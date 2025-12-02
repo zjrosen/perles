@@ -314,6 +314,19 @@ func DeleteView(configPath string, viewIndex int, allViews []ViewConfig) error {
 	return SaveViews(configPath, updated)
 }
 
+// RenameView renames the view at the given index and saves.
+// Returns error if viewIndex is out of range or if saving fails.
+func RenameView(configPath string, viewIndex int, newName string, allViews []ViewConfig) error {
+	if viewIndex < 0 || viewIndex >= len(allViews) {
+		return fmt.Errorf("view index %d out of range (have %d views)", viewIndex, len(allViews))
+	}
+
+	// Update the view name in the slice
+	allViews[viewIndex].Name = newName
+
+	return SaveViews(configPath, allViews)
+}
+
 // InsertColumnInView inserts a new column at the specified position within a specific view.
 // Position 0 inserts at the beginning of the column list.
 func InsertColumnInView(configPath string, viewIndex, position int, newCol ColumnConfig, allViews []ViewConfig) error {

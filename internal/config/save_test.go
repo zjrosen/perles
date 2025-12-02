@@ -1065,3 +1065,113 @@ func TestInsertColumnInView_EmptyColumns(t *testing.T) {
 	require.Len(t, loaded[0].Columns, 1)
 	assert.Equal(t, "First", loaded[0].Columns[0].Name)
 }
+
+func TestRenameView(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, ".perles.yaml")
+
+	// Create views
+	views := []ViewConfig{
+		{
+			Name: "Default",
+			Columns: []ColumnConfig{
+				{Name: "Open", Query: "status = open"},
+			},
+		},
+		{
+			Name: "Bugs",
+			Columns: []ColumnConfig{
+				{Name: "All Bugs", Query: "type = bug"},
+			},
+		},
+	}
+
+	// Save initial views
+	err := SaveViews(configPath, views)
+	require.NoError(t, err)
+
+	// Rename the second view
+	err = RenameView(configPath, 1, "Critical Bugs", views)
+	require.NoError(t, err)
+
+	// Load and verify
+	v := viper.New()
+	v.SetConfigFile(configPath)
+	err = v.ReadInConfig()
+	require.NoError(t, err)
+
+	var loaded []ViewConfig
+	err = v.UnmarshalKey("views", &loaded)
+	require.NoError(t, err)
+
+	require.Len(t, loaded, 2)
+	assert.Equal(t, "Default", loaded[0].Name)
+	assert.Equal(t, "Critical Bugs", loaded[1].Name)
+}
+
+func TestRenameView_FirstView(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, ".perles.yaml")
+
+	// Create views
+	views := []ViewConfig{
+		{
+			Name: "First",
+			Columns: []ColumnConfig{
+				{Name: "Col1", Query: "status = open"},
+			},
+		},
+		{
+			Name: "Second",
+			Columns: []ColumnConfig{
+				{Name: "Col2", Query: "status = closed"},
+			},
+		},
+	}
+
+	// Save initial views
+	err := SaveViews(configPath, views)
+	require.NoError(t, err)
+
+	// Rename the first view
+	err = RenameView(configPath, 0, "Renamed First", views)
+	require.NoError(t, err)
+
+	// Load and verify
+	v := viper.New()
+	v.SetConfigFile(configPath)
+	err = v.ReadInConfig()
+	require.NoError(t, err)
+
+	var loaded []ViewConfig
+	err = v.UnmarshalKey("views", &loaded)
+	require.NoError(t, err)
+
+	require.Len(t, loaded, 2)
+	assert.Equal(t, "Renamed First", loaded[0].Name)
+	assert.Equal(t, "Second", loaded[1].Name)
+}
+
+func TestRenameView_OutOfRange(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, ".perles.yaml")
+
+	views := []ViewConfig{
+		{
+			Name: "One",
+			Columns: []ColumnConfig{
+				{Name: "Col1", Query: "status = open"},
+			},
+		},
+	}
+
+	// Index too high
+	err := RenameView(configPath, 5, "New Name", views)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "out of range")
+
+	// Index negative
+	err = RenameView(configPath, -1, "New Name", views)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "out of range")
+}
