@@ -43,6 +43,7 @@ const (
 	ViewLabelEditor
 	ViewViewMenu
 	ViewDeleteColumnModal
+	ViewRenameViewModal
 )
 
 // cursorState tracks the current selection for restoration after refresh.
@@ -164,7 +165,7 @@ func (m Model) SetSize(width, height int) Model {
 		m.colEditor = m.colEditor.SetSize(width, height)
 	}
 	// Update modal if we're viewing it
-	if m.view == ViewNewViewModal || m.view == ViewDeleteViewModal || m.view == ViewDeleteConfirm || m.view == ViewDeleteColumnModal {
+	if m.view == ViewNewViewModal || m.view == ViewDeleteViewModal || m.view == ViewDeleteConfirm || m.view == ViewDeleteColumnModal || m.view == ViewRenameViewModal {
 		m.modal.SetSize(width, height)
 	}
 	// Update view menu if we're viewing it
@@ -325,7 +326,7 @@ func (m Model) View() string {
 	case ViewColumnEditor:
 		// Full-screen column editor
 		return m.colEditor.View()
-	case ViewNewViewModal, ViewDeleteViewModal:
+	case ViewNewViewModal, ViewDeleteViewModal, ViewRenameViewModal:
 		// Render modal overlay on top of board
 		bg := m.board.View()
 		if m.showStatusBar {
@@ -680,10 +681,18 @@ func (m Model) handleViewMenuSelect(msg viewmenu.SelectMsg) (Model, tea.Cmd) {
 		return m, m.modal.Init()
 
 	case viewmenu.OptionRename:
-		// Rename flow will be implemented in Phase 3
-		m.toaster = m.toaster.Show("Rename not yet implemented", toaster.StyleInfo)
-		m.view = ViewBoard
-		return m, toaster.ScheduleDismiss(2 * time.Second)
+		// Open rename modal with current view name pre-filled
+		currentViewName := m.board.CurrentViewName()
+		m.modal = modal.New(modal.Config{
+			Title:          "Rename View",
+			ConfirmVariant: modal.ButtonPrimary,
+			Inputs: []modal.InputConfig{
+				{Key: "name", Label: "View Name", Value: currentViewName, MaxLength: 50},
+			},
+		})
+		m.modal.SetSize(m.width, m.height)
+		m.view = ViewRenameViewModal
+		return m, m.modal.Init()
 	}
 
 	m.view = ViewBoard
@@ -757,6 +766,30 @@ func (m Model) deleteCurrentView() (Model, tea.Cmd) {
 		cmds = append(cmds, loadCmd)
 	}
 	return m, tea.Batch(cmds...)
+}
+
+// renameCurrentView handles renaming the current view after modal submission.
+func (m Model) renameCurrentView(newName string) (Model, tea.Cmd) {
+	viewIndex := m.board.CurrentViewIndex()
+
+	err := config.RenameView(m.configPath(), viewIndex, newName, m.services.Config.Views)
+	if err != nil {
+		m.err = err
+		m.errContext = "renaming view"
+		m.view = ViewBoard
+		return m, scheduleErrorClear()
+	}
+
+	// Update in-memory config
+	m.services.Config.Views[viewIndex].Name = newName
+
+	// Rebuild board to reflect the new name
+	m.rebuildBoard()
+	m.board, _ = m.board.SwitchToView(viewIndex)
+
+	m.view = ViewBoard
+	m.toaster = m.toaster.Show("Renamed view to: "+newName, toaster.StyleSuccess)
+	return m, toaster.ScheduleDismiss(2 * time.Second)
 }
 
 // copyToClipboard copies text to the system clipboard.

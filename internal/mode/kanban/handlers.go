@@ -49,6 +49,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m.handleViewMenuKey(msg)
 	case ViewDeleteColumnModal:
 		return m.handleDeleteColumnModalKey(msg)
+	case ViewRenameViewModal:
+		return m.handleRenameViewModalKey(msg)
 	}
 	return m, nil
 }
@@ -443,6 +445,18 @@ func (m Model) handleDeleteColumnModalKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m Model) handleRenameViewModalKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	}
+
+	// Delegate to modal
+	var cmd tea.Cmd
+	m.modal, cmd = m.modal.Update(msg)
+	return m, cmd
+}
+
 // handleColumnLoaded processes column load completion.
 func (m Model) handleColumnLoaded(msg tea.Msg) (Model, tea.Cmd) {
 	// Pass message to board for handling
@@ -712,6 +726,9 @@ func (m Model) handleModalSubmit(msg modal.SubmitMsg) (Model, tea.Cmd) {
 	if m.view == ViewDeleteColumnModal {
 		return m.deleteColumn()
 	}
+	if m.view == ViewRenameViewModal {
+		return m.renameCurrentView(msg.Values["name"])
+	}
 	if m.view == ViewDeleteConfirm {
 		if m.selectedIssue != nil {
 			issueID := m.selectedIssue.ID
@@ -735,7 +752,7 @@ func (m Model) handleModalSubmit(msg modal.SubmitMsg) (Model, tea.Cmd) {
 
 // handleModalCancel processes modal cancellation.
 func (m Model) handleModalCancel() (Model, tea.Cmd) {
-	if m.view == ViewNewViewModal || m.view == ViewDeleteViewModal || m.view == ViewDeleteColumnModal {
+	if m.view == ViewNewViewModal || m.view == ViewDeleteViewModal || m.view == ViewDeleteColumnModal || m.view == ViewRenameViewModal {
 		m.view = ViewBoard
 		m.pendingDeleteColumn = -1
 		return m, nil
