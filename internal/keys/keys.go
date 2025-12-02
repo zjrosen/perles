@@ -25,8 +25,8 @@ type KeyMap struct {
 	// View cycling
 	NextView         key.Binding
 	PrevView         key.Binding
-	NewView          key.Binding
-	DeleteView       key.Binding
+	ViewMenu         key.Binding
+	DeleteColumn     key.Binding
 	SearchFromColumn key.Binding
 
 	// General
@@ -105,13 +105,13 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("ctrl+k", "ctrl+p"),
 			key.WithHelp("ctrl+k/p", "previous view"),
 		),
-		NewView: key.NewBinding(
+		ViewMenu: key.NewBinding(
 			key.WithKeys("ctrl+v"),
-			key.WithHelp("ctrl+v", "new view"),
+			key.WithHelp("ctrl+v", "view menu"),
 		),
-		DeleteView: key.NewBinding(
+		DeleteColumn: key.NewBinding(
 			key.WithKeys("ctrl+d"),
-			key.WithHelp("ctrl+d", "delete view"),
+			key.WithHelp("ctrl+d", "delete column"),
 		),
 		SearchFromColumn: key.NewBinding(
 			key.WithKeys("/"),
@@ -152,7 +152,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Left, k.Right}, // Navigation
 		{k.Enter, k.Refresh, k.Yank, k.Status, k.Priority, k.AddColumn, k.EditColumn, k.MoveColumnLeft, k.MoveColumnRight}, // Actions
-		{k.NextView, k.PrevView, k.NewView, k.DeleteView},                                                                  // Views
+		{k.NextView, k.PrevView, k.ViewMenu, k.DeleteColumn},                                                               // Views
 		{k.Help, k.ToggleStatus, k.Escape, k.Quit},                                                                         // General
 	}
 }

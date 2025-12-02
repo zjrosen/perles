@@ -200,8 +200,8 @@ func (m Model) renderKanbanContent() string {
 	viewsCol.WriteString("\n")
 	viewsCol.WriteString(m.renderBinding(m.keys.NextView))
 	viewsCol.WriteString(m.renderBinding(m.keys.PrevView))
-	viewsCol.WriteString(m.renderBinding(m.keys.NewView))
-	viewsCol.WriteString(m.renderBinding(m.keys.DeleteView))
+	viewsCol.WriteString(m.renderBinding(m.keys.ViewMenu))
+	viewsCol.WriteString(m.renderBinding(m.keys.DeleteColumn))
 	viewsCol.WriteString(m.renderBinding(m.keys.SearchFromColumn))
 
 	// General column
