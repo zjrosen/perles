@@ -47,6 +47,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m.handleLabelEditorKey(msg)
 	case ViewViewMenu:
 		return m.handleViewMenuKey(msg)
+	case ViewDeleteColumnModal:
+		return m.handleDeleteColumnModalKey(msg)
 	}
 	return m, nil
 }
@@ -251,21 +253,21 @@ func (m Model) handleBoardKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.view = ViewViewMenu
 		return m, nil
 
-	case "ctrl+d": // Delete view
-		// Prevent deletion of last view
-		if len(m.services.Config.Views) <= 1 {
-			m.toaster = m.toaster.Show("Cannot delete the only view", toaster.StyleError)
-			return m, toaster.ScheduleDismiss(3 * time.Second)
+	case "ctrl+d": // Delete column
+		focusedCol := m.board.FocusedColumn()
+		columns := m.currentViewColumns()
+		if focusedCol < 0 || focusedCol >= len(columns) {
+			return m, nil // no column focused, do nothing
 		}
-
-		viewName := m.board.CurrentViewName()
+		colName := columns[focusedCol].Name
 		m.modal = modal.New(modal.Config{
-			Title:          "Delete View",
-			Message:        fmt.Sprintf("Delete view '%s'? This cannot be undone.", viewName),
+			Title:          "Delete Column",
+			Message:        fmt.Sprintf("Delete column '%s'? This cannot be undone.", colName),
 			ConfirmVariant: modal.ButtonDanger,
 		})
+		m.pendingDeleteColumn = focusedCol
 		m.modal.SetSize(m.width, m.height)
-		m.view = ViewDeleteViewModal
+		m.view = ViewDeleteColumnModal
 		return m, m.modal.Init()
 
 	case "enter":
@@ -426,6 +428,18 @@ func (m Model) handleViewMenuKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	// Delegate to view menu
 	var cmd tea.Cmd
 	m.viewMenu, cmd = m.viewMenu.Update(msg)
+	return m, cmd
+}
+
+func (m Model) handleDeleteColumnModalKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	}
+
+	// Delegate to modal
+	var cmd tea.Cmd
+	m.modal, cmd = m.modal.Update(msg)
 	return m, cmd
 }
 
@@ -695,6 +709,9 @@ func (m Model) handleModalSubmit(msg modal.SubmitMsg) (Model, tea.Cmd) {
 	if m.view == ViewDeleteViewModal {
 		return m.deleteCurrentView()
 	}
+	if m.view == ViewDeleteColumnModal {
+		return m.deleteColumn()
+	}
 	if m.view == ViewDeleteConfirm {
 		if m.selectedIssue != nil {
 			issueID := m.selectedIssue.ID
@@ -718,8 +735,9 @@ func (m Model) handleModalSubmit(msg modal.SubmitMsg) (Model, tea.Cmd) {
 
 // handleModalCancel processes modal cancellation.
 func (m Model) handleModalCancel() (Model, tea.Cmd) {
-	if m.view == ViewNewViewModal || m.view == ViewDeleteViewModal {
+	if m.view == ViewNewViewModal || m.view == ViewDeleteViewModal || m.view == ViewDeleteColumnModal {
 		m.view = ViewBoard
+		m.pendingDeleteColumn = -1
 		return m, nil
 	}
 	if m.view == ViewDeleteConfirm {

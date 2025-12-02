@@ -164,7 +164,7 @@ func (m Model) SetSize(width, height int) Model {
 		m.colEditor = m.colEditor.SetSize(width, height)
 	}
 	// Update modal if we're viewing it
-	if m.view == ViewNewViewModal || m.view == ViewDeleteViewModal || m.view == ViewDeleteConfirm {
+	if m.view == ViewNewViewModal || m.view == ViewDeleteViewModal || m.view == ViewDeleteConfirm || m.view == ViewDeleteColumnModal {
 		m.modal.SetSize(width, height)
 	}
 	// Update view menu if we're viewing it
@@ -345,6 +345,13 @@ func (m Model) View() string {
 			bg += "\n" + m.renderStatusBar()
 		}
 		return m.viewMenu.Overlay(bg)
+	case ViewDeleteColumnModal:
+		// Render delete column modal overlay on top of board
+		bg := m.board.View()
+		if m.showStatusBar {
+			bg += "\n" + m.renderStatusBar()
+		}
+		return m.modal.Overlay(bg)
 	default:
 		// Add top margin for spacing
 		view := m.board.View()
@@ -593,6 +600,49 @@ func (m Model) createDeleteModal(issue *beads.Issue) (modal.Model, bool) {
 		Message:        message,
 		ConfirmVariant: modal.ButtonDanger,
 	}), false
+}
+
+// deleteColumn handles the deletion of a column after modal confirmation.
+func (m Model) deleteColumn() (Model, tea.Cmd) {
+	colIndex := m.pendingDeleteColumn
+	m.pendingDeleteColumn = -1
+
+	if colIndex < 0 {
+		m.view = ViewBoard
+		return m, nil
+	}
+
+	viewIndex := m.currentViewIndex()
+	columns := m.currentViewColumns()
+
+	if colIndex >= len(columns) {
+		m.view = ViewBoard
+		return m, nil
+	}
+
+	err := config.DeleteColumnInView(m.configPath(), viewIndex, colIndex, columns, m.services.Config.Views)
+	if err != nil {
+		m.err = err
+		m.errContext = "deleting column"
+		m.view = ViewBoard
+		return m, scheduleErrorClear()
+	}
+
+	// Update in-memory config (remove the column)
+	newColumns := append(columns[:colIndex], columns[colIndex+1:]...)
+	m.services.Config.SetColumnsForView(viewIndex, newColumns)
+
+	// Rebuild board with new config
+	m.rebuildBoard()
+
+	m.view = ViewBoard
+	m.loading = true
+	m.toaster = m.toaster.Show("Column deleted", toaster.StyleSuccess)
+	cmds := []tea.Cmd{m.spinner.Tick, toaster.ScheduleDismiss(2 * time.Second)}
+	if loadCmd := m.loadBoardCmd(); loadCmd != nil {
+		cmds = append(cmds, loadCmd)
+	}
+	return m, tea.Batch(cmds...)
 }
 
 // handleViewMenuSelect routes view menu selections to appropriate actions.
