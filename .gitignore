@@ -1,0 +1,60 @@
+# AI Agents
+.claude
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go binary
+/perles
+*.bin
+
+# Go coverage
+*.coverprofile
+coverage.html
+coverage.txt
+
+# Dependency directories
+vendor/
+
+# Go module cache
+go.sum.lock
+
+# Environment files
+.env
+.env.local
+*.env
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Debug files
+debug
+__debug_bin
+
+# Beads
+.beads/
+
+# Perles remove apps own perles config
+.perles/
+
+# Docs
+docs/
+
+# Build files
+dist/

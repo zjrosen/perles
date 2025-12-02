@@ -1,0 +1,30 @@
+ [T][P2][task-500] Integration task                                                 │  Type      Task                      
+                                                                                    │  ─────────────────────────           
+ This task shows fully loaded dependency rendering.                                 │ >Priority  P2                        
+                                                                                    │  Status    Open                      
+                                                                                    │  ─────────────────────────           
+                                                                                    │  Created   2024-03-01                
+                                                                                    │  ─────────────────────────           
+                                                                                    │  Blocked by                          
+                                                                                    │   [B][P0][bug-101]                   
+                                                                                    │  ─────────────────────────           
+                                                                                    │  Blocks                              
+                                                                                    │   [T][P3][task-201]                  
+                                                                                    │   [F][P1][feature-301]               
+                                                                                    │                                      
+                                                                                    │                                      
+                                                                                    │                                      
+                                                                                    │                                      
+                                                                                    │                                      
+                                                                                    │                                      
+                                                                                    │                                      
+                                                                                    │                                      
+                                                                                    │                                      
+                                                                                    │                                      
+                                                                                    │                                      
+                                                                                    │                                      
+                                                                                    │                                      
+                                                                                    │                                      
+                                                                                    │                                      
+                                                                                    │                                      
+ [j/k] Scroll  [Shift+L] Edit Labels  [d] Delete Issue  [Esc] Back                  │                                      

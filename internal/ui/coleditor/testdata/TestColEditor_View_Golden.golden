@@ -1,0 +1,42 @@
+ Edit Column: Ready                                                                                 [Esc] Cancel  [↑/↓] Navigate   
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+                                                                           │                                                       
+╭─ Name ────────────────────────────────────────────────────────────────╮  │  Live Preview                                         
+│Ready                                                                  │  │  1 issues match current filters                       
+╰───────────────────────────────────────────────────────────────────────╯  │                                                       
+                                                                           │  ╭─ Ready (1) ─────────────────────────────────────╮  
+╭─ Color ───────────────────────────────────────────────────────────────╮  │  │>[?][P1][bd-1] First task                        │  
+│    #73F59F [Enter to change]                                          │  │  │                                                 │  
+╰───────────────────────────────────────────────────────────────────────╯  │  │                                                 │  
+                                                                           │  │                                                 │  
+╭─ BQL Query ───────────────────────────────────────────────────────────╮  │  │                                                 │  
+│status = open and ready = true                                         │  │  │                                                 │  
+╰───────────────────────────────────────────────────────────────────────╯  │  │                                                 │  
+                                                                           │  │                                                 │  
+  Save      Delete                                                         │  │                                                 │  
+                                                                           │  │                                                 │  
+─────────────────────────────────────────────────────────────────────────  │  │                                                 │  
+                                                                           │  │                                                 │  
+BQL Query Help                                                             │  │                                                 │  
+                                                                           │  │                                                 │  
+BQL Fields                                   BQL Operators                 │  │                                                 │  
+status    open, in_progress, closed          =  !=   equality              │  │                                                 │  
+type      bug, feature, task, epic, chore    <  >    comparison            │  │                                                 │  
+priority  p0, p1, p2, p3, p4                 ~  !~   contains              │  │                                                 │  
+blocked   true, false                        in      match any             │  ╰─────────────────────────────────────────────────╯  
+ready     true, false                        and or  logical               │                                                       
+label     string (use ~ for contains)        not     negation              │                                                       
+title     string (use ~ for contains)                                      │                                                       
+id        string                                                                                                                   
+created   date (today, yesterday, -7d)                                                                                             
+updated   date (today, yesterday, -7d)                                                                                             
+                                                                                                                                   
+Examples                                                                                                                           
+status = open                                                                                                                      
+status = open and ready = true                                                                                                     
+type = bug and priority <= p1                                                                                                      
+type in (bug, task) and status != closed                                                                                           
+title ~ "auth" or label ~ "security"                                                                                               
+created >= -7d order by priority                                                                                                   
+not blocked and priority = p0                                                                                                      
+                                                                                                                                   

@@ -1,0 +1,94 @@
+version: 2
+
+project_name: perles
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  - id: perles
+    main: .
+    binary: perles
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: default
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "Merge pull request"
+      - "Merge branch"
+  groups:
+    - title: Features
+      regexp: "^.*feat.*:+.*$"
+      order: 0
+    - title: Bug Fixes
+      regexp: "^.*fix.*:+.*$"
+      order: 1
+    - title: Other
+      order: 999
+
+release:
+  github:
+    owner: "{{ .Env.GITHUB_REPOSITORY_OWNER }}"
+    name: perles
+  draft: false
+  prerelease: auto
+  mode: replace
+  header: |
+    ## Perles {{ .Version }}
+
+    Terminal-based kanban board for beads issue tracking.
+  footer: |
+    **Full Changelog**: https://github.com/{{ .Env.GITHUB_REPOSITORY_OWNER }}/perles/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+# Homebrew tap configuration
+# Repository: https://github.com/zjrosen/homebrew-perles
+# Requires HOMEBREW_TAP_TOKEN secret with repo scope
+brews:
+  - name: perles
+    repository:
+      owner: zjrosen
+      name: homebrew-perles
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/zjrosen/perles"
+    description: "Terminal-based kanban board for beads issue tracking"
+    license: "MIT"
+    install: |
+      bin.install "perles"
+    test: |
+      system "#{bin}/perles", "--version"

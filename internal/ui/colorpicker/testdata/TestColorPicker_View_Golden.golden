@@ -1,0 +1,16 @@
+╭────────────────────────────────────────────────────────────────╮
+│ Select Color                                                   │
+│────────────────────────────────────────────────────────────────│
+│>   Red             Lime            Crimson         White       │
+│    Green           Cyan            Tomato          Gray 1      │
+│    Blue            Magenta         Gold            Gray 2      │
+│    Purple          Indigo          Olive           Gray 3      │
+│    Yellow          Rose            Aqua            Gray 4      │
+│    Orange          Amber           Navy            Gray 5      │
+│    Teal            Emerald         Plum            Gray 6      │
+│    Gray            Sky             Salmon          Gray 7      │
+│    Pink            Fuchsia         Khaki           Gray 8      │
+│    Coral           Violet          Mint            Black       │
+│                                                                │
+│ 'c' custom  h/l column                                         │
+╰────────────────────────────────────────────────────────────────╯

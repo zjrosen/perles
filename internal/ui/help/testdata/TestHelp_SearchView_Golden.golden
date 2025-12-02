@@ -1,0 +1,40 @@
+                                                                                                    
+                                                                                                    
+                                                                                                    
+        ╭──────────────────────────────────────────────────────────────────────────────────╮        
+        │  Search Mode Help                                                                │        
+        │──────────────────────────────────────────────────────────────────────────────────│        
+        │                                                                                  │        
+        │  Navigation                  Actions                     General                 │        
+        │  h          focus results    y          copy issue ID    ctrl+space switch mode  │        
+        │  l          focus details    ctrl+s     save to view     ?          toggle help  │        
+        │  k/↑        move up                                      q          quit         │        
+        │  j/↓        move down                                                            │        
+        │  /          focus search                                                         │        
+        │  esc        blur input                                                           │        
+        │                                                                                  │        
+        │                                                                                  │        
+        │  BQL Fields                                   BQL Operators                      │        
+        │  status    open, in_progress, closed          =  !=     equality                 │        
+        │  type      bug, feature, task, epic, chore    <  >      comparison               │        
+        │  priority  p0, p1, p2, p3, p4                 ~  !~     contains                 │        
+        │  blocked   true, false                        in        match any: in (a, b)     │        
+        │  ready     true, false                        and or    logical                  │        
+        │  label     string (~ for contains)            not       negation                 │        
+        │  title     string (~ for contains)                                               │        
+        │  created   today, -7d                                                            │        
+        │                                                                                  │        
+        │                                                                                  │        
+        │  Examples                                                                        │        
+        │  status = open and ready = true                                                  │        
+        │  type in (bug, task) and status != closed                                        │        
+        │  title ~ "auth" or label ~ "security"                                            │        
+        │  created >= -7d order by priority                                                │        
+        │                                                                                  │        
+        │                                                                                  │        
+        │  Press ? or Esc to close                                                         │        
+        ╰──────────────────────────────────────────────────────────────────────────────────╯        
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    

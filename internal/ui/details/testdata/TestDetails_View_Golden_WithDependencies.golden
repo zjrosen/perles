@@ -1,0 +1,30 @@
+ [E][P0][epic-456] Epic with Dependencies                                           │  Type      Epic                      
+                                                                                    │  ─────────────────────────           
+ This epic has both blockers and downstream dependencies.                           │ >Priority  P0                        
+                                                                                    │  Status    In Progress               
+                                                                                    │  ─────────────────────────           
+                                                                                    │  Created   2024-02-01                
+                                                                                    │  Updated   2024-02-15                
+                                                                                    │  ─────────────────────────           
+                                                                                    │  Labels                              
+                                                                                    │   ui                                 
+                                                                                    │   phase-2                            
+                                                                                    │  ─────────────────────────           
+                                                                                    │  Blocked by                          
+                                                                                    │   task-100                           
+                                                                                    │   task-101                           
+                                                                                    │  ─────────────────────────           
+                                                                                    │  Blocks                              
+                                                                                    │   task-200                           
+                                                                                    │   task-201                           
+                                                                                    │   task-202                           
+                                                                                    │                                      
+                                                                                    │                                      
+                                                                                    │                                      
+                                                                                    │                                      
+                                                                                    │                                      
+                                                                                    │                                      
+                                                                                    │                                      
+                                                                                    │                                      
+                                                                                    │                                      
+ [j/k] Scroll  [Shift+L] Edit Labels  [d] Delete Issue  [Esc] Back                  │                                      

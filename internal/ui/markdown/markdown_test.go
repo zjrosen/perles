@@ -1,0 +1,89 @@
+package markdown
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestNew(t *testing.T) {
+	r, err := New(80)
+	require.NoError(t, err, "unexpected error")
+	require.NotNil(t, r, "expected non-nil renderer")
+	assert.Equal(t, 80, r.Width())
+}
+
+func TestRenderer_Width(t *testing.T) {
+	tests := []int{40, 80, 120}
+	for _, w := range tests {
+		r, err := New(w)
+		require.NoError(t, err, "New(%d) error", w)
+		assert.Equal(t, w, r.Width())
+	}
+}
+
+func TestRenderer_Render_Heading(t *testing.T) {
+	r, err := New(80)
+	require.NoError(t, err, "New error")
+
+	result, err := r.Render("# Title\n\nContent")
+	require.NoError(t, err, "Render error")
+
+	assert.Contains(t, result, "Title", "expected result to contain 'Title'")
+	assert.Contains(t, result, "Content", "expected result to contain 'Content'")
+}
+
+func TestRenderer_Render_CodeBlock(t *testing.T) {
+	r, err := New(80)
+	require.NoError(t, err, "New error")
+
+	result, err := r.Render("```go\nfunc main() {}\n```")
+	require.NoError(t, err, "Render error")
+
+	assert.Contains(t, result, "func", "expected result to contain 'func'")
+	assert.Contains(t, result, "main", "expected result to contain 'main'")
+}
+
+func TestRenderer_Render_List(t *testing.T) {
+	r, err := New(80)
+	require.NoError(t, err, "New error")
+
+	result, err := r.Render("- Item 1\n- Item 2\n- Item 3")
+	require.NoError(t, err, "Render error")
+
+	assert.Contains(t, result, "Item 1", "expected result to contain 'Item 1'")
+	assert.Contains(t, result, "Item 2", "expected result to contain 'Item 2'")
+}
+
+func TestRenderer_Render_Bold(t *testing.T) {
+	r, err := New(80)
+	require.NoError(t, err, "New error")
+
+	result, err := r.Render("This is **bold** text")
+	require.NoError(t, err, "Render error")
+
+	assert.Contains(t, result, "bold", "expected result to contain 'bold'")
+}
+
+func TestRenderer_Render_EmptyString(t *testing.T) {
+	r, err := New(80)
+	require.NoError(t, err, "New error")
+
+	result, err := r.Render("")
+	require.NoError(t, err, "Render error")
+
+	// Empty input should produce minimal or empty output
+	assert.LessOrEqual(t, len(result), 10, "expected minimal output for empty string, got: %q", result)
+}
+
+func TestRenderer_Render_PlainText(t *testing.T) {
+	r, err := New(80)
+	require.NoError(t, err, "New error")
+
+	result, err := r.Render("Just plain text without any markdown")
+	require.NoError(t, err, "Render error")
+
+	assert.True(t, strings.Contains(result, "plain text"), "expected result to contain 'plain text'")
+}
