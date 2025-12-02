@@ -10,6 +10,7 @@ import (
 	"perles/internal/ui/details"
 	"perles/internal/ui/modal"
 	"perles/internal/ui/toaster"
+	"perles/internal/ui/viewmenu"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -44,6 +45,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m.handleDeleteConfirmKey(msg)
 	case ViewLabelEditor:
 		return m.handleLabelEditorKey(msg)
+	case ViewViewMenu:
+		return m.handleViewMenuKey(msg)
 	}
 	return m, nil
 }
@@ -243,17 +246,10 @@ func (m Model) handleBoardKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case "ctrl+v": // New view
-		m.modal = modal.New(modal.Config{
-			Title:          "Create New View",
-			ConfirmVariant: modal.ButtonPrimary,
-			Inputs: []modal.InputConfig{
-				{Key: "name", Label: "View Name", Placeholder: "Enter view name...", MaxLength: 50},
-			},
-		})
-		m.modal.SetSize(m.width, m.height)
-		m.view = ViewNewViewModal
-		return m, m.modal.Init()
+	case "ctrl+v": // View menu
+		m.viewMenu = viewmenu.New().SetSize(m.width, m.height)
+		m.view = ViewViewMenu
+		return m, nil
 
 	case "ctrl+d": // Delete view
 		// Prevent deletion of last view
@@ -418,6 +414,18 @@ func (m Model) handleLabelEditorKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	// Delegate to label editor
 	var cmd tea.Cmd
 	m.labelEditor, cmd = m.labelEditor.Update(msg)
+	return m, cmd
+}
+
+func (m Model) handleViewMenuKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	}
+
+	// Delegate to view menu
+	var cmd tea.Cmd
+	m.viewMenu, cmd = m.viewMenu.Update(msg)
 	return m, cmd
 }
 

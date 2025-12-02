@@ -17,6 +17,7 @@ import (
 	"perles/internal/ui/picker"
 	"perles/internal/ui/styles"
 	"perles/internal/ui/toaster"
+	"perles/internal/ui/viewmenu"
 	"runtime"
 	"strings"
 	"time"
@@ -40,6 +41,7 @@ const (
 	ViewDeleteViewModal
 	ViewDeleteConfirm
 	ViewLabelEditor
+	ViewViewMenu
 )
 
 // cursorState tracks the current selection for restoration after refresh.
@@ -59,6 +61,7 @@ type Model struct {
 	colEditor   coleditor.Model
 	modal       modal.Model
 	labelEditor labeleditor.Model
+	viewMenu    viewmenu.Model
 	spinner     spinner.Model
 	view        ViewMode
 	width       int
@@ -160,6 +163,10 @@ func (m Model) SetSize(width, height int) Model {
 	// Update modal if we're viewing it
 	if m.view == ViewNewViewModal || m.view == ViewDeleteViewModal || m.view == ViewDeleteConfirm {
 		m.modal.SetSize(width, height)
+	}
+	// Update view menu if we're viewing it
+	if m.view == ViewViewMenu {
+		m.viewMenu = m.viewMenu.SetSize(width, height)
 	}
 	return m
 }
@@ -280,6 +287,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.view = ViewBoard
 		return m, nil
 
+	case viewmenu.SelectMsg:
+		return m.handleViewMenuSelect(msg)
+
+	case viewmenu.CancelMsg:
+		m.view = ViewBoard
+		return m, nil
+
 	case modal.SubmitMsg:
 		return m.handleModalSubmit(msg)
 
@@ -321,6 +335,13 @@ func (m Model) View() string {
 	case ViewLabelEditor:
 		// Render label editor overlay on top of details view
 		return m.labelEditor.Overlay(m.details.View())
+	case ViewViewMenu:
+		// Render view menu overlay on top of board
+		bg := m.board.View()
+		if m.showStatusBar {
+			bg += "\n" + m.renderStatusBar()
+		}
+		return m.viewMenu.Overlay(bg)
 	default:
 		// Add top margin for spacing
 		view := m.board.View()
@@ -569,6 +590,51 @@ func (m Model) createDeleteModal(issue *beads.Issue) (modal.Model, bool) {
 		Message:        message,
 		ConfirmVariant: modal.ButtonDanger,
 	}), false
+}
+
+// handleViewMenuSelect routes view menu selections to appropriate actions.
+func (m Model) handleViewMenuSelect(msg viewmenu.SelectMsg) (Model, tea.Cmd) {
+	switch msg.Option {
+	case viewmenu.OptionCreate:
+		// Open new view modal
+		m.modal = modal.New(modal.Config{
+			Title:          "Create New View",
+			ConfirmVariant: modal.ButtonPrimary,
+			Inputs: []modal.InputConfig{
+				{Key: "name", Label: "View Name", Placeholder: "Enter view name...", MaxLength: 50},
+			},
+		})
+		m.modal.SetSize(m.width, m.height)
+		m.view = ViewNewViewModal
+		return m, m.modal.Init()
+
+	case viewmenu.OptionDelete:
+		// Prevent deletion of last view
+		if len(m.services.Config.Views) <= 1 {
+			m.toaster = m.toaster.Show("Cannot delete the only view", toaster.StyleError)
+			m.view = ViewBoard
+			return m, toaster.ScheduleDismiss(3 * time.Second)
+		}
+
+		viewName := m.board.CurrentViewName()
+		m.modal = modal.New(modal.Config{
+			Title:          "Delete View",
+			Message:        fmt.Sprintf("Delete view '%s'? This cannot be undone.", viewName),
+			ConfirmVariant: modal.ButtonDanger,
+		})
+		m.modal.SetSize(m.width, m.height)
+		m.view = ViewDeleteViewModal
+		return m, m.modal.Init()
+
+	case viewmenu.OptionRename:
+		// Rename flow will be implemented in Phase 3
+		m.toaster = m.toaster.Show("Rename not yet implemented", toaster.StyleInfo)
+		m.view = ViewBoard
+		return m, toaster.ScheduleDismiss(2 * time.Second)
+	}
+
+	m.view = ViewBoard
+	return m, nil
 }
 
 // createNewView handles the creation of a new view after modal submission.
