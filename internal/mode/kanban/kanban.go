@@ -42,6 +42,7 @@ const (
 	ViewDeleteConfirm
 	ViewLabelEditor
 	ViewViewMenu
+	ViewDeleteColumnModal
 )
 
 // cursorState tracks the current selection for restoration after refresh.
@@ -74,7 +75,8 @@ type Model struct {
 	selectedIssue *beads.Issue
 
 	// Delete operation state
-	deleteIsCascade bool // True if deleting an epic with children
+	deleteIsCascade     bool // True if deleting an epic with children
+	pendingDeleteColumn int  // Index of column to delete, -1 if none
 
 	// Pending cursor restoration after refresh
 	pendingCursor *cursorState
@@ -109,13 +111,14 @@ func New(services mode.Services) Model {
 	}
 
 	return Model{
-		services:      services,
-		view:          ViewBoard,
-		board:         boardModel,
-		help:          help.New(),
-		spinner:       s,
-		loading:       true,
-		showStatusBar: services.Config.UI.ShowStatusBar,
+		services:            services,
+		view:                ViewBoard,
+		board:               boardModel,
+		help:                help.New(),
+		spinner:             s,
+		loading:             true,
+		showStatusBar:       services.Config.UI.ShowStatusBar,
+		pendingDeleteColumn: -1,
 	}
 }
 
