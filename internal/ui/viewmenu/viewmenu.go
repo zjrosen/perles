@@ -114,7 +114,7 @@ func (m Model) View() string {
 	// Divider spans full width (no padding)
 	dividerStyle := lipgloss.NewStyle().Foreground(styles.OverlayBorderColor)
 	divider := dividerStyle.Render(strings.Repeat("─", width))
-	content := titleStyle.Render("View") + "\n" +
+	content := titleStyle.Render("View Menu") + "\n" +
 		divider + "\n" +
 		options.String()
 
