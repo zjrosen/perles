@@ -44,7 +44,7 @@ A terminal-based search and kanban board for [beads](https://github.com/anthropi
 
 ### Creating Custom Views
 <!-- VIDEO_PLACEHOLDER: custom-views-demo.mp4 -->
-<!-- Demo: Create new view with Ctrl+V, add columns with BQL queries, switch between views with Ctrl+J/K -->
+<!-- Demo: Open view menu with Ctrl+V, create/delete/rename views, switch between views with Ctrl+J/K -->
 *Video coming soon*
 
 ### Configuration & Theming
@@ -132,8 +132,8 @@ perles
 |-----|--------|
 | `Ctrl+J` / `Ctrl+N` | Next view |
 | `Ctrl+K` / `Ctrl+P` | Previous view |
-| `Ctrl+V` | Create new view |
-| `Ctrl+D` | Delete current view |
+| `Ctrl+V` | View menu (Create/Delete/Rename) |
+| `Ctrl+D` | Delete current column |
 
 ### Kanban Mode - Columns
 
