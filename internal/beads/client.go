@@ -60,7 +60,7 @@ func (c *Client) ListIssuesByIds(ids []string) ([]Issue, error) {
 	query := `
 		SELECT
 			i.id, i.title, i.description, i.status,
-			i.priority, i.issue_type, i.created_at, i.updated_at,
+			i.priority, i.issue_type, i.assignee, i.created_at, i.updated_at,
 			COALESCE((
 				SELECT GROUP_CONCAT(d.depends_on_id)
 				FROM dependencies d
@@ -96,6 +96,7 @@ func (c *Client) ListIssuesByIds(ids []string) ([]Issue, error) {
 	for rows.Next() {
 		var issue Issue
 		var description sql.NullString
+		var assignee sql.NullString
 		var blockerIDs string
 		var blocksIDs string
 		var labelsStr string
@@ -103,7 +104,7 @@ func (c *Client) ListIssuesByIds(ids []string) ([]Issue, error) {
 		err := rows.Scan(
 			&issue.ID, &issue.TitleText, &description,
 			&issue.Status, &issue.Priority, &issue.Type,
-			&issue.CreatedAt, &issue.UpdatedAt,
+			&assignee, &issue.CreatedAt, &issue.UpdatedAt,
 			&blockerIDs, &blocksIDs, &labelsStr,
 		)
 		if err != nil {
@@ -112,6 +113,9 @@ func (c *Client) ListIssuesByIds(ids []string) ([]Issue, error) {
 
 		if description.Valid {
 			issue.DescriptionText = description.String
+		}
+		if assignee.Valid {
+			issue.Assignee = assignee.String
 		}
 
 		// Parse blocker IDs from comma-separated string
@@ -133,4 +137,29 @@ func (c *Client) ListIssuesByIds(ids []string) ([]Issue, error) {
 	}
 
 	return issues, rows.Err()
+}
+
+// GetComments fetches comments for an issue.
+func (c *Client) GetComments(issueID string) ([]Comment, error) {
+	query := `
+		SELECT id, author, text, created_at
+		FROM comments
+		WHERE issue_id = ?
+		ORDER BY created_at ASC
+	`
+	rows, err := c.db.Query(query, issueID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var comments []Comment
+	for rows.Next() {
+		var comment Comment
+		if err := rows.Scan(&comment.ID, &comment.Author, &comment.Text, &comment.CreatedAt); err != nil {
+			return nil, err
+		}
+		comments = append(comments, comment)
+	}
+	return comments, rows.Err()
 }

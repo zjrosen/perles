@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/reflow/wordwrap"
 )
 
 // Layout constants for two-column view.
@@ -19,7 +20,7 @@ const (
 	minTwoColumnWidth  = 80 // Below this, use single-column layout
 	contentColWidth    = 80 // Preferred fixed width for content column
 	metadataColWidth   = 80 // Fixed width for metadata column (allows full titles)
-	metadataDividerLen = 25 // Visual divider length (keeps compact appearance)
+	metadataDividerLen = 30 // Visual divider length (extended for full timestamps)
 	columnGap          = 2  // Gap between columns
 )
 
@@ -27,6 +28,11 @@ const (
 // This interface allows for mocking in tests.
 type DependencyLoader interface {
 	ListIssuesByIds(ids []string) ([]beads.Issue, error)
+}
+
+// CommentLoader provides the ability to load comments for an issue.
+type CommentLoader interface {
+	GetComments(issueID string) ([]beads.Comment, error)
 }
 
 // DependencyItem holds loaded dependency data for display.
@@ -95,17 +101,24 @@ type Model struct {
 	dependencies       []DependencyItem
 	selectedDependency int // Index into dependencies slice
 	loader             DependencyLoader
+	comments           []beads.Comment
+	commentLoader      CommentLoader
+	commentsLoaded     bool
+	commentsError      error
 }
 
 // New creates a new detail view.
 // The optional loader parameter enables loading full issue data for dependencies.
-// Pass *beads.Client or any DependencyLoader implementation; nil disables loading.
-func New(issue beads.Issue, loader DependencyLoader) Model {
+// The optional commentLoader enables loading comments for the issue.
+// Pass *beads.Client for both (it implements both interfaces); nil disables loading.
+func New(issue beads.Issue, loader DependencyLoader, commentLoader CommentLoader) Model {
 	m := Model{
-		issue:  issue,
-		loader: loader,
+		issue:         issue,
+		loader:        loader,
+		commentLoader: commentLoader,
 	}
 	m.loadDependencies()
+	m.loadComments()
 	return m
 }
 
@@ -437,7 +450,7 @@ func (m Model) renderHeader() string {
 	return strings.Join(lines, "\n")
 }
 
-// renderLeftColumn renders the left column content (description only).
+// renderLeftColumn renders the left column content (description + comments).
 // Dependencies are now rendered in the right metadata column.
 func (m Model) renderLeftColumn() string {
 	issue := m.issue
@@ -453,6 +466,44 @@ func (m Model) renderLeftColumn() string {
 		emptyStyle := lipgloss.NewStyle().Foreground(styles.TextMutedColor).Italic(true)
 		sb.WriteString(emptyStyle.Render("No description"))
 		sb.WriteString("\n")
+	}
+
+	// Comments error handling
+	if m.commentsError != nil {
+		sb.WriteString("\n")
+		errorStyle := lipgloss.NewStyle().Foreground(styles.StatusErrorColor)
+		sb.WriteString(errorStyle.Render("Failed to load comments"))
+		sb.WriteString("\n")
+	}
+
+	// Comments section
+	if len(m.comments) > 0 {
+		sb.WriteString("\n")
+		headerStyle := lipgloss.NewStyle().Bold(true)
+		sb.WriteString(headerStyle.Render("Comments"))
+		sb.WriteString("\n\n")
+
+		// Calculate wrap width based on content column
+		wrapWidth := contentColWidth - 2 // Leave some margin
+		if m.width > 0 && m.width < contentColWidth {
+			wrapWidth = m.width - 4
+		}
+
+		commentHeaderStyle := lipgloss.NewStyle().Foreground(styles.TextSecondaryColor)
+
+		for _, c := range m.comments {
+			// [author] timestamp - styled with secondary color
+			// Use same format as metadata timestamps for consistency
+			header := fmt.Sprintf("[%s] %s",
+				c.Author,
+				c.CreatedAt.Format("2006-01-02 15:04:05"))
+			sb.WriteString(commentHeaderStyle.Render(header))
+			sb.WriteString("\n")
+			// Wrap comment text to fit column width
+			wrappedText := wordwrap.String(c.Text, wrapWidth)
+			sb.WriteString(wrappedText)
+			sb.WriteString("\n\n")
+		}
 	}
 
 	return sb.String()
@@ -498,16 +549,26 @@ func (m Model) renderMetadataColumn() string {
 	sb.WriteString(indentedDivider)
 	sb.WriteString("\n")
 
+	// Assignee (only show if non-empty)
+	if issue.Assignee != "" {
+		sb.WriteString(indent)
+		sb.WriteString(labelStyle.Render("Assignee"))
+		sb.WriteString(valueStyle.Render(issue.Assignee))
+		sb.WriteString("\n")
+		sb.WriteString(indentedDivider)
+		sb.WriteString("\n")
+	}
+
 	// Timestamps
 	sb.WriteString(indent)
 	sb.WriteString(labelStyle.Render("Created"))
-	sb.WriteString(valueStyle.Render(issue.CreatedAt.Format("2006-01-02")))
+	sb.WriteString(valueStyle.Render(issue.CreatedAt.Format("2006-01-02 15:04:05")))
 	sb.WriteString("\n")
 
 	if !issue.UpdatedAt.IsZero() && issue.UpdatedAt != issue.CreatedAt {
 		sb.WriteString(indent)
 		sb.WriteString(labelStyle.Render("Updated"))
-		sb.WriteString(valueStyle.Render(issue.UpdatedAt.Format("2006-01-02")))
+		sb.WriteString(valueStyle.Render(issue.UpdatedAt.Format("2006-01-02 15:04:05")))
 		sb.WriteString("\n")
 	}
 
@@ -803,4 +864,15 @@ func (m *Model) loadDependencies() {
 	}
 
 	m.dependencies = items
+}
+
+// loadComments fetches comments for the current issue using the comment loader.
+func (m *Model) loadComments() {
+	if m.commentLoader == nil || m.commentsLoaded {
+		return
+	}
+	comments, err := m.commentLoader.GetComments(m.issue.ID)
+	m.comments = comments
+	m.commentsError = err
+	m.commentsLoaded = true
 }

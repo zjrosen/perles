@@ -754,7 +754,14 @@ func (m *Model) updateDetailPanel() {
 		issue := m.results[m.selectedIdx]
 		rightWidth := m.width - (m.width / 2) - 1
 		// rightWidth-2 for left/right border, height-2 for top/bottom border
-		m.details = details.New(issue, m.services.Client).SetSize(rightWidth-2, m.height-2)
+		// Pass nil for loaders if Client is nil to avoid interface nil vs typed-nil issues
+		var depLoader details.DependencyLoader
+		var commentLoader details.CommentLoader
+		if m.services.Client != nil {
+			depLoader = m.services.Client
+			commentLoader = m.services.Client
+		}
+		m.details = details.New(issue, depLoader, commentLoader).SetSize(rightWidth-2, m.height-2)
 		m.hasDetail = true
 	}
 }
@@ -864,7 +871,14 @@ func (m Model) navigateToDependency(issueID string) (Model, tea.Cmd) {
 	// Update the details panel with this issue
 	rightWidth := m.width - (m.width / 2) - 1
 	// rightWidth-2 for left/right border, height-2 for top/bottom border
-	m.details = details.New(issue, m.services.Client).SetSize(rightWidth-2, m.height-2)
+	// Pass nil for loaders if Client is nil to avoid interface nil vs typed-nil issues
+	var depLoader details.DependencyLoader
+	var commentLoader details.CommentLoader
+	if m.services.Client != nil {
+		depLoader = m.services.Client
+		commentLoader = m.services.Client
+	}
+	m.details = details.New(issue, depLoader, commentLoader).SetSize(rightWidth-2, m.height-2)
 	m.hasDetail = true
 
 	// Try to find and select this issue in the results list

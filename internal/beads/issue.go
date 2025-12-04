@@ -34,6 +34,14 @@ const (
 	TypeChore   IssueType = "chore"
 )
 
+// Comment represents a comment on an issue.
+type Comment struct {
+	ID        int       `json:"id"`
+	Author    string    `json:"author"`
+	Text      string    `json:"text"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // Issue represents a beads issue.
 type Issue struct {
 	ID              string    `json:"id"`
@@ -42,6 +50,7 @@ type Issue struct {
 	Status          Status    `json:"status"`
 	Priority        Priority  `json:"priority"`
 	Type            IssueType `json:"type"`
+	Assignee        string    `json:"assignee"`
 	Labels          []string  `json:"labels"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
@@ -51,6 +60,9 @@ type Issue struct {
 	Blocks    []string `json:"blocks"`
 	Related   []string `json:"related"`
 	ParentID  string   `json:"parent_id"`
+
+	// Comments (populated on demand)
+	Comments []Comment `json:"comments,omitempty"`
 }
 
 // Title implements list.Item interface.

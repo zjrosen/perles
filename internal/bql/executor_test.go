@@ -12,6 +12,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// strPtr returns a pointer to the given string (helper for nullable assignee).
+func strPtr(s string) *string { return &s }
+
 // setupTestDB creates an in-memory SQLite database with test data.
 func setupTestDB(t *testing.T) *sql.DB {
 	db, err := sql.Open("sqlite3", ":memory:")
@@ -26,6 +29,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 			status TEXT NOT NULL DEFAULT 'open',
 			priority INTEGER NOT NULL DEFAULT 2,
 			issue_type TEXT NOT NULL DEFAULT 'task',
+			assignee TEXT,
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		);
@@ -68,21 +72,22 @@ func setupTestDB(t *testing.T) *sql.DB {
 		id, title, desc, status string
 		priority                int
 		issueType               string
+		assignee                *string // nil means NULL
 		createdAt, updatedAt    time.Time
 	}{
-		{"test-1", "Fix login bug", "Login fails for users", "open", 0, "bug", lastWeek, now},
-		{"test-2", "Add search feature", "Search functionality", "open", 1, "feature", yesterday, yesterday},
-		{"test-3", "Refactor auth", "Clean up auth code", "in_progress", 2, "task", lastWeek, yesterday},
-		{"test-4", "Update docs", "Documentation update", "closed", 3, "chore", lastWeek, lastWeek},
-		{"test-5", "Critical security fix", "Urgent fix needed", "open", 0, "bug", now, now},
-		{"test-6", "Epic: New dashboard", "Dashboard epic", "open", 1, "epic", lastWeek, now},
+		{"test-1", "Fix login bug", "Login fails for users", "open", 0, "bug", strPtr("alice"), lastWeek, now},
+		{"test-2", "Add search feature", "Search functionality", "open", 1, "feature", nil, yesterday, yesterday},
+		{"test-3", "Refactor auth", "Clean up auth code", "in_progress", 2, "task", strPtr("bob"), lastWeek, yesterday},
+		{"test-4", "Update docs", "Documentation update", "closed", 3, "chore", nil, lastWeek, lastWeek},
+		{"test-5", "Critical security fix", "Urgent fix needed", "open", 0, "bug", strPtr("alice"), now, now},
+		{"test-6", "Epic: New dashboard", "Dashboard epic", "open", 1, "epic", nil, lastWeek, now},
 	}
 
 	for _, i := range testIssues {
 		_, err = db.Exec(
-			`INSERT INTO issues (id, title, description, status, priority, issue_type, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			i.id, i.title, i.desc, i.status, i.priority, i.issueType, i.createdAt, i.updatedAt,
+			`INSERT INTO issues (id, title, description, status, priority, issue_type, assignee, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			i.id, i.title, i.desc, i.status, i.priority, i.issueType, i.assignee, i.createdAt, i.updatedAt,
 		)
 		require.NoError(t, err)
 	}
@@ -450,4 +455,55 @@ func TestExecutor_OrderByOnly(t *testing.T) {
 	assert.Len(t, issues, 6) // All issues except deleted
 	// First should be P0
 	assert.Equal(t, beads.Priority(0), issues[0].Priority)
+}
+
+func TestExecutor_AssigneePopulated(t *testing.T) {
+	db := setupTestDB(t)
+	defer func() { _ = db.Close() }()
+
+	executor := NewExecutor(db)
+
+	// Get test-1 which has assignee "alice"
+	issues, err := executor.Execute("id = test-1")
+	require.NoError(t, err)
+
+	require.Len(t, issues, 1)
+	assert.Equal(t, "alice", issues[0].Assignee, "assignee should be populated from database")
+}
+
+func TestExecutor_AssigneeNullIsEmptyString(t *testing.T) {
+	db := setupTestDB(t)
+	defer func() { _ = db.Close() }()
+
+	executor := NewExecutor(db)
+
+	// Get test-2 which has NULL assignee
+	issues, err := executor.Execute("id = test-2")
+	require.NoError(t, err)
+
+	require.Len(t, issues, 1)
+	assert.Equal(t, "", issues[0].Assignee, "NULL assignee should be empty string")
+}
+
+func TestExecutor_MultipleIssuesWithDifferentAssignees(t *testing.T) {
+	db := setupTestDB(t)
+	defer func() { _ = db.Close() }()
+
+	executor := NewExecutor(db)
+
+	// Get multiple issues and verify each has correct assignee
+	issues, err := executor.Execute("id in (test-1, test-2, test-3)")
+	require.NoError(t, err)
+
+	require.Len(t, issues, 3)
+
+	// Build map for easier assertion
+	assigneeByID := make(map[string]string)
+	for _, issue := range issues {
+		assigneeByID[issue.ID] = issue.Assignee
+	}
+
+	assert.Equal(t, "alice", assigneeByID["test-1"])
+	assert.Equal(t, "", assigneeByID["test-2"])
+	assert.Equal(t, "bob", assigneeByID["test-3"])
 }

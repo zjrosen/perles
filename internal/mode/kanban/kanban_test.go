@@ -40,7 +40,7 @@ func TestDeleteFlow_CancelReturnsToDetails(t *testing.T) {
 		Type:      beads.TypeTask,
 	}
 	m.view = ViewDeleteConfirm
-	m.details = details.New(issue, nil).SetSize(100, 40)
+	m.details = details.New(issue, nil, nil).SetSize(100, 40)
 	m.selectedIssue = &issue
 
 	// Simulate modal cancel

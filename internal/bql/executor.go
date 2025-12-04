@@ -39,7 +39,7 @@ func (e *Executor) Execute(input string) ([]beads.Issue, error) {
 	sqlQuery := `
 		SELECT
 			i.id, i.title, i.description, i.status,
-			i.priority, i.issue_type, i.created_at, i.updated_at,
+			i.priority, i.issue_type, i.assignee, i.created_at, i.updated_at,
 			COALESCE((
 				SELECT GROUP_CONCAT(d.depends_on_id)
 				FROM dependencies d
@@ -87,6 +87,7 @@ func (e *Executor) Execute(input string) ([]beads.Issue, error) {
 	for rows.Next() {
 		var issue beads.Issue
 		var description sql.NullString
+		var assignee sql.NullString
 		var blockerIDs string
 		var blocksIDs string
 		var labelsStr string
@@ -94,7 +95,7 @@ func (e *Executor) Execute(input string) ([]beads.Issue, error) {
 		err := rows.Scan(
 			&issue.ID, &issue.TitleText, &description,
 			&issue.Status, &issue.Priority, &issue.Type,
-			&issue.CreatedAt, &issue.UpdatedAt,
+			&assignee, &issue.CreatedAt, &issue.UpdatedAt,
 			&blockerIDs, &blocksIDs, &labelsStr,
 		)
 		if err != nil {
@@ -103,6 +104,9 @@ func (e *Executor) Execute(input string) ([]beads.Issue, error) {
 
 		if description.Valid {
 			issue.DescriptionText = description.String
+		}
+		if assignee.Valid {
+			issue.Assignee = assignee.String
 		}
 
 		// Parse blocker IDs from comma-separated string (issues that block this one)

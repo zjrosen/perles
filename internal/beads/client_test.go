@@ -30,6 +30,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 			status TEXT NOT NULL DEFAULT 'open',
 			priority INTEGER NOT NULL DEFAULT 2,
 			issue_type TEXT NOT NULL DEFAULT 'task',
+			assignee TEXT,
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		);
@@ -48,6 +49,15 @@ func setupTestDB(t *testing.T) *sql.DB {
 			type TEXT NOT NULL DEFAULT 'blocks',
 			FOREIGN KEY (issue_id) REFERENCES issues(id),
 			FOREIGN KEY (depends_on_id) REFERENCES issues(id)
+		);
+
+		CREATE TABLE comments (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			issue_id TEXT NOT NULL,
+			author TEXT NOT NULL,
+			text TEXT NOT NULL,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (issue_id) REFERENCES issues(id)
 		);
 	`
 	_, err = db.Exec(schema)
@@ -107,6 +117,25 @@ func setupTestDB(t *testing.T) *sql.DB {
 		"issue-2", "epic-1", "parent-child",
 	)
 	require.NoError(t, err)
+
+	// Insert comments
+	// issue-1 has two comments, issue-2 has one comment, issue-3 has none
+	comments := []struct {
+		issueID, author, text string
+		createdAt             time.Time
+	}{
+		{"issue-1", "alice", "First comment on issue-1", yesterday.Add(time.Hour)},
+		{"issue-1", "bob", "Second comment on issue-1", yesterday.Add(2 * time.Hour)},
+		{"issue-2", "charlie", "Only comment on issue-2", yesterday},
+	}
+
+	for _, c := range comments {
+		_, err = db.Exec(
+			`INSERT INTO comments (issue_id, author, text, created_at) VALUES (?, ?, ?, ?)`,
+			c.issueID, c.author, c.text, c.createdAt,
+		)
+		require.NoError(t, err)
+	}
 
 	return db
 }
@@ -261,4 +290,73 @@ func TestListIssuesByIds_AllNonExistent(t *testing.T) {
 	issues, err := client.ListIssuesByIds([]string{"fake-1", "fake-2", "fake-3"})
 	require.NoError(t, err)
 	assert.Empty(t, issues, "all nonexistent IDs should return empty slice")
+}
+
+func TestGetComments_NoComments(t *testing.T) {
+	db := setupTestDB(t)
+	defer func() { _ = db.Close() }()
+	client := newTestClient(db)
+
+	// issue-3 has no comments
+	comments, err := client.GetComments("issue-3")
+	require.NoError(t, err)
+	assert.Empty(t, comments, "issue with no comments should return empty slice")
+}
+
+func TestGetComments_SingleComment(t *testing.T) {
+	db := setupTestDB(t)
+	defer func() { _ = db.Close() }()
+	client := newTestClient(db)
+
+	// issue-2 has one comment
+	comments, err := client.GetComments("issue-2")
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+
+	assert.Equal(t, "charlie", comments[0].Author)
+	assert.Equal(t, "Only comment on issue-2", comments[0].Text)
+	assert.NotZero(t, comments[0].ID)
+	assert.False(t, comments[0].CreatedAt.IsZero())
+}
+
+func TestGetComments_MultipleComments(t *testing.T) {
+	db := setupTestDB(t)
+	defer func() { _ = db.Close() }()
+	client := newTestClient(db)
+
+	// issue-1 has two comments
+	comments, err := client.GetComments("issue-1")
+	require.NoError(t, err)
+	require.Len(t, comments, 2)
+
+	// Verify both comments are present
+	authors := []string{comments[0].Author, comments[1].Author}
+	assert.ElementsMatch(t, []string{"alice", "bob"}, authors)
+}
+
+func TestGetComments_OrderedByCreatedAt(t *testing.T) {
+	db := setupTestDB(t)
+	defer func() { _ = db.Close() }()
+	client := newTestClient(db)
+
+	// issue-1 has two comments: alice at yesterday+1h, bob at yesterday+2h
+	comments, err := client.GetComments("issue-1")
+	require.NoError(t, err)
+	require.Len(t, comments, 2)
+
+	// Should be ordered by created_at ASC (oldest first)
+	assert.Equal(t, "alice", comments[0].Author, "first comment should be from alice (earlier)")
+	assert.Equal(t, "bob", comments[1].Author, "second comment should be from bob (later)")
+	assert.True(t, comments[0].CreatedAt.Before(comments[1].CreatedAt), "comments should be ordered by created_at ASC")
+}
+
+func TestGetComments_NonExistentIssue(t *testing.T) {
+	db := setupTestDB(t)
+	defer func() { _ = db.Close() }()
+	client := newTestClient(db)
+
+	// Non-existent issue should return empty slice (not error)
+	comments, err := client.GetComments("nonexistent-issue")
+	require.NoError(t, err)
+	assert.Empty(t, comments, "non-existent issue should return empty slice")
 }

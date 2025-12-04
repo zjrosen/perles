@@ -239,8 +239,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if issue == nil {
 			return m, nil
 		}
-		// Create new details view for the dependency (pass client for nested deps)
-		m.details = details.New(*issue, m.services.Client).SetSize(m.width, m.height)
+		// Create new details view for the dependency (pass client for deps and comments)
+		m.details = details.New(*issue, m.services.Client, m.services.Client).SetSize(m.width, m.height)
 		return m, nil
 
 	case details.OpenLabelEditorMsg:

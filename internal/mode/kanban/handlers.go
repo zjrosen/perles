@@ -276,7 +276,7 @@ func (m Model) handleBoardKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case "enter":
 		if issue := m.board.SelectedIssue(); issue != nil {
-			m.details = details.New(*issue, m.services.Client).SetSize(m.width, m.height)
+			m.details = details.New(*issue, m.services.Client, m.services.Client).SetSize(m.width, m.height)
 			m.view = ViewDetails
 		}
 		return m, nil
