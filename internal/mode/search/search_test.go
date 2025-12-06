@@ -12,7 +12,6 @@ import (
 	"perles/internal/mode"
 	"perles/internal/ui/details"
 	"perles/internal/ui/modals/saveviewoptions"
-	"perles/internal/ui/shared/formmodal"
 )
 
 // createTestModel creates a minimal Model for testing state transitions.
@@ -454,8 +453,8 @@ func TestViewSelector_EscReturnToSearch(t *testing.T) {
 	m := createTestModelWithViews()
 	m.view = ViewSaveColumn
 
-	// Simulate CancelMsg from formmodal
-	m, _ = m.Update(formmodal.CancelMsg{})
+	// The factory pattern produces closeSaveViewMsg instead of formmodal.CancelMsg
+	m, _ = m.Update(closeSaveViewMsg{})
 
 	assert.Equal(t, ViewSearch, m.view, "expected to return to search view")
 }
@@ -465,20 +464,14 @@ func TestViewSelector_SaveBubblesUp(t *testing.T) {
 	m.view = ViewSaveColumn
 	m.input.SetValue("status = open")
 
-	// Simulate SubmitMsg from formmodal (values match updateview form)
-	submitMsg := formmodal.SubmitMsg{
-		Values: map[string]any{
-			"columnName": "Test Column",
-			"color":      "#73F59F",
-			"views":      []string{"0", "1"},
-		},
+	// The factory pattern produces updateViewSaveMsg directly (no longer formmodal.SubmitMsg)
+	saveMsg := updateViewSaveMsg{
+		ColumnName:  "Test Column",
+		Color:       "#73F59F",
+		Query:       "status = open",
+		ViewIndices: []int{0, 1},
 	}
-	m, cmd := m.Update(submitMsg)
-
-	// First update returns updateViewSaveMsg, which triggers the actual state change
-	assert.NotNil(t, cmd, "expected command from formmodal submit")
-	msg := cmd()
-	m, cmd = m.Update(msg)
+	m, cmd := m.Update(saveMsg)
 
 	assert.Equal(t, ViewSearch, m.view, "expected to return to search view")
 	assert.NotNil(t, cmd, "expected batch command with ShowToastMsg")
@@ -568,20 +561,14 @@ func TestNewViewModal_Save(t *testing.T) {
 	m.view = ViewNewView
 	m.input.SetValue("status = open")
 
-	// Simulate SubmitMsg from formmodal (values match newview form)
-	submitMsg := formmodal.SubmitMsg{
-		Values: map[string]any{
-			"viewName":   "My Bugs",
-			"columnName": "Open Bugs",
-			"color":      "#FF8787",
-		},
+	// The factory pattern produces newViewSaveMsg directly (no longer formmodal.SubmitMsg)
+	saveMsg := newViewSaveMsg{
+		ViewName:   "My Bugs",
+		ColumnName: "Open Bugs",
+		Color:      "#FF8787",
+		Query:      "status = open",
 	}
-	m, cmd := m.Update(submitMsg)
-
-	// First update returns newViewSaveMsg, which triggers the actual state change
-	assert.NotNil(t, cmd, "expected command from formmodal submit")
-	msg := cmd()
-	m, cmd = m.Update(msg)
+	m, cmd := m.Update(saveMsg)
 
 	assert.Equal(t, ViewSearch, m.view, "expected to return to search")
 	assert.NotNil(t, cmd, "expected batch command with ShowToastMsg")
@@ -591,7 +578,8 @@ func TestNewViewModal_Cancel(t *testing.T) {
 	m := createTestModelWithViews()
 	m.view = ViewNewView
 
-	m, _ = m.Update(formmodal.CancelMsg{})
+	// The factory pattern produces closeSaveViewMsg instead of formmodal.CancelMsg
+	m, _ = m.Update(closeSaveViewMsg{})
 
 	assert.Equal(t, ViewSearch, m.view, "expected to return to search")
 }

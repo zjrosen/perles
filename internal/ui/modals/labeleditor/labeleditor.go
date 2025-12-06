@@ -34,6 +34,8 @@ func New(issueID string, currentLabels []string) Model {
 		}
 	}
 
+	m := Model{issueID: issueID}
+
 	cfg := formmodal.FormConfig{
 		Title: "Edit Labels",
 		Fields: []formmodal.FieldConfig{
@@ -50,12 +52,17 @@ func New(issueID string, currentLabels []string) Model {
 		},
 		SubmitLabel: "Save",
 		MinWidth:    42,
+		OnSubmit: func(values map[string]any) tea.Msg {
+			return SaveMsg{
+				IssueID: m.issueID,
+				Labels:  values["labels"].([]string),
+			}
+		},
+		OnCancel: func() tea.Msg { return CancelMsg{} },
 	}
 
-	return Model{
-		issueID: issueID,
-		form:    formmodal.New(cfg),
-	}
+	m.form = formmodal.New(cfg)
+	return m
 }
 
 // SetSize sets the viewport dimensions for overlay rendering.
@@ -71,36 +78,8 @@ func (m Model) Init() tea.Cmd {
 
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case formmodal.SubmitMsg:
-		labels := msg.Values["labels"].([]string)
-		return m, func() tea.Msg {
-			return SaveMsg{IssueID: m.issueID, Labels: labels}
-		}
-	case formmodal.CancelMsg:
-		return m, func() tea.Msg { return CancelMsg{} }
-	}
-
 	var cmd tea.Cmd
 	m.form, cmd = m.form.Update(msg)
-
-	// Wrap formmodal commands to convert messages
-	if cmd != nil {
-		wrappedCmd := func() tea.Msg {
-			result := cmd()
-			switch resultMsg := result.(type) {
-			case formmodal.SubmitMsg:
-				labels := resultMsg.Values["labels"].([]string)
-				return SaveMsg{IssueID: m.issueID, Labels: labels}
-			case formmodal.CancelMsg:
-				return CancelMsg{}
-			default:
-				return result
-			}
-		}
-		return m, wrappedCmd
-	}
-
 	return m, cmd
 }
 

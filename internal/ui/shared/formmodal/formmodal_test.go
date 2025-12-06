@@ -1584,3 +1584,185 @@ func TestGolden_EditableListEmpty(t *testing.T) {
 
 	compareGolden(t, "editable_list_empty", m.View())
 }
+
+// --- OnSubmit/OnCancel Factory Tests ---
+
+// Custom message types for factory tests
+type CustomSubmitMsg struct {
+	Name string
+}
+
+type CustomCancelMsg struct {
+	Reason string
+}
+
+func TestOnSubmitFactory_ReturnsCustomMessage(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{Key: "name", Type: FieldTypeText, Label: "Name", InitialValue: "test"},
+		},
+		OnSubmit: func(values map[string]any) tea.Msg {
+			return CustomSubmitMsg{Name: values["name"].(string)}
+		},
+	}
+	m := New(cfg)
+
+	// Navigate to submit button and press Enter
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // to submit
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if cmd == nil {
+		t.Fatal("expected submit command, got nil")
+	}
+	msg := cmd()
+	customMsg, ok := msg.(CustomSubmitMsg)
+	if !ok {
+		t.Fatalf("expected CustomSubmitMsg, got %T", msg)
+	}
+	if customMsg.Name != "test" {
+		t.Errorf("expected Name='test', got %q", customMsg.Name)
+	}
+}
+
+func TestOnSubmitFactory_NilReturnsSubmitMsg(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{Key: "name", Type: FieldTypeText, Label: "Name", InitialValue: "test"},
+		},
+		// OnSubmit is nil (default)
+	}
+	m := New(cfg)
+
+	// Navigate to submit button and press Enter
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // to submit
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if cmd == nil {
+		t.Fatal("expected submit command, got nil")
+	}
+	msg := cmd()
+	submitMsg, ok := msg.(SubmitMsg)
+	if !ok {
+		t.Fatalf("expected SubmitMsg for nil OnSubmit, got %T", msg)
+	}
+	if submitMsg.Values["name"] != "test" {
+		t.Errorf("expected name='test', got %v", submitMsg.Values["name"])
+	}
+}
+
+func TestOnCancelFactory_ReturnsCustomMessageOnEsc(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{Key: "name", Type: FieldTypeText, Label: "Name"},
+		},
+		OnCancel: func() tea.Msg {
+			return CustomCancelMsg{Reason: "user pressed esc"}
+		},
+	}
+	m := New(cfg)
+
+	// Press Esc
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+
+	if cmd == nil {
+		t.Fatal("expected cancel command, got nil")
+	}
+	msg := cmd()
+	customMsg, ok := msg.(CustomCancelMsg)
+	if !ok {
+		t.Fatalf("expected CustomCancelMsg, got %T", msg)
+	}
+	if customMsg.Reason != "user pressed esc" {
+		t.Errorf("expected Reason='user pressed esc', got %q", customMsg.Reason)
+	}
+}
+
+func TestOnCancelFactory_ReturnsCustomMessageOnCancelButton(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		OnCancel: func() tea.Msg {
+			return CustomCancelMsg{Reason: "user clicked cancel"}
+		},
+	}
+	m := New(cfg)
+
+	// Navigate to cancel button
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // to cancel
+
+	// Press Enter on cancel button
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if cmd == nil {
+		t.Fatal("expected cancel command, got nil")
+	}
+	msg := cmd()
+	customMsg, ok := msg.(CustomCancelMsg)
+	if !ok {
+		t.Fatalf("expected CustomCancelMsg, got %T", msg)
+	}
+	if customMsg.Reason != "user clicked cancel" {
+		t.Errorf("expected Reason='user clicked cancel', got %q", customMsg.Reason)
+	}
+}
+
+func TestOnCancelFactory_NilReturnsCancelMsg(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{Key: "name", Type: FieldTypeText, Label: "Name"},
+		},
+		// OnCancel is nil (default)
+	}
+	m := New(cfg)
+
+	// Press Esc
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+
+	if cmd == nil {
+		t.Fatal("expected cancel command, got nil")
+	}
+	msg := cmd()
+	if _, ok := msg.(CancelMsg); !ok {
+		t.Fatalf("expected CancelMsg for nil OnCancel, got %T", msg)
+	}
+}
+
+func TestOnSubmitFactory_ValidationFailureStillShowsError(t *testing.T) {
+	factoryCalled := false
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{Key: "name", Type: FieldTypeText, Label: "Name"},
+		},
+		Validate: func(values map[string]any) error {
+			name := values["name"].(string)
+			if name == "" {
+				return errors.New("Name is required")
+			}
+			return nil
+		},
+		OnSubmit: func(values map[string]any) tea.Msg {
+			factoryCalled = true
+			return CustomSubmitMsg{Name: values["name"].(string)}
+		},
+	}
+	m := New(cfg)
+
+	// Navigate to submit and press Enter with empty name
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // to submit
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// Should have validation error, no command
+	if cmd != nil {
+		t.Error("expected nil command due to validation error")
+	}
+	if m.validationError != "Name is required" {
+		t.Errorf("expected validation error 'Name is required', got '%s'", m.validationError)
+	}
+	if factoryCalled {
+		t.Error("OnSubmit factory should not be called when validation fails")
+	}
+}

@@ -161,6 +161,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 func (m Model) handleKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 	// Handle Esc globally
 	if msg.String() == "esc" {
+		if m.config.OnCancel != nil {
+			return m, func() tea.Msg { return m.config.OnCancel() }
+		}
 		return m, func() tea.Msg { return CancelMsg{} }
 	}
 
@@ -278,6 +281,9 @@ func (m Model) handleEnter() (Model, tea.Cmd) {
 	case 0: // Submit
 		return m.submit()
 	case 1: // Cancel
+		if m.config.OnCancel != nil {
+			return m, func() tea.Msg { return m.config.OnCancel() }
+		}
 		return m, func() tea.Msg { return CancelMsg{} }
 	}
 
@@ -303,6 +309,10 @@ func (m Model) submit() (Model, tea.Cmd) {
 		}
 	}
 
+	// Use factory if provided, otherwise default SubmitMsg
+	if m.config.OnSubmit != nil {
+		return m, func() tea.Msg { return m.config.OnSubmit(values) }
+	}
 	return m, func() tea.Msg { return SubmitMsg{Values: values} }
 }
 

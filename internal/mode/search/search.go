@@ -112,8 +112,11 @@ type updateViewSaveMsg struct {
 	ViewIndices []int
 }
 
+// closeSaveViewMsg closes any save view modal and returns to search.
+type closeSaveViewMsg struct{}
+
 // makeNewViewFormConfig creates the formmodal config for creating a new view.
-func makeNewViewFormConfig(existingViews []config.ViewConfig) formmodal.FormConfig {
+func makeNewViewFormConfig(existingViews []config.ViewConfig, currentQuery string) formmodal.FormConfig {
 	return formmodal.FormConfig{
 		Title: "Create New View",
 		Fields: []formmodal.FieldConfig{
@@ -155,11 +158,25 @@ func makeNewViewFormConfig(existingViews []config.ViewConfig) formmodal.FormConf
 			}
 			return nil
 		},
+		OnSubmit: func(values map[string]any) tea.Msg {
+			viewName := strings.TrimSpace(values["viewName"].(string))
+			columnName := strings.TrimSpace(values["columnName"].(string))
+			if columnName == "" {
+				columnName = viewName
+			}
+			return newViewSaveMsg{
+				ViewName:   viewName,
+				ColumnName: columnName,
+				Color:      values["color"].(string),
+				Query:      currentQuery,
+			}
+		},
+		OnCancel: func() tea.Msg { return closeSaveViewMsg{} },
 	}
 }
 
 // makeUpdateViewFormConfig creates the formmodal config for adding a column to existing views.
-func makeUpdateViewFormConfig(views []config.ViewConfig) formmodal.FormConfig {
+func makeUpdateViewFormConfig(views []config.ViewConfig, currentQuery string) formmodal.FormConfig {
 	options := make([]formmodal.ListOption, len(views))
 	for i, v := range views {
 		options[i] = formmodal.ListOption{
@@ -208,6 +225,25 @@ func makeUpdateViewFormConfig(views []config.ViewConfig) formmodal.FormConfig {
 			}
 			return nil
 		},
+		OnSubmit: func(values map[string]any) tea.Msg {
+			columnName := strings.TrimSpace(values["columnName"].(string))
+			selectedViews := values["views"].([]string)
+
+			indices := make([]int, 0, len(selectedViews))
+			for _, s := range selectedViews {
+				if idx, err := strconv.Atoi(s); err == nil {
+					indices = append(indices, idx)
+				}
+			}
+
+			return updateViewSaveMsg{
+				ColumnName:  columnName,
+				Color:       values["color"].(string),
+				Query:       currentQuery,
+				ViewIndices: indices,
+			}
+		},
+		OnCancel: func() tea.Msg { return closeSaveViewMsg{} },
 	}
 }
 
@@ -326,26 +362,21 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case formmodal.SubmitMsg:
-		return m.handleFormModalSubmit(msg)
-
-	case formmodal.CancelMsg:
-		// Both view modals return to search on cancel
-		if m.view == ViewSaveColumn || m.view == ViewNewView {
-			m.view = ViewSearch
-		}
+	case closeSaveViewMsg:
+		m.view = ViewSearch
 		return m, nil
 
 	case saveviewoptions.SelectMsg:
+		query := m.input.Value()
 		switch msg.Action {
 		case saveviewoptions.ActionExistingView:
 			// Transition to existing view selector
-			m.viewSelector = formmodal.New(makeUpdateViewFormConfig(m.services.Config.Views)).
+			m.viewSelector = formmodal.New(makeUpdateViewFormConfig(m.services.Config.Views, query)).
 				SetSize(m.width, m.height)
 			m.view = ViewSaveColumn
 		case saveviewoptions.ActionNewView:
 			// Transition to new view modal
-			m.newViewModal = formmodal.New(makeNewViewFormConfig(m.services.Config.Views)).
+			m.newViewModal = formmodal.New(makeNewViewFormConfig(m.services.Config.Views, query)).
 				SetSize(m.width, m.height)
 			m.view = ViewNewView
 		}
@@ -1328,51 +1359,6 @@ func (m Model) openDeleteConfirm(msg details.DeleteIssueMsg) (Model, tea.Cmd) {
 	m.selectedIssue = issue
 	m.view = ViewDeleteConfirm
 	return m, m.modal.Init()
-}
-
-// handleFormModalSubmit processes formmodal submissions for view modals.
-func (m Model) handleFormModalSubmit(msg formmodal.SubmitMsg) (Model, tea.Cmd) {
-	switch m.view {
-	case ViewNewView:
-		viewName := strings.TrimSpace(msg.Values["viewName"].(string))
-		columnName := strings.TrimSpace(msg.Values["columnName"].(string))
-		if columnName == "" {
-			columnName = viewName
-		}
-		color := msg.Values["color"].(string)
-		query := m.input.Value()
-		return m, func() tea.Msg {
-			return newViewSaveMsg{
-				ViewName:   viewName,
-				ColumnName: columnName,
-				Color:      color,
-				Query:      query,
-			}
-		}
-
-	case ViewSaveColumn:
-		columnName := strings.TrimSpace(msg.Values["columnName"].(string))
-		color := msg.Values["color"].(string)
-		selectedViews := msg.Values["views"].([]string)
-
-		indices := make([]int, 0, len(selectedViews))
-		for _, s := range selectedViews {
-			if idx, err := strconv.Atoi(s); err == nil {
-				indices = append(indices, idx)
-			}
-		}
-
-		query := m.input.Value()
-		return m, func() tea.Msg {
-			return updateViewSaveMsg{
-				ColumnName:  columnName,
-				Color:       color,
-				Query:       query,
-				ViewIndices: indices,
-			}
-		}
-	}
-	return m, nil
 }
 
 // handleModalSubmit processes modal confirmation.

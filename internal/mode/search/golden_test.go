@@ -97,7 +97,7 @@ func TestSearch_View_Golden_NewViewModal(t *testing.T) {
 	m.input.SetValue("status = open")
 
 	// Open new view modal
-	m.newViewModal = formmodal.New(makeNewViewFormConfig(m.services.Config.Views)).
+	m.newViewModal = formmodal.New(makeNewViewFormConfig(m.services.Config.Views, m.input.Value())).
 		SetSize(m.width, m.height)
 	m.view = ViewNewView
 
@@ -111,7 +111,7 @@ func TestSearch_View_Golden_SaveColumnModal(t *testing.T) {
 	m.input.SetValue("priority = 0")
 
 	// Open save column modal
-	m.viewSelector = formmodal.New(makeUpdateViewFormConfig(m.services.Config.Views)).
+	m.viewSelector = formmodal.New(makeUpdateViewFormConfig(m.services.Config.Views, m.input.Value())).
 		SetSize(m.width, m.height)
 	m.view = ViewSaveColumn
 

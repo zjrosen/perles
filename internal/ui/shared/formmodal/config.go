@@ -43,32 +43,45 @@
 // a Values map with all field values keyed by FieldConfig.Key. When cancelled,
 // it sends a CancelMsg.
 //
-// Wrapper Pattern:
+// Wrapper Pattern (using message factories):
 //
 // To integrate formmodal into an existing modal component while preserving its API,
-// wrap formmodal.Model internally and translate messages:
+// use OnSubmit and OnCancel factories to produce your custom message types directly:
 //
 //	type Model struct {
-//	    form formmodal.Model
-//	    // ... other state
+//	    issueID string
+//	    form    formmodal.Model
+//	}
+//
+//	func New(issueID string) Model {
+//	    m := Model{issueID: issueID}
+//	    cfg := formmodal.FormConfig{
+//	        Title: "Edit Item",
+//	        Fields: []formmodal.FieldConfig{...},
+//	        OnSubmit: func(values map[string]any) tea.Msg {
+//	            return YourSaveMsg{ID: m.issueID, Data: values["data"].(string)}
+//	        },
+//	        OnCancel: func() tea.Msg { return YourCancelMsg{} },
+//	    }
+//	    m.form = formmodal.New(cfg)
+//	    return m
 //	}
 //
 //	func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
-//	    switch msg := msg.(type) {
-//	    case formmodal.SubmitMsg:
-//	        return m, func() tea.Msg {
-//	            return YourSaveMsg{...extract from msg.Values...}
-//	        }
-//	    case formmodal.CancelMsg:
-//	        return m, func() tea.Msg { return YourCancelMsg{} }
-//	    }
 //	    var cmd tea.Cmd
 //	    m.form, cmd = m.form.Update(msg)
-//	    return m, cmd
+//	    return m, cmd // formmodal produces YourSaveMsg/YourCancelMsg directly
 //	}
+//
+// The factories eliminate command wrapping boilerplate. If OnSubmit/OnCancel
+// are nil, formmodal produces the default SubmitMsg/CancelMsg types.
 package formmodal
 
-import "perles/internal/ui/shared/modal"
+import (
+	"perles/internal/ui/shared/modal"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
 
 // FieldType identifies the type of form field.
 type FieldType int
@@ -190,4 +203,14 @@ type FormConfig struct {
 	CancelLabel   string                     // Cancel button label (default: "Cancel")
 	MinWidth      int                        // Minimum modal width (default: 50)
 	Validate      func(map[string]any) error // Validation function (optional)
+
+	// OnSubmit produces a custom message when the form is submitted.
+	// If nil, formmodal produces SubmitMsg{Values: values}.
+	// Example: func(values map[string]any) tea.Msg { return MySubmitMsg{...} }
+	OnSubmit func(values map[string]any) tea.Msg
+
+	// OnCancel produces a custom message when the form is cancelled.
+	// If nil, formmodal produces CancelMsg{}.
+	// Example: func() tea.Msg { return MyCancelMsg{} }
+	OnCancel func() tea.Msg
 }
