@@ -21,6 +21,7 @@ type KeyMap struct {
 	EditColumn      key.Binding
 	MoveColumnLeft  key.Binding
 	MoveColumnRight key.Binding
+	Tree            key.Binding // New: Tree View
 
 	// View cycling
 	NextView         key.Binding
@@ -95,6 +96,10 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("ctrl+l"),
 			key.WithHelp("ctrl+l", "move column right"),
 		),
+		Tree: key.NewBinding( // New: Tree View
+			key.WithKeys("t"),
+			key.WithHelp("t", "tree view"),
+		),
 
 		// View cycling
 		NextView: key.NewBinding(
@@ -150,10 +155,10 @@ func (k KeyMap) ShortHelp() []key.Binding {
 // FullHelp returns keybindings for the full help view.
 func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Up, k.Down, k.Left, k.Right}, // Navigation
-		{k.Enter, k.Refresh, k.Yank, k.Status, k.Priority, k.AddColumn, k.EditColumn, k.MoveColumnLeft, k.MoveColumnRight}, // Actions
+		{k.Up, k.Down, k.Left, k.Right},                                                                           // Navigation
+		{k.Enter, k.Refresh, k.Yank, k.Status, k.Priority, k.AddColumn, k.EditColumn, k.MoveColumnLeft, k.MoveColumnRight, k.Tree}, // Actions
 		{k.NextView, k.PrevView, k.ViewMenu, k.DeleteColumn},                                                               // Views
-		{k.Help, k.ToggleStatus, k.Escape, k.Quit},                                                                         // General
+		{k.Help, k.ToggleStatus, k.Escape, k.Quit},                                                                 // General
 	}
 }
 
@@ -176,6 +181,7 @@ type SearchKeyMap struct {
 	Status     key.Binding
 	Yank       key.Binding
 	SaveColumn key.Binding
+	Tree       key.Binding // New: Tree View
 
 	// General
 	SwitchMode key.Binding
@@ -238,6 +244,10 @@ func DefaultSearchKeyMap() SearchKeyMap {
 		SaveColumn: key.NewBinding(
 			key.WithKeys("ctrl+s"),
 			key.WithHelp("ctrl+s", "save to view"),
+		),
+		Tree: key.NewBinding( // New: Tree View
+			key.WithKeys("t"),
+			key.WithHelp("t", "tree view"),
 		),
 
 		// General

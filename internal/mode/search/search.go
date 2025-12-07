@@ -457,6 +457,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.view = ViewDetailsEditMenu
 		return m, nil
 
+	case details.CopyIssueIDMsg:
+		err := shared.CopyToClipboard(msg.IssueID)
+		if err != nil {
+			return m, func() tea.Msg {
+				return mode.ShowToastMsg{Message: "Clipboard error: " + err.Error(), Style: toaster.StyleError}
+			}
+		}
+		return m, func() tea.Msg { return mode.ShowToastMsg{Message: "Copied: " + msg.IssueID, Style: toaster.StyleSuccess} }
+
 	case editMenuLabelsMsg:
 		if m.selectedIssue == nil {
 			m.view = ViewSearch
@@ -829,6 +838,28 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		// Yank (copy) issue ID to clipboard
 		if m.focus == FocusResults || m.focus == FocusDetails {
 			return m.yankIssueID()
+		}
+		return m, nil
+
+	case "t":
+		if m.focus == FocusDetails {
+			issue := m.getSelectedIssue()
+			if issue == nil {
+				return m, nil
+			}
+			// Set up loaders
+			var depLoader details.DependencyLoader
+			var commentLoader details.CommentLoader
+			if m.services.Client != nil {
+				depLoader = m.services.Client
+				commentLoader = m.services.Client
+			}
+			// Create new details model for the selected issue
+			m.details = details.New(*issue, depLoader, commentLoader, m.services.Executor).SetSize(m.width-(m.width/2)-1-2, m.height-2)
+			var cmd tea.Cmd
+			m.details, cmd = m.details.ShowTree() // Activate tree view immediately
+			m.view = ViewSearch                    // Remain in search view
+			return m, cmd
 		}
 		return m, nil
 

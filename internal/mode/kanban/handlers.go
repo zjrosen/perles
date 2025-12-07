@@ -292,6 +292,16 @@ func (m Model) handleBoardKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.view = ViewDeleteColumnModal
 		return m, m.modal.Init()
 
+	case "t":
+		if issue := m.board.SelectedIssue(); issue != nil {
+			m.details = details.New(*issue, m.services.Client, m.services.Client, m.services.Executor).SetSize(m.width, m.height)
+			var cmd tea.Cmd
+			m.details, cmd = m.details.ShowTree()
+			m.view = ViewDetails
+			return m, cmd
+		}
+		return m, nil
+
 	case "enter":
 		if issue := m.board.SelectedIssue(); issue != nil {
 			m.details = details.New(*issue, m.services.Client, m.services.Client, m.services.Executor).SetSize(m.width, m.height)

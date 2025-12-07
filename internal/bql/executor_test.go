@@ -414,7 +414,7 @@ func TestExecutor_LoadsBlocksForEpicWithChildren(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, issues, 1)
-	require.Contains(t, issues[0].Blocks, "test-2", "epic should show child in Blocks")
+	require.Contains(t, issues[0].Children, "test-2", "epic should show child in Children")
 }
 
 func TestIsBQLQuery(t *testing.T) {

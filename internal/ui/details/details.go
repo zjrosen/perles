@@ -68,6 +68,11 @@ type NavigateToDependencyMsg struct {
 	IssueID string
 }
 
+// CopyIssueIDMsg requests copying an issue ID to the clipboard.
+type CopyIssueIDMsg struct {
+	IssueID string
+}
+
 // OpenLabelEditorMsg requests opening the label editor modal.
 type OpenLabelEditorMsg struct {
 	IssueID string
@@ -129,6 +134,16 @@ func New(issue beads.Issue, loader DependencyLoader, commentLoader CommentLoader
 	m.loadDependencies()
 	m.loadComments()
 	return m
+}
+
+// ShowTree enables the tree view and initializes it.
+func (m Model) ShowTree() (Model, tea.Cmd) {
+	if m.treeLoader != nil {
+		m.showTree = true
+		m.treeView = treeview.New(m.issue.ID, m.treeLoader).SetSize(m.width, m.height)
+		return m, m.treeView.Init()
+	}
+	return m, nil
 }
 
 // SetSize updates dimensions and initializes viewport.
@@ -247,7 +262,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			switch msg.String() {
 			case "esc", "q", "t":
 				m.showTree = false
-					return m, nil
+				return m, nil
 			}
 			m.treeView, cmd = m.treeView.Update(msg)
 			return m, cmd
@@ -331,6 +346,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		// Handle navigation from tree view
 		return m, func() tea.Msg {
 			return NavigateToDependencyMsg{IssueID: msg.IssueID}
+		}
+
+	case treeview.CopyIDMsg:
+		// Handle copying ID from tree view
+		return m, func() tea.Msg {
+			return CopyIssueIDMsg{IssueID: msg.IssueID}
 		}
 	}
 
@@ -685,7 +706,7 @@ func (m Model) renderDependencyItem(item DependencyItem, selected bool) string {
 }
 
 // renderDependenciesSection renders the dependencies section for the metadata column.
-// Groups dependencies by category (blocked_by, blocks, related).
+// Groups dependencies by category (parent, blocked_by, blocks, children, related).
 func (m Model) renderDependenciesSection() string {
 	if len(m.dependencies) == 0 {
 		return ""
@@ -704,19 +725,36 @@ func (m Model) renderDependenciesSection() string {
 	indentedDivider := indent + divider
 
 	// Group by category
-	var blockedBy, blocks, related []DependencyItem
+	var parent, blockedBy, blocks, children, related []DependencyItem
 	for _, dep := range m.dependencies {
 		switch dep.Category {
+		case "parent":
+			parent = append(parent, dep)
 		case "blocked_by":
 			blockedBy = append(blockedBy, dep)
 		case "blocks":
 			blocks = append(blocks, dep)
+		case "children":
+			children = append(children, dep)
 		case "related":
 			related = append(related, dep)
 		}
 	}
 
 	depIndex := 0 // Track overall index for selection
+
+	if len(parent) > 0 {
+		sb.WriteString(indentedDivider)
+		sb.WriteString("\n")
+		sb.WriteString(indent)
+		sb.WriteString(labelStyle.Render("Parent"))
+		sb.WriteString("\n")
+		for _, dep := range parent {
+			sb.WriteString(m.renderDependencyItem(dep, depIndex == m.selectedDependency))
+			sb.WriteString("\n")
+			depIndex++
+		}
+	}
 
 	if len(blockedBy) > 0 {
 		sb.WriteString(indentedDivider)
@@ -740,6 +778,19 @@ func (m Model) renderDependenciesSection() string {
 		sb.WriteString(blocksStyle.Render("Blocks"))
 		sb.WriteString("\n")
 		for _, dep := range blocks {
+			sb.WriteString(m.renderDependencyItem(dep, depIndex == m.selectedDependency))
+			sb.WriteString("\n")
+			depIndex++
+		}
+	}
+
+	if len(children) > 0 {
+		sb.WriteString(indentedDivider)
+		sb.WriteString("\n")
+		sb.WriteString(indent)
+		sb.WriteString(labelStyle.Render("Children"))
+		sb.WriteString("\n")
+		for _, dep := range children {
 			sb.WriteString(m.renderDependencyItem(dep, depIndex == m.selectedDependency))
 			sb.WriteString("\n")
 			depIndex++
@@ -863,16 +914,24 @@ func (m Model) IssueID() string {
 }
 
 // loadDependencies populates the dependencies slice from the issue's
-// BlockedBy, Blocks, and Related fields. If a client is available,
+// ParentID, BlockedBy, Blocks, Children, and Related fields. If a client is available,
 // it fetches full issue data for each dependency.
 func (m *Model) loadDependencies() {
 	// Collect all dependency IDs with their categories
 	var items []DependencyItem
+
+	if m.issue.ParentID != "" {
+		items = append(items, DependencyItem{ID: m.issue.ParentID, Category: "parent"})
+	}
+
 	for _, id := range m.issue.BlockedBy {
 		items = append(items, DependencyItem{ID: id, Category: "blocked_by"})
 	}
 	for _, id := range m.issue.Blocks {
 		items = append(items, DependencyItem{ID: id, Category: "blocks"})
+	}
+	for _, id := range m.issue.Children {
+		items = append(items, DependencyItem{ID: id, Category: "children"})
 	}
 	for _, id := range m.issue.Related {
 		items = append(items, DependencyItem{ID: id, Category: "related"})

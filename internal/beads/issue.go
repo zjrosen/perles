@@ -58,6 +58,7 @@ type Issue struct {
 	// Dependency tracking
 	BlockedBy []string `json:"blocked_by"`
 	Blocks    []string `json:"blocks"`
+	Children  []string `json:"children"`
 	Related   []string `json:"related"`
 	ParentID  string   `json:"parent_id"`
 

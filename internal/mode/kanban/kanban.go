@@ -302,6 +302,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.view = ViewDetailsEditMenu
 		return m, nil
 
+	case details.CopyIssueIDMsg:
+		err := shared.CopyToClipboard(msg.IssueID)
+		if err != nil {
+			return m, func() tea.Msg {
+				return mode.ShowToastMsg{Message: "Clipboard error: " + err.Error(), Style: toaster.StyleError}
+			}
+		}
+		return m, func() tea.Msg {
+			return mode.ShowToastMsg{Message: "Copied: " + msg.IssueID, Style: toaster.StyleSuccess}
+		}
+
 	case editMenuLabelsMsg:
 		if m.selectedIssue == nil {
 			m.view = ViewDetails

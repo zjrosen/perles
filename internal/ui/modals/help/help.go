@@ -198,6 +198,7 @@ func (m Model) renderKanbanContent() string {
 	actionsCol.WriteString(m.renderBinding(m.keys.EditColumn))
 	actionsCol.WriteString(m.renderBinding(m.keys.MoveColumnLeft))
 	actionsCol.WriteString(m.renderBinding(m.keys.MoveColumnRight))
+	actionsCol.WriteString(m.renderBinding(m.keys.Tree))
 
 	// Views column
 	var viewsCol strings.Builder

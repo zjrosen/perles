@@ -79,6 +79,11 @@ func (m Model) SetSize(width, height int) Model {
 	return m
 }
 
+// CopyIDMsg requests copying an issue ID.
+type CopyIDMsg struct {
+	IssueID string
+}
+
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -100,6 +105,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 			m.loading = true
 			return m, m.loadTreeCmd
+		case "y":
+			// Copy ID
+			if m.selected >= 0 && m.selected < len(m.nodes) {
+				return m, func() tea.Msg {
+					return CopyIDMsg{IssueID: m.nodes[m.selected].Issue.ID}
+				}
+			}
 		case "j", "down":
 			if len(m.nodes) > 0 {
 				m.selected++
@@ -200,7 +212,7 @@ func (m Model) renderContent() string {
 	sb.WriteString("\n")
 
 	helpStyle := lipgloss.NewStyle().Foreground(styles.TextDescriptionColor)
-	sb.WriteString(helpStyle.Render("[Tab] Switch Direction  [Enter] Go to Issue  [Esc] Back"))
+	sb.WriteString(helpStyle.Render("[Tab] Switch Direction  [Enter] Go to Issue  [y] Copy ID  [Esc] Back"))
 	sb.WriteString("\n\n")
 
 	if m.loading {
@@ -249,10 +261,11 @@ func buildTree(rootID string, issues []beads.Issue, dir Direction) *Node {
 
 func buildNode(issue beads.Issue, issueMap map[string]beads.Issue, visited map[string]bool, dir Direction, depth int) *Node {
 	if visited[issue.ID] {
-		return nil // Cycle detected
+		return nil // Cycle detected or already visited
 	}
 	visited[issue.ID] = true
-	defer delete(visited, issue.ID) // Backtrack
+	// No backtracking: we want to show each node only once globally in the tree.
+	// This prevents diamond dependencies from duplicating nodes.
 
 	node := &Node{
 		Issue: issue,
@@ -263,12 +276,16 @@ func buildNode(issue beads.Issue, issueMap map[string]beads.Issue, visited map[s
 	var childrenIDs []string
 	if dir == DirectionDownstream {
 		// Downstream: dependents (what points to me)
-		// Populated in Blocks field by executor (includes parent-child and blocks)
-		childrenIDs = issue.Blocks
+		// Includes children (parent-child) and issues I block (blocks)
+		childrenIDs = append(childrenIDs, issue.Children...)
+		childrenIDs = append(childrenIDs, issue.Blocks...)
 	} else {
 		// Upstream: dependencies (what I point to)
-		// Populated in Related field by executor (all outgoing links)
-		childrenIDs = issue.Related
+		// Includes parent (parent-child) and issues blocking me (blocked_by)
+		if issue.ParentID != "" {
+			childrenIDs = append(childrenIDs, issue.ParentID)
+		}
+		childrenIDs = append(childrenIDs, issue.BlockedBy...)
 	}
 
 	for i, id := range childrenIDs {

@@ -71,6 +71,12 @@ func (e *Executor) executeBaseQuery(query *Query) ([]beads.Issue, error) {
 			i.id, i.title, i.description, i.status,
 			i.priority, i.issue_type, i.assignee, i.created_at, i.updated_at,
 			COALESCE((
+				SELECT d.depends_on_id
+				FROM dependencies d
+				WHERE d.issue_id = i.id AND d.type = 'parent-child'
+				LIMIT 1
+			), '') as parent_id,
+			COALESCE((
 				SELECT GROUP_CONCAT(d.depends_on_id)
 				FROM dependencies d
 				JOIN issues blocker ON d.depends_on_id = blocker.id
@@ -83,14 +89,23 @@ func (e *Executor) executeBaseQuery(query *Query) ([]beads.Issue, error) {
 				FROM dependencies d
 				JOIN issues child ON d.issue_id = child.id
 				WHERE d.depends_on_id = i.id
-					AND d.type IN ('blocks', 'parent-child')
+					AND d.type = 'blocks'
 					AND child.status != 'deleted'
 			), '') as blocks_ids,
+			COALESCE((
+				SELECT GROUP_CONCAT(d.issue_id)
+				FROM dependencies d
+				JOIN issues child ON d.issue_id = child.id
+				WHERE d.depends_on_id = i.id
+					AND d.type = 'parent-child'
+					AND child.status != 'deleted'
+			), '') as children_ids,
 			COALESCE((
 				SELECT GROUP_CONCAT(d.depends_on_id)
 				FROM dependencies d
 				JOIN issues up ON d.depends_on_id = up.id
 				WHERE d.issue_id = i.id
+					AND d.type NOT IN ('blocks', 'parent-child')
 					AND up.status != 'deleted'
 			), '') as related_ids,
 			COALESCE((
@@ -131,8 +146,10 @@ func (e *Executor) scanIssues(rows *sql.Rows) ([]beads.Issue, error) {
 		var issue beads.Issue
 		var description sql.NullString
 		var assignee sql.NullString
+		var parentID sql.NullString
 		var blockerIDs string
 		var blocksIDs string
+		var childrenIDs string
 		var relatedIDs string
 		var labelsStr string
 
@@ -140,7 +157,8 @@ func (e *Executor) scanIssues(rows *sql.Rows) ([]beads.Issue, error) {
 			&issue.ID, &issue.TitleText, &description,
 			&issue.Status, &issue.Priority, &issue.Type,
 			&assignee, &issue.CreatedAt, &issue.UpdatedAt,
-			&blockerIDs, &blocksIDs, &relatedIDs, &labelsStr,
+			&parentID,
+			&blockerIDs, &blocksIDs, &childrenIDs, &relatedIDs, &labelsStr,
 		)
 		if err != nil {
 			log.ErrorErr(log.CatDB, "Scan failed", err)
@@ -153,6 +171,9 @@ func (e *Executor) scanIssues(rows *sql.Rows) ([]beads.Issue, error) {
 		if assignee.Valid {
 			issue.Assignee = assignee.String
 		}
+		if parentID.Valid {
+			issue.ParentID = parentID.String
+		}
 
 		// Parse blocker IDs from comma-separated string (issues that block this one)
 		if blockerIDs != "" {
@@ -162,6 +183,11 @@ func (e *Executor) scanIssues(rows *sql.Rows) ([]beads.Issue, error) {
 		// Parse blocks IDs from comma-separated string (issues this one blocks)
 		if blocksIDs != "" {
 			issue.Blocks = strings.Split(blocksIDs, ",")
+		}
+
+		// Parse children IDs
+		if childrenIDs != "" {
+			issue.Children = strings.Split(childrenIDs, ",")
 		}
 
 		// Parse related IDs (all upstream dependencies)
@@ -403,6 +429,12 @@ func (e *Executor) fetchIssuesByIDs(ids []string) ([]beads.Issue, error) {
 			i.id, i.title, i.description, i.status,
 			i.priority, i.issue_type, i.assignee, i.created_at, i.updated_at,
 			COALESCE((
+				SELECT d.depends_on_id
+				FROM dependencies d
+				WHERE d.issue_id = i.id AND d.type = 'parent-child'
+				LIMIT 1
+			), '') as parent_id,
+			COALESCE((
 				SELECT GROUP_CONCAT(d.depends_on_id)
 				FROM dependencies d
 				JOIN issues blocker ON d.depends_on_id = blocker.id
@@ -415,14 +447,23 @@ func (e *Executor) fetchIssuesByIDs(ids []string) ([]beads.Issue, error) {
 				FROM dependencies d
 				JOIN issues child ON d.issue_id = child.id
 				WHERE d.depends_on_id = i.id
-					AND d.type IN ('blocks', 'parent-child')
+					AND d.type = 'blocks'
 					AND child.status != 'deleted'
 			), '') as blocks_ids,
+			COALESCE((
+				SELECT GROUP_CONCAT(d.issue_id)
+				FROM dependencies d
+				JOIN issues child ON d.issue_id = child.id
+				WHERE d.depends_on_id = i.id
+					AND d.type = 'parent-child'
+					AND child.status != 'deleted'
+			), '') as children_ids,
 			COALESCE((
 				SELECT GROUP_CONCAT(d.depends_on_id)
 				FROM dependencies d
 				JOIN issues up ON d.depends_on_id = up.id
 				WHERE d.issue_id = i.id
+					AND d.type NOT IN ('blocks', 'parent-child')
 					AND up.status != 'deleted'
 			), '') as related_ids,
 			COALESCE((

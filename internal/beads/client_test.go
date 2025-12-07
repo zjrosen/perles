@@ -264,7 +264,7 @@ func TestListIssuesByIds_EpicChildrenInBlocks(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, issues, 1)
 
-	require.Contains(t, issues[0].Blocks, "issue-2", "epic should have children in Blocks field")
+	require.Contains(t, issues[0].Children, "issue-2", "epic should have children in Children field")
 }
 
 func TestListIssuesByIds_NullDescription(t *testing.T) {

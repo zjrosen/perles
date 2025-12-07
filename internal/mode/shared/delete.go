@@ -50,15 +50,17 @@ func GetIssuesByIds(loader IssueLoader, ids []string) map[string]*beads.Issue {
 // CreateDeleteModal creates a confirmation modal for issue deletion.
 // Returns the modal and a boolean indicating if this is a cascade delete (epic with children).
 func CreateDeleteModal(issue *beads.Issue, loader IssueLoader) (modal.Model, bool) {
-	// Check if this is an epic with child issues
-	hasChildren := issue.Type == beads.TypeEpic && len(issue.Blocks) > 0
+	// Check if this is an epic with child issues (checking both Children and Blocks for backward compatibility)
+	allChildrenIDs := append([]string{}, issue.Children...)
+	allChildrenIDs = append(allChildrenIDs, issue.Blocks...)
+	hasChildren := issue.Type == beads.TypeEpic && len(allChildrenIDs) > 0
 
 	if hasChildren {
 		// Build list of child issues for the modal message
-		childIssues := GetIssuesByIds(loader, issue.Blocks)
+		childIssues := GetIssuesByIds(loader, allChildrenIDs)
 		var childList strings.Builder
 		issueIdStyle := lipgloss.NewStyle().Foreground(styles.TextSecondaryColor)
-		for _, childID := range issue.Blocks {
+		for _, childID := range allChildrenIDs {
 			if child, ok := childIssues[childID]; ok {
 				typeText := board.GetTypeIndicator(child.Type)
 				typeStyle := board.GetTypeStyle(child.Type)
@@ -78,7 +80,7 @@ func CreateDeleteModal(issue *beads.Issue, loader IssueLoader) (modal.Model, boo
 		}
 
 		message := fmt.Sprintf("Delete epic \"%s: %s\"?\n\nThis will also delete %d child issue(s):\n%s\nThis action cannot be undone.",
-			issue.ID, issue.TitleText, len(issue.Blocks), childList.String())
+			issue.ID, issue.TitleText, len(allChildrenIDs), childList.String())
 
 		return modal.New(modal.Config{
 			Title:          "Delete Epic",
