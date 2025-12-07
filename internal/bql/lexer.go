@@ -125,7 +125,7 @@ func (l *Lexer) skipWhitespace() {
 // readIdentifier reads an identifier (letters, digits, underscores, hyphens).
 func (l *Lexer) readIdentifier() string {
 	start := l.pos - 1
-	for isLetter(l.ch) || isDigit(l.ch) || l.ch == '_' || l.ch == '-' {
+	for isLetter(l.ch) || isDigit(l.ch) || l.ch == '_' || l.ch == '-' || l.ch == ':' {
 		l.readChar()
 	}
 	return l.input[start : l.pos-1]

@@ -85,6 +85,7 @@ func TestParser_InExpression(t *testing.T) {
 		{"in three values", "status in (open, in_progress, blocked)", "status", false, []string{"open", "in_progress", "blocked"}},
 		{"not in", "label not in (backlog, deferred)", "label", true, []string{"backlog", "deferred"}},
 		{"in single value", "type in (bug)", "type", false, []string{"bug"}},
+		{"in values with colons", "label in (spec:010-output-schema-support)", "label", false, []string{"spec:010-output-schema-support"}},
 	}
 
 	for _, tt := range tests {
