@@ -390,6 +390,58 @@ func TestLexer_ExpandUnlimitedDepth(t *testing.T) {
 	require.Equal(t, TokenEOF, tok.Type)
 }
 
+func TestLexer_ExtendedIdentifierChars(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"dot - semver", "v1.2.3", "v1.2.3"},
+		{"slash - path", "feature/auth", "feature/auth"},
+		{"at - mention", "@user", "@user"},
+		{"hash - issue ref", "issue#123", "issue#123"},
+		{"plus - compound", "C++", "C++"},
+		{"semver with prerelease", "v1.0.0-beta+build", "v1.0.0-beta+build"},
+		{"all special chars", "a_b-c:d.e/f@g#h+i", "a_b-c:d.e/f@g#h+i"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lexer := NewLexer(tt.input)
+			tok := lexer.NextToken()
+			require.Equal(t, TokenIdent, tok.Type)
+			require.Equal(t, tt.expected, tok.Literal)
+		})
+	}
+}
+
+func TestLexer_IdentifierStopsAtOperator(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		firstIdent    string
+		secondTokType TokenType
+	}{
+		{"stops at equals", "label=value", "label", TokenEq},
+		{"stops at greater than", "v1.0.0>v2.0.0", "v1.0.0", TokenGt},
+		{"stops at less than", "a/b<c/d", "a/b", TokenLt},
+		{"stops at not equals", "v1.0.0!=v2.0.0", "v1.0.0", TokenNeq},
+		{"stops at contains", "path/to~search", "path/to", TokenContains},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lexer := NewLexer(tt.input)
+			tok := lexer.NextToken()
+			require.Equal(t, TokenIdent, tok.Type)
+			require.Equal(t, tt.firstIdent, tok.Literal)
+
+			tok = lexer.NextToken()
+			require.Equal(t, tt.secondTokType, tok.Type)
+		})
+	}
+}
+
 func TestLexer_ExpandWithFilter(t *testing.T) {
 	l := NewLexer("type = epic expand children")
 

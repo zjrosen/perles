@@ -86,6 +86,9 @@ func TestParser_InExpression(t *testing.T) {
 		{"not in", "label not in (backlog, deferred)", "label", true, []string{"backlog", "deferred"}},
 		{"in single value", "type in (bug)", "type", false, []string{"bug"}},
 		{"in values with colons", "label in (spec:010-output-schema-support)", "label", false, []string{"spec:010-output-schema-support"}},
+		{"in values with dots", "label in (v1.0.0, v2.0.0)", "label", false, []string{"v1.0.0", "v2.0.0"}},
+		{"in values with slashes", "label in (feat/a, feat/b)", "label", false, []string{"feat/a", "feat/b"}},
+		{"mixed special chars", "label in (v1.0.0, feat/a, @user)", "label", false, []string{"v1.0.0", "feat/a", "@user"}},
 	}
 
 	for _, tt := range tests {

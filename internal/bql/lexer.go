@@ -79,7 +79,7 @@ func (l *Lexer) NextToken() Token {
 		tok.Literal = ""
 		return tok
 	default:
-		if isLetter(l.ch) {
+		if isIdentStartChar(l.ch) {
 			tok.Literal = l.readIdentifier()
 			tok.Type = LookupKeyword(tok.Literal)
 			return tok
@@ -122,13 +122,30 @@ func (l *Lexer) skipWhitespace() {
 	}
 }
 
-// readIdentifier reads an identifier (letters, digits, underscores, hyphens).
+// readIdentifier reads an identifier.
 func (l *Lexer) readIdentifier() string {
 	start := l.pos - 1
-	for isLetter(l.ch) || isDigit(l.ch) || l.ch == '_' || l.ch == '-' || l.ch == ':' {
+	for isIdentChar(l.ch) {
 		l.readChar()
 	}
 	return l.input[start : l.pos-1]
+}
+
+// isIdentStartChar returns true if c can start an identifier.
+// Identifiers can start with letters, _, or these special characters: . / @ # +
+func isIdentStartChar(c byte) bool {
+	return isLetter(c) ||
+		c == '.' || c == '/' || c == '@' ||
+		c == '#' || c == '+'
+}
+
+// isIdentChar returns true if c can appear in an identifier.
+// Allowed: letters, digits, and these special characters: _ - : . / @ # +
+func isIdentChar(c byte) bool {
+	return isLetter(c) || isDigit(c) ||
+		c == '_' || c == '-' || c == ':' ||
+		c == '.' || c == '/' || c == '@' ||
+		c == '#' || c == '+'
 }
 
 // readString reads a quoted string (supports both " and ').
