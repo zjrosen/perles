@@ -28,9 +28,10 @@ const (
 type Node struct {
 	Issue    beads.Issue
 	Children []*Node
-	Expanded bool // For collapsible nodes (future)
+	Expanded bool   // For collapsible nodes (future)
 	Depth    int
-	IsLast   bool // For drawing connector lines
+	IsLast   bool   // For drawing connector lines
+	Prefix   string // Tree prefix for indentation (e.g., "│   │   ")
 }
 
 // Model is the tree view model.
@@ -288,15 +289,18 @@ func buildNode(issue beads.Issue, issueMap map[string]beads.Issue, visited map[s
 		childrenIDs = append(childrenIDs, issue.BlockedBy...)
 	}
 
-	for i, id := range childrenIDs {
+	for _, id := range childrenIDs {
 		if childIssue, ok := issueMap[id]; ok {
 			childNode := buildNode(childIssue, issueMap, visited, dir, depth+1)
 			if childNode != nil {
-				// Mark if it's the last child (for drawing tree lines)
-				childNode.IsLast = (i == len(childrenIDs)-1)
 				node.Children = append(node.Children, childNode)
 			}
 		}
+	}
+
+	// Mark the last actually-added child (not based on original list position)
+	if len(node.Children) > 0 {
+		node.Children[len(node.Children)-1].IsLast = true
 	}
 
 	return node
@@ -306,10 +310,33 @@ func flattenTree(root *Node) []*Node {
 	if root == nil {
 		return nil
 	}
+	return flattenTreeWithAncestry(root, nil)
+}
+
+func flattenTreeWithAncestry(node *Node, ancestry []bool) []*Node {
+	// Build prefix from ancestry
+	var prefix strings.Builder
+	for _, ancestorWasLast := range ancestry {
+		if ancestorWasLast {
+			prefix.WriteString("    ") // 4 spaces (completed branch)
+		} else {
+			prefix.WriteString("│   ") // Continuation line
+		}
+	}
+	node.Prefix = prefix.String()
+
 	var nodes []*Node
-	nodes = append(nodes, root)
-	for _, child := range root.Children {
-		nodes = append(nodes, flattenTree(child)...)
+	nodes = append(nodes, node)
+
+	for _, child := range node.Children {
+		// Build ancestry for children: add current node's IsLast status
+		// (but skip root at depth 0 since it has no parent to show continuation for)
+		var childAncestry []bool
+		childAncestry = append(childAncestry, ancestry...)
+		if node.Depth > 0 {
+			childAncestry = append(childAncestry, node.IsLast)
+		}
+		nodes = append(nodes, flattenTreeWithAncestry(child, childAncestry)...)
 	}
 	return nodes
 }
@@ -317,8 +344,8 @@ func flattenTree(root *Node) []*Node {
 // Rendering logic
 
 func renderNode(node *Node, selected bool) string {
-	// Indentation
-	indent := strings.Repeat("  ", node.Depth)
+	// Indentation (computed prefix with proper tree connectors)
+	indent := node.Prefix
 
 	// Tree marker
 	marker := ""
