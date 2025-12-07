@@ -61,7 +61,7 @@ func TestDetails_New(t *testing.T) {
 		Priority:  beads.PriorityHigh,
 		Status:    beads.StatusOpen,
 	}
-	m := New(issue, nil, nil)
+	m := New(issue, nil, nil, nil)
 	require.Equal(t, "test-1", m.issue.ID)
 }
 
@@ -70,7 +70,7 @@ func TestDetails_SetSize(t *testing.T) {
 		ID:        "test-1",
 		TitleText: "Test Issue",
 	}
-	m := New(issue, nil, nil)
+	m := New(issue, nil, nil, nil)
 	m = m.SetSize(100, 40)
 	require.Equal(t, 100, m.width)
 	require.Equal(t, 40, m.height)
@@ -79,7 +79,7 @@ func TestDetails_SetSize(t *testing.T) {
 
 func TestDetails_View_NotReady(t *testing.T) {
 	issue := beads.Issue{ID: "test-1", TitleText: "Test"}
-	m := New(issue, nil, nil)
+	m := New(issue, nil, nil, nil)
 	// Without SetSize, ready is false
 	view := m.View()
 	require.Equal(t, "Loading...", view, "expected 'Loading...' when not ready")
@@ -94,7 +94,7 @@ func TestDetails_View_Ready(t *testing.T) {
 		Status:    beads.StatusOpen,
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := New(issue, nil, nil, nil)
 	m = m.SetSize(100, 40)
 	view := m.View()
 
@@ -109,7 +109,7 @@ func TestDetails_View_WithDescription(t *testing.T) {
 		DescriptionText: "This is a detailed description",
 		CreatedAt:       time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := New(issue, nil, nil, nil)
 	m = m.SetSize(100, 40)
 	view := m.View()
 
@@ -126,7 +126,7 @@ func TestDetails_View_WithDependencies(t *testing.T) {
 		Blocks:    []string{"downstream-1"},
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := New(issue, nil, nil, nil)
 	m = m.SetSize(100, 40)
 	view := m.View()
 
@@ -143,7 +143,7 @@ func TestDetails_View_WithLabels(t *testing.T) {
 		Labels:    []string{"bug", "urgent"},
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := New(issue, nil, nil, nil)
 	m = m.SetSize(100, 40)
 	view := m.View()
 
@@ -159,7 +159,7 @@ func TestDetails_Update_ScrollDown(t *testing.T) {
 		DescriptionText: strings.Repeat("Long content line\n", 100),
 		CreatedAt:       time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := New(issue, nil, nil, nil)
 	m = m.SetSize(100, 20) // Small height to enable scrolling
 
 	initialOffset := m.viewport.YOffset
@@ -174,7 +174,7 @@ func TestDetails_Update_ScrollUp(t *testing.T) {
 		DescriptionText: strings.Repeat("Long content line\n", 100),
 		CreatedAt:       time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := New(issue, nil, nil, nil)
 	m = m.SetSize(100, 20)
 
 	// Scroll down first
@@ -194,7 +194,7 @@ func TestDetails_Update_GotoTop(t *testing.T) {
 		DescriptionText: strings.Repeat("Long content line\n", 100),
 		CreatedAt:       time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := New(issue, nil, nil, nil)
 	m = m.SetSize(100, 20)
 
 	// Scroll down
@@ -213,7 +213,7 @@ func TestDetails_Update_GotoBottom(t *testing.T) {
 		DescriptionText: strings.Repeat("Long content line\n", 100),
 		CreatedAt:       time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := New(issue, nil, nil, nil)
 	m = m.SetSize(100, 20)
 
 	// Go to bottom
@@ -228,7 +228,7 @@ func TestDetails_SetSize_TwiceUpdatesViewport(t *testing.T) {
 		TitleText: "Test Issue",
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := New(issue, nil, nil, nil)
 	m = m.SetSize(100, 40)
 	m = m.SetSize(80, 30) // Resize
 
@@ -252,7 +252,7 @@ func TestDetails_View_AllTypes(t *testing.T) {
 			Type:      issueType,
 			CreatedAt: time.Now(),
 		}
-		m := New(issue, nil, nil)
+		m := New(issue, nil, nil, nil)
 		m = m.SetSize(100, 40)
 		view := m.View()
 		require.NotEmpty(t, view, "expected non-empty view for type %s", issueType)
@@ -275,7 +275,7 @@ func TestDetails_View_AllPriorities(t *testing.T) {
 			Priority:  priority,
 			CreatedAt: time.Now(),
 		}
-		m := New(issue, nil, nil)
+		m := New(issue, nil, nil, nil)
 		m = m.SetSize(100, 40)
 		view := m.View()
 		require.NotEmpty(t, view, "expected non-empty view for priority %d", priority)
@@ -290,7 +290,7 @@ func TestDetails_View_MarkdownDescription(t *testing.T) {
 		DescriptionText: "# Heading\n\nThis is **bold** and *italic* text.\n\n- Item 1\n- Item 2",
 		CreatedAt:       time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := New(issue, nil, nil, nil)
 	m = m.SetSize(100, 40)
 	view := m.View()
 
@@ -308,7 +308,7 @@ func TestDetails_View_MarkdownCodeBlock(t *testing.T) {
 		DescriptionText: "```go\nfunc example() {\n    return\n}\n```",
 		CreatedAt:       time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := New(issue, nil, nil, nil)
 	m = m.SetSize(100, 40)
 	view := m.View()
 
@@ -325,7 +325,7 @@ func TestDetails_RendererInitialization(t *testing.T) {
 		DescriptionText: "Some content",
 		CreatedAt:       time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := New(issue, nil, nil, nil)
 
 	// Before SetSize, mdRenderer should be nil
 	require.Nil(t, m.mdRenderer, "expected mdRenderer to be nil before SetSize")
@@ -346,7 +346,7 @@ func TestDetails_SingleColumnFallback(t *testing.T) {
 		Labels:    []string{"test-label"},
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := New(issue, nil, nil, nil)
 
 	// Width below minTwoColumnWidth (80) should use single-column
 	m = m.SetSize(70, 40)
@@ -367,7 +367,7 @@ func TestDetails_TwoColumnLayout(t *testing.T) {
 		Labels:    []string{"test-label"},
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := New(issue, nil, nil, nil)
 
 	// Width at or above minTwoColumnWidth (80) should use two-column
 	m = m.SetSize(100, 40)
@@ -388,7 +388,7 @@ func TestDetails_EmptyDescription(t *testing.T) {
 		TitleText: "Test Issue",
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := New(issue, nil, nil, nil)
 	m = m.SetSize(100, 40)
 	view := m.View()
 
@@ -403,7 +403,7 @@ func TestDetails_NoLabels(t *testing.T) {
 		Labels:    []string{},
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := New(issue, nil, nil, nil)
 	m = m.SetSize(100, 40)
 	view := m.View()
 
@@ -418,7 +418,7 @@ func TestDetails_ManyLabels(t *testing.T) {
 		Labels:    []string{"label1", "label2", "label3", "label4", "label5"},
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := New(issue, nil, nil, nil)
 	m = m.SetSize(100, 40)
 	view := m.View()
 
@@ -435,7 +435,7 @@ func TestDetails_LongDependencyList(t *testing.T) {
 		BlockedBy: []string{"dep-1", "dep-2", "dep-3", "dep-4", "dep-5"},
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := New(issue, nil, nil, nil)
 	m = m.SetSize(100, 40)
 	view := m.View()
 
@@ -455,7 +455,7 @@ func TestDetails_TerminalResize(t *testing.T) {
 		Labels:          []string{"test"},
 		CreatedAt:       time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := New(issue, nil, nil, nil)
 
 	// Start with wide terminal (two-column)
 	m = m.SetSize(120, 40)
@@ -482,7 +482,7 @@ func TestDetails_JKScrollsViewport(t *testing.T) {
 		DescriptionText: strings.Repeat("Long content line\n", 100),
 		CreatedAt:       time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := New(issue, nil, nil, nil)
 	m = m.SetSize(100, 20)
 
 	initialOffset := m.viewport.YOffset
@@ -501,7 +501,7 @@ func TestDetails_DependencyNavigation_LToFocusDeps(t *testing.T) {
 		BlockedBy: []string{"dep-1", "dep-2", "dep-3"},
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := New(issue, nil, nil, nil)
 	m = m.SetSize(100, 40)
 
 	// Initially on content pane
@@ -536,7 +536,7 @@ func TestDetails_DependencyNavigation_EnterNavigates(t *testing.T) {
 		BlockedBy: []string{"target-dep"},
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := New(issue, nil, nil, nil)
 	m = m.SetSize(100, 40)
 
 	// Focus dependencies with 'l'
@@ -561,7 +561,7 @@ func TestDetails_DependencyNavigation_EnterNoOpOnContentPane(t *testing.T) {
 		BlockedBy: []string{"dep-1"},
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := New(issue, nil, nil, nil)
 	m = m.SetSize(100, 40)
 
 	// Stay on content pane (don't press 'l')
@@ -579,7 +579,7 @@ func TestDetails_DependencyNavigation_LNoOpWithoutDeps(t *testing.T) {
 		// No dependencies
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := New(issue, nil, nil, nil)
 	m = m.SetSize(100, 40)
 
 	// Press 'l' - should stay on content (no deps to focus)
@@ -594,7 +594,7 @@ func TestDetails_DeleteKey_EmitsDeleteIssueMsg(t *testing.T) {
 		Type:      beads.TypeTask,
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := New(issue, nil, nil, nil)
 	m = m.SetSize(100, 40)
 
 	// Press 'd' to request deletion
@@ -616,7 +616,7 @@ func TestDetails_DeleteKey_EpicType(t *testing.T) {
 		Type:      beads.TypeEpic,
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := New(issue, nil, nil, nil)
 	m = m.SetSize(100, 40)
 
 	// Press 'd' to request deletion
@@ -635,7 +635,7 @@ func TestDetails_FooterShowsDeleteKeybinding(t *testing.T) {
 		TitleText: "Test Issue",
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := New(issue, nil, nil, nil)
 	m = m.SetSize(100, 40)
 	view := m.View()
 
@@ -656,7 +656,7 @@ func TestDetails_View_Golden(t *testing.T) {
 		CreatedAt:       time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC),
 		UpdatedAt:       time.Date(2024, 1, 20, 14, 45, 0, 0, time.UTC),
 	}
-	m := New(issue, nil, nil).SetSize(120, 30)
+	m := New(issue, nil, nil, nil).SetSize(120, 30)
 
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))
@@ -678,7 +678,7 @@ func TestDetails_View_Golden_WithDependencies(t *testing.T) {
 		CreatedAt:       time.Date(2024, 2, 1, 9, 0, 0, 0, time.UTC),
 		UpdatedAt:       time.Date(2024, 2, 15, 16, 30, 0, 0, time.UTC),
 	}
-	m := New(issue, nil, nil).SetSize(120, 30)
+	m := New(issue, nil, nil, nil).SetSize(120, 30)
 
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))
@@ -726,7 +726,7 @@ func TestDetails_View_Golden_WithLoadedDependencies(t *testing.T) {
 		Blocks:          []string{"task-201", "feature-301"},
 		CreatedAt:       time.Date(2024, 3, 1, 10, 0, 0, 0, time.UTC),
 	}
-	m := New(issue, loader, nil).SetSize(120, 30)
+	m := New(issue, loader, nil, nil).SetSize(120, 30)
 
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))
@@ -745,7 +745,7 @@ func TestDetails_View_Golden_Wide(t *testing.T) {
 		Labels:          []string{"test"},
 		CreatedAt:       time.Date(2024, 3, 1, 12, 0, 0, 0, time.UTC),
 	}
-	m := New(issue, nil, nil).SetSize(180, 25)
+	m := New(issue, nil, nil, nil).SetSize(180, 25)
 
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))
@@ -763,7 +763,7 @@ func TestDetails_View_Golden_WrappingTitle(t *testing.T) {
 		Status:          beads.StatusInProgress,
 		CreatedAt:       time.Date(2024, 3, 1, 12, 0, 0, 0, time.UTC),
 	}
-	m := New(issue, nil, nil).SetSize(180, 25)
+	m := New(issue, nil, nil, nil).SetSize(180, 25)
 
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))
@@ -784,7 +784,7 @@ func TestDetails_View_Golden_WithAssignee(t *testing.T) {
 		CreatedAt:       time.Date(2024, 4, 1, 9, 0, 0, 0, time.UTC),
 		UpdatedAt:       time.Date(2024, 4, 1, 10, 30, 0, 0, time.UTC),
 	}
-	m := New(issue, nil, nil).SetSize(120, 30)
+	m := New(issue, nil, nil, nil).SetSize(120, 30)
 
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))
@@ -822,7 +822,7 @@ func TestDetails_View_Golden_WithComments(t *testing.T) {
 		Status:          beads.StatusOpen,
 		CreatedAt:       time.Date(2024, 4, 1, 9, 0, 0, 0, time.UTC),
 	}
-	m := New(issue, nil, commentLoader).SetSize(120, 30)
+	m := New(issue, nil, commentLoader, nil).SetSize(120, 30)
 
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))
@@ -856,7 +856,7 @@ func TestDetails_View_Golden_WithAssigneeAndComments(t *testing.T) {
 		CreatedAt:       time.Date(2024, 4, 1, 9, 0, 0, 0, time.UTC),
 		UpdatedAt:       time.Date(2024, 4, 3, 17, 0, 0, 0, time.UTC),
 	}
-	m := New(issue, nil, commentLoader).SetSize(120, 30)
+	m := New(issue, nil, commentLoader, nil).SetSize(120, 30)
 
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))
@@ -887,7 +887,7 @@ func TestDetails_View_Golden_WithLongComment(t *testing.T) {
 		Status:          beads.StatusOpen,
 		CreatedAt:       time.Date(2024, 4, 5, 9, 0, 0, 0, time.UTC),
 	}
-	m := New(issue, nil, commentLoader).SetSize(120, 30)
+	m := New(issue, nil, commentLoader, nil).SetSize(120, 30)
 
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))
@@ -909,7 +909,7 @@ func TestDetails_View_Golden_WithCommentsError(t *testing.T) {
 		Status:          beads.StatusOpen,
 		CreatedAt:       time.Date(2024, 4, 10, 9, 0, 0, 0, time.UTC),
 	}
-	m := New(issue, nil, commentLoader).SetSize(120, 30)
+	m := New(issue, nil, commentLoader, nil).SetSize(120, 30)
 
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))

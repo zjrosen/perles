@@ -267,8 +267,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if issue == nil {
 			return m, nil
 		}
-		// Create new details view for the dependency (pass client for deps and comments)
-		m.details = details.New(*issue, m.services.Client, m.services.Client).SetSize(m.width, m.height)
+		// Create new details view for the dependency (pass client for deps and comments, executor for tree)
+		m.details = details.New(*issue, m.services.Client, m.services.Client, m.services.Executor).SetSize(m.width, m.height)
 		return m, nil
 
 	case details.OpenLabelEditorMsg:
@@ -451,6 +451,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case modal.CancelMsg:
 		return m.handleModalCancel()
+	}
+
+	// Delegate to active view if message wasn't handled above
+	if m.view == ViewDetails {
+		var cmd tea.Cmd
+		m.details, cmd = m.details.Update(msg)
+		return m, cmd
 	}
 
 	return m, nil

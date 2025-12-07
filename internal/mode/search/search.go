@@ -530,6 +530,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m.handleLabelsChanged(msg)
 	}
 
+	// Delegate to details view if focused and message wasn't handled above
+	if m.focus == FocusDetails {
+		var cmd tea.Cmd
+		m.details, cmd = m.details.Update(msg)
+		return m, cmd
+	}
+
 	return m, nil
 }
 
@@ -949,7 +956,7 @@ func (m *Model) updateDetailPanel() {
 			depLoader = m.services.Client
 			commentLoader = m.services.Client
 		}
-		m.details = details.New(issue, depLoader, commentLoader).SetSize(rightWidth-2, m.height-2)
+		m.details = details.New(issue, depLoader, commentLoader, m.services.Executor).SetSize(rightWidth-2, m.height-2)
 		m.hasDetail = true
 	}
 }
@@ -1034,7 +1041,7 @@ func (m Model) navigateToDependency(issueID string) (Model, tea.Cmd) {
 		depLoader = m.services.Client
 		commentLoader = m.services.Client
 	}
-	m.details = details.New(issue, depLoader, commentLoader).SetSize(rightWidth-2, m.height-2)
+	m.details = details.New(issue, depLoader, commentLoader, m.services.Executor).SetSize(rightWidth-2, m.height-2)
 	m.hasDetail = true
 
 	// Try to find and select this issue in the results list

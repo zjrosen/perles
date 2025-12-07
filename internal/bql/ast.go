@@ -99,6 +99,8 @@ const (
 	ExpandBlocks              // Include issues blocked by matched issues
 	ExpandDeps                // Include both blocking relationships
 	ExpandAll                 // Include all relationship types
+	ExpandUpstream            // Include all upstream dependencies (outgoing links)
+	ExpandDownstream          // Include all downstream dependents (incoming links)
 )
 
 // ExpandDepth represents how deep to expand relationships.

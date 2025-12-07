@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"perles/internal/beads"
 	"perles/internal/ui/board"
+	"perles/internal/ui/details/treeview"
 	"perles/internal/ui/shared/markdown"
 	"perles/internal/ui/styles"
 	"strings"
@@ -105,17 +106,25 @@ type Model struct {
 	commentLoader      CommentLoader
 	commentsLoaded     bool
 	commentsError      error
+
+	// Tree view
+	treeView   treeview.Model
+	showTree   bool
+	treeLoader treeview.TreeLoader
 }
 
 // New creates a new detail view.
 // The optional loader parameter enables loading full issue data for dependencies.
 // The optional commentLoader enables loading comments for the issue.
-// Pass *beads.Client for both (it implements both interfaces); nil disables loading.
-func New(issue beads.Issue, loader DependencyLoader, commentLoader CommentLoader) Model {
+// The optional treeLoader enables the dependency tree view.
+// Pass *beads.Client for dependency/comment loaders.
+// Pass *bql.Executor for treeLoader.
+func New(issue beads.Issue, loader DependencyLoader, commentLoader CommentLoader, treeLoader treeview.TreeLoader) Model {
 	m := Model{
 		issue:         issue,
 		loader:        loader,
 		commentLoader: commentLoader,
+		treeLoader:    treeLoader,
 	}
 	m.loadDependencies()
 	m.loadComments()
@@ -126,6 +135,11 @@ func New(issue beads.Issue, loader DependencyLoader, commentLoader CommentLoader
 func (m Model) SetSize(width, height int) Model {
 	m.width = width
 	m.height = height
+
+	// Update tree view if active
+	if m.showTree {
+		m.treeView = m.treeView.SetSize(width, height)
+	}
 
 	// Calculate column widths first (needed for header height calculation)
 	leftColWidth, _ := m.calculateColumnWidths()
@@ -229,6 +243,16 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if m.showTree {
+			switch msg.String() {
+			case "esc", "q", "t":
+				m.showTree = false
+					return m, nil
+			}
+			m.treeView, cmd = m.treeView.Update(msg)
+			return m, cmd
+		}
+
 		switch msg.String() {
 		case "h":
 			// Move focus left (to content pane)
@@ -295,7 +319,24 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 					Status:   m.issue.Status,
 				}
 			}
+		case "t":
+			if m.treeLoader != nil {
+				m.showTree = true
+				m.treeView = treeview.New(m.issue.ID, m.treeLoader).SetSize(m.width, m.height)
+				return m, m.treeView.Init()
+			}
 		}
+
+	case treeview.NavigateMsg:
+		// Handle navigation from tree view
+		return m, func() tea.Msg {
+			return NavigateToDependencyMsg{IssueID: msg.IssueID}
+		}
+	}
+
+	if m.showTree {
+		m.treeView, cmd = m.treeView.Update(msg)
+		return m, cmd
 	}
 
 	m.viewport, cmd = m.viewport.Update(msg)
@@ -329,6 +370,10 @@ func (m Model) IsOnLeftEdge() bool {
 func (m Model) View() string {
 	if !m.ready || m.width == 0 {
 		return "Loading..."
+	}
+
+	if m.showTree {
+		return m.treeView.View()
 	}
 
 	// Build the modal
@@ -727,7 +772,7 @@ func (m Model) renderFooter() string {
 		scrollPercent = fmt.Sprintf(" %3.0f%%", m.viewport.ScrollPercent()*100)
 	}
 
-	return footerStyle.Render("[j/k] Scroll  [e] Edit Issue  [d] Delete Issue  [Esc] Back" + scrollPercent)
+	return footerStyle.Render("[j/k] Scroll  [t] Tree View  [e] Edit Issue  [d] Delete Issue  [Esc] Back" + scrollPercent)
 }
 
 // getTypeStyle returns the style for an issue type.

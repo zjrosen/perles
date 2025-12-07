@@ -65,6 +65,7 @@ func (e *Executor) executeBaseQuery(query *Query) ([]beads.Issue, error) {
 	whereClause, orderBy, params := builder.Build()
 
 	// Construct full query
+	// Added related_ids subquery to fetch all outgoing links (upstream dependencies)
 	sqlQuery := `
 		SELECT
 			i.id, i.title, i.description, i.status,
@@ -85,6 +86,13 @@ func (e *Executor) executeBaseQuery(query *Query) ([]beads.Issue, error) {
 					AND d.type IN ('blocks', 'parent-child')
 					AND child.status != 'deleted'
 			), '') as blocks_ids,
+			COALESCE((
+				SELECT GROUP_CONCAT(d.depends_on_id)
+				FROM dependencies d
+				JOIN issues up ON d.depends_on_id = up.id
+				WHERE d.issue_id = i.id
+					AND up.status != 'deleted'
+			), '') as related_ids,
 			COALESCE((
 				SELECT GROUP_CONCAT(l.label)
 				FROM labels l
@@ -125,13 +133,14 @@ func (e *Executor) scanIssues(rows *sql.Rows) ([]beads.Issue, error) {
 		var assignee sql.NullString
 		var blockerIDs string
 		var blocksIDs string
+		var relatedIDs string
 		var labelsStr string
 
 		err := rows.Scan(
 			&issue.ID, &issue.TitleText, &description,
 			&issue.Status, &issue.Priority, &issue.Type,
 			&assignee, &issue.CreatedAt, &issue.UpdatedAt,
-			&blockerIDs, &blocksIDs, &labelsStr,
+			&blockerIDs, &blocksIDs, &relatedIDs, &labelsStr,
 		)
 		if err != nil {
 			log.ErrorErr(log.CatDB, "Scan failed", err)
@@ -153,6 +162,11 @@ func (e *Executor) scanIssues(rows *sql.Rows) ([]beads.Issue, error) {
 		// Parse blocks IDs from comma-separated string (issues this one blocks)
 		if blocksIDs != "" {
 			issue.Blocks = strings.Split(blocksIDs, ",")
+		}
+
+		// Parse related IDs (all upstream dependencies)
+		if relatedIDs != "" {
+			issue.Related = strings.Split(relatedIDs, ",")
 		}
 
 		// Parse labels from comma-separated string
@@ -312,6 +326,24 @@ func (e *Executor) queryRelatedIDs(issueIDs []string, expandType ExpandType) ([]
 				AND i.status != 'deleted'
 		`, inClause))
 
+	case ExpandUpstream:
+		// Upstream: all outgoing links (issue_id -> depends_on_id)
+		queries = append(queries, fmt.Sprintf(`
+			SELECT d.depends_on_id FROM dependencies d
+			JOIN issues i ON d.depends_on_id = i.id
+			WHERE d.issue_id IN (%s)
+				AND i.status != 'deleted'
+		`, inClause))
+
+	case ExpandDownstream:
+		// Downstream: all incoming links (depends_on_id <- issue_id)
+		queries = append(queries, fmt.Sprintf(`
+			SELECT d.issue_id FROM dependencies d
+			JOIN issues i ON d.issue_id = i.id
+			WHERE d.depends_on_id IN (%s)
+				AND i.status != 'deleted'
+		`, inClause))
+
 	default:
 		return nil, nil
 	}
@@ -386,6 +418,13 @@ func (e *Executor) fetchIssuesByIDs(ids []string) ([]beads.Issue, error) {
 					AND d.type IN ('blocks', 'parent-child')
 					AND child.status != 'deleted'
 			), '') as blocks_ids,
+			COALESCE((
+				SELECT GROUP_CONCAT(d.depends_on_id)
+				FROM dependencies d
+				JOIN issues up ON d.depends_on_id = up.id
+				WHERE d.issue_id = i.id
+					AND up.status != 'deleted'
+			), '') as related_ids,
 			COALESCE((
 				SELECT GROUP_CONCAT(l.label)
 				FROM labels l

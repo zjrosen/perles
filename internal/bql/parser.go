@@ -396,8 +396,12 @@ func parseExpandType(s string) (ExpandType, error) {
 		return ExpandDeps, nil
 	case "all", "All", "ALL":
 		return ExpandAll, nil
+	case "upstream", "Upstream", "UPSTREAM":
+		return ExpandUpstream, nil
+	case "downstream", "Downstream", "DOWNSTREAM":
+		return ExpandDownstream, nil
 	default:
 		return ExpandNone, fmt.Errorf(
-			"unknown expansion type %q (valid: children, blockers, blocks, deps, all)", s)
+			"unknown expansion type %q (valid: children, blockers, blocks, deps, all, upstream, downstream)", s)
 	}
 }
