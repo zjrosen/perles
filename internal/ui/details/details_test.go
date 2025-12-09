@@ -117,6 +117,30 @@ func TestDetails_View_WithDescription(t *testing.T) {
 	require.Contains(t, stripped, "detailed description", "expected view to contain description text")
 }
 
+func TestDetails_View_WithExtraFields(t *testing.T) {
+	issue := beads.Issue{
+		ID:                 "test-1",
+		TitleText:          "Test Issue",
+		DescriptionText:    "Description content",
+		AcceptanceCriteria: "- Criteria 1\n- Criteria 2",
+		Design:             "Design document link",
+		Notes:              "Some notes",
+		CreatedAt:          time.Now(),
+	}
+	m := New(issue, nil, nil)
+	m = m.SetSize(100, 40)
+	view := m.View()
+	stripped := stripANSI(view)
+
+	// Check for headers and content
+	require.Contains(t, stripped, "Acceptance Criteria")
+	require.Contains(t, stripped, "Criteria 1")
+	require.Contains(t, stripped, "Design")
+	require.Contains(t, stripped, "Design document link")
+	require.Contains(t, stripped, "Notes")
+	require.Contains(t, stripped, "Some notes")
+}
+
 func TestDetails_View_WithDependencies(t *testing.T) {
 	issue := beads.Issue{
 		ID:        "test-1",

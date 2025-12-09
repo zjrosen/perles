@@ -71,6 +71,9 @@ func (e *Executor) executeBaseQuery(query *Query) ([]beads.Issue, error) {
 			i.id, 
 			i.title, 
 			i.description, 
+			i.design,
+			i.acceptance_criteria,
+			i.notes,
 			i.status,
 			i.priority, 
 			i.issue_type, 
@@ -145,6 +148,9 @@ func (e *Executor) scanIssues(rows *sql.Rows) ([]beads.Issue, error) {
 		var (
 			issue       beads.Issue
 			description sql.NullString
+			design      sql.NullString
+			acceptanceCriteria sql.NullString
+			notes       sql.NullString
 			assignee    sql.NullString
 			parentId    string
 			childrenIDs string
@@ -157,6 +163,9 @@ func (e *Executor) scanIssues(rows *sql.Rows) ([]beads.Issue, error) {
 			&issue.ID,
 			&issue.TitleText,
 			&description,
+			&design,
+			&acceptanceCriteria,
+			&notes,
 			&issue.Status,
 			&issue.Priority,
 			&issue.Type,
@@ -176,6 +185,15 @@ func (e *Executor) scanIssues(rows *sql.Rows) ([]beads.Issue, error) {
 
 		if description.Valid {
 			issue.DescriptionText = description.String
+		}
+		if design.Valid {
+			issue.Design = design.String
+		}
+		if acceptanceCriteria.Valid {
+			issue.AcceptanceCriteria = acceptanceCriteria.String
+		}
+		if notes.Valid {
+			issue.Notes = notes.String
 		}
 		if assignee.Valid {
 			issue.Assignee = assignee.String
@@ -406,6 +424,9 @@ func (e *Executor) fetchIssuesByIDs(ids []string) ([]beads.Issue, error) {
 			i.id, 
 			i.title, 
 			i.description, 
+			i.design,
+			i.acceptance_criteria,
+			i.notes,
 			i.status,
 			i.priority, 
 			i.issue_type, 

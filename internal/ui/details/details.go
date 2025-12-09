@@ -470,6 +470,15 @@ func (m Model) renderLeftColumn() string {
 		sb.WriteString("\n")
 	}
 
+	// Acceptance Criteria
+	sb.WriteString(m.renderMarkdownSection("Acceptance Criteria", issue.AcceptanceCriteria))
+
+	// Design
+	sb.WriteString(m.renderMarkdownSection("Design", issue.Design))
+
+	// Notes
+	sb.WriteString(m.renderMarkdownSection("Notes", issue.Notes))
+
 	// Comments error handling
 	if m.commentsError != nil {
 		sb.WriteString("\n")
@@ -610,6 +619,38 @@ func (m Model) renderDescription() string {
 
 	// Fallback: plain text with header
 	return "Description:\n" + m.issue.DescriptionText
+}
+
+// renderMarkdownSection renders a titled markdown section.
+// Returns empty string if content is empty.
+func (m Model) renderMarkdownSection(title, content string) string {
+	if content == "" {
+		return ""
+	}
+
+	var sb strings.Builder
+
+	// Spacing before section
+	sb.WriteString("\n")
+
+	// Header
+	headerStyle := lipgloss.NewStyle().Bold(true)
+	sb.WriteString(headerStyle.Render(title))
+	sb.WriteString("\n\n")
+
+	// Content
+	if m.mdRenderer != nil {
+		if rendered, err := m.mdRenderer.Render(content); err == nil {
+			sb.WriteString(strings.TrimSpace(rendered))
+			sb.WriteString("\n")
+			return sb.String()
+		}
+	}
+
+	// Fallback
+	sb.WriteString(content)
+	sb.WriteString("\n")
+	return sb.String()
 }
 
 // renderDependencyItem renders a single dependency with board-style formatting.
