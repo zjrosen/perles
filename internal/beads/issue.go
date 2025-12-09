@@ -44,16 +44,19 @@ type Comment struct {
 
 // Issue represents a beads issue.
 type Issue struct {
-	ID              string    `json:"id"`
-	TitleText       string    `json:"title"`
-	DescriptionText string    `json:"description"`
-	Status          Status    `json:"status"`
-	Priority        Priority  `json:"priority"`
-	Type            IssueType `json:"type"`
-	Assignee        string    `json:"assignee"`
-	Labels          []string  `json:"labels"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID                 string    `json:"id"`
+	TitleText          string    `json:"title"`
+	DescriptionText    string    `json:"description"`
+	Design             string    `json:"design"`
+	AcceptanceCriteria string    `json:"acceptance_criteria"`
+	Notes              string    `json:"notes"`
+	Status             Status    `json:"status"`
+	Priority           Priority  `json:"priority"`
+	Type               IssueType `json:"type"`
+	Assignee           string    `json:"assignee"`
+	Labels             []string  `json:"labels"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 
 	// Dependency tracking
 	BlockedBy []string `json:"blocked_by"`

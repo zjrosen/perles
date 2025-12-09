@@ -117,6 +117,54 @@ func TestDetails_View_WithDescription(t *testing.T) {
 	require.Contains(t, stripped, "detailed description", "expected view to contain description text")
 }
 
+func TestDetails_View_WithExtraFields(t *testing.T) {
+	issue := beads.Issue{
+		ID:                 "test-1",
+		TitleText:          "Test Issue",
+		DescriptionText:    "Description content",
+		AcceptanceCriteria: "- Criteria 1\n- Criteria 2",
+		Design:             "Design document link",
+		Notes:              "Some notes",
+		CreatedAt:          time.Now(),
+	}
+	m := New(issue, nil, nil)
+	m = m.SetSize(100, 40)
+	view := m.View()
+	stripped := stripANSI(view)
+
+	// Check for headers and content
+	require.Contains(t, stripped, "Acceptance Criteria")
+	require.Contains(t, stripped, "Criteria 1")
+	require.Contains(t, stripped, "Design")
+	require.Contains(t, stripped, "Design document link")
+	require.Contains(t, stripped, "Notes")
+	require.Contains(t, stripped, "Some notes")
+}
+
+func TestDetails_View_WithNoExtraFields(t *testing.T) {
+	issue := beads.Issue{
+		ID:                 "test-1",
+		TitleText:          "Test Issue",
+		DescriptionText:    "Description content",
+		AcceptanceCriteria: "",
+		Design:             "",
+		Notes:              "",
+		CreatedAt:          time.Now(),
+	}
+	m := New(issue, nil, nil)
+	m = m.SetSize(100, 40)
+	view := m.View()
+	stripped := stripANSI(view)
+
+	// Check for headers and content
+	require.NotContains(t, stripped, "Acceptance Criteria")
+	require.NotContains(t, stripped, "Criteria 1")
+	require.NotContains(t, stripped, "Design")
+	require.NotContains(t, stripped, "Design document link")
+	require.NotContains(t, stripped, "Notes")
+	require.NotContains(t, stripped, "Some notes")
+}
+
 func TestDetails_View_WithDependencies(t *testing.T) {
 	issue := beads.Issue{
 		ID:        "test-1",
@@ -910,6 +958,49 @@ func TestDetails_View_Golden_WithCommentsError(t *testing.T) {
 		CreatedAt:       time.Date(2024, 4, 10, 9, 0, 0, 0, time.UTC),
 	}
 	m := New(issue, nil, commentLoader).SetSize(120, 30)
+
+	view := m.View()
+	teatest.RequireEqualOutput(t, []byte(view))
+}
+
+// TestDetails_View_Golden_WithExtraFields tests rendering with acceptance criteria, design, and notes fields.
+// Run with -update flag to update golden files: go test -update ./internal/ui/details/...
+func TestDetails_View_Golden_WithExtraFields(t *testing.T) {
+	issue := beads.Issue{
+		ID:                 "extra-fields-task",
+		TitleText:          "Task with Extra Fields",
+		DescriptionText:    "This task demonstrates the extra fields: acceptance criteria, design, and notes.",
+		Type:               beads.TypeFeature,
+		Priority:           beads.PriorityHigh,
+		Status:             beads.StatusOpen,
+		AcceptanceCriteria: "- [ ] Users can log in with email/password\n- [ ] Users can reset password via email\n- [ ] Session expires after 24 hours",
+		Design:             "See design doc at: https://example.com/design/auth-flow",
+		Notes:              "This feature requires coordination with the backend team.\nTarget release: v2.0",
+		Labels:             []string{"feature", "auth"},
+		CreatedAt:          time.Date(2024, 5, 1, 9, 0, 0, 0, time.UTC),
+		UpdatedAt:          time.Date(2024, 5, 2, 14, 30, 0, 0, time.UTC),
+	}
+	m := New(issue, nil, nil).SetSize(120, 40)
+
+	view := m.View()
+	teatest.RequireEqualOutput(t, []byte(view))
+}
+
+// TestDetails_View_Golden_NoExtraFields tests that section headers don't render when extra fields are empty.
+// Run with -update flag to update golden files: go test -update ./internal/ui/details/...
+func TestDetails_View_Golden_NoExtraFields(t *testing.T) {
+	issue := beads.Issue{
+		ID:              "no-extra-task",
+		TitleText:       "Task without Extra Fields",
+		DescriptionText: "This task has no acceptance criteria, design, or notes fields.",
+		Type:            beads.TypeTask,
+		Priority:        beads.PriorityMedium,
+		Status:          beads.StatusOpen,
+		// AcceptanceCriteria, Design, Notes are all empty
+		Labels:    []string{"simple"},
+		CreatedAt: time.Date(2024, 5, 10, 9, 0, 0, 0, time.UTC),
+	}
+	m := New(issue, nil, nil).SetSize(120, 40)
 
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))
