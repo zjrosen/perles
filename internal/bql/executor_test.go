@@ -6,134 +6,25 @@ import (
 	"time"
 
 	"perles/internal/beads"
+	"perles/internal/testutil"
 
-	_ "github.com/ncruces/go-sqlite3/driver"
-	_ "github.com/ncruces/go-sqlite3/embed"
 	"github.com/stretchr/testify/require"
 )
 
-// strPtr returns a pointer to the given string (helper for nullable assignee).
-func strPtr(s string) *string { return &s }
-
-// setupTestDB creates an in-memory SQLite database with test data.
-func setupTestDB(t *testing.T) *sql.DB {
-	db, err := sql.Open("sqlite3", ":memory:")
-	require.NoError(t, err)
-
-	// Create schema
-	schema := `
-		CREATE TABLE issues (
-			id TEXT PRIMARY KEY,
-			title TEXT NOT NULL,
-			description TEXT,
-			design TEXT NOT NULL DEFAULT '',
-			acceptance_criteria TEXT NOT NULL DEFAULT '',
-			notes TEXT NOT NULL DEFAULT '',
-			status TEXT NOT NULL DEFAULT 'open',
-			priority INTEGER NOT NULL DEFAULT 2,
-			issue_type TEXT NOT NULL DEFAULT 'task',
-			assignee TEXT,
-			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-		);
-
-		CREATE TABLE labels (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			issue_id TEXT NOT NULL,
-			label TEXT NOT NULL,
-			FOREIGN KEY (issue_id) REFERENCES issues(id)
-		);
-
-		CREATE TABLE dependencies (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			issue_id TEXT NOT NULL,
-			depends_on_id TEXT NOT NULL,
-			type TEXT NOT NULL DEFAULT 'blocks',
-			FOREIGN KEY (issue_id) REFERENCES issues(id),
-			FOREIGN KEY (depends_on_id) REFERENCES issues(id)
-		);
-
-		CREATE TABLE blocked_issues_cache (
-			issue_id TEXT PRIMARY KEY
-		);
-
-		CREATE VIEW ready_issues AS
-		SELECT i.id
-		FROM issues i
-		WHERE i.status IN ('open', 'in_progress')
-		  AND i.id NOT IN (SELECT issue_id FROM blocked_issues_cache);
-	`
-	_, err = db.Exec(schema)
-	require.NoError(t, err)
-
-	// Insert test data
-	now := time.Now()
-	yesterday := time.Now().Add(-24 * time.Hour)
-	lastWeek := time.Now().Add(-7 * 24 * time.Hour)
-
-	testIssues := []struct {
-		id, title, desc, status string
-		priority                int
-		issueType               string
-		assignee                *string // nil means NULL
-		createdAt, updatedAt    time.Time
-	}{
-		{"test-1", "Fix login bug", "Login fails for users", "open", 0, "bug", strPtr("alice"), lastWeek, now},
-		{"test-2", "Add search feature", "Search functionality", "open", 1, "feature", nil, yesterday, yesterday},
-		{"test-3", "Refactor auth", "Clean up auth code", "in_progress", 2, "task", strPtr("bob"), lastWeek, yesterday},
-		{"test-4", "Update docs", "Documentation update", "closed", 3, "chore", nil, lastWeek, lastWeek},
-		{"test-5", "Critical security fix", "Urgent fix needed", "open", 0, "bug", strPtr("alice"), now, now},
-		{"test-6", "Epic: New dashboard", "Dashboard epic", "open", 1, "epic", nil, lastWeek, now},
+// setupDB creates an in-memory SQLite database, optionally configured via the builder.
+// Pass nil for an empty database, or a function to configure the builder.
+func setupDB(t *testing.T, configure func(*testutil.Builder) *testutil.Builder) *sql.DB {
+	db := testutil.NewTestDB(t)
+	b := testutil.NewBuilder(t, db)
+	if configure != nil {
+		b = configure(b)
 	}
-
-	for _, i := range testIssues {
-		_, err = db.Exec(
-			`INSERT INTO issues (id, title, description, status, priority, issue_type, assignee, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			i.id, i.title, i.desc, i.status, i.priority, i.issueType, i.assignee, i.createdAt, i.updatedAt,
-		)
-		require.NoError(t, err)
-	}
-
-	// Insert labels
-	labels := []struct {
-		issueID, label string
-	}{
-		{"test-1", "urgent"},
-		{"test-1", "auth"},
-		{"test-5", "urgent"},
-		{"test-5", "security"},
-		{"test-3", "auth"},
-	}
-
-	for _, l := range labels {
-		_, err = db.Exec(`INSERT INTO labels (issue_id, label) VALUES (?, ?)`, l.issueID, l.label)
-		require.NoError(t, err)
-	}
-
-	// Insert blocked issues
-	_, err = db.Exec(`INSERT INTO blocked_issues_cache (issue_id) VALUES (?)`, "test-3")
-	require.NoError(t, err)
-
-	// Insert dependency (test-3 blocked by test-1)
-	_, err = db.Exec(
-		`INSERT INTO dependencies (issue_id, depends_on_id, type) VALUES (?, ?, ?)`,
-		"test-3", "test-1", "blocks",
-	)
-	require.NoError(t, err)
-
-	// Insert parent-child dependency (test-2 is child of test-6 epic)
-	_, err = db.Exec(
-		`INSERT INTO dependencies (issue_id, depends_on_id, type) VALUES (?, ?, ?)`,
-		"test-2", "test-6", "parent-child",
-	)
-	require.NoError(t, err)
-
+	b.Build()
 	return db
 }
 
 func TestExecutor_TypeFilter(t *testing.T) {
-	db := setupTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -149,7 +40,7 @@ func TestExecutor_TypeFilter(t *testing.T) {
 }
 
 func TestExecutor_StatusFilter(t *testing.T) {
-	db := setupTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -164,7 +55,7 @@ func TestExecutor_StatusFilter(t *testing.T) {
 }
 
 func TestExecutor_PriorityFilter(t *testing.T) {
-	db := setupTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -180,7 +71,7 @@ func TestExecutor_PriorityFilter(t *testing.T) {
 }
 
 func TestExecutor_PriorityComparison(t *testing.T) {
-	db := setupTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -197,7 +88,7 @@ func TestExecutor_PriorityComparison(t *testing.T) {
 }
 
 func TestExecutor_BlockedFilter(t *testing.T) {
-	db := setupTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -211,7 +102,7 @@ func TestExecutor_BlockedFilter(t *testing.T) {
 }
 
 func TestExecutor_ReadyFilter(t *testing.T) {
-	db := setupTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -231,7 +122,7 @@ func TestExecutor_ReadyFilter(t *testing.T) {
 }
 
 func TestExecutor_LabelFilter(t *testing.T) {
-	db := setupTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -247,7 +138,7 @@ func TestExecutor_LabelFilter(t *testing.T) {
 }
 
 func TestExecutor_TitleContains(t *testing.T) {
-	db := setupTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -261,7 +152,7 @@ func TestExecutor_TitleContains(t *testing.T) {
 }
 
 func TestExecutor_OrderBy(t *testing.T) {
-	db := setupTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -279,7 +170,7 @@ func TestExecutor_OrderBy(t *testing.T) {
 }
 
 func TestExecutor_ComplexQuery(t *testing.T) {
-	db := setupTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -296,7 +187,7 @@ func TestExecutor_ComplexQuery(t *testing.T) {
 }
 
 func TestExecutor_OrQuery(t *testing.T) {
-	db := setupTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -312,7 +203,7 @@ func TestExecutor_OrQuery(t *testing.T) {
 }
 
 func TestExecutor_InExpression(t *testing.T) {
-	db := setupTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -328,7 +219,7 @@ func TestExecutor_InExpression(t *testing.T) {
 }
 
 func TestExecutor_EmptyResult(t *testing.T) {
-	db := setupTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -341,7 +232,7 @@ func TestExecutor_EmptyResult(t *testing.T) {
 }
 
 func TestExecutor_InvalidQuery(t *testing.T) {
-	db := setupTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -353,7 +244,7 @@ func TestExecutor_InvalidQuery(t *testing.T) {
 }
 
 func TestExecutor_ParseError(t *testing.T) {
-	db := setupTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -365,7 +256,7 @@ func TestExecutor_ParseError(t *testing.T) {
 }
 
 func TestExecutor_LoadsLabels(t *testing.T) {
-	db := setupTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -380,7 +271,7 @@ func TestExecutor_LoadsLabels(t *testing.T) {
 }
 
 func TestExecutor_LoadsBlockedBy(t *testing.T) {
-	db := setupTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -394,7 +285,7 @@ func TestExecutor_LoadsBlockedBy(t *testing.T) {
 }
 
 func TestExecutor_LoadsBlocks(t *testing.T) {
-	db := setupTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -408,7 +299,7 @@ func TestExecutor_LoadsBlocks(t *testing.T) {
 }
 
 func TestExecutor_LoadsChildrenForEpicWithChildren(t *testing.T) {
-	db := setupTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -453,7 +344,7 @@ func TestIsBQLQuery(t *testing.T) {
 }
 
 func TestExecutor_OrderByOnly(t *testing.T) {
-	db := setupTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -468,7 +359,7 @@ func TestExecutor_OrderByOnly(t *testing.T) {
 }
 
 func TestExecutor_AssigneePopulated(t *testing.T) {
-	db := setupTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -482,7 +373,7 @@ func TestExecutor_AssigneePopulated(t *testing.T) {
 }
 
 func TestExecutor_AssigneeNullIsEmptyString(t *testing.T) {
-	db := setupTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -496,7 +387,7 @@ func TestExecutor_AssigneeNullIsEmptyString(t *testing.T) {
 }
 
 func TestExecutor_MultipleIssuesWithDifferentAssignees(t *testing.T) {
-	db := setupTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -518,112 +409,8 @@ func TestExecutor_MultipleIssuesWithDifferentAssignees(t *testing.T) {
 	require.Equal(t, "bob", assigneeByID["test-3"])
 }
 
-// setupExpandTestDB creates a database with more complex dependency relationships.
-func setupExpandTestDB(t *testing.T) *sql.DB {
-	db, err := sql.Open("sqlite3", ":memory:")
-	require.NoError(t, err)
-
-	// Create schema
-	schema := `
-		CREATE TABLE issues (
-			id TEXT PRIMARY KEY,
-			title TEXT NOT NULL,
-			description TEXT,
-			design TEXT NOT NULL DEFAULT '',
-			acceptance_criteria TEXT NOT NULL DEFAULT '',
-			notes TEXT NOT NULL DEFAULT '',
-			status TEXT NOT NULL DEFAULT 'open',
-			priority INTEGER NOT NULL DEFAULT 2,
-			issue_type TEXT NOT NULL DEFAULT 'task',
-			assignee TEXT,
-			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-		);
-
-		CREATE TABLE labels (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			issue_id TEXT NOT NULL,
-			label TEXT NOT NULL,
-			FOREIGN KEY (issue_id) REFERENCES issues(id)
-		);
-
-		CREATE TABLE dependencies (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			issue_id TEXT NOT NULL,
-			depends_on_id TEXT NOT NULL,
-			type TEXT NOT NULL DEFAULT 'blocks',
-			FOREIGN KEY (issue_id) REFERENCES issues(id),
-			FOREIGN KEY (depends_on_id) REFERENCES issues(id)
-		);
-
-		CREATE TABLE blocked_issues_cache (
-			issue_id TEXT PRIMARY KEY
-		);
-
-		CREATE VIEW ready_issues AS
-		SELECT i.id
-		FROM issues i
-		WHERE i.status IN ('open', 'in_progress')
-		  AND i.id NOT IN (SELECT issue_id FROM blocked_issues_cache);
-	`
-	_, err = db.Exec(schema)
-	require.NoError(t, err)
-
-	// Create a hierarchical structure:
-	// epic-1 (epic)
-	//   ├── task-1 (child)
-	//   │     └── subtask-1 (grandchild)
-	//   └── task-2 (child)
-	//
-	// And blocking relationships:
-	// blocker-1 blocks blocked-1
-	// blocked-1 blocks blocked-2 (chain: blocker-1 -> blocked-1 -> blocked-2)
-
-	issues := []struct {
-		id, title, issueType string
-	}{
-		{"epic-1", "Epic One", "epic"},
-		{"task-1", "Task One", "task"},
-		{"task-2", "Task Two", "task"},
-		{"subtask-1", "Subtask One", "task"},
-		{"blocker-1", "Blocker One", "bug"},
-		{"blocked-1", "Blocked One", "task"},
-		{"blocked-2", "Blocked Two", "task"},
-		{"standalone", "Standalone Issue", "task"},
-	}
-
-	for _, i := range issues {
-		_, err = db.Exec(
-			`INSERT INTO issues (id, title, status, priority, issue_type) VALUES (?, ?, 'open', 1, ?)`,
-			i.id, i.title, i.issueType,
-		)
-		require.NoError(t, err)
-	}
-
-	// Parent-child relationships
-	deps := []struct {
-		issueID, dependsOnID, depType string
-	}{
-		{"task-1", "epic-1", "parent-child"},    // task-1 is child of epic-1
-		{"task-2", "epic-1", "parent-child"},    // task-2 is child of epic-1
-		{"subtask-1", "task-1", "parent-child"}, // subtask-1 is child of task-1
-		{"blocked-1", "blocker-1", "blocks"},    // blocked-1 is blocked by blocker-1
-		{"blocked-2", "blocked-1", "blocks"},    // blocked-2 is blocked by blocked-1
-	}
-
-	for _, d := range deps {
-		_, err = db.Exec(
-			`INSERT INTO dependencies (issue_id, depends_on_id, type) VALUES (?, ?, ?)`,
-			d.issueID, d.dependsOnID, d.depType,
-		)
-		require.NoError(t, err)
-	}
-
-	return db
-}
-
 func TestExecutor_ExpandDown(t *testing.T) {
-	db := setupExpandTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -647,7 +434,7 @@ func TestExecutor_ExpandDown(t *testing.T) {
 }
 
 func TestExecutor_ExpandDownDepth2(t *testing.T) {
-	db := setupExpandTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -671,7 +458,7 @@ func TestExecutor_ExpandDownDepth2(t *testing.T) {
 }
 
 func TestExecutor_ExpandDownUnlimited(t *testing.T) {
-	db := setupExpandTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -695,7 +482,7 @@ func TestExecutor_ExpandDownUnlimited(t *testing.T) {
 }
 
 func TestExecutor_ExpandUp(t *testing.T) {
-	db := setupExpandTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -717,7 +504,7 @@ func TestExecutor_ExpandUp(t *testing.T) {
 }
 
 func TestExecutor_ExpandDownWithBlocks(t *testing.T) {
-	db := setupExpandTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -739,7 +526,7 @@ func TestExecutor_ExpandDownWithBlocks(t *testing.T) {
 }
 
 func TestExecutor_ExpandUpWithParent(t *testing.T) {
-	db := setupExpandTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -761,7 +548,7 @@ func TestExecutor_ExpandUpWithParent(t *testing.T) {
 }
 
 func TestExecutor_ExpandAll(t *testing.T) {
-	db := setupExpandTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -784,7 +571,7 @@ func TestExecutor_ExpandAll(t *testing.T) {
 }
 
 func TestExecutor_ExpandNoDuplicates(t *testing.T) {
-	db := setupExpandTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -802,7 +589,7 @@ func TestExecutor_ExpandNoDuplicates(t *testing.T) {
 }
 
 func TestExecutor_ExpandCircularDeps(t *testing.T) {
-	db := setupExpandTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
 	defer func() { _ = db.Close() }()
 
 	// Add circular blocking dependency: A blocks B, B blocks A
@@ -834,7 +621,7 @@ func TestExecutor_ExpandCircularDeps(t *testing.T) {
 }
 
 func TestExecutor_ExpandEmptyBaseResult(t *testing.T) {
-	db := setupExpandTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -846,7 +633,7 @@ func TestExecutor_ExpandEmptyBaseResult(t *testing.T) {
 }
 
 func TestExecutor_ExpandWithOrderBy(t *testing.T) {
-	db := setupExpandTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -869,217 +656,12 @@ func collectIDs(issues []beads.Issue) map[string]bool {
 	return ids
 }
 
-// setupNestedTestDB creates a DB with nested hierarchy for depth testing.
-// Structure:
-//
-//	epic-1 (epic)
-//	  ├── task-1 (child)
-//	  │     └── subtask-1 (grandchild)
-//	  └── task-2 (child)
-func setupNestedTestDB(t *testing.T) *sql.DB {
-	db, err := sql.Open("sqlite3", ":memory:")
-	require.NoError(t, err)
-
-	schema := `
-		CREATE TABLE issues (
-			id TEXT PRIMARY KEY,
-			title TEXT NOT NULL,
-			description TEXT,
-			design TEXT NOT NULL DEFAULT '',
-			acceptance_criteria TEXT NOT NULL DEFAULT '',
-			notes TEXT NOT NULL DEFAULT '',
-			status TEXT NOT NULL DEFAULT 'open',
-			priority INTEGER NOT NULL DEFAULT 2,
-			issue_type TEXT NOT NULL DEFAULT 'task',
-			assignee TEXT,
-			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-		);
-		CREATE TABLE labels (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			issue_id TEXT NOT NULL,
-			label TEXT NOT NULL,
-			FOREIGN KEY (issue_id) REFERENCES issues(id)
-		);
-		CREATE TABLE dependencies (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			issue_id TEXT NOT NULL,
-			depends_on_id TEXT NOT NULL,
-			type TEXT NOT NULL DEFAULT 'blocks',
-			FOREIGN KEY (issue_id) REFERENCES issues(id),
-			FOREIGN KEY (depends_on_id) REFERENCES issues(id)
-		);
-		CREATE TABLE blocked_issues_cache (issue_id TEXT PRIMARY KEY);
-		CREATE VIEW ready_issues AS
-		SELECT i.id FROM issues i
-		WHERE i.status IN ('open', 'in_progress')
-		  AND i.id NOT IN (SELECT issue_id FROM blocked_issues_cache);
-	`
-	_, err = db.Exec(schema)
-	require.NoError(t, err)
-
-	issues := []struct{ id, title, issueType string }{
-		{"epic-1", "Epic One", "epic"},
-		{"task-1", "Task One", "task"},
-		{"task-2", "Task Two", "task"},
-		{"subtask-1", "Subtask One", "task"},
-	}
-	for _, i := range issues {
-		_, err = db.Exec(`INSERT INTO issues (id, title, status, priority, issue_type) VALUES (?, ?, 'open', 1, ?)`,
-			i.id, i.title, i.issueType)
-		require.NoError(t, err)
-	}
-
-	deps := []struct{ issueID, dependsOnID string }{
-		{"task-1", "epic-1"},
-		{"task-2", "epic-1"},
-		{"subtask-1", "task-1"},
-	}
-	for _, d := range deps {
-		_, err = db.Exec(`INSERT INTO dependencies (issue_id, depends_on_id, type) VALUES (?, ?, 'parent-child')`,
-			d.issueID, d.dependsOnID)
-		require.NoError(t, err)
-	}
-
-	return db
-}
-
-// setupDeepTestDB creates a DB with a 4+ level deep hierarchy.
-// Structure:
-//
-//	level-0 (epic)
-//	  └── level-1
-//	        └── level-2
-//	              └── level-3
-//	                    └── level-4
-func setupDeepTestDB(t *testing.T) *sql.DB {
-	db, err := sql.Open("sqlite3", ":memory:")
-	require.NoError(t, err)
-
-	schema := `
-		CREATE TABLE issues (
-			id TEXT PRIMARY KEY,
-			title TEXT NOT NULL,
-			description TEXT,
-			design TEXT NOT NULL DEFAULT '',
-			acceptance_criteria TEXT NOT NULL DEFAULT '',
-			notes TEXT NOT NULL DEFAULT '',
-			status TEXT NOT NULL DEFAULT 'open',
-			priority INTEGER NOT NULL DEFAULT 2,
-			issue_type TEXT NOT NULL DEFAULT 'task',
-			assignee TEXT,
-			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-		);
-		CREATE TABLE labels (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			issue_id TEXT NOT NULL,
-			label TEXT NOT NULL,
-			FOREIGN KEY (issue_id) REFERENCES issues(id)
-		);
-		CREATE TABLE dependencies (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			issue_id TEXT NOT NULL,
-			depends_on_id TEXT NOT NULL,
-			type TEXT NOT NULL DEFAULT 'blocks',
-			FOREIGN KEY (issue_id) REFERENCES issues(id),
-			FOREIGN KEY (depends_on_id) REFERENCES issues(id)
-		);
-		CREATE TABLE blocked_issues_cache (issue_id TEXT PRIMARY KEY);
-		CREATE VIEW ready_issues AS
-		SELECT i.id FROM issues i
-		WHERE i.status IN ('open', 'in_progress')
-		  AND i.id NOT IN (SELECT issue_id FROM blocked_issues_cache);
-	`
-	_, err = db.Exec(schema)
-	require.NoError(t, err)
-
-	// Create 5 levels (0-4)
-	for i := 0; i <= 4; i++ {
-		issueType := "task"
-		if i == 0 {
-			issueType = "epic"
-		}
-		_, err = db.Exec(`INSERT INTO issues (id, title, status, priority, issue_type) VALUES (?, ?, 'open', 1, ?)`,
-			"level-"+string(rune('0'+i)), "Level "+string(rune('0'+i)), issueType)
-		require.NoError(t, err)
-	}
-
-	// Create parent-child relationships (level-N is child of level-(N-1))
-	for i := 1; i <= 4; i++ {
-		_, err = db.Exec(`INSERT INTO dependencies (issue_id, depends_on_id, type) VALUES (?, ?, 'parent-child')`,
-			"level-"+string(rune('0'+i)), "level-"+string(rune('0'+i-1)))
-		require.NoError(t, err)
-	}
-
-	return db
-}
-
-// setupCircularTestDB creates a DB with circular blocking dependencies.
-// Structure: circular-a <-> circular-b (each blocks the other)
-func setupCircularTestDB(t *testing.T) *sql.DB {
-	db, err := sql.Open("sqlite3", ":memory:")
-	require.NoError(t, err)
-
-	schema := `
-		CREATE TABLE issues (
-			id TEXT PRIMARY KEY,
-			title TEXT NOT NULL,
-			description TEXT,
-			design TEXT NOT NULL DEFAULT '',
-			acceptance_criteria TEXT NOT NULL DEFAULT '',
-			notes TEXT NOT NULL DEFAULT '',
-			status TEXT NOT NULL DEFAULT 'open',
-			priority INTEGER NOT NULL DEFAULT 2,
-			issue_type TEXT NOT NULL DEFAULT 'task',
-			assignee TEXT,
-			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-		);
-		CREATE TABLE labels (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			issue_id TEXT NOT NULL,
-			label TEXT NOT NULL,
-			FOREIGN KEY (issue_id) REFERENCES issues(id)
-		);
-		CREATE TABLE dependencies (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			issue_id TEXT NOT NULL,
-			depends_on_id TEXT NOT NULL,
-			type TEXT NOT NULL DEFAULT 'blocks',
-			FOREIGN KEY (issue_id) REFERENCES issues(id),
-			FOREIGN KEY (depends_on_id) REFERENCES issues(id)
-		);
-		CREATE TABLE blocked_issues_cache (issue_id TEXT PRIMARY KEY);
-		CREATE VIEW ready_issues AS
-		SELECT i.id FROM issues i
-		WHERE i.status IN ('open', 'in_progress')
-		  AND i.id NOT IN (SELECT issue_id FROM blocked_issues_cache);
-	`
-	_, err = db.Exec(schema)
-	require.NoError(t, err)
-
-	// Create two issues
-	_, err = db.Exec(`INSERT INTO issues (id, title, status, priority, issue_type) VALUES ('circular-a', 'Circular A', 'open', 1, 'task')`)
-	require.NoError(t, err)
-	_, err = db.Exec(`INSERT INTO issues (id, title, status, priority, issue_type) VALUES ('circular-b', 'Circular B', 'open', 1, 'task')`)
-	require.NoError(t, err)
-
-	// Circular blocking: A blocks B, B blocks A
-	_, err = db.Exec(`INSERT INTO dependencies (issue_id, depends_on_id, type) VALUES ('circular-b', 'circular-a', 'blocks')`)
-	require.NoError(t, err)
-	_, err = db.Exec(`INSERT INTO dependencies (issue_id, depends_on_id, type) VALUES ('circular-a', 'circular-b', 'blocks')`)
-	require.NoError(t, err)
-
-	return db
-}
-
 // =============================================================================
 // Phase 5: Edge Case Tests
 // =============================================================================
 
 func TestExecutor_ExpandNoRelationships(t *testing.T) {
-	db := setupExpandTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -1093,7 +675,7 @@ func TestExecutor_ExpandNoRelationships(t *testing.T) {
 }
 
 func TestExecutor_ExpandNoRelationshipsWithUnlimitedDepth(t *testing.T) {
-	db := setupExpandTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -1107,7 +689,7 @@ func TestExecutor_ExpandNoRelationshipsWithUnlimitedDepth(t *testing.T) {
 }
 
 func TestExecutor_ExpandSelfReferentialNoDuplicates(t *testing.T) {
-	db := setupExpandTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
 	defer func() { _ = db.Close() }()
 
 	// Add self-referential dependency: issue blocks itself
@@ -1127,77 +709,25 @@ func TestExecutor_ExpandSelfReferentialNoDuplicates(t *testing.T) {
 }
 
 func TestExecutor_ExpandMultipleMatchesOverlappingDeps(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	require.NoError(t, err)
-	defer func() { _ = db.Close() }()
-
-	schema := `
-		CREATE TABLE issues (
-			id TEXT PRIMARY KEY,
-			title TEXT NOT NULL,
-			description TEXT,
-			design TEXT NOT NULL DEFAULT '',
-			acceptance_criteria TEXT NOT NULL DEFAULT '',
-			notes TEXT NOT NULL DEFAULT '',
-			status TEXT NOT NULL DEFAULT 'open',
-			priority INTEGER NOT NULL DEFAULT 2,
-			issue_type TEXT NOT NULL DEFAULT 'task',
-			assignee TEXT,
-			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-		);
-		CREATE TABLE labels (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			issue_id TEXT NOT NULL,
-			label TEXT NOT NULL,
-			FOREIGN KEY (issue_id) REFERENCES issues(id)
-		);
-		CREATE TABLE dependencies (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			issue_id TEXT NOT NULL,
-			depends_on_id TEXT NOT NULL,
-			type TEXT NOT NULL DEFAULT 'blocks',
-			FOREIGN KEY (issue_id) REFERENCES issues(id),
-			FOREIGN KEY (depends_on_id) REFERENCES issues(id)
-		);
-		CREATE TABLE blocked_issues_cache (issue_id TEXT PRIMARY KEY);
-		CREATE VIEW ready_issues AS
-		SELECT i.id FROM issues i
-		WHERE i.status IN ('open', 'in_progress')
-		  AND i.id NOT IN (SELECT issue_id FROM blocked_issues_cache);
-	`
-	_, err = db.Exec(schema)
-	require.NoError(t, err)
-
 	// Create two epics that share a child
 	// epic-a -> shared-child
 	// epic-b -> shared-child
 	// epic-a -> unique-a
 	// epic-b -> unique-b
-	issues := []struct{ id, title, issueType string }{
-		{"epic-a", "Epic A", "epic"},
-		{"epic-b", "Epic B", "epic"},
-		{"shared-child", "Shared Child", "task"},
-		{"unique-a", "Unique A", "task"},
-		{"unique-b", "Unique B", "task"},
-	}
-	for _, i := range issues {
-		_, err = db.Exec(`INSERT INTO issues (id, title, status, priority, issue_type) VALUES (?, ?, 'open', 1, ?)`,
-			i.id, i.title, i.issueType)
-		require.NoError(t, err)
-	}
+	db := testutil.NewTestDB(t)
+	defer func() { _ = db.Close() }()
 
-	deps := []struct{ issueID, dependsOnID string }{
-		{"shared-child", "epic-a"},
-		{"shared-child", "epic-b"},
-		{"unique-a", "epic-a"},
-		{"unique-b", "epic-b"},
-	}
-	for _, d := range deps {
-		_, err = db.Exec(`INSERT INTO dependencies (issue_id, depends_on_id, type) VALUES (?, ?, 'parent-child')`,
-			d.issueID, d.dependsOnID)
-		require.NoError(t, err)
-	}
+	testutil.NewBuilder(t, db).
+		WithIssue("epic-a", testutil.Title("Epic A"), testutil.IssueType("epic")).
+		WithIssue("epic-b", testutil.Title("Epic B"), testutil.IssueType("epic")).
+		WithIssue("shared-child", testutil.Title("Shared Child"), testutil.IssueType("task")).
+		WithIssue("unique-a", testutil.Title("Unique A"), testutil.IssueType("task")).
+		WithIssue("unique-b", testutil.Title("Unique B"), testutil.IssueType("task")).
+		WithDependency("shared-child", "epic-a", "parent-child").
+		WithDependency("shared-child", "epic-b", "parent-child").
+		WithDependency("unique-a", "epic-a", "parent-child").
+		WithDependency("unique-b", "epic-b", "parent-child").
+		Build()
 
 	executor := NewExecutor(db)
 
@@ -1217,7 +747,15 @@ func TestExecutor_ExpandMultipleMatchesOverlappingDeps(t *testing.T) {
 }
 
 func TestExecutor_ExpandWithoutFilter(t *testing.T) {
-	db := setupNestedTestDB(t)
+	db := setupDB(t, func(b *testutil.Builder) *testutil.Builder {
+		return b.WithIssue("epic-1", testutil.Title("Epic One"), testutil.IssueType("epic")).
+			WithIssue("task-1", testutil.Title("Task One"), testutil.IssueType("task")).
+			WithIssue("task-2", testutil.Title("Task Two"), testutil.IssueType("task")).
+			WithIssue("subtask-1", testutil.Title("Subtask One"), testutil.IssueType("task")).
+			WithDependency("task-1", "epic-1", "parent-child").
+			WithDependency("task-2", "epic-1", "parent-child").
+			WithDependency("subtask-1", "task-1", "parent-child")
+	})
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -1232,7 +770,15 @@ func TestExecutor_ExpandWithoutFilter(t *testing.T) {
 }
 
 func TestExecutor_ExpandWithoutFilterOrderBy(t *testing.T) {
-	db := setupNestedTestDB(t)
+	db := setupDB(t, func(b *testutil.Builder) *testutil.Builder {
+		return b.WithIssue("epic-1", testutil.Title("Epic One"), testutil.IssueType("epic")).
+			WithIssue("task-1", testutil.Title("Task One"), testutil.IssueType("task")).
+			WithIssue("task-2", testutil.Title("Task Two"), testutil.IssueType("task")).
+			WithIssue("subtask-1", testutil.Title("Subtask One"), testutil.IssueType("task")).
+			WithDependency("task-1", "epic-1", "parent-child").
+			WithDependency("task-2", "epic-1", "parent-child").
+			WithDependency("subtask-1", "task-1", "parent-child")
+	})
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -1248,68 +794,24 @@ func TestExecutor_ExpandWithoutFilterOrderBy(t *testing.T) {
 }
 
 func TestExecutor_ExpandDepth10Boundary(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	require.NoError(t, err)
+	// Create 12 levels (0-11) to test depth 10 boundary
+	db := testutil.NewTestDB(t)
 	defer func() { _ = db.Close() }()
 
-	schema := `
-		CREATE TABLE issues (
-			id TEXT PRIMARY KEY,
-			title TEXT NOT NULL,
-			description TEXT,
-			design TEXT NOT NULL DEFAULT '',
-			acceptance_criteria TEXT NOT NULL DEFAULT '',
-			notes TEXT NOT NULL DEFAULT '',
-			status TEXT NOT NULL DEFAULT 'open',
-			priority INTEGER NOT NULL DEFAULT 2,
-			issue_type TEXT NOT NULL DEFAULT 'task',
-			assignee TEXT,
-			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-		);
-		CREATE TABLE labels (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			issue_id TEXT NOT NULL,
-			label TEXT NOT NULL,
-			FOREIGN KEY (issue_id) REFERENCES issues(id)
-		);
-		CREATE TABLE dependencies (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			issue_id TEXT NOT NULL,
-			depends_on_id TEXT NOT NULL,
-			type TEXT NOT NULL DEFAULT 'blocks',
-			FOREIGN KEY (issue_id) REFERENCES issues(id),
-			FOREIGN KEY (depends_on_id) REFERENCES issues(id)
-		);
-		CREATE TABLE blocked_issues_cache (issue_id TEXT PRIMARY KEY);
-		CREATE VIEW ready_issues AS
-		SELECT i.id FROM issues i
-		WHERE i.status IN ('open', 'in_progress')
-		  AND i.id NOT IN (SELECT issue_id FROM blocked_issues_cache);
-	`
-	_, err = db.Exec(schema)
-	require.NoError(t, err)
-
-	// Create 12 levels (0-11) to test depth 10 boundary
-	for i := 0; i <= 11; i++ {
-		issueType := "task"
-		if i == 0 {
-			issueType = "epic"
-		}
-		id := "d" + string(rune('a'+i)) // da, db, dc, ... dl
-		_, err = db.Exec(`INSERT INTO issues (id, title, status, priority, issue_type) VALUES (?, ?, 'open', 1, ?)`,
-			id, "Level "+string(rune('0'+i)), issueType)
-		require.NoError(t, err)
+	builder := testutil.NewBuilder(t, db)
+	// Create 12 levels: da (epic), db, dc, ... dl (all tasks)
+	builder.WithIssue("da", testutil.Title("Level 0"), testutil.IssueType("epic"))
+	for i := 1; i <= 11; i++ {
+		id := "d" + string(rune('a'+i))
+		builder.WithIssue(id, testutil.Title("Level "+string(rune('0'+i))), testutil.IssueType("task"))
 	}
-
 	// Create parent-child chain
 	for i := 1; i <= 11; i++ {
 		child := "d" + string(rune('a'+i))
 		parent := "d" + string(rune('a'+i-1))
-		_, err = db.Exec(`INSERT INTO dependencies (issue_id, depends_on_id, type) VALUES (?, ?, 'parent-child')`,
-			child, parent)
-		require.NoError(t, err)
+		builder.WithDependency(child, parent, "parent-child")
 	}
+	builder.Build()
 
 	executor := NewExecutor(db)
 
@@ -1328,7 +830,18 @@ func TestExecutor_ExpandDepth10Boundary(t *testing.T) {
 
 func TestExecutor_ExpandMixedTermination(t *testing.T) {
 	// Tests that depth * terminates naturally when graph ends, not at safety limit
-	db := setupDeepTestDB(t)
+	// 5-level deep hierarchy: level-0 -> level-1 -> level-2 -> level-3 -> level-4
+	db := setupDB(t, func(b *testutil.Builder) *testutil.Builder {
+		return b.WithIssue("level-0", testutil.Title("Level 0"), testutil.IssueType("epic")).
+			WithIssue("level-1", testutil.Title("Level 1"), testutil.IssueType("task")).
+			WithIssue("level-2", testutil.Title("Level 2"), testutil.IssueType("task")).
+			WithIssue("level-3", testutil.Title("Level 3"), testutil.IssueType("task")).
+			WithIssue("level-4", testutil.Title("Level 4"), testutil.IssueType("task")).
+			WithDependency("level-1", "level-0", "parent-child").
+			WithDependency("level-2", "level-1", "parent-child").
+			WithDependency("level-3", "level-2", "parent-child").
+			WithDependency("level-4", "level-3", "parent-child")
+	})
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -1347,7 +860,13 @@ func TestExecutor_ExpandMixedTermination(t *testing.T) {
 }
 
 func TestExecutor_ExpandCircularDepsStandalone(t *testing.T) {
-	db := setupCircularTestDB(t)
+	// Circular blocking: circular-a <-> circular-b
+	db := setupDB(t, func(b *testutil.Builder) *testutil.Builder {
+		return b.WithIssue("circular-a", testutil.Title("Circular A"), testutil.IssueType("task")).
+			WithIssue("circular-b", testutil.Title("Circular B"), testutil.IssueType("task")).
+			WithDependency("circular-b", "circular-a", "blocks").
+			WithDependency("circular-a", "circular-b", "blocks")
+	})
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -1390,7 +909,7 @@ func TestBuildIDQuery_SpecialCharacters(t *testing.T) {
 }
 
 func TestExecutor_IDIn_NonExistent(t *testing.T) {
-	db := setupTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -1402,7 +921,7 @@ func TestExecutor_IDIn_NonExistent(t *testing.T) {
 }
 
 func TestExecutor_IDIn_Mixed(t *testing.T) {
-	db := setupTestDB(t)
+	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
 	executor := NewExecutor(db)
@@ -1422,60 +941,18 @@ func TestExecutor_IDIn_Mixed(t *testing.T) {
 }
 
 func TestExecutor_ExpandLargeFanout(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	require.NoError(t, err)
+	// Create 1 epic with 100 children (large fan-out)
+	db := testutil.NewTestDB(t)
 	defer func() { _ = db.Close() }()
 
-	schema := `
-		CREATE TABLE issues (
-			id TEXT PRIMARY KEY,
-			title TEXT NOT NULL,
-			description TEXT,
-			design TEXT NOT NULL DEFAULT '',
-			acceptance_criteria TEXT NOT NULL DEFAULT '',
-			notes TEXT NOT NULL DEFAULT '',
-			status TEXT NOT NULL DEFAULT 'open',
-			priority INTEGER NOT NULL DEFAULT 2,
-			issue_type TEXT NOT NULL DEFAULT 'task',
-			assignee TEXT,
-			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-		);
-		CREATE TABLE labels (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			issue_id TEXT NOT NULL,
-			label TEXT NOT NULL,
-			FOREIGN KEY (issue_id) REFERENCES issues(id)
-		);
-		CREATE TABLE dependencies (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			issue_id TEXT NOT NULL,
-			depends_on_id TEXT NOT NULL,
-			type TEXT NOT NULL DEFAULT 'blocks',
-			FOREIGN KEY (issue_id) REFERENCES issues(id),
-			FOREIGN KEY (depends_on_id) REFERENCES issues(id)
-		);
-		CREATE TABLE blocked_issues_cache (issue_id TEXT PRIMARY KEY);
-		CREATE VIEW ready_issues AS
-		SELECT i.id FROM issues i
-		WHERE i.status IN ('open', 'in_progress')
-		  AND i.id NOT IN (SELECT issue_id FROM blocked_issues_cache);
-	`
-	_, err = db.Exec(schema)
-	require.NoError(t, err)
-
-	// Create 1 epic with 100 children (large fan-out)
-	_, err = db.Exec(`INSERT INTO issues (id, title, status, priority, issue_type) VALUES ('big-epic', 'Big Epic', 'open', 1, 'epic')`)
-	require.NoError(t, err)
-
+	builder := testutil.NewBuilder(t, db)
+	builder.WithIssue("big-epic", testutil.Title("Big Epic"), testutil.IssueType("epic"))
 	for i := 0; i < 100; i++ {
 		id := "child-" + string(rune('0'+i/100)) + string(rune('0'+(i%100)/10)) + string(rune('0'+i%10))
-		_, err = db.Exec(`INSERT INTO issues (id, title, status, priority, issue_type) VALUES (?, ?, 'open', 2, 'task')`,
-			id, "Child "+id)
-		require.NoError(t, err)
-		_, err = db.Exec(`INSERT INTO dependencies (issue_id, depends_on_id, type) VALUES (?, 'big-epic', 'parent-child')`, id)
-		require.NoError(t, err)
+		builder.WithIssue(id, testutil.Title("Child "+id), testutil.IssueType("task"), testutil.Priority(2))
+		builder.WithDependency(id, "big-epic", "parent-child")
 	}
+	builder.Build()
 
 	executor := NewExecutor(db)
 
