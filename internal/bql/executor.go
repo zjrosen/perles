@@ -146,17 +146,17 @@ func (e *Executor) scanIssues(rows *sql.Rows) ([]beads.Issue, error) {
 	var issues []beads.Issue
 	for rows.Next() {
 		var (
-			issue       beads.Issue
-			description sql.NullString
-			design      sql.NullString
+			issue              beads.Issue
+			description        sql.NullString
+			design             sql.NullString
 			acceptanceCriteria sql.NullString
-			notes       sql.NullString
-			assignee    sql.NullString
-			parentId    string
-			childrenIDs string
-			blockerIDs  string
-			blocksIDs   string
-			labelsStr   string
+			notes              sql.NullString
+			assignee           sql.NullString
+			parentId           string
+			childrenIDs        string
+			blockerIDs         string
+			blocksIDs          string
+			labelsStr          string
 		)
 
 		err := rows.Scan(
