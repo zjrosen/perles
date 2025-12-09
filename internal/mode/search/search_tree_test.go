@@ -479,3 +479,140 @@ func TestTreeSubMode_UCapitalKey_GoesToOriginal(t *testing.T) {
 	assert.Equal(t, originalRootID, m.tree.Root().Issue.ID, "U should go to original root")
 	assert.Equal(t, originalRootID, m.treeRoot.ID, "treeRoot should be updated")
 }
+
+// Tests for handleIssueDeleted tree-aware deletion handling
+
+func TestHandleIssueDeleted_TreeMode_NonRootDeletion(t *testing.T) {
+	// Setup: Tree mode with a root and children
+	m := createTreeTestModel()
+	assert.Equal(t, mode.SubModeTree, m.subMode)
+	assert.NotNil(t, m.treeRoot)
+	rootID := m.treeRoot.ID
+
+	// Delete a non-root issue (wasTreeRoot=false)
+	msg := issueDeletedMsg{
+		issueID:     "child-1",
+		parentID:    "root-1",
+		wasTreeRoot: false,
+		err:         nil,
+	}
+	m, cmd := m.handleIssueDeleted(msg)
+
+	// Verify state after deletion
+	assert.Equal(t, ViewSearch, m.view, "view should return to search")
+	assert.Nil(t, m.selectedIssue, "selectedIssue should be cleared")
+
+	// Verify command is returned (loadTree with same root + toast)
+	assert.NotNil(t, cmd, "should return command")
+
+	// The tree root should still be the same (refreshed with same root)
+	assert.Equal(t, rootID, m.treeRoot.ID, "treeRoot should remain unchanged for non-root deletion")
+}
+
+func TestHandleIssueDeleted_TreeMode_RootDeletionWithParent(t *testing.T) {
+	// Setup: Tree mode where root has a parent
+	rootIssue := beads.Issue{
+		ID:        "child-root",
+		TitleText: "Child as Root",
+		Type:      beads.TypeTask,
+		Status:    beads.StatusOpen,
+		ParentID:  "parent-1", // Has a parent
+	}
+	issues := []beads.Issue{rootIssue}
+
+	m := createTestModelWithTree(rootIssue, issues)
+	assert.Equal(t, mode.SubModeTree, m.subMode)
+
+	// Delete the root issue (wasTreeRoot=true, has parent)
+	msg := issueDeletedMsg{
+		issueID:     "child-root",
+		parentID:    "parent-1",
+		wasTreeRoot: true,
+		err:         nil,
+	}
+	m, cmd := m.handleIssueDeleted(msg)
+
+	// Verify state
+	assert.Equal(t, ViewSearch, m.view, "view should return to search")
+	assert.Nil(t, m.selectedIssue, "selectedIssue should be cleared")
+
+	// Should return loadTree command with parentID as new root
+	assert.NotNil(t, cmd, "should return command for re-rooting to parent")
+}
+
+func TestHandleIssueDeleted_TreeMode_RootDeletionWithoutParent(t *testing.T) {
+	// Setup: Tree mode where root has no parent (orphan root)
+	rootIssue := beads.Issue{
+		ID:        "orphan-root",
+		TitleText: "Orphan Root",
+		Type:      beads.TypeTask,
+		Status:    beads.StatusOpen,
+		ParentID:  "", // No parent
+	}
+	issues := []beads.Issue{rootIssue}
+
+	m := createTestModelWithTree(rootIssue, issues)
+	assert.Equal(t, mode.SubModeTree, m.subMode)
+
+	// Delete the root issue (wasTreeRoot=true, no parent)
+	msg := issueDeletedMsg{
+		issueID:     "orphan-root",
+		parentID:    "",
+		wasTreeRoot: true,
+		err:         nil,
+	}
+	m, cmd := m.handleIssueDeleted(msg)
+
+	// Verify state
+	assert.Equal(t, ViewSearch, m.view, "view should return to search")
+	assert.Nil(t, m.selectedIssue, "selectedIssue should be cleared")
+
+	// Should return ExitToKanbanMsg command
+	assert.NotNil(t, cmd, "should return command")
+
+	// Execute the batch command - one of them should be ExitToKanbanMsg
+	// Note: tea.Batch returns multiple commands, we check that it exists
+}
+
+func TestHandleIssueDeleted_ListMode_Deletion(t *testing.T) {
+	// Setup: List mode (default)
+	m := createTestModelWithResults()
+	assert.Equal(t, mode.SubModeList, m.subMode)
+
+	// Delete an issue in list mode
+	msg := issueDeletedMsg{
+		issueID:     "test-1",
+		parentID:    "",
+		wasTreeRoot: false,
+		err:         nil,
+	}
+	m, cmd := m.handleIssueDeleted(msg)
+
+	// Verify state
+	assert.Equal(t, ViewSearch, m.view, "view should return to search")
+	assert.Nil(t, m.selectedIssue, "selectedIssue should be cleared")
+
+	// Should return executeSearch command + toast
+	assert.NotNil(t, cmd, "should return command for list refresh")
+}
+
+func TestHandleIssueDeleted_Error(t *testing.T) {
+	// Setup: Any mode
+	m := createTreeTestModel()
+
+	// Delete fails with error
+	msg := issueDeletedMsg{
+		issueID:     "any-issue",
+		parentID:    "",
+		wasTreeRoot: false,
+		err:         assert.AnError,
+	}
+	m, cmd := m.handleIssueDeleted(msg)
+
+	// Verify state
+	assert.Equal(t, ViewSearch, m.view, "view should return to search")
+	assert.Nil(t, m.selectedIssue, "selectedIssue should be cleared")
+
+	// Should return error toast command
+	assert.NotNil(t, cmd, "should return command for error toast")
+}

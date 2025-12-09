@@ -1939,10 +1939,15 @@ func (m Model) handleModalSubmit(_ modal.SubmitMsg) (Model, tea.Cmd) {
 	if m.view == ViewDeleteConfirm {
 		if m.selectedIssue != nil {
 			issueID := m.selectedIssue.ID
+			parentID := m.selectedIssue.ParentID
 			cascade := m.deleteIsCascade
+			// Determine if this is the tree root being deleted
+			wasTreeRoot := m.subMode == mode.SubModeTree &&
+				m.treeRoot != nil &&
+				m.selectedIssue.ID == m.treeRoot.ID
 			m.selectedIssue = nil
 			m.deleteIsCascade = false
-			return m, deleteIssueCmd(issueID, cascade)
+			return m, deleteIssueCmd(issueID, parentID, wasTreeRoot, cascade)
 		}
 		m.view = ViewSearch
 		m.deleteIsCascade = false
@@ -1972,9 +1977,33 @@ func (m Model) handleIssueDeleted(msg issueDeletedMsg) (Model, tea.Cmd) {
 		}
 	}
 
-	// Return to search, refresh results to remove deleted issue
 	m.view = ViewSearch
 	m.selectedIssue = nil
+
+	// Tree sub-mode: refresh tree or exit to kanban
+	if m.subMode == mode.SubModeTree {
+		if msg.wasTreeRoot {
+			if msg.parentID != "" {
+				// Re-root tree to parent
+				return m, tea.Batch(
+					m.loadTree(msg.parentID),
+					func() tea.Msg { return mode.ShowToastMsg{Message: "Issue deleted", Style: toaster.StyleSuccess} },
+				)
+			}
+			// No parent - exit to kanban
+			return m, tea.Batch(
+				func() tea.Msg { return ExitToKanbanMsg{} },
+				func() tea.Msg { return mode.ShowToastMsg{Message: "Issue deleted", Style: toaster.StyleSuccess} },
+			)
+		}
+		// Non-root deleted - refresh with same root
+		return m, tea.Batch(
+			m.loadTree(m.treeRoot.ID),
+			func() tea.Msg { return mode.ShowToastMsg{Message: "Issue deleted", Style: toaster.StyleSuccess} },
+		)
+	}
+
+	// List sub-mode: existing behavior
 	return m, tea.Batch(
 		m.executeSearch(),
 		func() tea.Msg { return mode.ShowToastMsg{Message: "Issue deleted", Style: toaster.StyleSuccess} },
@@ -2006,8 +2035,10 @@ func (m Model) handleLabelsChanged(msg labelsChangedMsg) (Model, tea.Cmd) {
 // Message types for delete and label operations
 
 type issueDeletedMsg struct {
-	issueID string
-	err     error
+	issueID     string
+	parentID    string // Parent of deleted issue (for re-rooting tree)
+	wasTreeRoot bool   // True if deleted issue was tree root
+	err         error
 }
 
 type labelsChangedMsg struct {
@@ -2018,7 +2049,7 @@ type labelsChangedMsg struct {
 
 // Async commands
 
-func deleteIssueCmd(issueID string, cascade bool) tea.Cmd {
+func deleteIssueCmd(issueID, parentID string, wasTreeRoot, cascade bool) tea.Cmd {
 	return func() tea.Msg {
 		var err error
 		if cascade {
@@ -2026,7 +2057,12 @@ func deleteIssueCmd(issueID string, cascade bool) tea.Cmd {
 		} else {
 			err = beads.DeleteIssue(issueID)
 		}
-		return issueDeletedMsg{issueID: issueID, err: err}
+		return issueDeletedMsg{
+			issueID:     issueID,
+			parentID:    parentID,
+			wasTreeRoot: wasTreeRoot,
+			err:         err,
+		}
 	}
 }
 
