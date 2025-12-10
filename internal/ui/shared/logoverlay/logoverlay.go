@@ -16,8 +16,10 @@ import (
 )
 
 const (
-	viewportMaxHeight = 25 // Fixed viewport height in lines
-	viewportMinHeight = 5  // Minimum viewport height for very small screens
+	viewportMaxHeight = 25  // Fixed viewport height in lines
+	viewportMinHeight = 5   // Minimum viewport height for very small screens
+	boxMaxWidth       = 160 // Maximum box width in characters
+	boxMinWidth       = 40  // Minimum box width in characters
 )
 
 // CloseMsg is sent when the overlay should be closed.
@@ -30,7 +32,6 @@ type Model struct {
 	width    int
 	height   int
 	viewport viewport.Model
-	ready    bool // viewport initialized
 }
 
 // New creates a new log overlay model.
@@ -68,60 +69,52 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case "c":
 			// Clear buffer
 			log.ClearBuffer()
-			m.updateViewportContent()
+			m.refreshViewport()
 			return m, nil
 
 		case "d":
 			// Filter to DEBUG and above
 			m.minLevel = log.LevelDebug
-			m.updateViewportContent()
+			m.refreshViewport()
 			return m, nil
 
 		case "i":
 			// Filter to INFO and above
 			m.minLevel = log.LevelInfo
-			m.updateViewportContent()
+			m.refreshViewport()
 			return m, nil
 
 		case "w":
 			// Filter to WARN and above
 			m.minLevel = log.LevelWarn
-			m.updateViewportContent()
+			m.refreshViewport()
 			return m, nil
 
 		case "e":
 			// Filter to ERROR only
 			m.minLevel = log.LevelError
-			m.updateViewportContent()
+			m.refreshViewport()
 			return m, nil
 
 		case "j", "down":
-			// Scroll down
-			if m.ready {
-				m.viewport.ScrollDown(1)
-			}
+			m.viewport.ScrollDown(1)
 			return m, nil
 
 		case "k", "up":
-			// Scroll up
-			if m.ready {
-				m.viewport.ScrollUp(1)
-			}
+			m.viewport.ScrollUp(1)
 			return m, nil
 
 		case "g":
-			// Jump to top
-			if m.ready {
-				m.viewport.GotoTop()
-			}
+			m.viewport.GotoTop()
 			return m, nil
 
 		case "G":
-			// Jump to bottom
-			if m.ready {
-				m.viewport.GotoBottom()
-			}
+			m.viewport.GotoBottom()
 			return m, nil
+
+		case "ctrl+c":
+			// Quit the app
+			return m, tea.Quit
 
 		case "ctrl+x", "esc":
 			// Close overlay
@@ -132,7 +125,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.initViewport()
+		m.refreshViewport()
 	}
 
 	return m, nil
@@ -144,9 +137,7 @@ func (m Model) View() string {
 		return ""
 	}
 
-	// Calculate box dimensions
-	boxWidth := max(min(m.width-4, 80), 40) // Max 80 chars, min 40, with margin
-	contentWidth := boxWidth - 2            // Account for borders
+	boxWidth := m.boxWidth()
 
 	// Styles
 	titleStyle := lipgloss.NewStyle().
@@ -162,12 +153,7 @@ func (m Model) View() string {
 	header := titleStyle.Render("Logs")
 
 	// Build log content for viewport
-	var content string
-	if m.ready {
-		content = m.viewport.View()
-	} else {
-		content = m.buildLogContent(contentWidth)
-	}
+	content := m.viewport.View()
 
 	// Build footer with key hints
 	footerDivider := dividerStyle.Render(strings.Repeat("─", boxWidth))
@@ -225,14 +211,13 @@ func (m Model) buildLogContent(contentWidth int) string {
 	return strings.Join(lines, "\n")
 }
 
-// initViewport initializes the viewport with current log content.
-func (m *Model) initViewport() {
+// refreshViewport initializes or updates the viewport with current log content.
+func (m *Model) refreshViewport() {
 	if m.width == 0 || m.height == 0 {
 		return
 	}
 
-	boxWidth := max(min(m.width-4, 80), 40)
-	contentWidth := boxWidth - 2
+	contentWidth := m.contentWidth()
 
 	// Use fixed 25-line height, constrained by screen size
 	// Account for header (2 lines), footer (2 lines), borders (2 lines) = 6 lines overhead
@@ -241,17 +226,6 @@ func (m *Model) initViewport() {
 	viewportHeight = max(viewportHeight, viewportMinHeight)
 
 	m.viewport = viewport.New(contentWidth, viewportHeight)
-	m.viewport.SetContent(m.buildLogContent(contentWidth))
-	m.ready = true
-}
-
-// updateViewportContent refreshes the viewport content after filter changes.
-func (m *Model) updateViewportContent() {
-	if !m.ready {
-		return
-	}
-	boxWidth := max(min(m.width-4, 80), 40)
-	contentWidth := boxWidth - 2
 	m.viewport.SetContent(m.buildLogContent(contentWidth))
 }
 
@@ -273,24 +247,28 @@ func (m Model) Visible() bool {
 	return m.visible
 }
 
+// boxWidth returns the calculated box width based on screen size.
+func (m Model) boxWidth() int {
+	return max(min(m.width-4, boxMaxWidth), boxMinWidth)
+}
+
+// contentWidth returns the content width (box width minus borders).
+func (m Model) contentWidth() int {
+	return m.boxWidth() - 2
+}
+
 // Toggle toggles the overlay visibility.
 func (m *Model) Toggle() {
 	m.visible = !m.visible
 	if m.visible {
-		if !m.ready {
-			m.initViewport()
-		}
-		m.updateViewportContent()
+		m.refreshViewport()
 	}
 }
 
 // Show makes the overlay visible.
 func (m *Model) Show() {
 	m.visible = true
-	if !m.ready {
-		m.initViewport()
-	}
-	m.updateViewportContent()
+	m.refreshViewport()
 }
 
 // Hide makes the overlay invisible.
@@ -302,7 +280,7 @@ func (m *Model) Hide() {
 func (m *Model) SetSize(width, height int) {
 	m.width = width
 	m.height = height
-	m.initViewport()
+	m.refreshViewport()
 }
 
 // matchesLevel checks if a log entry matches the current filter level.

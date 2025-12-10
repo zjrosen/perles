@@ -208,7 +208,6 @@ func TestUpdate_ScrollDown(t *testing.T) {
 
 	m := NewWithSize(80, 24)
 	m.Show()
-	require.True(t, m.ready)
 
 	initialOffset := m.viewport.YOffset
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
@@ -225,7 +224,6 @@ func TestUpdate_ScrollUp(t *testing.T) {
 
 	m := NewWithSize(80, 24)
 	m.Show()
-	require.True(t, m.ready)
 
 	// Scroll down first
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
@@ -247,7 +245,6 @@ func TestUpdate_GotoTop(t *testing.T) {
 
 	m := NewWithSize(80, 24)
 	m.Show()
-	require.True(t, m.ready)
 
 	// Scroll down first
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
@@ -268,7 +265,6 @@ func TestUpdate_GotoBottom(t *testing.T) {
 
 	m := NewWithSize(80, 24)
 	m.Show()
-	require.True(t, m.ready)
 
 	// Go to top first to ensure we're not at bottom
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
