@@ -1439,6 +1439,11 @@ func (m Model) navigateToDependency(issueID string) (Model, tea.Cmd) {
 		}
 	}
 
+	// If in tree mode, select the node in the tree
+	if m.subMode == mode.SubModeTree && m.tree != nil {
+		m.tree.SelectByIssueID(issueID)
+	}
+
 	return m, nil
 }
 
