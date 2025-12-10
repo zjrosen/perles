@@ -175,6 +175,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case search.SaveSearchToNewViewMsg:
 		return m.handleSaveSearchToNewView(msg)
 
+	case search.SaveTreeToNewViewMsg:
+		return m.handleSaveTreeToNewView(msg)
+
+	case search.SaveTreeAsColumnMsg:
+		return m.handleSaveTreeAsColumn(msg)
+
 	case DBChangedMsg:
 		// Route to active mode and re-subscribe
 		log.Debug(log.CatMode, "DB changed, refreshing active mode", "mode", m.currentMode)
@@ -294,6 +300,72 @@ func (m Model) handleSaveSearchToNewView(msg search.SaveSearchToNewViewMsg) (tea
 	// Update in-memory config
 	m.services.Config.Views = append(m.services.Config.Views, newView)
 
+	return m, nil
+}
+
+// handleSaveTreeToNewView creates a new view with a tree column.
+func (m Model) handleSaveTreeToNewView(msg search.SaveTreeToNewViewMsg) (tea.Model, tea.Cmd) {
+	// Create tree column config
+	col := config.ColumnConfig{
+		Name:     msg.ColumnName,
+		Type:     "tree",
+		IssueID:  msg.IssueID,
+		TreeMode: msg.TreeMode,
+		Color:    msg.Color,
+	}
+
+	// Create the view config
+	newView := config.ViewConfig{
+		Name:    msg.ViewName,
+		Columns: []config.ColumnConfig{col},
+	}
+
+	// Persist to YAML
+	err := config.AddView(m.services.ConfigPath, newView, m.services.Config.Views)
+	if err != nil {
+		// Error already shown in search mode toast, just return
+		return m, nil
+	}
+
+	// Update in-memory config
+	m.services.Config.Views = append(m.services.Config.Views, newView)
+
+	return m, nil
+}
+
+// handleSaveTreeAsColumn adds a tree column to existing views.
+func (m Model) handleSaveTreeAsColumn(msg search.SaveTreeAsColumnMsg) (tea.Model, tea.Cmd) {
+	// Create tree column config
+	col := config.ColumnConfig{
+		Name:     msg.ColumnName,
+		Type:     "tree",
+		IssueID:  msg.IssueID,
+		TreeMode: msg.TreeMode,
+		Color:    msg.Color,
+	}
+
+	// Add column to each selected view
+	for _, viewIdx := range msg.ViewIndices {
+		// Persist to YAML
+		err := config.InsertColumnInView(
+			m.services.ConfigPath,
+			viewIdx,
+			0, // Insert at beginning
+			col,
+			m.services.Config.Views,
+		)
+		if err != nil {
+			// Log error, continue with other views
+			continue
+		}
+
+		// Update in-memory config
+		cols := m.services.Config.Views[viewIdx].Columns
+		cols = append([]config.ColumnConfig{col}, cols...)
+		m.services.Config.SetColumnsForView(viewIdx, cols)
+	}
+
+	// Refresh kanban if we switch back to it (will pick up new columns)
 	return m, nil
 }
 

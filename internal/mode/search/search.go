@@ -119,6 +119,36 @@ type updateViewSaveMsg struct {
 // closeSaveViewMsg closes any save view modal and returns to search.
 type closeSaveViewMsg struct{}
 
+// saveTreeActionNewViewMsg is triggered when user selects "Save to new view" in action picker.
+type saveTreeActionNewViewMsg struct {
+	issueID  string // from m.treeRoot.ID
+	treeMode string // from m.tree.Mode()
+}
+
+// saveTreeActionExistingViewMsg is triggered when user selects "Save to existing view".
+type saveTreeActionExistingViewMsg struct {
+	issueID  string
+	treeMode string
+}
+
+// treeNewViewSaveMsg is the form submission for new view creation with tree column.
+type treeNewViewSaveMsg struct {
+	ViewName   string
+	ColumnName string
+	Color      string
+	IssueID    string
+	TreeMode   string
+}
+
+// treeUpdateViewSaveMsg is the form submission for adding tree column to existing views.
+type treeUpdateViewSaveMsg struct {
+	ColumnName  string
+	Color       string
+	IssueID     string
+	TreeMode    string
+	ViewIndices []int
+}
+
 // makeNewViewFormConfig creates the formmodal config for creating a new view.
 func makeNewViewFormConfig(existingViews []config.ViewConfig, currentQuery string) formmodal.FormConfig {
 	return formmodal.FormConfig{
@@ -249,6 +279,169 @@ func makeUpdateViewFormConfig(views []config.ViewConfig, currentQuery string) fo
 		},
 		OnCancel: func() tea.Msg { return closeSaveViewMsg{} },
 	}
+}
+
+// makeNewViewTreeFormConfig creates form config for saving tree to a new view.
+func makeNewViewTreeFormConfig(existingViews []string, issueID, treeMode string) formmodal.FormConfig {
+	return formmodal.FormConfig{
+		Title: "Save Tree to New View",
+		Fields: []formmodal.FieldConfig{
+			{
+				Key:         "viewName",
+				Type:        formmodal.FieldTypeText,
+				Label:       "View Name",
+				Hint:        "required",
+				Placeholder: "My View",
+				MaxLength:   50,
+			},
+			{
+				Key:          "columnName",
+				Type:         formmodal.FieldTypeText,
+				Label:        "Column Name",
+				Hint:         "optional",
+				InitialValue: fmt.Sprintf("tree: %s", issueID),
+				MaxLength:    30,
+			},
+			{
+				Key:          "color",
+				Type:         formmodal.FieldTypeColor,
+				Label:        "Color",
+				Hint:         "Enter to change",
+				InitialColor: "#73F59F",
+			},
+			{
+				Key:   "treeMode",
+				Type:  formmodal.FieldTypeToggle,
+				Label: "Tree Mode",
+				Options: []formmodal.ListOption{
+					{Label: "Dependencies", Value: "deps"},
+					{Label: "Parent-Child", Value: "children"},
+				},
+				InitialToggleIndex: treeModeToIndex(treeMode),
+			},
+		},
+		SubmitLabel: " Save ",
+		MinWidth:    50,
+		Validate: func(values map[string]any) error {
+			viewName := strings.TrimSpace(values["viewName"].(string))
+			if viewName == "" {
+				return fmt.Errorf("View name is required")
+			}
+			for _, v := range existingViews {
+				if strings.EqualFold(v, viewName) {
+					return fmt.Errorf("View '%s' already exists", v)
+				}
+			}
+			return nil
+		},
+		OnSubmit: func(values map[string]any) tea.Msg {
+			viewName := strings.TrimSpace(values["viewName"].(string))
+			columnName := strings.TrimSpace(values["columnName"].(string))
+			if columnName == "" {
+				columnName = viewName
+			}
+			return treeNewViewSaveMsg{
+				ViewName:   viewName,
+				ColumnName: columnName,
+				Color:      values["color"].(string),
+				IssueID:    issueID,
+				TreeMode:   values["treeMode"].(string),
+			}
+		},
+		OnCancel: func() tea.Msg { return closeSaveViewMsg{} },
+	}
+}
+
+// makeUpdateViewTreeFormConfig creates form config for adding tree column to existing views.
+func makeUpdateViewTreeFormConfig(views []string, issueID, treeMode string) formmodal.FormConfig {
+	options := make([]formmodal.ListOption, len(views))
+	for i, v := range views {
+		options[i] = formmodal.ListOption{
+			Label:    v,
+			Value:    fmt.Sprintf("%d", i),
+			Selected: false,
+		}
+	}
+
+	return formmodal.FormConfig{
+		Title: "Add Tree Column to Views",
+		Fields: []formmodal.FieldConfig{
+			{
+				Key:          "columnName",
+				Type:         formmodal.FieldTypeText,
+				Label:        "Column Name",
+				Hint:         "required",
+				InitialValue: fmt.Sprintf("tree: %s", issueID),
+				MaxLength:    30,
+			},
+			{
+				Key:          "color",
+				Type:         formmodal.FieldTypeColor,
+				Label:        "Color",
+				Hint:         "Enter to change",
+				InitialColor: "#73F59F",
+			},
+			{
+				Key:   "treeMode",
+				Type:  formmodal.FieldTypeToggle,
+				Label: "Tree Mode",
+				Options: []formmodal.ListOption{
+					{Label: "Dependencies", Value: "deps"},
+					{Label: "Parent-Child", Value: "children"},
+				},
+				InitialToggleIndex: treeModeToIndex(treeMode),
+			},
+			{
+				Key:         "views",
+				Type:        formmodal.FieldTypeList,
+				Label:       "Add to Views",
+				Hint:        "Space to toggle",
+				MultiSelect: true,
+				Options:     options,
+			},
+		},
+		SubmitLabel: " Save ",
+		MinWidth:    50,
+		Validate: func(values map[string]any) error {
+			name := strings.TrimSpace(values["columnName"].(string))
+			if name == "" {
+				return fmt.Errorf("column name is required")
+			}
+			selectedViews := values["views"].([]string)
+			if len(selectedViews) == 0 {
+				return fmt.Errorf("select at least one view")
+			}
+			return nil
+		},
+		OnSubmit: func(values map[string]any) tea.Msg {
+			columnName := strings.TrimSpace(values["columnName"].(string))
+			selectedViews := values["views"].([]string)
+
+			indices := make([]int, 0, len(selectedViews))
+			for _, s := range selectedViews {
+				if idx, err := strconv.Atoi(s); err == nil {
+					indices = append(indices, idx)
+				}
+			}
+
+			return treeUpdateViewSaveMsg{
+				ColumnName:  columnName,
+				Color:       values["color"].(string),
+				IssueID:     issueID,
+				TreeMode:    values["treeMode"].(string),
+				ViewIndices: indices,
+			}
+		},
+		OnCancel: func() tea.Msg { return closeSaveViewMsg{} },
+	}
+}
+
+// treeModeToIndex converts tree mode string to toggle index.
+func treeModeToIndex(mode string) int {
+	if mode == "children" {
+		return 1
+	}
+	return 0 // "deps" is default
 }
 
 // New creates a new search mode controller.
@@ -457,6 +650,53 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, tea.Batch(
 			func() tea.Msg {
 				return SaveSearchAsColumnMsg(msg)
+			},
+			func() tea.Msg { return mode.ShowToastMsg{Message: toastMsg, Style: toaster.StyleSuccess} },
+		)
+
+	// Tree save action picker handlers
+	case saveTreeActionNewViewMsg:
+		existingViews := make([]string, len(m.services.Config.Views))
+		for i, v := range m.services.Config.Views {
+			existingViews[i] = v.Name
+		}
+		cfg := makeNewViewTreeFormConfig(existingViews, msg.issueID, msg.treeMode)
+		m.newViewModal = formmodal.New(cfg).SetSize(m.width, m.height)
+		m.view = ViewNewView
+		return m, nil
+
+	case saveTreeActionExistingViewMsg:
+		viewNames := make([]string, len(m.services.Config.Views))
+		for i, v := range m.services.Config.Views {
+			viewNames[i] = v.Name
+		}
+		cfg := makeUpdateViewTreeFormConfig(viewNames, msg.issueID, msg.treeMode)
+		m.viewSelector = formmodal.New(cfg).SetSize(m.width, m.height)
+		m.view = ViewSaveColumn
+		return m, nil
+
+	// Tree form submission handlers
+	case treeNewViewSaveMsg:
+		m.view = ViewSearch
+		return m, tea.Batch(
+			func() tea.Msg {
+				return SaveTreeToNewViewMsg(msg)
+			},
+			func() tea.Msg {
+				return mode.ShowToastMsg{Message: fmt.Sprintf("Created view '%s'", msg.ViewName), Style: toaster.StyleSuccess}
+			},
+		)
+
+	case treeUpdateViewSaveMsg:
+		m.view = ViewSearch
+		count := len(msg.ViewIndices)
+		toastMsg := fmt.Sprintf("Tree column added to %d view(s)", count)
+		if count == 1 {
+			toastMsg = "Tree column added to 1 view"
+		}
+		return m, tea.Batch(
+			func() tea.Msg {
+				return SaveTreeAsColumnMsg(msg)
 			},
 			func() tea.Msg { return mode.ShowToastMsg{Message: toastMsg, Style: toaster.StyleSuccess} },
 		)
@@ -759,6 +999,40 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			return m.toggleTreeDirection()
 		case "m":
 			return m.toggleTreeMode()
+		case "ctrl+s":
+			// Save current tree as column
+			if m.tree == nil || m.treeRoot == nil {
+				return m, func() tea.Msg {
+					return mode.ShowToastMsg{Message: "No tree to save", Style: toaster.StyleWarn}
+				}
+			}
+			// Capture tree state before showing picker
+			issueID := m.treeRoot.ID
+			treeMode := string(m.tree.Mode())
+
+			// Show action picker
+			m.picker = picker.NewWithConfig(picker.Config{
+				Title: "Save tree view as column:",
+				Options: []picker.Option{
+					{Label: "Save to existing view", Value: "existing"},
+					{Label: "Save to new view", Value: "new"},
+				},
+				OnSelect: func(opt picker.Option) tea.Msg {
+					if opt.Value == "new" {
+						return saveTreeActionNewViewMsg{
+							issueID:  issueID,
+							treeMode: treeMode,
+						}
+					}
+					return saveTreeActionExistingViewMsg{
+						issueID:  issueID,
+						treeMode: treeMode,
+					}
+				},
+				OnCancel: func() tea.Msg { return closeSaveViewMsg{} },
+			}).SetSize(m.width, m.height).SetBoxWidth(30)
+			m.view = ViewSaveAction
+			return m, nil
 		case "l", "right":
 			// Move focus to details panel
 			m.focus = FocusDetails
@@ -1733,6 +2007,26 @@ type SaveSearchToNewViewMsg struct {
 	ColumnName string
 	Color      string
 	Query      string
+}
+
+// SaveTreeToNewViewMsg creates a new view with a tree column.
+// This bubbles up to the app level for config persistence.
+type SaveTreeToNewViewMsg struct {
+	ViewName   string
+	ColumnName string
+	Color      string
+	IssueID    string
+	TreeMode   string
+}
+
+// SaveTreeAsColumnMsg adds a tree column to existing views.
+// This bubbles up to the app level for config persistence.
+type SaveTreeAsColumnMsg struct {
+	ColumnName  string
+	Color       string
+	IssueID     string
+	TreeMode    string
+	ViewIndices []int
 }
 
 // ExitToKanbanMsg requests switching back to kanban mode.

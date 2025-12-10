@@ -1506,3 +1506,362 @@ func TestOnSubmitFactory_ValidationFailureStillShowsError(t *testing.T) {
 	require.Equal(t, "Name is required", m.validationError)
 	require.False(t, factoryCalled, "OnSubmit factory should not be called when validation fails")
 }
+
+// --- Toggle Field Tests ---
+
+func TestToggleField_InitialState(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:   "mode",
+				Type:  FieldTypeToggle,
+				Label: "Mode",
+				Options: []ListOption{
+					{Label: "Option A", Value: "a"},
+					{Label: "Option B", Value: "b"},
+				},
+			},
+		},
+	}
+	m := New(cfg)
+
+	// Default initial index is 0
+	require.Equal(t, 0, m.fields[0].toggleIndex)
+
+	// Value should be "a"
+	values := getValues(m)
+	require.Equal(t, "a", values["mode"])
+}
+
+func TestToggleField_InitialToggleIndex(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:                "mode",
+				Type:               FieldTypeToggle,
+				Label:              "Mode",
+				InitialToggleIndex: 1, // Start on second option
+				Options: []ListOption{
+					{Label: "Option A", Value: "a"},
+					{Label: "Option B", Value: "b"},
+				},
+			},
+		},
+	}
+	m := New(cfg)
+
+	// Initial index should be 1
+	require.Equal(t, 1, m.fields[0].toggleIndex)
+
+	// Value should be "b"
+	values := getValues(m)
+	require.Equal(t, "b", values["mode"])
+}
+
+func TestToggleField_Navigation_LeftRight(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:   "mode",
+				Type:  FieldTypeToggle,
+				Label: "Mode",
+				Options: []ListOption{
+					{Label: "Option A", Value: "a"},
+					{Label: "Option B", Value: "b"},
+				},
+			},
+		},
+	}
+	m := New(cfg)
+
+	// Start at index 0
+	require.Equal(t, 0, m.fields[0].toggleIndex)
+
+	// Right key switches to index 1
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	require.Equal(t, 1, m.fields[0].toggleIndex, "after right")
+
+	// Right again stays at 1 (boundary)
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	require.Equal(t, 1, m.fields[0].toggleIndex, "at boundary")
+
+	// Left key switches back to index 0
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	require.Equal(t, 0, m.fields[0].toggleIndex, "after left")
+
+	// Left again stays at 0 (boundary)
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	require.Equal(t, 0, m.fields[0].toggleIndex, "at boundary")
+}
+
+func TestToggleField_Navigation_HL(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:   "mode",
+				Type:  FieldTypeToggle,
+				Label: "Mode",
+				Options: []ListOption{
+					{Label: "Option A", Value: "a"},
+					{Label: "Option B", Value: "b"},
+				},
+			},
+		},
+	}
+	m := New(cfg)
+
+	// Start at index 0
+	require.Equal(t, 0, m.fields[0].toggleIndex)
+
+	// 'l' switches to index 1
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	require.Equal(t, 1, m.fields[0].toggleIndex, "after 'l'")
+
+	// 'h' switches back to index 0
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	require.Equal(t, 0, m.fields[0].toggleIndex, "after 'h'")
+}
+
+func TestToggleField_Navigation_JK_MovesToNextField(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:   "name",
+				Type:  FieldTypeText,
+				Label: "Name",
+			},
+			{
+				Key:   "mode",
+				Type:  FieldTypeToggle,
+				Label: "Mode",
+				Options: []ListOption{
+					{Label: "Option A", Value: "a"},
+					{Label: "Option B", Value: "b"},
+				},
+			},
+			{
+				Key:   "color",
+				Type:  FieldTypeText,
+				Label: "Color",
+			},
+		},
+	}
+	m := New(cfg)
+
+	// Start on first field (name)
+	require.Equal(t, 0, m.focusedIndex)
+
+	// Tab to toggle field
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	require.Equal(t, 1, m.focusedIndex, "on toggle field")
+
+	// 'j' on toggle should move to next field (color), not toggle within
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	require.Equal(t, 2, m.focusedIndex, "after 'j' on toggle - should be on color field")
+
+	// Reset to toggle field to test 'k'
+	m.focusedIndex = 1 // toggle field
+
+	// 'k' on toggle should move to previous field
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	require.Equal(t, 0, m.focusedIndex, "after 'k' on toggle - should be on name field")
+}
+
+func TestToggleField_Navigation_DownUp_MovesToNextField(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:   "name",
+				Type:  FieldTypeText,
+				Label: "Name",
+			},
+			{
+				Key:   "mode",
+				Type:  FieldTypeToggle,
+				Label: "Mode",
+				Options: []ListOption{
+					{Label: "Option A", Value: "a"},
+					{Label: "Option B", Value: "b"},
+				},
+			},
+			{
+				Key:   "color",
+				Type:  FieldTypeText,
+				Label: "Color",
+			},
+		},
+	}
+	m := New(cfg)
+
+	// Start on first field (name)
+	require.Equal(t, 0, m.focusedIndex)
+
+	// Tab to toggle field
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	require.Equal(t, 1, m.focusedIndex, "on toggle field")
+
+	// Down on toggle should move to next field (color), not toggle within
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	require.Equal(t, 2, m.focusedIndex, "after down on toggle - should be on color field")
+
+	// Reset to toggle field to test Up
+	m.focusedIndex = 1
+
+	// Up on toggle should move to previous field (name)
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	require.Equal(t, 0, m.focusedIndex, "after up on toggle - should be on name field")
+}
+
+func TestToggleField_TabExitsToggle(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:   "mode",
+				Type:  FieldTypeToggle,
+				Label: "Mode",
+				Options: []ListOption{
+					{Label: "Option A", Value: "a"},
+					{Label: "Option B", Value: "b"},
+				},
+			},
+		},
+	}
+	m := New(cfg)
+
+	// Start on toggle field
+	require.Equal(t, 0, m.focusedIndex)
+
+	// Tab should move to buttons
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	require.Equal(t, -1, m.focusedIndex, "expected focus on buttons")
+}
+
+func TestToggleField_SubmitIncludesValue(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:   "mode",
+				Type:  FieldTypeToggle,
+				Label: "Mode",
+				Options: []ListOption{
+					{Label: "Option A", Value: "a"},
+					{Label: "Option B", Value: "b"},
+				},
+			},
+		},
+	}
+	m := New(cfg)
+
+	// Switch to second option
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+
+	// Navigate to submit and press Enter
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // to submit
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	require.NotNil(t, cmd, "expected submit command")
+	msg := cmd()
+	submitMsg, ok := msg.(SubmitMsg)
+	require.True(t, ok, "expected SubmitMsg, got %T", msg)
+	require.Equal(t, "b", submitMsg.Values["mode"])
+}
+
+func TestToggleField_InitialIndexClamping(t *testing.T) {
+	// Test that out-of-range initial indices are clamped
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:                "mode",
+				Type:               FieldTypeToggle,
+				Label:              "Mode",
+				InitialToggleIndex: 99, // Out of range
+				Options: []ListOption{
+					{Label: "Option A", Value: "a"},
+					{Label: "Option B", Value: "b"},
+				},
+			},
+		},
+	}
+	m := New(cfg)
+
+	// Should be clamped to 1 (max valid index)
+	require.Equal(t, 1, m.fields[0].toggleIndex)
+}
+
+func TestToggleField_NegativeInitialIndex(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:                "mode",
+				Type:               FieldTypeToggle,
+				Label:              "Mode",
+				InitialToggleIndex: -1, // Negative
+				Options: []ListOption{
+					{Label: "Option A", Value: "a"},
+					{Label: "Option B", Value: "b"},
+				},
+			},
+		},
+	}
+	m := New(cfg)
+
+	// Should be clamped to 0
+	require.Equal(t, 0, m.fields[0].toggleIndex)
+}
+
+// --- Toggle Field Golden Tests ---
+
+func TestGolden_ToggleFieldFocused_FirstSelected(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Save Tree Column",
+		Fields: []FieldConfig{
+			{
+				Key:   "mode",
+				Type:  FieldTypeToggle,
+				Label: "Tree Mode",
+				Options: []ListOption{
+					{Label: "Dependencies", Value: "deps"},
+					{Label: "Parent-Child", Value: "children"},
+				},
+			},
+		},
+		SubmitLabel: "Save",
+		MinWidth:    50,
+	}
+	m := New(cfg).SetSize(80, 24)
+
+	compareGolden(t, "toggle_field_first_selected", m.View())
+}
+
+func TestGolden_ToggleFieldFocused_SecondSelected(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Save Tree Column",
+		Fields: []FieldConfig{
+			{
+				Key:                "mode",
+				Type:               FieldTypeToggle,
+				Label:              "Tree Mode",
+				InitialToggleIndex: 1,
+				Options: []ListOption{
+					{Label: "Dependencies", Value: "deps"},
+					{Label: "Parent-Child", Value: "children"},
+				},
+			},
+		},
+		SubmitLabel: "Save",
+		MinWidth:    50,
+	}
+	m := New(cfg).SetSize(80, 24)
+
+	compareGolden(t, "toggle_field_second_selected", m.View())
+}

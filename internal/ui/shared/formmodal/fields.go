@@ -30,6 +30,9 @@ type fieldState struct {
 	// EditableList field state
 	addInput textinput.Model // Input for adding new items
 	subFocus subFocus        // Which part of composite field has focus
+
+	// Toggle field state
+	toggleIndex int // 0 or 1 - which option is currently selected
 }
 
 // listItem tracks selection state for list items.
@@ -94,6 +97,16 @@ func newFieldState(cfg FieldConfig) fieldState {
 		fs.addInput = ti
 		// Start with focus on the list
 		fs.subFocus = SubFocusList
+
+	case FieldTypeToggle:
+		// Initialize toggle with the configured initial index (default: 0)
+		fs.toggleIndex = cfg.InitialToggleIndex
+		// Clamp to valid range [0, 1]
+		if fs.toggleIndex < 0 {
+			fs.toggleIndex = 0
+		} else if fs.toggleIndex > 1 {
+			fs.toggleIndex = 1
+		}
 	}
 
 	return fs
@@ -134,6 +147,13 @@ func (fs *fieldState) value() any {
 			}
 		}
 		return selected
+
+	case FieldTypeToggle:
+		// Return the value of the selected option
+		if fs.toggleIndex >= 0 && fs.toggleIndex < len(fs.config.Options) {
+			return fs.config.Options[fs.toggleIndex].Value
+		}
+		return ""
 	}
 	return nil
 }

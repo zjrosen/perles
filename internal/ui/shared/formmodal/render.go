@@ -124,6 +124,9 @@ func (m Model) renderField(index int, width int) string {
 
 	case FieldTypeEditableList:
 		return m.renderEditableListField(fs, width, focused)
+
+	case FieldTypeToggle:
+		return m.renderToggleField(fs, width, focused)
 	}
 
 	return ""
@@ -172,6 +175,45 @@ func (m Model) renderEditableListField(fs *fieldState, width int, focused bool) 
 
 	// Join with a small gap
 	return lipgloss.JoinVertical(lipgloss.Left, listSection, "", inputSection)
+}
+
+// renderToggleField renders a binary toggle selector.
+// Visual pattern matches coleditor: ● Selected    ○ Unselected [←/→]
+func (m Model) renderToggleField(fs *fieldState, width int, focused bool) string {
+	cfg := fs.config
+
+	// Ensure we have exactly 2 options
+	if len(cfg.Options) < 2 {
+		return styles.RenderFormSection(
+			[]string{"(invalid: need 2 options)"},
+			cfg.Label, cfg.Hint, width, focused, styles.BorderHighlightFocusColor,
+		)
+	}
+
+	selectedStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(styles.TextPrimaryColor)
+	unselectedStyle := lipgloss.NewStyle().
+		Foreground(styles.TextMutedColor)
+	hintStyle := lipgloss.NewStyle().
+		Foreground(styles.TextMutedColor)
+
+	var opt0Label, opt1Label string
+	if fs.toggleIndex == 0 {
+		opt0Label = selectedStyle.Render("● " + cfg.Options[0].Label)
+		opt1Label = unselectedStyle.Render("○ " + cfg.Options[1].Label)
+	} else {
+		opt0Label = unselectedStyle.Render("○ " + cfg.Options[0].Label)
+		opt1Label = selectedStyle.Render("● " + cfg.Options[1].Label)
+	}
+
+	hint := hintStyle.Render(" [←/→]")
+	toggleRow := opt0Label + "    " + opt1Label + hint
+
+	return styles.RenderFormSection(
+		[]string{toggleRow},
+		cfg.Label, cfg.Hint, width, focused, styles.BorderHighlightFocusColor,
+	)
 }
 
 // renderButtons renders the submit and cancel buttons.

@@ -111,6 +111,13 @@ const (
 	// Navigate with j/k within the list, Tab between list and input.
 	// Supports Options, MultiSelect, InputPlaceholder, InputHint, InputLabel, AllowDuplicates.
 	FieldTypeEditableList
+
+	// FieldTypeToggle is a binary toggle selector (radio button style).
+	// Navigate between options with h/l or left/right keys.
+	// Requires exactly 2 Options. Returns the selected option's Value.
+	// Supports Options, InitialToggleIndex (0 or 1).
+	// Visual pattern: ● Selected    ○ Unselected [←/→]
+	FieldTypeToggle
 )
 
 // FieldConfig defines a single form field.
@@ -163,6 +170,9 @@ type FieldConfig struct {
 	InputHint        string // Hint shown below input (e.g., "Enter to add")
 	InputLabel       string // Label for input section (e.g., "Add Label")
 	AllowDuplicates  bool   // Whether duplicate values are allowed (default: false)
+
+	// Toggle field options (FieldTypeToggle)
+	InitialToggleIndex int // 0 or 1 - which option is initially selected (default: 0)
 }
 
 // ListOption represents an item in a list or select field.

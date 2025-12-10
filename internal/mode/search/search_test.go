@@ -12,6 +12,7 @@ import (
 	"perles/internal/mode"
 	"perles/internal/mode/shared"
 	"perles/internal/ui/details"
+	"perles/internal/ui/shared/formmodal"
 )
 
 // createTestModel creates a minimal Model for testing state transitions.
@@ -653,4 +654,364 @@ func TestSearch_YankKey_FocusResults_UsesResultsIssueID(t *testing.T) {
 	// The toast should mention the results issue ID (test-1), not the details issue ID (test-999)
 	require.Contains(t, toastMsg.Message, "test-1", "toast should contain results issue ID")
 	require.NotContains(t, toastMsg.Message, "test-999", "toast should NOT contain details issue ID")
+}
+
+// --- Tree Form Factory Tests ---
+
+func TestTreeModeToIndex(t *testing.T) {
+	tests := []struct {
+		name     string
+		mode     string
+		expected int
+	}{
+		{"deps returns 0", "deps", 0},
+		{"children returns 1", "children", 1},
+		{"empty string returns 0 (default)", "", 0},
+		{"unknown mode returns 0 (default)", "unknown", 0},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := treeModeToIndex(tc.mode)
+			require.Equal(t, tc.expected, result)
+		})
+	}
+}
+
+func TestMakeNewViewTreeFormConfig_Structure(t *testing.T) {
+	existingViews := []string{"Backlog", "Sprint"}
+	issueID := "test-123"
+	treeMode := "deps"
+
+	cfg := makeNewViewTreeFormConfig(existingViews, issueID, treeMode)
+
+	// Check form title
+	require.Equal(t, "Save Tree to New View", cfg.Title)
+
+	// Check we have 4 fields
+	require.Len(t, cfg.Fields, 4)
+
+	// Field 0: viewName (text)
+	require.Equal(t, "viewName", cfg.Fields[0].Key)
+	require.Equal(t, formmodal.FieldTypeText, cfg.Fields[0].Type)
+	require.Equal(t, "View Name", cfg.Fields[0].Label)
+	require.Equal(t, "required", cfg.Fields[0].Hint)
+
+	// Field 1: columnName (text with default)
+	require.Equal(t, "columnName", cfg.Fields[1].Key)
+	require.Equal(t, formmodal.FieldTypeText, cfg.Fields[1].Type)
+	require.Equal(t, "tree: test-123", cfg.Fields[1].InitialValue)
+
+	// Field 2: color
+	require.Equal(t, "color", cfg.Fields[2].Key)
+	require.Equal(t, formmodal.FieldTypeColor, cfg.Fields[2].Type)
+
+	// Field 3: treeMode (toggle)
+	require.Equal(t, "treeMode", cfg.Fields[3].Key)
+	require.Equal(t, formmodal.FieldTypeToggle, cfg.Fields[3].Type)
+	require.Len(t, cfg.Fields[3].Options, 2)
+	require.Equal(t, "Dependencies", cfg.Fields[3].Options[0].Label)
+	require.Equal(t, "deps", cfg.Fields[3].Options[0].Value)
+	require.Equal(t, "Parent-Child", cfg.Fields[3].Options[1].Label)
+	require.Equal(t, "children", cfg.Fields[3].Options[1].Value)
+	require.Equal(t, 0, cfg.Fields[3].InitialToggleIndex) // deps mode -> index 0
+}
+
+func TestMakeNewViewTreeFormConfig_InitialToggleIndex_Children(t *testing.T) {
+	cfg := makeNewViewTreeFormConfig(nil, "test-123", "children")
+
+	// When mode is "children", InitialToggleIndex should be 1
+	require.Equal(t, 1, cfg.Fields[3].InitialToggleIndex)
+}
+
+func TestMakeNewViewTreeFormConfig_Validation_EmptyName(t *testing.T) {
+	cfg := makeNewViewTreeFormConfig(nil, "test-123", "deps")
+
+	err := cfg.Validate(map[string]any{
+		"viewName":   "",
+		"columnName": "test column",
+		"color":      "#73F59F",
+		"treeMode":   "deps",
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "View name is required")
+}
+
+func TestMakeNewViewTreeFormConfig_Validation_DuplicateName(t *testing.T) {
+	existingViews := []string{"Backlog", "Sprint"}
+	cfg := makeNewViewTreeFormConfig(existingViews, "test-123", "deps")
+
+	err := cfg.Validate(map[string]any{
+		"viewName":   "Backlog",
+		"columnName": "test column",
+		"color":      "#73F59F",
+		"treeMode":   "deps",
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "already exists")
+}
+
+func TestMakeNewViewTreeFormConfig_Validation_DuplicateName_CaseInsensitive(t *testing.T) {
+	existingViews := []string{"Backlog", "Sprint"}
+	cfg := makeNewViewTreeFormConfig(existingViews, "test-123", "deps")
+
+	err := cfg.Validate(map[string]any{
+		"viewName":   "BACKLOG", // Different case
+		"columnName": "test column",
+		"color":      "#73F59F",
+		"treeMode":   "deps",
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "already exists")
+}
+
+func TestMakeNewViewTreeFormConfig_Validation_Success(t *testing.T) {
+	existingViews := []string{"Backlog", "Sprint"}
+	cfg := makeNewViewTreeFormConfig(existingViews, "test-123", "deps")
+
+	err := cfg.Validate(map[string]any{
+		"viewName":   "New View",
+		"columnName": "test column",
+		"color":      "#73F59F",
+		"treeMode":   "deps",
+	})
+
+	require.NoError(t, err)
+}
+
+func TestMakeNewViewTreeFormConfig_OnSubmit(t *testing.T) {
+	cfg := makeNewViewTreeFormConfig(nil, "test-123", "deps")
+
+	msg := cfg.OnSubmit(map[string]any{
+		"viewName":   "  My View  ", // With whitespace
+		"columnName": "  My Column  ",
+		"color":      "#FF8787",
+		"treeMode":   "children",
+	})
+
+	saveMsg, ok := msg.(treeNewViewSaveMsg)
+	require.True(t, ok, "expected treeNewViewSaveMsg, got %T", msg)
+	require.Equal(t, "My View", saveMsg.ViewName)     // Trimmed
+	require.Equal(t, "My Column", saveMsg.ColumnName) // Trimmed
+	require.Equal(t, "#FF8787", saveMsg.Color)
+	require.Equal(t, "test-123", saveMsg.IssueID)
+	require.Equal(t, "children", saveMsg.TreeMode)
+}
+
+func TestMakeNewViewTreeFormConfig_OnSubmit_EmptyColumnName(t *testing.T) {
+	cfg := makeNewViewTreeFormConfig(nil, "test-123", "deps")
+
+	msg := cfg.OnSubmit(map[string]any{
+		"viewName":   "My View",
+		"columnName": "   ", // Empty after trim
+		"color":      "#73F59F",
+		"treeMode":   "deps",
+	})
+
+	saveMsg := msg.(treeNewViewSaveMsg)
+	require.Equal(t, "My View", saveMsg.ColumnName) // Uses view name as fallback
+}
+
+func TestMakeUpdateViewTreeFormConfig_Structure(t *testing.T) {
+	views := []string{"Backlog", "Sprint", "Done"}
+	issueID := "test-456"
+	treeMode := "children"
+
+	cfg := makeUpdateViewTreeFormConfig(views, issueID, treeMode)
+
+	// Check form title
+	require.Equal(t, "Add Tree Column to Views", cfg.Title)
+
+	// Check we have 4 fields
+	require.Len(t, cfg.Fields, 4)
+
+	// Field 0: columnName (text with default)
+	require.Equal(t, "columnName", cfg.Fields[0].Key)
+	require.Equal(t, formmodal.FieldTypeText, cfg.Fields[0].Type)
+	require.Equal(t, "tree: test-456", cfg.Fields[0].InitialValue)
+
+	// Field 1: color
+	require.Equal(t, "color", cfg.Fields[1].Key)
+	require.Equal(t, formmodal.FieldTypeColor, cfg.Fields[1].Type)
+
+	// Field 2: treeMode (toggle)
+	require.Equal(t, "treeMode", cfg.Fields[2].Key)
+	require.Equal(t, formmodal.FieldTypeToggle, cfg.Fields[2].Type)
+	require.Equal(t, 1, cfg.Fields[2].InitialToggleIndex) // children mode -> index 1
+
+	// Field 3: views (list)
+	require.Equal(t, "views", cfg.Fields[3].Key)
+	require.Equal(t, formmodal.FieldTypeList, cfg.Fields[3].Type)
+	require.True(t, cfg.Fields[3].MultiSelect)
+	require.Len(t, cfg.Fields[3].Options, 3)
+	require.Equal(t, "Backlog", cfg.Fields[3].Options[0].Label)
+	require.Equal(t, "0", cfg.Fields[3].Options[0].Value)
+}
+
+func TestMakeUpdateViewTreeFormConfig_Validation_EmptyColumnName(t *testing.T) {
+	cfg := makeUpdateViewTreeFormConfig([]string{"Backlog"}, "test-123", "deps")
+
+	err := cfg.Validate(map[string]any{
+		"columnName": "   ",
+		"color":      "#73F59F",
+		"treeMode":   "deps",
+		"views":      []string{"0"},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "column name is required")
+}
+
+func TestMakeUpdateViewTreeFormConfig_Validation_NoViewsSelected(t *testing.T) {
+	cfg := makeUpdateViewTreeFormConfig([]string{"Backlog"}, "test-123", "deps")
+
+	err := cfg.Validate(map[string]any{
+		"columnName": "My Column",
+		"color":      "#73F59F",
+		"treeMode":   "deps",
+		"views":      []string{}, // Empty selection
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "select at least one view")
+}
+
+func TestMakeUpdateViewTreeFormConfig_Validation_Success(t *testing.T) {
+	cfg := makeUpdateViewTreeFormConfig([]string{"Backlog", "Sprint"}, "test-123", "deps")
+
+	err := cfg.Validate(map[string]any{
+		"columnName": "My Column",
+		"color":      "#73F59F",
+		"treeMode":   "deps",
+		"views":      []string{"0", "1"},
+	})
+
+	require.NoError(t, err)
+}
+
+func TestMakeUpdateViewTreeFormConfig_OnSubmit(t *testing.T) {
+	cfg := makeUpdateViewTreeFormConfig([]string{"Backlog", "Sprint"}, "test-123", "deps")
+
+	msg := cfg.OnSubmit(map[string]any{
+		"columnName": "  Tree: test-123  ",
+		"color":      "#FF8787",
+		"treeMode":   "children",
+		"views":      []string{"0", "1"},
+	})
+
+	saveMsg, ok := msg.(treeUpdateViewSaveMsg)
+	require.True(t, ok, "expected treeUpdateViewSaveMsg, got %T", msg)
+	require.Equal(t, "Tree: test-123", saveMsg.ColumnName) // Trimmed
+	require.Equal(t, "#FF8787", saveMsg.Color)
+	require.Equal(t, "test-123", saveMsg.IssueID)
+	require.Equal(t, "children", saveMsg.TreeMode)
+	require.Equal(t, []int{0, 1}, saveMsg.ViewIndices)
+}
+
+// --- Tree Save Toast Tests ---
+
+func TestTreeNewViewSaveMsg_EmitsToast(t *testing.T) {
+	m := createTestModelWithViews()
+	m.view = ViewNewView
+
+	saveMsg := treeNewViewSaveMsg{
+		ViewName:   "My Tree View",
+		ColumnName: "Deps Column",
+		Color:      "#73F59F",
+		IssueID:    "test-123",
+		TreeMode:   "deps",
+	}
+	m, cmd := m.Update(saveMsg)
+
+	require.Equal(t, ViewSearch, m.view, "expected to return to search view")
+	require.NotNil(t, cmd, "expected batch command with ShowToastMsg")
+
+	// Execute the batch command and verify ShowToastMsg is present
+	msgs := executeBatchCmd(cmd)
+	var toastFound bool
+	for _, msg := range msgs {
+		if toast, ok := msg.(mode.ShowToastMsg); ok {
+			require.Contains(t, toast.Message, "My Tree View", "toast should mention view name")
+			toastFound = true
+		}
+	}
+	require.True(t, toastFound, "expected ShowToastMsg in batch")
+}
+
+func TestTreeUpdateViewSaveMsg_EmitsToast_SingleView(t *testing.T) {
+	m := createTestModelWithViews()
+	m.view = ViewSaveColumn
+
+	saveMsg := treeUpdateViewSaveMsg{
+		ColumnName:  "Tree Column",
+		Color:       "#73F59F",
+		IssueID:     "test-123",
+		TreeMode:    "children",
+		ViewIndices: []int{0},
+	}
+	m, cmd := m.Update(saveMsg)
+
+	require.Equal(t, ViewSearch, m.view, "expected to return to search view")
+	require.NotNil(t, cmd, "expected batch command with ShowToastMsg")
+
+	// Execute the batch command and verify ShowToastMsg message
+	msgs := executeBatchCmd(cmd)
+	var toastFound bool
+	for _, msg := range msgs {
+		if toast, ok := msg.(mode.ShowToastMsg); ok {
+			require.Equal(t, "Tree column added to 1 view", toast.Message, "toast should use singular")
+			toastFound = true
+		}
+	}
+	require.True(t, toastFound, "expected ShowToastMsg in batch")
+}
+
+func TestTreeUpdateViewSaveMsg_EmitsToast_MultipleViews(t *testing.T) {
+	m := createTestModelWithViews()
+	m.view = ViewSaveColumn
+
+	saveMsg := treeUpdateViewSaveMsg{
+		ColumnName:  "Tree Column",
+		Color:       "#73F59F",
+		IssueID:     "test-123",
+		TreeMode:    "deps",
+		ViewIndices: []int{0, 1, 2},
+	}
+	m, cmd := m.Update(saveMsg)
+
+	require.Equal(t, ViewSearch, m.view, "expected to return to search view")
+	require.NotNil(t, cmd, "expected batch command with ShowToastMsg")
+
+	// Execute the batch command and verify ShowToastMsg message
+	msgs := executeBatchCmd(cmd)
+	var toastFound bool
+	for _, msg := range msgs {
+		if toast, ok := msg.(mode.ShowToastMsg); ok {
+			require.Equal(t, "Tree column added to 3 view(s)", toast.Message, "toast should use plural")
+			toastFound = true
+		}
+	}
+	require.True(t, toastFound, "expected ShowToastMsg in batch")
+}
+
+// executeBatchCmd executes a tea.Cmd that returns a tea.BatchMsg and collects all messages.
+func executeBatchCmd(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	msg := cmd()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		return []tea.Msg{msg}
+	}
+	var results []tea.Msg
+	for _, c := range batch {
+		if c != nil {
+			results = append(results, c())
+		}
+	}
+	return results
 }

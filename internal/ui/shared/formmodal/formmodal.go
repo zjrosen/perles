@@ -188,6 +188,14 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m.handleEnter()
 
 	case "h", "left":
+		// For toggle fields, switch to first option
+		if m.focusedIndex >= 0 && m.focusedIndex < len(m.fields) {
+			fs := &m.fields[m.focusedIndex]
+			if fs.config.Type == FieldTypeToggle && fs.toggleIndex == 1 {
+				fs.toggleIndex = 0
+				return m, nil
+			}
+		}
 		// Navigate between buttons when focused on buttons
 		if m.focusedIndex == -1 && m.focusedButton == 1 {
 			m.focusedButton = 0
@@ -195,6 +203,14 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 
 	case "l", "right":
+		// For toggle fields, switch to second option
+		if m.focusedIndex >= 0 && m.focusedIndex < len(m.fields) {
+			fs := &m.fields[m.focusedIndex]
+			if fs.config.Type == FieldTypeToggle && fs.toggleIndex == 0 {
+				fs.toggleIndex = 1
+				return m, nil
+			}
+		}
 		// Navigate between buttons when focused on buttons
 		if m.focusedIndex == -1 && m.focusedButton == 0 {
 			m.focusedButton = 1
@@ -210,6 +226,11 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 					fs.listCursor++
 				}
 				return m, nil
+			}
+			// For toggle fields, j/down moves to next field (not within toggle)
+			if fs.config.Type == FieldTypeToggle {
+				m = m.nextField()
+				return m, m.blinkCmd()
 			}
 		} else if m.focusedIndex == -1 {
 			// On buttons: Save -> Cancel -> first field
@@ -232,6 +253,11 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 					fs.listCursor--
 				}
 				return m, nil
+			}
+			// For toggle fields, k/up moves to previous field (not within toggle)
+			if fs.config.Type == FieldTypeToggle {
+				m = m.prevField()
+				return m, m.blinkCmd()
 			}
 		} else if m.focusedIndex == -1 {
 			// On buttons: Cancel -> Save -> last field
