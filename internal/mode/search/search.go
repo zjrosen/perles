@@ -1431,11 +1431,13 @@ func (m Model) navigateToDependency(issueID string) (Model, tea.Cmd) {
 	m.hasDetail = true
 
 	// Try to find and select this issue in the results list
-	for i, result := range m.results {
-		if result.ID == issueID {
-			m.selectedIdx = i
-			m.resultsList.Select(i)
-			break
+	if m.subMode == mode.SubModeList {
+		for i, result := range m.results {
+			if result.ID == issueID {
+				m.selectedIdx = i
+				m.resultsList.Select(i)
+				break
+			}
 		}
 	}
 
