@@ -7,7 +7,6 @@ import (
 
 	"perles/internal/config"
 	"perles/internal/mode"
-	"perles/internal/mode/shared"
 	"perles/internal/ui/coleditor"
 	"perles/internal/ui/shared/modal"
 	"perles/internal/ui/shared/picker"
@@ -87,7 +86,7 @@ func (m Model) handleBoardKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "y":
 		// Yank (copy) selected issue ID to clipboard
 		if issue := m.board.SelectedIssue(); issue != nil {
-			if err := shared.CopyToClipboard(issue.ID); err != nil {
+			if err := m.services.Clipboard.Copy(issue.ID); err != nil {
 				m.err = err
 				m.errContext = "copying to clipboard"
 				return m, scheduleErrorClear()
@@ -344,7 +343,7 @@ func (m Model) handleDetailsKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		if issueID == "" {
 			return m, nil
 		}
-		if err := shared.CopyToClipboard(issueID); err != nil {
+		if err := m.services.Clipboard.Copy(issueID); err != nil {
 			m.err = err
 			m.errContext = "copying to clipboard"
 			return m, scheduleErrorClear()

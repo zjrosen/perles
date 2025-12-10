@@ -10,6 +10,7 @@ import (
 	"perles/internal/beads"
 	"perles/internal/config"
 	"perles/internal/mode"
+	"perles/internal/mode/shared"
 	"perles/internal/ui/details"
 )
 
@@ -18,7 +19,8 @@ import (
 func createTestModel() Model {
 	cfg := config.Defaults()
 	services := mode.Services{
-		Config: &cfg,
+		Config:    &cfg,
+		Clipboard: shared.MockClipboard{},
 	}
 
 	m := New(services)

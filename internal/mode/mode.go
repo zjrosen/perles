@@ -7,6 +7,7 @@ import (
 	"perles/internal/beads"
 	"perles/internal/bql"
 	"perles/internal/config"
+	"perles/internal/mode/shared"
 	"perles/internal/ui/shared/toaster"
 )
 
@@ -48,6 +49,7 @@ type Services struct {
 	Config     *config.Config
 	ConfigPath string
 	DBPath     string
+	Clipboard  shared.Clipboard
 }
 
 // ShowToastMsg requests displaying a toast notification.

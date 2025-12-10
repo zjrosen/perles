@@ -1241,7 +1241,7 @@ func (m Model) yankTreeIssueID() (Model, tea.Cmd) {
 		return m, func() tea.Msg { return mode.ShowToastMsg{Message: "No issue selected", Style: toaster.StyleError} }
 	}
 
-	if err := shared.CopyToClipboard(node.Issue.ID); err != nil {
+	if err := m.services.Clipboard.Copy(node.Issue.ID); err != nil {
 		return m, func() tea.Msg {
 			return mode.ShowToastMsg{Message: "Clipboard error: " + err.Error(), Style: toaster.StyleError}
 		}
@@ -1848,7 +1848,7 @@ func (m Model) yankIssueID() (Model, tea.Cmd) {
 	}
 
 	issue := m.results[m.selectedIdx]
-	if err := shared.CopyToClipboard(issue.ID); err != nil {
+	if err := m.services.Clipboard.Copy(issue.ID); err != nil {
 		return m, func() tea.Msg {
 			return mode.ShowToastMsg{Message: "Clipboard error: " + err.Error(), Style: toaster.StyleError}
 		}
@@ -1865,7 +1865,7 @@ func (m Model) yankDetailsIssueID() (Model, tea.Cmd) {
 		return m, func() tea.Msg { return mode.ShowToastMsg{Message: "No issue selected", Style: toaster.StyleError} }
 	}
 
-	if err := shared.CopyToClipboard(issueID); err != nil {
+	if err := m.services.Clipboard.Copy(issueID); err != nil {
 		return m, func() tea.Msg {
 			return mode.ShowToastMsg{Message: "Clipboard error: " + err.Error(), Style: toaster.StyleError}
 		}

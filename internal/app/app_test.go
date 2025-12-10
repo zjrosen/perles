@@ -9,6 +9,7 @@ import (
 	"perles/internal/mode"
 	"perles/internal/mode/kanban"
 	"perles/internal/mode/search"
+	"perles/internal/mode/shared"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -18,7 +19,8 @@ import (
 func createTestModel() Model {
 	cfg := config.Defaults()
 	services := mode.Services{
-		Config: &cfg,
+		Config:    &cfg,
+		Clipboard: shared.MockClipboard{},
 	}
 
 	return Model{

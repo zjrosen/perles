@@ -13,6 +13,7 @@ import (
 	"perles/internal/mode"
 	"perles/internal/mode/kanban"
 	"perles/internal/mode/search"
+	"perles/internal/mode/shared"
 	"perles/internal/ui/shared/logoverlay"
 	"perles/internal/ui/shared/toaster"
 	"perles/internal/watcher"
@@ -89,6 +90,7 @@ func NewWithConfig(client *beads.Client, cfg config.Config, dbPath, configPath s
 		Config:     &cfg,
 		ConfigPath: configPath,
 		DBPath:     dbPath,
+		Clipboard:  shared.SystemClipboard{},
 	}
 
 	return Model{
