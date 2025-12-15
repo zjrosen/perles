@@ -153,5 +153,5 @@ func TestDefaultConfig(t *testing.T) {
 	cfg := watcher.DefaultConfig(dbPath)
 
 	require.Equal(t, dbPath, cfg.DBPath)
-	require.Equal(t, 1*time.Second, cfg.DebounceDur)
+	require.Equal(t, 100*time.Millisecond, cfg.DebounceDur)
 }

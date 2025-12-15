@@ -60,7 +60,6 @@ func init() {
 func initConfig() {
 	defaults := config.Defaults()
 	viper.SetDefault("auto_refresh", defaults.AutoRefresh)
-	viper.SetDefault("auto_refresh_debounce", defaults.AutoRefreshDebounce)
 	viper.SetDefault("ui.show_counts", defaults.UI.ShowCounts)
 	viper.SetDefault("theme.preset", defaults.Theme.Preset)
 

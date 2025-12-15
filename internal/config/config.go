@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	"perles/internal/log"
 )
@@ -28,12 +27,11 @@ type ViewConfig struct {
 
 // Config holds all configuration options for perles.
 type Config struct {
-	BeadsDir            string        `mapstructure:"beads_dir"`
-	AutoRefresh         bool          `mapstructure:"auto_refresh"`
-	AutoRefreshDebounce time.Duration `mapstructure:"auto_refresh_debounce"`
-	UI                  UIConfig      `mapstructure:"ui"`
-	Theme               ThemeConfig   `mapstructure:"theme"`
-	Views               []ViewConfig  `mapstructure:"views"`
+	BeadsDir    string       `mapstructure:"beads_dir"`
+	AutoRefresh bool         `mapstructure:"auto_refresh"`
+	UI          UIConfig     `mapstructure:"ui"`
+	Theme       ThemeConfig  `mapstructure:"theme"`
+	Views       []ViewConfig `mapstructure:"views"`
 }
 
 // UIConfig holds user interface configuration options.
@@ -191,8 +189,7 @@ func (c *Config) SetColumnsForView(viewIndex int, columns []ColumnConfig) {
 // Defaults returns a Config with sensible default values.
 func Defaults() Config {
 	return Config{
-		AutoRefresh:         true,
-		AutoRefreshDebounce: 1 * time.Second,
+		AutoRefresh: true,
 		UI: UIConfig{
 			ShowCounts:    true,
 			ShowStatusBar: true,
@@ -214,7 +211,6 @@ func DefaultConfigTemplate() string {
 
 # Auto-refresh when database changes
 auto_refresh: true
-auto_refresh_debounce: 1s
 
 # UI settings
 ui:

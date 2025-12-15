@@ -61,10 +61,7 @@ func NewWithConfig(client *beads.Client, cfg config.Config, dbPath, configPath s
 	var dbWatcher <-chan struct{}
 	var watcherHandle *watcher.Watcher
 	if cfg.AutoRefresh && dbPath != "" {
-		w, err := watcher.New(watcher.Config{
-			DBPath:      dbPath,
-			DebounceDur: cfg.AutoRefreshDebounce,
-		})
+		w, err := watcher.New(watcher.DefaultConfig(dbPath))
 		if err == nil {
 			onChange, err := w.Start()
 			if err == nil {

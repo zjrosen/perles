@@ -29,7 +29,7 @@ type Config struct {
 func DefaultConfig(dbPath string) Config {
 	return Config{
 		DBPath:      dbPath,
-		DebounceDur: 1 * time.Second,
+		DebounceDur: 100 * time.Millisecond,
 	}
 }
 

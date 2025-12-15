@@ -411,7 +411,6 @@ Perles looks for configuration in these locations (in order):
 |--------|------|---------|-------------|
 | `beads_dir` | string | `""` | Path to beads database directory (default: current directory) |
 | `auto_refresh` | bool | `true` | Auto-refresh when database changes |
-| `auto_refresh_debounce` | duration | `1s` | Debounce delay for auto-refresh |
 | `ui.show_counts` | bool | `true` | Show issue counts in column headers |
 | `ui.show_status_bar` | bool | `true` | Show status bar at bottom |
 | `theme.preset` | string | `""` | Theme preset name (see Theming section) |
@@ -425,7 +424,6 @@ Perles looks for configuration in these locations (in order):
 
 # Auto-refresh when database changes
 auto_refresh: true
-auto_refresh_debounce: 1s
 
 # UI settings
 ui:
