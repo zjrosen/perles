@@ -488,6 +488,7 @@ func (m Model) Init() tea.Cmd {
 func (m Model) SetQuery(query string) Model {
 	m.subMode = mode.SubModeList
 	m.focus = FocusSearch // Focus search input
+	m.input.Focus()       // Focus the bqlinput component
 	m.input.SetValue(query)
 	// Clear tree state from any previous tree sub-mode usage
 	m.tree = nil
