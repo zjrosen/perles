@@ -72,23 +72,15 @@ func (b *SQLBuilder) buildCompare(e *CompareExpr) string {
 		}
 		return "i.id NOT IN (SELECT id FROM ready_issues)"
 
-	case "pinned":
-		// pinned is a nullable boolean column (INTEGER in SQLite)
-		// pinned = true -> i.pinned = 1
-		// pinned = false -> i.pinned = 0 (won't match NULL)
+	case "pinned", "is_template":
+		// Nullable boolean columns (INTEGER in SQLite)
+		// field = true -> column = 1
+		// field = false -> column = 0 (won't match NULL)
+		column := b.fieldToColumn(e.Field)
 		if e.Value.Bool {
-			return "i.pinned = 1"
+			return fmt.Sprintf("%s = 1", column)
 		}
-		return "i.pinned = 0"
-
-	case "is_template":
-		// is_template is a nullable boolean column (INTEGER in SQLite)
-		// is_template = true -> i.is_template = 1
-		// is_template = false -> i.is_template = 0 (won't match NULL)
-		if e.Value.Bool {
-			return "i.is_template = 1"
-		}
-		return "i.is_template = 0"
+		return fmt.Sprintf("%s = 0", column)
 
 	case "label":
 		// Label check via labels table
@@ -124,6 +116,21 @@ func (b *SQLBuilder) buildCompare(e *CompareExpr) string {
 	if e.Value.Type == ValueDate {
 		dateSQL := b.dateToSQL(e.Value.String)
 		return fmt.Sprintf("datetime(%s) %s %s", column, b.opToSQL(e.Op), dateSQL)
+	}
+
+	// Handle nullable string fields (use COALESCE so NULL matches empty string)
+	if e.Field == "assignee" {
+		switch e.Op {
+		case TokenContains:
+			b.params = append(b.params, "%"+e.Value.String+"%")
+			return fmt.Sprintf("COALESCE(%s, '') LIKE ?", column)
+		case TokenNotContains:
+			b.params = append(b.params, "%"+e.Value.String+"%")
+			return fmt.Sprintf("COALESCE(%s, '') NOT LIKE ?", column)
+		default:
+			b.params = append(b.params, e.Value.String)
+			return fmt.Sprintf("COALESCE(%s, '') %s ?", column, b.opToSQL(e.Op))
+		}
 	}
 
 	// Handle contains/not contains operators
@@ -180,14 +187,11 @@ func (b *SQLBuilder) buildIn(e *InExpr) string {
 
 // fieldToColumn maps BQL field names to SQL column names.
 func (b *SQLBuilder) fieldToColumn(field string) string {
+	// Only map fields where BQL name differs from column name
 	mapping := map[string]string{
-		"type":     "i.issue_type",
-		"priority": "i.priority",
-		"status":   "i.status",
-		"title":    "i.title",
-		"id":       "i.id",
-		"created":  "i.created_at",
-		"updated":  "i.updated_at",
+		"type":    "i.issue_type",
+		"created": "i.created_at",
+		"updated": "i.updated_at",
 	}
 	if col, ok := mapping[field]; ok {
 		return col

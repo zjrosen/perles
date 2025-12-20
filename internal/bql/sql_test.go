@@ -157,6 +157,42 @@ func TestSQLBuilder_SpecialFields(t *testing.T) {
 		require.Empty(t, params)
 	})
 
+	t.Run("assignee equals", func(t *testing.T) {
+		parser := NewParser("assignee = alice")
+		query, err := parser.Parse()
+		require.NoError(t, err)
+
+		builder := NewSQLBuilder(query)
+		where, _, params := builder.Build()
+
+		require.Equal(t, "COALESCE(i.assignee, '') = ?", where)
+		require.Equal(t, []interface{}{"alice"}, params)
+	})
+
+	t.Run("assignee empty", func(t *testing.T) {
+		parser := NewParser(`assignee = ""`)
+		query, err := parser.Parse()
+		require.NoError(t, err)
+
+		builder := NewSQLBuilder(query)
+		where, _, params := builder.Build()
+
+		require.Equal(t, "COALESCE(i.assignee, '') = ?", where)
+		require.Equal(t, []interface{}{""}, params)
+	})
+
+	t.Run("assignee contains", func(t *testing.T) {
+		parser := NewParser("assignee ~ bob")
+		query, err := parser.Parse()
+		require.NoError(t, err)
+
+		builder := NewSQLBuilder(query)
+		where, _, params := builder.Build()
+
+		require.Equal(t, "COALESCE(i.assignee, '') LIKE ?", where)
+		require.Equal(t, []interface{}{"%bob%"}, params)
+	})
+
 	t.Run("single label", func(t *testing.T) {
 		parser := NewParser("label = urgent")
 		query, err := parser.Parse()

@@ -17,6 +17,11 @@ var ValidFields = map[string]FieldType{
 	"label":       FieldString,
 	"title":       FieldString,
 	"id":          FieldString,
+	"assignee":    FieldString,
+	"sender":      FieldString,
+	"description": FieldString,
+	"design":      FieldString,
+	"notes":       FieldString,
 	"created":     FieldDate,
 	"updated":     FieldDate,
 }
@@ -181,8 +186,16 @@ func validateValue(field string, fieldType FieldType, value Value) error {
 		}
 
 	case FieldPriority:
-		if value.Type != ValuePriority {
-			return fmt.Errorf("field %q requires a priority value (P0-P4), got %q", field, value.Raw)
+		// Accept both P0-P4 format and plain integers 0-4
+		switch value.Type {
+		case ValuePriority:
+			// Already validated by parser
+		case ValueInt:
+			if value.Int < 0 || value.Int > 4 {
+				return fmt.Errorf("field %q requires priority 0-4, got %d", field, value.Int)
+			}
+		default:
+			return fmt.Errorf("field %q requires a priority value (P0-P4 or 0-4), got %q", field, value.Raw)
 		}
 
 	case FieldDate:

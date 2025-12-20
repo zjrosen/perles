@@ -16,6 +16,10 @@ func TestValidate_ValidQueries(t *testing.T) {
 		"priority = P0",
 		"priority < P2",
 		"priority >= P1",
+		"priority = 0",
+		"priority = 2",
+		"priority < 3",
+		"priority >= 1",
 		"status = open",
 		"status = in_progress",
 		"status = closed",
@@ -115,6 +119,8 @@ func TestValidate_InvalidValue(t *testing.T) {
 		{"invalid status value", "status = pending"},
 		{"boolean field with string", "blocked = yes"},
 		{"priority field with string", "priority = high"},
+		{"priority integer too high", "priority = 5"},
+		{"priority integer negative", "priority = -1"},
 	}
 
 	for _, tc := range tests {
