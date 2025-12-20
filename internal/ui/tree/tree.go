@@ -401,7 +401,12 @@ func (m *Model) renderNode(node *TreeNode, isLast bool, isSelected bool) string 
 		// Calculate padding to right-align metadata
 		currentWidth := lipgloss.Width(sb.String())
 		paddingNeeded := max(m.width-currentWidth-rightWidth, minPadding)
-		sb.WriteString(strings.Repeat(" ", paddingNeeded))
+		if isSelected {
+			guideStyle := lipgloss.NewStyle().Foreground(styles.TextMutedColor)
+			sb.WriteString(guideStyle.Render(strings.Repeat("─", paddingNeeded)))
+		} else {
+			sb.WriteString(strings.Repeat(" ", paddingNeeded))
+		}
 		sb.WriteString(rightRendered)
 	}
 

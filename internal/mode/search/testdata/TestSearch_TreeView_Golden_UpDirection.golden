@@ -1,5 +1,5 @@
 ╭─ Tree (↑ up) (deps) ────────────────────────────── ░░░░░░░░░░░░░░░ 0% (0/2) ─╮ ╭─ Issue Details ─────────────────────────────────────────────────────────────╮
-│ >[T][P0][child-1] Child Issue ○                                      292y ago│ │                                                                             │
+│ >[T][P0][child-1] Child Issue ○──────────────────────────────────────292y ago│ │                                                                             │
 │  └─[E][P0][parent-1] Parent Issue ○                                  292y ago│ │  Select an issue to view details                                            │
 │                                                                              │ │                                                                             │
 │                                                                              │ │                                                                             │

@@ -1,5 +1,5 @@
 ╭─ Tree (↓ down) (children) ─────────────────────── █████░░░░░░░░░░ 33% (1/3) ─╮ ╭─ Issue Details ─────────────────────────────────────────────────────────────╮
-│ >[E][P1][epic-1] Epic: Implement new feature ○                       292y ago│ │                                                                             │
+│ >[E][P1][epic-1] Epic: Implement new feature ○───────────────────────292y ago│ │                                                                             │
 │  ├─[T][P1][task-1] Design API ✓                                      292y ago│ │  Select an issue to view details                                            │
 │  └─[T][P1][task-2] Implement backend ●                               292y ago│ │                                                                             │
 │                                                                              │ │                                                                             │

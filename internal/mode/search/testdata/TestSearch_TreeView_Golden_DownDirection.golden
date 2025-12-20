@@ -1,5 +1,5 @@
 ╭─ Tree (↓ down) (deps) ─────────────────────────── █████░░░░░░░░░░ 33% (1/3) ─╮ ╭─ Issue Details ─────────────────────────────────────────────────────────────╮
-│ >[T][P0][parent-1] Parent Issue ○                                    292y ago│ │                                                                             │
+│ >[T][P0][parent-1] Parent Issue ○────────────────────────────────────292y ago│ │                                                                             │
 │  ├─[T][P0][child-1] Child A ✓                                        292y ago│ │  Select an issue to view details                                            │
 │  └─[T][P0][child-2] Child B ○                                        292y ago│ │                                                                             │
 │                                                                              │ │                                                                             │

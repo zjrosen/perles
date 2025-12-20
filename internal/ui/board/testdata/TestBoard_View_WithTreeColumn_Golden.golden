@@ -1,5 +1,5 @@
 ╭─ Backlog (2) ────────────────────────╮╭─ Dependencies (deps) ────────────────╮╭─ Done (1) ───────────────────────────╮
-│ [T][P2][bd-1] Open Task              ││>[E][P1][root-1] Epic: Featu... ○  now││ [F][P3][bd-3] Completed Feature      │
+│ [T][P2][bd-1] Open Task              ││>[E][P1][root-1] Epic: Featu... ○──now││ [F][P3][bd-3] Completed Feature      │
 │ [B][P1][bd-2] Open Bug               ││ ├─[T][P2][child-1] Task: Ba... ○  now││                                      │
 │                                      ││ └─[T][P2][child-2] Task: Fr... ○  now││                                      │
 │                                      ││     └─[T][P3][child-3] Subtask: ... ○││                                      │
