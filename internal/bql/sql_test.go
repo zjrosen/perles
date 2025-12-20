@@ -109,6 +109,30 @@ func TestSQLBuilder_SpecialFields(t *testing.T) {
 		require.Equal(t, "i.id IN (SELECT id FROM ready_issues)", where)
 	})
 
+	t.Run("pinned true", func(t *testing.T) {
+		parser := NewParser("pinned = true")
+		query, err := parser.Parse()
+		require.NoError(t, err)
+
+		builder := NewSQLBuilder(query)
+		where, _, params := builder.Build()
+
+		require.Equal(t, "i.pinned = 1", where)
+		require.Empty(t, params)
+	})
+
+	t.Run("pinned false", func(t *testing.T) {
+		parser := NewParser("pinned = false")
+		query, err := parser.Parse()
+		require.NoError(t, err)
+
+		builder := NewSQLBuilder(query)
+		where, _, params := builder.Build()
+
+		require.Equal(t, "i.pinned = 0", where)
+		require.Empty(t, params)
+	})
+
 	t.Run("single label", func(t *testing.T) {
 		parser := NewParser("label = urgent")
 		query, err := parser.Parse()

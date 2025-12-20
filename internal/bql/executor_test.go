@@ -1365,3 +1365,134 @@ func TestExecutor_MultipleIssuesWithDifferentSenderAndEphemeral(t *testing.T) {
 	require.Equal(t, "", issueMap["issue-3"].Sender)
 	require.False(t, issueMap["issue-3"].Ephemeral)
 }
+
+// =============================================================================
+// Pinned Field Tests
+// =============================================================================
+
+func TestExecutor_PinnedTrue(t *testing.T) {
+	db := setupDB(t, func(b *testutil.Builder) *testutil.Builder {
+		return b.
+			WithIssue("issue-1", testutil.Title("Pinned issue"), testutil.Pinned(true))
+	})
+	defer func() { _ = db.Close() }()
+
+	executor := NewExecutor(db)
+
+	issues, err := executor.Execute("id = issue-1")
+	require.NoError(t, err)
+
+	require.Len(t, issues, 1)
+	require.NotNil(t, issues[0].Pinned, "Pinned should not be nil")
+	require.True(t, *issues[0].Pinned, "Pinned should be true")
+}
+
+func TestExecutor_PinnedFalse(t *testing.T) {
+	db := setupDB(t, func(b *testutil.Builder) *testutil.Builder {
+		return b.
+			WithIssue("issue-1", testutil.Title("Not pinned issue"), testutil.Pinned(false))
+	})
+	defer func() { _ = db.Close() }()
+
+	executor := NewExecutor(db)
+
+	issues, err := executor.Execute("id = issue-1")
+	require.NoError(t, err)
+
+	require.Len(t, issues, 1)
+	require.NotNil(t, issues[0].Pinned, "Pinned should not be nil when explicitly set to false")
+	require.False(t, *issues[0].Pinned, "Pinned should be false")
+}
+
+func TestExecutor_PinnedNilByDefault(t *testing.T) {
+	db := setupDB(t, func(b *testutil.Builder) *testutil.Builder {
+		return b.
+			WithIssue("issue-1", testutil.Title("Issue without pinned"))
+	})
+	defer func() { _ = db.Close() }()
+
+	executor := NewExecutor(db)
+
+	issues, err := executor.Execute("id = issue-1")
+	require.NoError(t, err)
+
+	require.Len(t, issues, 1)
+	require.Nil(t, issues[0].Pinned, "default pinned should be nil")
+}
+
+func TestExecutor_MultipleIssuesWithDifferentPinned(t *testing.T) {
+	db := setupDB(t, func(b *testutil.Builder) *testutil.Builder {
+		return b.
+			WithIssue("issue-1", testutil.Title("Issue 1"), testutil.Pinned(true)).
+			WithIssue("issue-2", testutil.Title("Issue 2"), testutil.Pinned(false)).
+			WithIssue("issue-3", testutil.Title("Issue 3")) // No pinned (nil)
+	})
+	defer func() { _ = db.Close() }()
+
+	executor := NewExecutor(db)
+
+	issues, err := executor.Execute("order by id asc")
+	require.NoError(t, err)
+
+	require.Len(t, issues, 3)
+
+	// Build map for easier assertion
+	issueMap := make(map[string]beads.Issue)
+	for _, issue := range issues {
+		issueMap[issue.ID] = issue
+	}
+
+	// issue-1: pinned=true
+	require.NotNil(t, issueMap["issue-1"].Pinned)
+	require.True(t, *issueMap["issue-1"].Pinned)
+
+	// issue-2: pinned=false (explicitly set)
+	require.NotNil(t, issueMap["issue-2"].Pinned)
+	require.False(t, *issueMap["issue-2"].Pinned)
+
+	// issue-3: pinned=nil (not set)
+	require.Nil(t, issueMap["issue-3"].Pinned)
+}
+
+func TestExecutor_QueryByPinnedTrue(t *testing.T) {
+	db := setupDB(t, func(b *testutil.Builder) *testutil.Builder {
+		return b.
+			WithIssue("pinned-1", testutil.Title("Pinned issue"), testutil.Pinned(true)).
+			WithIssue("pinned-2", testutil.Title("Also pinned"), testutil.Pinned(true)).
+			WithIssue("not-pinned", testutil.Title("Not pinned"), testutil.Pinned(false)).
+			WithIssue("unset-pinned", testutil.Title("Pinned unset")) // nil
+	})
+	defer func() { _ = db.Close() }()
+
+	executor := NewExecutor(db)
+
+	issues, err := executor.Execute("pinned = true")
+	require.NoError(t, err)
+
+	require.Len(t, issues, 2)
+	ids := make(map[string]bool)
+	for _, issue := range issues {
+		ids[issue.ID] = true
+	}
+	require.True(t, ids["pinned-1"])
+	require.True(t, ids["pinned-2"])
+}
+
+func TestExecutor_QueryByPinnedFalse(t *testing.T) {
+	db := setupDB(t, func(b *testutil.Builder) *testutil.Builder {
+		return b.
+			WithIssue("pinned-1", testutil.Title("Pinned issue"), testutil.Pinned(true)).
+			WithIssue("not-pinned", testutil.Title("Not pinned"), testutil.Pinned(false)).
+			WithIssue("unset-pinned", testutil.Title("Pinned unset")) // nil
+	})
+	defer func() { _ = db.Close() }()
+
+	executor := NewExecutor(db)
+
+	issues, err := executor.Execute("pinned = false")
+	require.NoError(t, err)
+
+	// Only explicitly false, not nil
+	require.Len(t, issues, 1)
+	require.Equal(t, "not-pinned", issues[0].ID)
+}

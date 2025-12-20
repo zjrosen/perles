@@ -80,6 +80,7 @@ func (e *Executor) executeBaseQuery(query *Query) ([]beads.Issue, error) {
 			i.assignee,
 			i.sender,
 			i.ephemeral,
+			i.pinned,
 			i.created_at,
 			i.updated_at,
 			i.closed_at,
@@ -179,6 +180,7 @@ func (e *Executor) scanIssues(rows *sql.Rows) ([]beads.Issue, error) {
 			assignee           sql.NullString
 			sender             sql.NullString
 			ephemeral          sql.NullBool
+			pinned             sql.NullBool
 			closedAt           sql.NullTime
 			parentId           string
 			childrenIDs        string
@@ -202,6 +204,7 @@ func (e *Executor) scanIssues(rows *sql.Rows) ([]beads.Issue, error) {
 			&assignee,
 			&sender,
 			&ephemeral,
+			&pinned,
 			&issue.CreatedAt,
 			&issue.UpdatedAt,
 			&closedAt,
@@ -239,6 +242,9 @@ func (e *Executor) scanIssues(rows *sql.Rows) ([]beads.Issue, error) {
 		}
 		if ephemeral.Valid && ephemeral.Bool {
 			issue.Ephemeral = true
+		}
+		if pinned.Valid {
+			issue.Pinned = &pinned.Bool
 		}
 		if closedAt.Valid {
 			issue.ClosedAt = closedAt.Time
@@ -504,6 +510,7 @@ func (e *Executor) fetchIssuesByIDs(ids []string) ([]beads.Issue, error) {
 			i.assignee,
 			i.sender,
 			i.ephemeral,
+			i.pinned,
 			i.created_at,
 			i.updated_at,
 			i.closed_at,

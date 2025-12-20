@@ -72,6 +72,15 @@ func (b *SQLBuilder) buildCompare(e *CompareExpr) string {
 		}
 		return "i.id NOT IN (SELECT id FROM ready_issues)"
 
+	case "pinned":
+		// pinned is a nullable boolean column (INTEGER in SQLite)
+		// pinned = true -> i.pinned = 1
+		// pinned = false -> i.pinned = 0 (won't match NULL)
+		if e.Value.Bool {
+			return "i.pinned = 1"
+		}
+		return "i.pinned = 0"
+
 	case "label":
 		// Label check via labels table
 		// Supports exact match (=, !=) and partial match (~, !~)

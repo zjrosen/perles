@@ -22,6 +22,8 @@ func TestValidate_ValidQueries(t *testing.T) {
 		"blocked = true",
 		"blocked = false",
 		"ready = true",
+		"pinned = true",
+		"pinned = false",
 		"label = urgent",
 		"title ~ auth",
 		"title !~ test",

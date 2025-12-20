@@ -12,6 +12,7 @@ var ValidFields = map[string]FieldType{
 	"status":   FieldEnum,
 	"blocked":  FieldBool,
 	"ready":    FieldBool,
+	"pinned":   FieldBool,
 	"label":    FieldString,
 	"title":    FieldString,
 	"id":       FieldString,

@@ -56,6 +56,7 @@ type Issue struct {
 	Assignee           string    `json:"assignee"`
 	Sender             string    `json:"sender,omitempty"`
 	Ephemeral          bool      `json:"ephemeral,omitempty"`
+	Pinned             *bool     `json:"pinned,omitempty"`
 	Labels             []string  `json:"labels"`
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`

@@ -26,6 +26,7 @@ CREATE TABLE issues (
 	assignee TEXT,
 	sender TEXT,
 	ephemeral INTEGER,
+	pinned INTEGER,
 	created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	closed_at DATETIME,
