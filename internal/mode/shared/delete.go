@@ -24,9 +24,8 @@ func GetAllDescendants(loader bql.BQLExecutor, rootID string) []beads.Issue {
 }
 
 // CreateDeleteModal creates a confirmation modal for issue deletion.
-// Returns the modal, a boolean indicating if this is a cascade delete (epic with children),
-// and a slice of all issue IDs to delete (including descendants for epics).
-func CreateDeleteModal(issue *beads.Issue, loader bql.BQLExecutor) (modal.Model, bool, []string) {
+// Returns the modal and a slice of all issue IDs to delete (including descendants for epics).
+func CreateDeleteModal(issue *beads.Issue, loader bql.BQLExecutor) (modal.Model, []string) {
 	// Check if this is an epic with child issues
 	hasChildren := issue.Type == beads.TypeEpic && len(issue.Children) > 0
 
@@ -71,7 +70,7 @@ func CreateDeleteModal(issue *beads.Issue, loader bql.BQLExecutor) (modal.Model,
 			Message:        message,
 			ConfirmVariant: modal.ButtonDanger,
 			MinWidth:       60,
-		}), true, allIDs
+		}), allIDs
 	}
 
 	// Regular issue deletion - return single-element slice with issue ID
@@ -80,5 +79,5 @@ func CreateDeleteModal(issue *beads.Issue, loader bql.BQLExecutor) (modal.Model,
 		Title:          "Delete Issue",
 		Message:        message,
 		ConfirmVariant: modal.ButtonDanger,
-	}), false, []string{issue.ID}
+	}), []string{issue.ID}
 }

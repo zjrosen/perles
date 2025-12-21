@@ -95,10 +95,9 @@ func TestCreateDeleteModal_RegularIssue_ReturnsCorrectIDs(t *testing.T) {
 		Type:      beads.TypeTask,
 	}
 
-	modal, isCascade, issueIDs := CreateDeleteModal(issue, mockExecutor)
+	modal, issueIDs := CreateDeleteModal(issue, mockExecutor)
 
 	require.NotNil(t, modal)
-	require.False(t, isCascade, "regular issue should not be cascade")
 	require.Equal(t, []string{"task-1"}, issueIDs, "should return single-element slice")
 }
 
@@ -117,10 +116,9 @@ func TestCreateDeleteModal_EpicWithChildren_ReturnsAllDescendants(t *testing.T) 
 		Children:  []string{"task-1", "task-2"},
 	}
 
-	modal, isCascade, issueIDs := CreateDeleteModal(issue, mockExecutor)
+	modal, issueIDs := CreateDeleteModal(issue, mockExecutor)
 
 	require.NotNil(t, modal)
-	require.True(t, isCascade, "epic with children should be cascade")
 	require.Len(t, issueIDs, 3, "should return all 3 IDs")
 	require.Contains(t, issueIDs, "epic-1")
 	require.Contains(t, issueIDs, "task-1")
@@ -143,10 +141,9 @@ func TestCreateDeleteModal_EpicWithNestedChildren_ReturnsAllDescendants(t *testi
 		Children:  []string{"sub-epic-1", "task-1"}, // Immediate children
 	}
 
-	modal, isCascade, issueIDs := CreateDeleteModal(issue, mockExecutor)
+	modal, issueIDs := CreateDeleteModal(issue, mockExecutor)
 
 	require.NotNil(t, modal)
-	require.True(t, isCascade)
 	require.Len(t, issueIDs, 4, "should return all 4 IDs including grandchild")
 	require.Contains(t, issueIDs, "epic-1")
 	require.Contains(t, issueIDs, "sub-epic-1")
@@ -165,9 +162,8 @@ func TestCreateDeleteModal_EpicWithoutChildren_NotCascade(t *testing.T) {
 		Children:  []string{}, // No children
 	}
 
-	modal, isCascade, issueIDs := CreateDeleteModal(issue, mockExecutor)
+	modal, issueIDs := CreateDeleteModal(issue, mockExecutor)
 
 	require.NotNil(t, modal)
-	require.False(t, isCascade, "epic without children should not be cascade")
 	require.Equal(t, []string{"epic-1"}, issueIDs)
 }

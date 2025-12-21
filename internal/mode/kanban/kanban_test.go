@@ -124,10 +124,9 @@ func TestCreateDeleteModal_RegularIssue(t *testing.T) {
 		Type:      beads.TypeTask,
 	}
 
-	modal, isCascade, issueIDs := shared.CreateDeleteModal(issue, mockExecutor)
+	modal, issueIDs := shared.CreateDeleteModal(issue, mockExecutor)
 
 	require.NotNil(t, modal)
-	require.False(t, isCascade, "expected non-cascade for regular task")
 	require.Equal(t, []string{"test-456"}, issueIDs, "expected single-element slice with issue ID")
 }
 
@@ -142,10 +141,9 @@ func TestCreateDeleteModal_EpicWithoutChildren(t *testing.T) {
 		Children:  []string{}, // No children
 	}
 
-	modal, isCascade, issueIDs := shared.CreateDeleteModal(issue, mockExecutor)
+	modal, issueIDs := shared.CreateDeleteModal(issue, mockExecutor)
 
 	require.NotNil(t, modal)
-	require.False(t, isCascade, "expected non-cascade for epic without children")
 	require.Equal(t, []string{"epic-1"}, issueIDs, "expected single-element slice with epic ID")
 }
 
@@ -165,10 +163,9 @@ func TestCreateDeleteModal_EpicWithChildren(t *testing.T) {
 		Children:  []string{"task-1", "task-2", "task-3"},
 	}
 
-	modal, isCascade, issueIDs := shared.CreateDeleteModal(issue, mockExecutor)
+	modal, issueIDs := shared.CreateDeleteModal(issue, mockExecutor)
 
 	require.NotNil(t, modal)
-	require.True(t, isCascade, "expected cascade for epic with children")
 	require.Len(t, issueIDs, 4, "expected 4 IDs (epic + 3 children)")
 	require.Contains(t, issueIDs, "epic-1", "expected epic ID in delete list")
 	require.Contains(t, issueIDs, "task-1", "expected child task-1 in delete list")

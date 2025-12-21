@@ -259,7 +259,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if issue == nil {
 			return m, nil
 		}
-		m.modal, _, m.deleteIssueIDs = shared.CreateDeleteModal(issue, m.services.Executor)
+		m.modal, m.deleteIssueIDs = shared.CreateDeleteModal(issue, m.services.Executor)
 		m.modal.SetSize(m.width, m.height)
 		m.selectedIssue = issue
 		m.view = ViewDeleteConfirm
