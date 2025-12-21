@@ -7,18 +7,14 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"perles/internal/beads"
+	"perles/internal/bql"
 	"perles/internal/ui/shared/modal"
 	"perles/internal/ui/styles"
 )
 
-// IssueLoader provides the ability to fetch issues by their IDs.
-type IssueLoader interface {
-	Execute(query string) ([]beads.Issue, error)
-}
-
 // GetAllDescendants returns all descendant issues for an epic using BQL expand.
 // The returned slice includes the root issue as the first element.
-func GetAllDescendants(loader IssueLoader, rootID string) []beads.Issue {
+func GetAllDescendants(loader bql.BQLExecutor, rootID string) []beads.Issue {
 	query := fmt.Sprintf(`id = "%s" expand down depth *`, rootID)
 	issues, err := loader.Execute(query)
 	if err != nil {
@@ -30,7 +26,7 @@ func GetAllDescendants(loader IssueLoader, rootID string) []beads.Issue {
 // CreateDeleteModal creates a confirmation modal for issue deletion.
 // Returns the modal, a boolean indicating if this is a cascade delete (epic with children),
 // and a slice of all issue IDs to delete (including descendants for epics).
-func CreateDeleteModal(issue *beads.Issue, loader IssueLoader) (modal.Model, bool, []string) {
+func CreateDeleteModal(issue *beads.Issue, loader bql.BQLExecutor) (modal.Model, bool, []string) {
 	// Check if this is an epic with child issues
 	hasChildren := issue.Type == beads.TypeEpic && len(issue.Children) > 0
 

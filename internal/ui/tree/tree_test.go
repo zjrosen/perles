@@ -5,18 +5,25 @@ import (
 	"time"
 
 	"perles/internal/beads"
+	"perles/internal/mocks"
 	"perles/internal/mode/shared"
 
 	"github.com/charmbracelet/x/exp/teatest"
 	"github.com/stretchr/testify/require"
 )
 
-// testClock is a fixed clock for deterministic test output.
-// All test issues are created 2 days before this time.
-var testClock = shared.FakeClock{FixedTime: time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)}
+// testClockTime is a fixed time for deterministic test output.
+var testClockTime = time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)
 
-// testCreatedAt is 2 days before testClock.FixedTime
+// testCreatedAt is 2 days before testClockTime
 var testCreatedAt = time.Date(2025, 1, 13, 12, 0, 0, 0, time.UTC)
+
+// newTestClock creates a MockClock that always returns testClockTime.
+func newTestClock(t *testing.T) shared.Clock {
+	clock := mocks.NewMockClock(t)
+	clock.EXPECT().Now().Return(testClockTime).Maybe()
+	return clock
+}
 
 func makeTestIssueMap() map[string]*beads.Issue {
 	return map[string]*beads.Issue{
@@ -66,7 +73,7 @@ func makeTestIssueMap() map[string]*beads.Issue {
 
 func TestNew_Basic(t *testing.T) {
 	issueMap := makeTestIssueMap()
-	m := New("epic-1", issueMap, DirectionDown, ModeDeps, testClock)
+	m := New("epic-1", issueMap, DirectionDown, ModeDeps, newTestClock(t))
 
 	require.NotNil(t, m)
 	require.NotNil(t, m.root)
@@ -79,7 +86,7 @@ func TestNew_Basic(t *testing.T) {
 
 func TestNew_InvalidRoot(t *testing.T) {
 	issueMap := makeTestIssueMap()
-	m := New("nonexistent", issueMap, DirectionDown, ModeDeps, testClock)
+	m := New("nonexistent", issueMap, DirectionDown, ModeDeps, newTestClock(t))
 
 	require.NotNil(t, m)
 	require.Nil(t, m.root)
@@ -88,7 +95,7 @@ func TestNew_InvalidRoot(t *testing.T) {
 
 func TestSetSize(t *testing.T) {
 	issueMap := makeTestIssueMap()
-	m := New("epic-1", issueMap, DirectionDown, ModeDeps, testClock)
+	m := New("epic-1", issueMap, DirectionDown, ModeDeps, newTestClock(t))
 
 	m.SetSize(80, 24)
 	require.Equal(t, 80, m.width)
@@ -97,7 +104,7 @@ func TestSetSize(t *testing.T) {
 
 func TestMoveCursor_Basic(t *testing.T) {
 	issueMap := makeTestIssueMap()
-	m := New("epic-1", issueMap, DirectionDown, ModeDeps, testClock)
+	m := New("epic-1", issueMap, DirectionDown, ModeDeps, newTestClock(t))
 
 	require.Equal(t, 0, m.cursor)
 
@@ -113,7 +120,7 @@ func TestMoveCursor_Basic(t *testing.T) {
 
 func TestMoveCursor_Bounds(t *testing.T) {
 	issueMap := makeTestIssueMap()
-	m := New("epic-1", issueMap, DirectionDown, ModeDeps, testClock)
+	m := New("epic-1", issueMap, DirectionDown, ModeDeps, newTestClock(t))
 
 	// Try to go above top
 	m.MoveCursor(-10)
@@ -130,7 +137,7 @@ func TestMoveCursor_Bounds(t *testing.T) {
 
 func TestSelectedNode(t *testing.T) {
 	issueMap := makeTestIssueMap()
-	m := New("epic-1", issueMap, DirectionDown, ModeDeps, testClock)
+	m := New("epic-1", issueMap, DirectionDown, ModeDeps, newTestClock(t))
 
 	node := m.SelectedNode()
 	require.NotNil(t, node)
@@ -143,7 +150,7 @@ func TestSelectedNode(t *testing.T) {
 
 func TestSelectedNode_Empty(t *testing.T) {
 	issueMap := makeTestIssueMap()
-	m := New("nonexistent", issueMap, DirectionDown, ModeDeps, testClock)
+	m := New("nonexistent", issueMap, DirectionDown, ModeDeps, newTestClock(t))
 
 	node := m.SelectedNode()
 	require.Nil(t, node)
@@ -151,7 +158,7 @@ func TestSelectedNode_Empty(t *testing.T) {
 
 func TestRoot(t *testing.T) {
 	issueMap := makeTestIssueMap()
-	m := New("epic-1", issueMap, DirectionDown, ModeDeps, testClock)
+	m := New("epic-1", issueMap, DirectionDown, ModeDeps, newTestClock(t))
 
 	root := m.Root()
 	require.NotNil(t, root)
@@ -160,7 +167,7 @@ func TestRoot(t *testing.T) {
 
 func TestDirection(t *testing.T) {
 	issueMap := makeTestIssueMap()
-	m := New("epic-1", issueMap, DirectionDown, ModeDeps, testClock)
+	m := New("epic-1", issueMap, DirectionDown, ModeDeps, newTestClock(t))
 
 	require.Equal(t, DirectionDown, m.Direction())
 
@@ -170,7 +177,7 @@ func TestDirection(t *testing.T) {
 
 func TestRefocus_AndGoBack(t *testing.T) {
 	issueMap := makeTestIssueMap()
-	m := New("epic-1", issueMap, DirectionDown, ModeDeps, testClock)
+	m := New("epic-1", issueMap, DirectionDown, ModeDeps, newTestClock(t))
 
 	// Refocus on task-2
 	err := m.Refocus("task-2")
@@ -188,7 +195,7 @@ func TestRefocus_AndGoBack(t *testing.T) {
 
 func TestRefocus_MultipleAndGoToOriginal(t *testing.T) {
 	issueMap := makeTestIssueMap()
-	m := New("epic-1", issueMap, DirectionDown, ModeDeps, testClock)
+	m := New("epic-1", issueMap, DirectionDown, ModeDeps, newTestClock(t))
 
 	// Refocus twice
 	_ = m.Refocus("task-2")
@@ -205,7 +212,7 @@ func TestRefocus_MultipleAndGoToOriginal(t *testing.T) {
 
 func TestGoBack_EmptyStack_NoParent(t *testing.T) {
 	issueMap := makeTestIssueMap()
-	m := New("epic-1", issueMap, DirectionDown, ModeDeps, testClock)
+	m := New("epic-1", issueMap, DirectionDown, ModeDeps, newTestClock(t))
 
 	// GoBack on empty stack with no parent should do nothing
 	needsRequery, parentID := m.GoBack()
@@ -217,7 +224,7 @@ func TestGoBack_EmptyStack_NoParent(t *testing.T) {
 func TestGoBack_EmptyStack_WithParentInMap(t *testing.T) {
 	issueMap := makeTestIssueMap()
 	// Start directly on task-1 which has parent epic-1
-	m := New("task-1", issueMap, DirectionDown, ModeDeps, testClock)
+	m := New("task-1", issueMap, DirectionDown, ModeDeps, newTestClock(t))
 
 	require.Equal(t, "task-1", m.root.Issue.ID)
 	require.Empty(t, m.rootStack)
@@ -239,7 +246,7 @@ func TestGoBack_EmptyStack_ParentNotInMap(t *testing.T) {
 			CreatedAt: testCreatedAt,
 		},
 	}
-	m := New("task-1", issueMap, DirectionDown, ModeDeps, testClock)
+	m := New("task-1", issueMap, DirectionDown, ModeDeps, newTestClock(t))
 
 	// GoBack should signal re-query needed when parent not in map
 	needsRequery, parentID := m.GoBack()
@@ -251,7 +258,7 @@ func TestGoBack_EmptyStack_ParentNotInMap(t *testing.T) {
 
 func TestView_Basic(t *testing.T) {
 	issueMap := makeTestIssueMap()
-	m := New("epic-1", issueMap, DirectionDown, ModeDeps, testClock)
+	m := New("epic-1", issueMap, DirectionDown, ModeDeps, newTestClock(t))
 	m.SetSize(80, 24)
 
 	view := m.View()
@@ -268,7 +275,7 @@ func TestView_Basic(t *testing.T) {
 
 func TestView_UpDirection(t *testing.T) {
 	issueMap := makeTestIssueMap()
-	m := New("task-1", issueMap, DirectionUp, ModeDeps, testClock)
+	m := New("task-1", issueMap, DirectionUp, ModeDeps, newTestClock(t))
 	m.SetSize(80, 24)
 
 	// Direction should be up (parent container uses this for border title)
@@ -281,7 +288,7 @@ func TestView_UpDirection(t *testing.T) {
 
 func TestView_TreeBranches(t *testing.T) {
 	issueMap := makeTestIssueMap()
-	m := New("epic-1", issueMap, DirectionDown, ModeDeps, testClock)
+	m := New("epic-1", issueMap, DirectionDown, ModeDeps, newTestClock(t))
 	m.SetSize(80, 24)
 
 	view := m.View()
@@ -293,7 +300,7 @@ func TestView_TreeBranches(t *testing.T) {
 
 func TestView_StatusIndicators(t *testing.T) {
 	issueMap := makeTestIssueMap()
-	m := New("epic-1", issueMap, DirectionDown, ModeDeps, testClock)
+	m := New("epic-1", issueMap, DirectionDown, ModeDeps, newTestClock(t))
 	m.SetSize(80, 24)
 
 	view := m.View()
@@ -306,7 +313,7 @@ func TestView_StatusIndicators(t *testing.T) {
 
 func TestView_Empty(t *testing.T) {
 	issueMap := makeTestIssueMap()
-	m := New("nonexistent", issueMap, DirectionDown, ModeDeps, testClock)
+	m := New("nonexistent", issueMap, DirectionDown, ModeDeps, newTestClock(t))
 
 	view := m.View()
 	require.Contains(t, view, "No tree data")
@@ -318,7 +325,7 @@ func TestView_Empty(t *testing.T) {
 // TestView_Golden_Basic tests the basic tree view rendering with multiple nodes.
 func TestView_Golden_Basic(t *testing.T) {
 	issueMap := makeTestIssueMap()
-	m := New("epic-1", issueMap, DirectionDown, ModeDeps, testClock)
+	m := New("epic-1", issueMap, DirectionDown, ModeDeps, newTestClock(t))
 	m.SetSize(100, 30)
 
 	view := m.View()
@@ -328,7 +335,7 @@ func TestView_Golden_Basic(t *testing.T) {
 // TestView_Golden_UpDirection tests tree view with up direction.
 func TestView_Golden_UpDirection(t *testing.T) {
 	issueMap := makeTestIssueMap()
-	m := New("subtask-1", issueMap, DirectionUp, ModeDeps, testClock)
+	m := New("subtask-1", issueMap, DirectionUp, ModeDeps, newTestClock(t))
 	m.SetSize(100, 30)
 
 	view := m.View()
@@ -338,7 +345,7 @@ func TestView_Golden_UpDirection(t *testing.T) {
 // TestView_Golden_CursorMoved tests tree view with cursor on different node.
 func TestView_Golden_CursorMoved(t *testing.T) {
 	issueMap := makeTestIssueMap()
-	m := New("epic-1", issueMap, DirectionDown, ModeDeps, testClock)
+	m := New("epic-1", issueMap, DirectionDown, ModeDeps, newTestClock(t))
 	m.SetSize(100, 30)
 
 	// Move cursor to task-2 (index 2)
@@ -351,7 +358,7 @@ func TestView_Golden_CursorMoved(t *testing.T) {
 // TestView_Golden_Empty tests tree view with no data.
 func TestView_Golden_Empty(t *testing.T) {
 	issueMap := makeTestIssueMap()
-	m := New("nonexistent", issueMap, DirectionDown, ModeDeps, testClock)
+	m := New("nonexistent", issueMap, DirectionDown, ModeDeps, newTestClock(t))
 	m.SetSize(100, 30)
 
 	view := m.View()
@@ -361,7 +368,7 @@ func TestView_Golden_Empty(t *testing.T) {
 // TestView_Golden_LeafNode tests tree view when root has no children.
 func TestView_Golden_LeafNode(t *testing.T) {
 	issueMap := makeTestIssueMap()
-	m := New("task-1", issueMap, DirectionDown, ModeDeps, testClock)
+	m := New("task-1", issueMap, DirectionDown, ModeDeps, newTestClock(t))
 	m.SetSize(100, 30)
 
 	view := m.View()
@@ -382,7 +389,7 @@ func TestView_Golden_NarrowWidth(t *testing.T) {
 			CommentCount: 3,
 		},
 	}
-	m := New("long-1", issueMap, DirectionDown, ModeDeps, testClock)
+	m := New("long-1", issueMap, DirectionDown, ModeDeps, newTestClock(t))
 	m.SetSize(60, 30)
 
 	view := m.View()
@@ -403,7 +410,7 @@ func TestView_Golden_VeryNarrowWidth(t *testing.T) {
 			CommentCount: 3,
 		},
 	}
-	m := New("long-1", issueMap, DirectionDown, ModeDeps, testClock)
+	m := New("long-1", issueMap, DirectionDown, ModeDeps, newTestClock(t))
 	m.SetSize(40, 30) // Very narrow - metadata should be hidden
 
 	view := m.View()

@@ -154,9 +154,9 @@ type Column struct {
 	showCounts  *bool // pointer so it survives value copies (nil = default true)
 
 	// BQL self-loading fields
-	executor  *bql.Executor // BQL executor for loading issues
-	query     string        // BQL query for this column
-	loadError error         // error from last load attempt
+	executor  bql.BQLExecutor // BQL executor for loading issues
+	query     string          // BQL query for this column
+	loadError error           // error from last load attempt
 }
 
 // NewColumn creates a new column.
@@ -182,7 +182,7 @@ func NewColumn(title string) Column {
 }
 
 // NewColumnWithExecutor creates a column that can load its own data via BQL.
-func NewColumnWithExecutor(title string, query string, executor *bql.Executor) Column {
+func NewColumnWithExecutor(title string, query string, executor bql.BQLExecutor) Column {
 	col := NewColumn(title)
 	col.executor = executor
 	col.query = query
@@ -296,7 +296,7 @@ func (c Column) SetQuery(query string) Column {
 }
 
 // SetExecutor sets the BQL executor for this column.
-func (c Column) SetExecutor(executor *bql.Executor) Column {
+func (c Column) SetExecutor(executor bql.BQLExecutor) Column {
 	c.executor = executor
 	return c
 }

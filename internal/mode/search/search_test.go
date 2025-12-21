@@ -5,23 +5,35 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"perles/internal/beads"
 	"perles/internal/config"
+	"perles/internal/mocks"
 	"perles/internal/mode"
-	"perles/internal/mode/shared"
 	"perles/internal/ui/details"
 	"perles/internal/ui/shared/formmodal"
 )
 
 // createTestModel creates a minimal Model for testing state transitions.
 // It does not require a database connection.
-func createTestModel() Model {
+func createTestModel(t *testing.T) Model {
 	cfg := config.Defaults()
+	clipboard := mocks.NewMockClipboard(t)
+	clipboard.EXPECT().Copy(mock.Anything).Return(nil).Maybe()
+
+	mockClient := mocks.NewMockBeadsClient(t)
+	mockClient.EXPECT().GetComments(mock.Anything).Return([]beads.Comment{}, nil).Maybe()
+
+	mockExecutor := mocks.NewMockBQLExecutor(t)
+	mockExecutor.EXPECT().Execute(mock.Anything).Return([]beads.Issue{}, nil).Maybe()
+
 	services := mode.Services{
+		Client:    mockClient,
+		Executor:  mockExecutor,
 		Config:    &cfg,
-		Clipboard: shared.MockClipboard{},
+		Clipboard: clipboard,
 	}
 
 	m := New(services)
@@ -31,8 +43,8 @@ func createTestModel() Model {
 }
 
 // createTestModelWithResults creates a Model with some test results loaded.
-func createTestModelWithResults() Model {
-	m := createTestModel()
+func createTestModelWithResults(t *testing.T) Model {
+	m := createTestModel(t)
 	issues := []beads.Issue{
 		{ID: "test-1", TitleText: "First Issue", Priority: 1, Status: beads.StatusOpen, Type: beads.TypeTask},
 		{ID: "test-2", TitleText: "Second Issue", Priority: 2, Status: beads.StatusInProgress, Type: beads.TypeBug},
@@ -43,7 +55,7 @@ func createTestModelWithResults() Model {
 }
 
 func TestSearch_New(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 
 	require.Equal(t, FocusSearch, m.focus, "expected focus on search input")
 	require.Equal(t, ViewSearch, m.view, "expected ViewSearch mode")
@@ -52,7 +64,7 @@ func TestSearch_New(t *testing.T) {
 }
 
 func TestSearch_SetSize(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 
 	m = m.SetSize(120, 50)
 
@@ -61,7 +73,7 @@ func TestSearch_SetSize(t *testing.T) {
 }
 
 func TestSearch_SetSize_ZeroGuard(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 	m.width = 100
 	m.height = 40
 
@@ -73,7 +85,7 @@ func TestSearch_SetSize_ZeroGuard(t *testing.T) {
 }
 
 func TestSearch_HandleSearchResults_Success(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 	issues := []beads.Issue{
 		{ID: "test-1", TitleText: "First", Priority: 1, Status: beads.StatusOpen},
 		{ID: "test-2", TitleText: "Second", Priority: 2, Status: beads.StatusClosed},
@@ -88,7 +100,7 @@ func TestSearch_HandleSearchResults_Success(t *testing.T) {
 }
 
 func TestSearch_HandleSearchResults_Empty(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 
 	m, _ = m.handleSearchResults(searchResultsMsg{issues: []beads.Issue{}, err: nil})
 
@@ -98,7 +110,7 @@ func TestSearch_HandleSearchResults_Empty(t *testing.T) {
 }
 
 func TestSearch_HandleSearchResults_Error(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 	testErr := errors.New("invalid query syntax")
 
 	m, cmd := m.handleSearchResults(searchResultsMsg{issues: nil, err: testErr})
@@ -112,7 +124,7 @@ func TestSearch_HandleSearchResults_Error(t *testing.T) {
 }
 
 func TestSearch_FocusNavigation_SlashFocusesSearch(t *testing.T) {
-	m := createTestModelWithResults()
+	m := createTestModelWithResults(t)
 	m.focus = FocusResults
 	m.input.Blur()
 
@@ -123,7 +135,7 @@ func TestSearch_FocusNavigation_SlashFocusesSearch(t *testing.T) {
 }
 
 func TestSearch_FocusNavigation_HMovesLeft(t *testing.T) {
-	m := createTestModelWithResults()
+	m := createTestModelWithResults(t)
 	m.focus = FocusDetails
 
 	// h moves focus from details to results
@@ -133,7 +145,7 @@ func TestSearch_FocusNavigation_HMovesLeft(t *testing.T) {
 }
 
 func TestSearch_FocusNavigation_LMovesRight(t *testing.T) {
-	m := createTestModelWithResults()
+	m := createTestModelWithResults(t)
 	m.focus = FocusResults
 
 	// l moves focus from results to details
@@ -143,7 +155,7 @@ func TestSearch_FocusNavigation_LMovesRight(t *testing.T) {
 }
 
 func TestSearch_FocusNavigation_LMovesToDetailsEvenWhenEmpty(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 	m.focus = FocusResults
 	m.hasDetail = false
 
@@ -154,7 +166,7 @@ func TestSearch_FocusNavigation_LMovesToDetailsEvenWhenEmpty(t *testing.T) {
 }
 
 func TestSearch_FocusNavigation_EscFromSearchExitsToKanban(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 	m.focus = FocusSearch
 	m.input.Focus()
 
@@ -171,7 +183,7 @@ func TestSearch_FocusNavigation_EscFromSearchExitsToKanban(t *testing.T) {
 }
 
 func TestSearch_FocusNavigation_EscFromResultsExitsToKanban(t *testing.T) {
-	m := createTestModelWithResults()
+	m := createTestModelWithResults(t)
 	m.focus = FocusResults
 
 	m, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEscape})
@@ -185,7 +197,7 @@ func TestSearch_FocusNavigation_EscFromResultsExitsToKanban(t *testing.T) {
 }
 
 func TestSearch_FocusNavigation_EscFromDetailsExitsToKanban(t *testing.T) {
-	m := createTestModelWithResults()
+	m := createTestModelWithResults(t)
 	m.focus = FocusDetails
 
 	m, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEscape})
@@ -199,7 +211,7 @@ func TestSearch_FocusNavigation_EscFromDetailsExitsToKanban(t *testing.T) {
 }
 
 func TestSearch_ResultSelection_JMovesDown(t *testing.T) {
-	m := createTestModelWithResults()
+	m := createTestModelWithResults(t)
 	m.focus = FocusResults
 	m.selectedIdx = 0
 
@@ -209,7 +221,7 @@ func TestSearch_ResultSelection_JMovesDown(t *testing.T) {
 }
 
 func TestSearch_ResultSelection_KMovesUp(t *testing.T) {
-	m := createTestModelWithResults()
+	m := createTestModelWithResults(t)
 	m.focus = FocusResults
 	m.selectedIdx = 1
 
@@ -219,7 +231,7 @@ func TestSearch_ResultSelection_KMovesUp(t *testing.T) {
 }
 
 func TestSearch_ResultSelection_JAtEnd(t *testing.T) {
-	m := createTestModelWithResults()
+	m := createTestModelWithResults(t)
 	m.focus = FocusResults
 	m.selectedIdx = 2 // Last item
 
@@ -229,7 +241,7 @@ func TestSearch_ResultSelection_JAtEnd(t *testing.T) {
 }
 
 func TestSearch_ResultSelection_KAtStart(t *testing.T) {
-	m := createTestModelWithResults()
+	m := createTestModelWithResults(t)
 	m.focus = FocusResults
 	m.selectedIdx = 0
 
@@ -239,7 +251,7 @@ func TestSearch_ResultSelection_KAtStart(t *testing.T) {
 }
 
 func TestSearch_HelpOverlay_QuestionOpens(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 	m.focus = FocusResults // Must not be in search input for ? to open help
 
 	m, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
@@ -248,7 +260,7 @@ func TestSearch_HelpOverlay_QuestionOpens(t *testing.T) {
 }
 
 func TestSearch_HelpOverlay_QuestionCloses(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 	m.view = ViewHelp
 
 	m, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
@@ -257,7 +269,7 @@ func TestSearch_HelpOverlay_QuestionCloses(t *testing.T) {
 }
 
 func TestSearch_HelpOverlay_EscCloses(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 	m.view = ViewHelp
 
 	m, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEscape})
@@ -266,7 +278,7 @@ func TestSearch_HelpOverlay_EscCloses(t *testing.T) {
 }
 
 func TestSearch_PickerOpen_Priority(t *testing.T) {
-	m := createTestModelWithResults()
+	m := createTestModelWithResults(t)
 	m.focus = FocusDetails
 
 	msg := details.OpenPriorityPickerMsg{IssueID: "test-1", Current: beads.Priority(1)}
@@ -277,7 +289,7 @@ func TestSearch_PickerOpen_Priority(t *testing.T) {
 }
 
 func TestSearch_PickerOpen_Status(t *testing.T) {
-	m := createTestModelWithResults()
+	m := createTestModelWithResults(t)
 	m.focus = FocusDetails
 
 	msg := details.OpenStatusPickerMsg{IssueID: "test-1", Current: beads.StatusOpen}
@@ -288,7 +300,7 @@ func TestSearch_PickerOpen_Status(t *testing.T) {
 }
 
 func TestSearch_PickerCancel_Esc(t *testing.T) {
-	m := createTestModelWithResults()
+	m := createTestModelWithResults(t)
 	m.view = ViewPriorityPicker
 	m.selectedIssue = &m.results[0]
 
@@ -307,7 +319,7 @@ func TestSearch_PickerCancel_Esc(t *testing.T) {
 }
 
 func TestSearch_PickerCancel_Q(t *testing.T) {
-	m := createTestModelWithResults()
+	m := createTestModelWithResults(t)
 	m.view = ViewStatusPicker
 	m.selectedIssue = &m.results[0]
 
@@ -326,7 +338,7 @@ func TestSearch_PickerCancel_Q(t *testing.T) {
 }
 
 func TestSearch_PriorityChanged_Success(t *testing.T) {
-	m := createTestModelWithResults()
+	m := createTestModelWithResults(t)
 	m.selectedIssue = &m.results[0]
 
 	msg := priorityChangedMsg{issueID: "test-1", priority: beads.Priority(0), err: nil}
@@ -339,7 +351,7 @@ func TestSearch_PriorityChanged_Success(t *testing.T) {
 }
 
 func TestSearch_PriorityChanged_Error(t *testing.T) {
-	m := createTestModelWithResults()
+	m := createTestModelWithResults(t)
 	m.selectedIssue = &m.results[0]
 
 	msg := priorityChangedMsg{issueID: "test-1", priority: beads.Priority(0), err: errors.New("db error")}
@@ -350,7 +362,7 @@ func TestSearch_PriorityChanged_Error(t *testing.T) {
 }
 
 func TestSearch_StatusChanged_Success(t *testing.T) {
-	m := createTestModelWithResults()
+	m := createTestModelWithResults(t)
 	m.selectedIssue = &m.results[0]
 
 	msg := statusChangedMsg{issueID: "test-1", status: beads.StatusClosed, err: nil}
@@ -363,7 +375,7 @@ func TestSearch_StatusChanged_Success(t *testing.T) {
 }
 
 func TestSearch_StatusChanged_Error(t *testing.T) {
-	m := createTestModelWithResults()
+	m := createTestModelWithResults(t)
 	m.selectedIssue = &m.results[0]
 
 	msg := statusChangedMsg{issueID: "test-1", status: beads.StatusClosed, err: errors.New("db error")}
@@ -379,20 +391,20 @@ func TestSearch_View_NotPanics(t *testing.T) {
 		name string
 		m    Model
 	}{
-		{"empty", createTestModel()},
-		{"with_results", createTestModelWithResults()},
+		{"empty", createTestModel(t)},
+		{"with_results", createTestModelWithResults(t)},
 		{"help_view", func() Model {
-			m := createTestModel()
+			m := createTestModel(t)
 			m.view = ViewHelp
 			return m
 		}()},
 		{"priority_picker", func() Model {
-			m := createTestModelWithResults()
+			m := createTestModelWithResults(t)
 			m.view = ViewPriorityPicker
 			return m
 		}()},
 		{"status_picker", func() Model {
-			m := createTestModelWithResults()
+			m := createTestModelWithResults(t)
 			m.view = ViewStatusPicker
 			return m
 		}()},
@@ -422,7 +434,7 @@ func TestSearch_IssueDelegate_HeightAndSpacing(t *testing.T) {
 }
 
 func TestSearch_EnterMsg_WithQuery(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 
 	m, _ = m.Update(EnterMsg{SubMode: mode.SubModeList, Query: "status:open"})
 
@@ -432,7 +444,7 @@ func TestSearch_EnterMsg_WithQuery(t *testing.T) {
 }
 
 func TestSearch_EnterMsg_EmptyQuery(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 
 	// Set a query first
 	m, _ = m.Update(EnterMsg{SubMode: mode.SubModeList, Query: "priority:1"})
@@ -599,7 +611,7 @@ func TestNewViewModal_Cancel(t *testing.T) {
 }
 
 func TestSearch_YankKey_FocusDetails_UsesDetailsIssueID(t *testing.T) {
-	m := createTestModelWithResults()
+	m := createTestModelWithResults(t)
 
 	// Set up: results have test-1 selected, but details shows a different issue
 	m.selectedIdx = 0
@@ -607,7 +619,7 @@ func TestSearch_YankKey_FocusDetails_UsesDetailsIssueID(t *testing.T) {
 
 	// Create details view showing a DIFFERENT issue (test-999)
 	differentIssue := beads.Issue{ID: "test-999", TitleText: "Different Issue"}
-	m.details = details.New(differentIssue, nil, nil).SetSize(50, 30)
+	m.details = details.New(differentIssue, m.services.Executor, m.services.Client).SetSize(50, 30)
 	m.hasDetail = true
 	m.focus = FocusDetails
 
@@ -630,7 +642,7 @@ func TestSearch_YankKey_FocusDetails_UsesDetailsIssueID(t *testing.T) {
 }
 
 func TestSearch_YankKey_FocusResults_UsesResultsIssueID(t *testing.T) {
-	m := createTestModelWithResults()
+	m := createTestModelWithResults(t)
 
 	// Set up: results have test-1 selected
 	m.selectedIdx = 0
@@ -638,7 +650,7 @@ func TestSearch_YankKey_FocusResults_UsesResultsIssueID(t *testing.T) {
 
 	// Create details view showing a DIFFERENT issue
 	differentIssue := beads.Issue{ID: "test-999", TitleText: "Different Issue"}
-	m.details = details.New(differentIssue, nil, nil).SetSize(50, 30)
+	m.details = details.New(differentIssue, m.services.Executor, m.services.Client).SetSize(50, 30)
 	m.hasDetail = true
 	m.focus = FocusResults // Focus on results, not details
 

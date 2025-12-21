@@ -3,25 +3,16 @@ package coleditor
 import (
 	"perles/internal/beads"
 	"perles/internal/config"
+	"perles/internal/mocks"
 	"perles/internal/ui/shared/colorpicker"
 	"perles/internal/ui/shared/modal"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/exp/teatest"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
-
-// mockExecutor is a test double for QueryExecutor.
-type mockExecutor struct {
-	issues []beads.Issue
-}
-
-func (m *mockExecutor) Execute(query string) ([]beads.Issue, error) {
-	// Simple filter: return issues matching the query's status
-	// For testing, just return all issues (preview behavior)
-	return m.issues, nil
-}
 
 func TestNew_InitialState(t *testing.T) {
 	cols := []config.ColumnConfig{
@@ -194,11 +185,10 @@ func TestLivePreview_FiltersOnQuery(t *testing.T) {
 		{Name: "Open", Query: "status = open", Color: "#FF0000"},
 	}
 	// Mock executor returns what the BQL query would return
-	executor := &mockExecutor{
-		issues: []beads.Issue{
-			{ID: "1", Status: beads.StatusOpen},
-		},
-	}
+	executor := mocks.NewMockBQLExecutor(t)
+	executor.EXPECT().Execute(mock.Anything).Return([]beads.Issue{
+		{ID: "1", Status: beads.StatusOpen},
+	}, nil)
 
 	ed := New(0, columns, executor)
 
@@ -492,11 +482,10 @@ func TestColEditor_View_Golden(t *testing.T) {
 	columns := []config.ColumnConfig{
 		{Name: "Ready", Query: "status = open and ready = true", Color: "#73F59F"},
 	}
-	executor := &mockExecutor{
-		issues: []beads.Issue{
-			{ID: "bd-1", TitleText: "First task", Status: beads.StatusOpen, Priority: beads.PriorityHigh},
-		},
-	}
+	executor := mocks.NewMockBQLExecutor(t)
+	executor.EXPECT().Execute(mock.Anything).Return([]beads.Issue{
+		{ID: "bd-1", TitleText: "First task", Status: beads.StatusOpen, Priority: beads.PriorityHigh},
+	}, nil)
 
 	ed := New(0, columns, executor)
 	ed = ed.SetSize(130, 30)
@@ -510,11 +499,10 @@ func TestColEditor_View_Golden_Tall(t *testing.T) {
 	columns := []config.ColumnConfig{
 		{Name: "Ready", Query: "status = open and ready = true", Color: "#73F59F"},
 	}
-	executor := &mockExecutor{
-		issues: []beads.Issue{
-			{ID: "bd-1", TitleText: "First task", Status: beads.StatusOpen, Priority: beads.PriorityHigh},
-		},
-	}
+	executor := mocks.NewMockBQLExecutor(t)
+	executor.EXPECT().Execute(mock.Anything).Return([]beads.Issue{
+		{ID: "bd-1", TitleText: "First task", Status: beads.StatusOpen, Priority: beads.PriorityHigh},
+	}, nil)
 
 	ed := New(0, columns, executor)
 	ed = ed.SetSize(130, 51)
@@ -531,34 +519,33 @@ func TestColEditor_View_Golden_TreePreview(t *testing.T) {
 	}
 
 	// Create mock executor with tree data (epic with child tasks)
-	executor := &mockExecutor{
-		issues: []beads.Issue{
-			{
-				ID:        "epic-1",
-				TitleText: "Epic: Implement tree columns",
-				Status:    beads.StatusInProgress,
-				Priority:  beads.PriorityHigh,
-				Type:      beads.TypeEpic,
-				Blocks:    []string{"task-1", "task-2"},
-			},
-			{
-				ID:        "task-1",
-				TitleText: "Add tree column to board",
-				Status:    beads.StatusClosed,
-				Priority:  beads.PriorityMedium,
-				Type:      beads.TypeTask,
-				BlockedBy: []string{"epic-1"},
-			},
-			{
-				ID:        "task-2",
-				TitleText: "Fix tree width calculation",
-				Status:    beads.StatusOpen,
-				Priority:  beads.PriorityMedium,
-				Type:      beads.TypeTask,
-				BlockedBy: []string{"epic-1"},
-			},
+	executor := mocks.NewMockBQLExecutor(t)
+	executor.EXPECT().Execute(mock.Anything).Return([]beads.Issue{
+		{
+			ID:        "epic-1",
+			TitleText: "Epic: Implement tree columns",
+			Status:    beads.StatusInProgress,
+			Priority:  beads.PriorityHigh,
+			Type:      beads.TypeEpic,
+			Blocks:    []string{"task-1", "task-2"},
 		},
-	}
+		{
+			ID:        "task-1",
+			TitleText: "Add tree column to board",
+			Status:    beads.StatusClosed,
+			Priority:  beads.PriorityMedium,
+			Type:      beads.TypeTask,
+			BlockedBy: []string{"epic-1"},
+		},
+		{
+			ID:        "task-2",
+			TitleText: "Fix tree width calculation",
+			Status:    beads.StatusOpen,
+			Priority:  beads.PriorityMedium,
+			Type:      beads.TypeTask,
+			BlockedBy: []string{"epic-1"},
+		},
+	}, nil)
 
 	ed := New(0, columns, executor)
 	ed = ed.SetSize(130, 40)
@@ -644,9 +631,10 @@ func TestColorPicker_NavigationWhenOpen(t *testing.T) {
 
 func TestColorPicker_PreviewUpdatesAfterSelection(t *testing.T) {
 	columns := []config.ColumnConfig{{Name: "Test", Query: "status = open", Color: "#FF0000"}}
-	executor := &mockExecutor{
-		issues: []beads.Issue{{ID: "1", Status: beads.StatusOpen}},
-	}
+	executor := mocks.NewMockBQLExecutor(t)
+	executor.EXPECT().Execute(mock.Anything).Return([]beads.Issue{
+		{ID: "1", Status: beads.StatusOpen},
+	}, nil).Maybe()
 	ed := New(0, columns, executor)
 	ed = ed.SetSize(80, 40)
 

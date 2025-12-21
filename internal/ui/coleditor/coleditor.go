@@ -4,6 +4,7 @@ package coleditor
 import (
 	"fmt"
 	"perles/internal/beads"
+	"perles/internal/bql"
 	"perles/internal/config"
 	"perles/internal/mode/shared"
 	"perles/internal/ui/board"
@@ -101,7 +102,7 @@ type Model struct {
 
 	// Preview data - actual issues from the column for realistic preview
 	previewIssues []beads.Issue
-	executor      QueryExecutor // BQL executor for preview queries
+	executor      bql.BQLExecutor // BQL executor for preview queries
 
 	// Tree preview for tree column type
 	treeIssueMap map[string]*beads.Issue // Loaded issues for tree preview
@@ -111,14 +112,9 @@ type Model struct {
 	validationError string
 }
 
-// QueryExecutor is the interface for executing BQL queries.
-type QueryExecutor interface {
-	Execute(query string) ([]beads.Issue, error)
-}
-
 // New creates a new editor for the given column.
 // executor is used to run BQL queries for live preview.
-func New(columnIndex int, allColumns []config.ColumnConfig, executor QueryExecutor) Model {
+func New(columnIndex int, allColumns []config.ColumnConfig, executor bql.BQLExecutor) Model {
 	cfg := allColumns[columnIndex]
 
 	nameInput := textinput.New()
@@ -181,7 +177,7 @@ func New(columnIndex int, allColumns []config.ColumnConfig, executor QueryExecut
 
 // NewForCreate creates an editor for adding a new column.
 // insertAfterIndex specifies where to insert the new column (to the right of this index).
-func NewForCreate(insertAfterIndex int, allColumns []config.ColumnConfig, executor QueryExecutor) Model {
+func NewForCreate(insertAfterIndex int, allColumns []config.ColumnConfig, executor bql.BQLExecutor) Model {
 	// Default config for new column
 	cfg := config.ColumnConfig{
 		Name:  "",

@@ -1,0 +1,14 @@
+with-expecter: true
+dir: internal/mocks
+outpkg: mocks
+packages:
+  perles/internal/beads:
+    interfaces:
+      BeadsClient:
+  perles/internal/bql:
+    interfaces:
+      BQLExecutor:
+  perles/internal/mode/shared:
+    interfaces:
+      Clock:
+      Clipboard:

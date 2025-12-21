@@ -22,7 +22,7 @@ type TreeColumn struct {
 	rootID      string        // Root issue ID for the tree
 	mode        tree.TreeMode // ModeDeps or ModeChildren
 	color       lipgloss.TerminalColor
-	executor    *bql.Executor
+	executor    bql.BQLExecutor
 	clock       shared.Clock // Clock for timestamp formatting
 	width       int
 	height      int
@@ -44,7 +44,7 @@ type TreeColumnLoadedMsg struct {
 
 // NewTreeColumn creates a new tree column.
 // treeMode can be "deps" (default) or "child".
-func NewTreeColumn(title, rootID, treeMode string, executor *bql.Executor, clock shared.Clock) TreeColumn {
+func NewTreeColumn(title, rootID, treeMode string, executor bql.BQLExecutor, clock shared.Clock) TreeColumn {
 	focused := new(bool)
 
 	// Convert string mode to tree.TreeMode

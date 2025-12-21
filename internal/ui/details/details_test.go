@@ -7,12 +7,13 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/exp/teatest"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"perles/internal/beads"
-
-	tea "github.com/charmbracelet/bubbletea"
+	"perles/internal/mocks"
 )
 
 // stripANSI removes ANSI escape codes from a string for easier testing.
@@ -22,34 +23,15 @@ func stripANSI(s string) string {
 	return ansiRegex.ReplaceAllString(s, "")
 }
 
-// mockLoader implements DependencyLoader for testing with predefined issues.
-type mockLoader struct {
-	issues map[string]beads.Issue
-}
+func createTestModel(t *testing.T, issue beads.Issue) Model {
+	mockExecutor := mocks.NewMockBQLExecutor(t)
+	mockExecutor.EXPECT().Execute(mock.Anything).Return([]beads.Issue{}, nil).Maybe()
 
-func (m *mockLoader) Execute(query string) ([]beads.Issue, error) {
-	// Return all issues from the mock - the real executor filters by query
-	var result []beads.Issue
-	for _, issue := range m.issues {
-		result = append(result, issue)
-	}
-	return result, nil
-}
+	mockClient := mocks.NewMockBeadsClient(t)
+	mockClient.EXPECT().GetComments(mock.Anything).
+		Return([]beads.Comment{}, nil)
 
-// mockCommentLoader implements CommentLoader for testing with predefined comments.
-type mockCommentLoader struct {
-	comments map[string][]beads.Comment
-	err      error // If set, GetComments returns this error
-}
-
-func (m *mockCommentLoader) GetComments(issueID string) ([]beads.Comment, error) {
-	if m.err != nil {
-		return nil, m.err
-	}
-	if comments, ok := m.comments[issueID]; ok {
-		return comments, nil
-	}
-	return nil, nil
+	return New(issue, mockExecutor, mockClient)
 }
 
 func TestDetails_New(t *testing.T) {
@@ -60,7 +42,7 @@ func TestDetails_New(t *testing.T) {
 		Priority:  beads.PriorityHigh,
 		Status:    beads.StatusOpen,
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 	require.Equal(t, "test-1", m.issue.ID)
 }
 
@@ -69,7 +51,8 @@ func TestDetails_SetSize(t *testing.T) {
 		ID:        "test-1",
 		TitleText: "Test Issue",
 	}
-	m := New(issue, nil, nil)
+
+	m := createTestModel(t, issue)
 	m = m.SetSize(100, 40)
 	require.Equal(t, 100, m.width)
 	require.Equal(t, 40, m.height)
@@ -78,7 +61,7 @@ func TestDetails_SetSize(t *testing.T) {
 
 func TestDetails_View_NotReady(t *testing.T) {
 	issue := beads.Issue{ID: "test-1", TitleText: "Test"}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 	// Without SetSize, ready is false
 	view := m.View()
 	require.Equal(t, "Loading...", view, "expected 'Loading...' when not ready")
@@ -93,7 +76,7 @@ func TestDetails_View_Ready(t *testing.T) {
 		Status:    beads.StatusOpen,
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 	m = m.SetSize(100, 40)
 	view := m.View()
 
@@ -108,7 +91,7 @@ func TestDetails_View_WithDescription(t *testing.T) {
 		DescriptionText: "This is a detailed description",
 		CreatedAt:       time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 	m = m.SetSize(100, 40)
 	view := m.View()
 
@@ -127,7 +110,7 @@ func TestDetails_View_WithExtraFields(t *testing.T) {
 		Notes:              "Some notes",
 		CreatedAt:          time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 	m = m.SetSize(100, 40)
 	view := m.View()
 	stripped := stripANSI(view)
@@ -151,7 +134,7 @@ func TestDetails_View_WithNoExtraFields(t *testing.T) {
 		Notes:              "",
 		CreatedAt:          time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 	m = m.SetSize(100, 40)
 	view := m.View()
 	stripped := stripANSI(view)
@@ -173,7 +156,7 @@ func TestDetails_View_WithDependencies(t *testing.T) {
 		Blocks:    []string{"downstream-1"},
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 	m = m.SetSize(170, 40) // Width >= 115 for two-column layout with dependencies
 	view := m.View()
 
@@ -190,7 +173,7 @@ func TestDetails_View_WithLabels(t *testing.T) {
 		Labels:    []string{"bug", "urgent"},
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 	m = m.SetSize(100, 40)
 	view := m.View()
 
@@ -206,7 +189,7 @@ func TestDetails_Update_ScrollDown(t *testing.T) {
 		DescriptionText: strings.Repeat("Long content line\n", 100),
 		CreatedAt:       time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 	m = m.SetSize(100, 20) // Small height to enable scrolling
 
 	initialOffset := m.viewport.YOffset
@@ -221,7 +204,7 @@ func TestDetails_Update_ScrollUp(t *testing.T) {
 		DescriptionText: strings.Repeat("Long content line\n", 100),
 		CreatedAt:       time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 	m = m.SetSize(100, 20)
 
 	// Scroll down first
@@ -241,7 +224,7 @@ func TestDetails_Update_GotoTop(t *testing.T) {
 		DescriptionText: strings.Repeat("Long content line\n", 100),
 		CreatedAt:       time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 	m = m.SetSize(100, 20)
 
 	// Scroll down
@@ -260,7 +243,7 @@ func TestDetails_Update_GotoBottom(t *testing.T) {
 		DescriptionText: strings.Repeat("Long content line\n", 100),
 		CreatedAt:       time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 	m = m.SetSize(100, 20)
 
 	// Go to bottom
@@ -275,7 +258,7 @@ func TestDetails_SetSize_TwiceUpdatesViewport(t *testing.T) {
 		TitleText: "Test Issue",
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 	m = m.SetSize(100, 40)
 	m = m.SetSize(80, 30) // Resize
 
@@ -299,7 +282,7 @@ func TestDetails_View_AllTypes(t *testing.T) {
 			Type:      issueType,
 			CreatedAt: time.Now(),
 		}
-		m := New(issue, nil, nil)
+		m := createTestModel(t, issue)
 		m = m.SetSize(100, 40)
 		view := m.View()
 		require.NotEmpty(t, view, "expected non-empty view for type %s", issueType)
@@ -322,7 +305,7 @@ func TestDetails_View_AllPriorities(t *testing.T) {
 			Priority:  priority,
 			CreatedAt: time.Now(),
 		}
-		m := New(issue, nil, nil)
+		m := createTestModel(t, issue)
 		m = m.SetSize(100, 40)
 		view := m.View()
 		require.NotEmpty(t, view, "expected non-empty view for priority %d", priority)
@@ -337,7 +320,7 @@ func TestDetails_View_MarkdownDescription(t *testing.T) {
 		DescriptionText: "# Heading\n\nThis is **bold** and *italic* text.\n\n- Item 1\n- Item 2",
 		CreatedAt:       time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 	m = m.SetSize(100, 40)
 	view := m.View()
 
@@ -355,7 +338,7 @@ func TestDetails_View_MarkdownCodeBlock(t *testing.T) {
 		DescriptionText: "```go\nfunc example() {\n    return\n}\n```",
 		CreatedAt:       time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 	m = m.SetSize(100, 40)
 	view := m.View()
 
@@ -372,7 +355,7 @@ func TestDetails_RendererInitialization(t *testing.T) {
 		DescriptionText: "Some content",
 		CreatedAt:       time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 
 	// Before SetSize, mdRenderer should be nil
 	require.Nil(t, m.mdRenderer, "expected mdRenderer to be nil before SetSize")
@@ -393,7 +376,7 @@ func TestDetails_SingleColumnFallback(t *testing.T) {
 		Labels:    []string{"test-label"},
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 
 	// Width below minTwoColumnWidth (80) should use single-column
 	m = m.SetSize(70, 40)
@@ -414,7 +397,7 @@ func TestDetails_TwoColumnLayout(t *testing.T) {
 		Labels:    []string{"test-label"},
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 
 	// Width at or above minTwoColumnWidth (115) should use two-column
 	m = m.SetSize(170, 40)
@@ -435,7 +418,7 @@ func TestDetails_EmptyDescription(t *testing.T) {
 		TitleText: "Test Issue",
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 	m = m.SetSize(100, 40)
 	view := m.View()
 
@@ -450,7 +433,7 @@ func TestDetails_NoLabels(t *testing.T) {
 		Labels:    []string{},
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 	m = m.SetSize(100, 40)
 	view := m.View()
 
@@ -465,7 +448,7 @@ func TestDetails_ManyLabels(t *testing.T) {
 		Labels:    []string{"label1", "label2", "label3", "label4", "label5"},
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 	m = m.SetSize(100, 40)
 	view := m.View()
 
@@ -482,7 +465,7 @@ func TestDetails_LongDependencyList(t *testing.T) {
 		BlockedBy: []string{"dep-1", "dep-2", "dep-3", "dep-4", "dep-5"},
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 	m = m.SetSize(170, 40) // Width >= 115 for two-column layout with dependencies
 	view := m.View()
 
@@ -502,7 +485,7 @@ func TestDetails_TerminalResize(t *testing.T) {
 		Labels:          []string{"test"},
 		CreatedAt:       time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 
 	// Start with wide terminal (two-column)
 	m = m.SetSize(120, 40)
@@ -529,7 +512,7 @@ func TestDetails_JKScrollsViewport(t *testing.T) {
 		DescriptionText: strings.Repeat("Long content line\n", 100),
 		CreatedAt:       time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 	m = m.SetSize(100, 20)
 
 	initialOffset := m.viewport.YOffset
@@ -548,7 +531,7 @@ func TestDetails_DependencyNavigation_LToFocusDeps(t *testing.T) {
 		BlockedBy: []string{"dep-1", "dep-2", "dep-3"},
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 	m = m.SetSize(100, 40)
 
 	// Initially on content pane
@@ -583,7 +566,7 @@ func TestDetails_DependencyNavigation_EnterNavigates(t *testing.T) {
 		BlockedBy: []string{"target-dep"},
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 	m = m.SetSize(100, 40)
 
 	// Focus dependencies with 'l'
@@ -608,7 +591,7 @@ func TestDetails_DependencyNavigation_EnterNoOpOnContentPane(t *testing.T) {
 		BlockedBy: []string{"dep-1"},
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 	m = m.SetSize(100, 40)
 
 	// Stay on content pane (don't press 'l')
@@ -626,7 +609,7 @@ func TestDetails_DependencyNavigation_LNoOpWithoutDeps(t *testing.T) {
 		// No dependencies
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 	m = m.SetSize(100, 40)
 
 	// Press 'l' - should stay on content (no deps to focus)
@@ -650,7 +633,7 @@ func TestDetails_DependencyNavigation_MixedCategories_CorrectOrder(t *testing.T)
 		BlockedBy: []string{"blocker-1", "blocker-2"},
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 	m = m.SetSize(100, 40)
 
 	// Focus dependencies
@@ -701,7 +684,7 @@ func TestDetails_DeleteKey_EmitsDeleteIssueMsg(t *testing.T) {
 		Type:      beads.TypeTask,
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 	m = m.SetSize(100, 40)
 
 	// Press 'd' to request deletion
@@ -723,7 +706,7 @@ func TestDetails_DeleteKey_EpicType(t *testing.T) {
 		Type:      beads.TypeEpic,
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 	m = m.SetSize(100, 40)
 
 	// Press 'd' to request deletion
@@ -742,7 +725,7 @@ func TestDetails_FooterShowsDeleteKeybinding(t *testing.T) {
 		TitleText: "Test Issue",
 		CreatedAt: time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 	m = m.SetSize(100, 40)
 	view := m.View()
 
@@ -763,7 +746,7 @@ func TestDetails_View_Golden(t *testing.T) {
 		CreatedAt:       time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC),
 		UpdatedAt:       time.Date(2024, 1, 20, 14, 45, 0, 0, time.UTC),
 	}
-	m := New(issue, nil, nil).SetSize(120, 30)
+	m := createTestModel(t, issue).SetSize(120, 30)
 
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))
@@ -785,42 +768,44 @@ func TestDetails_View_Golden_WithDependencies(t *testing.T) {
 		CreatedAt:       time.Date(2024, 2, 1, 9, 0, 0, 0, time.UTC),
 		UpdatedAt:       time.Date(2024, 2, 15, 16, 30, 0, 0, time.UTC),
 	}
-	m := New(issue, nil, nil).SetSize(120, 30)
+	m := createTestModel(t, issue).SetSize(120, 30)
 
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))
 }
 
 // TestDetails_View_Golden_WithLoadedDependencies tests rendering with fully loaded dependency data.
-// Uses mockLoader to provide full issue details for dependencies.
+// Uses MockBQLExecutor to provide full issue details for dependencies.
 // Run with -update flag to update golden files: go test -update ./internal/ui/details/...
 func TestDetails_View_Golden_WithLoadedDependencies(t *testing.T) {
-	// Create mock loader with dependency issue data
-	loader := &mockLoader{
-		issues: map[string]beads.Issue{
-			"bug-101": {
-				ID:        "bug-101",
-				TitleText: "Critical login failure",
-				Type:      beads.TypeBug,
-				Priority:  beads.PriorityCritical,
-				Status:    beads.StatusOpen,
-			},
-			"task-201": {
-				ID:        "task-201",
-				TitleText: "Update documentation",
-				Type:      beads.TypeTask,
-				Priority:  beads.PriorityLow,
-				Status:    beads.StatusOpen,
-			},
-			"feature-301": {
-				ID:        "feature-301",
-				TitleText: "New dashboard widget",
-				Type:      beads.TypeFeature,
-				Priority:  beads.PriorityHigh,
-				Status:    beads.StatusInProgress,
-			},
+	mockExecutor := mocks.NewMockBQLExecutor(t)
+	mockExecutor.EXPECT().Execute(mock.Anything).Return([]beads.Issue{
+		{
+			ID:        "bug-101",
+			TitleText: "Critical login failure",
+			Type:      beads.TypeBug,
+			Priority:  beads.PriorityCritical,
+			Status:    beads.StatusOpen,
 		},
-	}
+		{
+			ID:        "task-201",
+			TitleText: "Update documentation",
+			Type:      beads.TypeTask,
+			Priority:  beads.PriorityLow,
+			Status:    beads.StatusOpen,
+		},
+		{
+			ID:        "feature-301",
+			TitleText: "New dashboard widget",
+			Type:      beads.TypeFeature,
+			Priority:  beads.PriorityHigh,
+			Status:    beads.StatusInProgress,
+		},
+	}, nil)
+
+	mockClient := mocks.NewMockBeadsClient(t)
+	mockClient.EXPECT().GetComments(mock.Anything).
+		Return([]beads.Comment{}, nil)
 
 	issue := beads.Issue{
 		ID:              "task-500",
@@ -834,7 +819,7 @@ func TestDetails_View_Golden_WithLoadedDependencies(t *testing.T) {
 		Children:        []string{"task-201", "feature-301"},
 		CreatedAt:       time.Date(2024, 3, 1, 10, 0, 0, 0, time.UTC),
 	}
-	m := New(issue, loader, nil).SetSize(120, 30)
+	m := New(issue, mockExecutor, mockClient).SetSize(120, 30)
 
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))
@@ -853,7 +838,7 @@ func TestDetails_View_Golden_Wide(t *testing.T) {
 		Labels:          []string{"test"},
 		CreatedAt:       time.Date(2024, 3, 1, 12, 0, 0, 0, time.UTC),
 	}
-	m := New(issue, nil, nil).SetSize(180, 25)
+	m := createTestModel(t, issue).SetSize(180, 25)
 
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))
@@ -871,7 +856,7 @@ func TestDetails_View_Golden_WrappingTitle(t *testing.T) {
 		Status:          beads.StatusInProgress,
 		CreatedAt:       time.Date(2024, 3, 1, 12, 0, 0, 0, time.UTC),
 	}
-	m := New(issue, nil, nil).SetSize(180, 25)
+	m := createTestModel(t, issue).SetSize(180, 25)
 
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))
@@ -892,34 +877,31 @@ func TestDetails_View_Golden_WithAssignee(t *testing.T) {
 		CreatedAt:       time.Date(2024, 4, 1, 9, 0, 0, 0, time.UTC),
 		UpdatedAt:       time.Date(2024, 4, 1, 10, 30, 0, 0, time.UTC),
 	}
-	m := New(issue, nil, nil).SetSize(120, 30)
+	m := createTestModel(t, issue).SetSize(120, 30)
 
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))
 }
 
 // TestDetails_View_Golden_WithComments tests rendering with comments loaded.
-// Uses mockCommentLoader to provide comments for the issue.
+// Uses MockCommentLoader to provide comments for the issue.
 // Run with -update flag to update golden files: go test -update ./internal/ui/details/...
 func TestDetails_View_Golden_WithComments(t *testing.T) {
-	commentLoader := &mockCommentLoader{
-		comments: map[string][]beads.Comment{
-			"commented-task": {
-				{
-					ID:        1,
-					Author:    "alice",
-					Text:      "First comment on this task.",
-					CreatedAt: time.Date(2024, 4, 2, 14, 30, 0, 0, time.UTC),
-				},
-				{
-					ID:        2,
-					Author:    "bob",
-					Text:      "Second comment with some feedback.",
-					CreatedAt: time.Date(2024, 4, 2, 15, 45, 0, 0, time.UTC),
-				},
-			},
+	commentLoader := mocks.NewMockBeadsClient(t)
+	commentLoader.EXPECT().GetComments("commented-task").Return([]beads.Comment{
+		{
+			ID:        1,
+			Author:    "alice",
+			Text:      "First comment on this task.",
+			CreatedAt: time.Date(2024, 4, 2, 14, 30, 0, 0, time.UTC),
 		},
-	}
+		{
+			ID:        2,
+			Author:    "bob",
+			Text:      "Second comment with some feedback.",
+			CreatedAt: time.Date(2024, 4, 2, 15, 45, 0, 0, time.UTC),
+		},
+	}, nil)
 
 	issue := beads.Issue{
 		ID:              "commented-task",
@@ -939,18 +921,15 @@ func TestDetails_View_Golden_WithComments(t *testing.T) {
 // TestDetails_View_Golden_WithAssigneeAndComments tests rendering with both assignee and comments.
 // Run with -update flag to update golden files: go test -update ./internal/ui/details/...
 func TestDetails_View_Golden_WithAssigneeAndComments(t *testing.T) {
-	commentLoader := &mockCommentLoader{
-		comments: map[string][]beads.Comment{
-			"full-task": {
-				{
-					ID:        1,
-					Author:    "code-reviewer",
-					Text:      "APPROVED: Implementation looks good.",
-					CreatedAt: time.Date(2024, 4, 3, 16, 0, 0, 0, time.UTC),
-				},
-			},
+	commentLoader := mocks.NewMockBeadsClient(t)
+	commentLoader.EXPECT().GetComments("full-task").Return([]beads.Comment{
+		{
+			ID:        1,
+			Author:    "code-reviewer",
+			Text:      "APPROVED: Implementation looks good.",
+			CreatedAt: time.Date(2024, 4, 3, 16, 0, 0, 0, time.UTC),
 		},
-	}
+	}, nil)
 
 	issue := beads.Issue{
 		ID:              "full-task",
@@ -973,18 +952,15 @@ func TestDetails_View_Golden_WithAssigneeAndComments(t *testing.T) {
 // TestDetails_View_Golden_WithLongComment tests that long comments wrap correctly.
 // Run with -update flag to update golden files: go test -update ./internal/ui/details/...
 func TestDetails_View_Golden_WithLongComment(t *testing.T) {
-	commentLoader := &mockCommentLoader{
-		comments: map[string][]beads.Comment{
-			"long-comment-task": {
-				{
-					ID:        1,
-					Author:    "reviewer",
-					Text:      "This is a very long comment that should wrap to multiple lines within the content column. It contains enough text to demonstrate that the word wrapping is working correctly and that long comments don't overflow past the column boundary.",
-					CreatedAt: time.Date(2024, 4, 5, 10, 0, 0, 0, time.UTC),
-				},
-			},
+	commentLoader := mocks.NewMockBeadsClient(t)
+	commentLoader.EXPECT().GetComments("long-comment-task").Return([]beads.Comment{
+		{
+			ID:        1,
+			Author:    "reviewer",
+			Text:      "This is a very long comment that should wrap to multiple lines within the content column. It contains enough text to demonstrate that the word wrapping is working correctly and that long comments don't overflow past the column boundary.",
+			CreatedAt: time.Date(2024, 4, 5, 10, 0, 0, 0, time.UTC),
 		},
-	}
+	}, nil)
 
 	issue := beads.Issue{
 		ID:              "long-comment-task",
@@ -1004,9 +980,8 @@ func TestDetails_View_Golden_WithLongComment(t *testing.T) {
 // TestDetails_View_Golden_WithCommentsError tests that error message is shown when comments fail to load.
 // Run with -update flag to update golden files: go test -update ./internal/ui/details/...
 func TestDetails_View_Golden_WithCommentsError(t *testing.T) {
-	commentLoader := &mockCommentLoader{
-		err: errors.New("database connection failed"),
-	}
+	commentLoader := mocks.NewMockBeadsClient(t)
+	commentLoader.EXPECT().GetComments("error-task").Return(nil, errors.New("database connection failed"))
 
 	issue := beads.Issue{
 		ID:              "error-task",
@@ -1040,7 +1015,7 @@ func TestDetails_View_Golden_WithExtraFields(t *testing.T) {
 		CreatedAt:          time.Date(2024, 5, 1, 9, 0, 0, 0, time.UTC),
 		UpdatedAt:          time.Date(2024, 5, 2, 14, 30, 0, 0, time.UTC),
 	}
-	m := New(issue, nil, nil).SetSize(120, 40)
+	m := createTestModel(t, issue).SetSize(120, 40)
 
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))
@@ -1060,7 +1035,7 @@ func TestDetails_View_Golden_NoExtraFields(t *testing.T) {
 		Labels:    []string{"simple"},
 		CreatedAt: time.Date(2024, 5, 10, 9, 0, 0, 0, time.UTC),
 	}
-	m := New(issue, nil, nil).SetSize(120, 40)
+	m := createTestModel(t, issue).SetSize(120, 40)
 
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))
@@ -1081,7 +1056,7 @@ func TestDetails_View_Golden_WithClosedAt(t *testing.T) {
 		UpdatedAt:       time.Date(2024, 6, 3, 14, 30, 0, 0, time.UTC),
 		ClosedAt:        time.Date(2024, 6, 3, 14, 30, 0, 0, time.UTC),
 	}
-	m := New(issue, nil, nil).SetSize(120, 30)
+	m := createTestModel(t, issue).SetSize(120, 30)
 
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))
@@ -1151,7 +1126,7 @@ func TestDetails_YOffset_GetterSetter(t *testing.T) {
 		DescriptionText: strings.Repeat("Long content line\n", 100), // Lots of content to enable scrolling
 		CreatedAt:       time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 	m = m.SetSize(100, 20) // Small height to enable scrolling (matching existing test pattern)
 
 	// Initial offset is 0
@@ -1183,7 +1158,7 @@ func TestDetails_SetSize_PreservesScroll(t *testing.T) {
 		DescriptionText: strings.Repeat("Long content line\n", 100),
 		CreatedAt:       time.Now(),
 	}
-	m := New(issue, nil, nil)
+	m := createTestModel(t, issue)
 	m = m.SetSize(100, 20) // Small height to enable scrolling
 
 	// Scroll down using key presses (like TestDetails_Update_ScrollDown)
@@ -1207,7 +1182,7 @@ func TestDetails_SetSize_InitializedAtTop(t *testing.T) {
 	}
 
 	// New model starts at top on first SetSize (initialization)
-	m := New(issue, nil, nil).SetSize(80, 20)
+	m := createTestModel(t, issue).SetSize(80, 20)
 	require.Equal(t, 0, m.YOffset(), "new model should start at top")
 }
 
@@ -1228,7 +1203,7 @@ func TestDetails_View_Golden_LongLabels(t *testing.T) {
 		Labels:    []string{"spec:018-embed-children-list", "very-long-label-that-exceeds-column-bounds"},
 		CreatedAt: time.Date(2025, 12, 17, 16, 24, 59, 0, time.UTC),
 	}
-	m := New(issue, nil, nil).SetSize(120, 30)
+	m := createTestModel(t, issue).SetSize(120, 30)
 
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))

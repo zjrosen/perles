@@ -10,23 +10,31 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"perles/internal/beads"
+	"perles/internal/mocks"
 	"perles/internal/mode"
 	"perles/internal/mode/shared"
 	"perles/internal/ui/tree"
 )
 
-// testClock for deterministic timestamps in tests.
-var testClock = shared.FakeClock{FixedTime: time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)}
+// testClockTime for deterministic timestamps in tests.
+var testClockTime = time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)
 
-// testCreatedAt is 2 days before testClock for "2d ago" display
+// testCreatedAt is 2 days before testClockTime for "2d ago" display
 var testCreatedAt = time.Date(2025, 1, 13, 12, 0, 0, 0, time.UTC)
+
+// newTestClock creates a MockClock that always returns testClockTime.
+func newTestClock(t *testing.T) shared.Clock {
+	clock := mocks.NewMockClock(t)
+	clock.EXPECT().Now().Return(testClockTime).Maybe()
+	return clock
+}
 
 // Golden tests for tree sub-mode rendering.
 // Run with -update flag to update golden files: go test -update ./internal/mode/search/...
 
 // createTestModelInTreeMode creates a model in tree sub-mode for testing.
-func createTestModelInTreeMode() Model {
-	m := createTestModel()
+func createTestModelInTreeMode(t *testing.T) Model {
+	m := createTestModel(t)
 	m.subMode = mode.SubModeTree
 	m.focus = FocusResults
 	return m
@@ -42,18 +50,18 @@ func buildIssueMap(issues []beads.Issue) map[string]*beads.Issue {
 }
 
 // createTestModelWithTree creates a model with a loaded tree.
-func createTestModelWithTree(rootIssue beads.Issue, issues []beads.Issue) Model {
-	m := createTestModelInTreeMode()
+func createTestModelWithTree(t *testing.T, rootIssue beads.Issue, issues []beads.Issue) Model {
+	m := createTestModelInTreeMode(t)
 	m.treeRoot = &rootIssue
 
 	// Build tree
 	issueMap := buildIssueMap(issues)
-	m.tree = tree.New(rootIssue.ID, issueMap, tree.DirectionDown, tree.ModeDeps, testClock)
+	m.tree = tree.New(rootIssue.ID, issueMap, tree.DirectionDown, tree.ModeDeps, newTestClock(t))
 	return m
 }
 
 func TestSearch_TreeView_Golden_Loading(t *testing.T) {
-	m := createTestModelInTreeMode()
+	m := createTestModelInTreeMode(t)
 	m = m.SetSize(160, 30)
 	// No tree loaded yet - should show loading state
 	m.treeRoot = &beads.Issue{ID: "test-root"}
@@ -78,7 +86,7 @@ func TestSearch_TreeView_Golden_WithTree(t *testing.T) {
 		{ID: "task-3", TitleText: "Add tests", Type: beads.TypeTask, Status: beads.StatusOpen, Priority: 2, ParentID: "epic-1"},
 	}
 
-	m := createTestModelWithTree(rootIssue, issues)
+	m := createTestModelWithTree(t, rootIssue, issues)
 	m = m.SetSize(160, 30)
 
 	view := m.View()
@@ -99,9 +107,9 @@ func TestSearch_TreeView_Golden_DownDirection(t *testing.T) {
 		{ID: "child-2", TitleText: "Child B", Type: beads.TypeTask, Status: beads.StatusOpen, ParentID: "parent-1"},
 	}
 
-	m := createTestModelWithTree(rootIssue, issues)
+	m := createTestModelWithTree(t, rootIssue, issues)
 	issueMap := buildIssueMap(issues)
-	m.tree = tree.New(rootIssue.ID, issueMap, tree.DirectionDown, tree.ModeDeps, testClock)
+	m.tree = tree.New(rootIssue.ID, issueMap, tree.DirectionDown, tree.ModeDeps, newTestClock(t))
 	m = m.SetSize(160, 30)
 
 	view := m.View()
@@ -125,9 +133,9 @@ func TestSearch_TreeView_Golden_UpDirection(t *testing.T) {
 	}
 	issues := []beads.Issue{parentIssue, rootIssue}
 
-	m := createTestModelWithTree(rootIssue, issues)
+	m := createTestModelWithTree(t, rootIssue, issues)
 	issueMap := buildIssueMap(issues)
-	m.tree = tree.New(rootIssue.ID, issueMap, tree.DirectionUp, tree.ModeDeps, testClock)
+	m.tree = tree.New(rootIssue.ID, issueMap, tree.DirectionUp, tree.ModeDeps, newTestClock(t))
 	m = m.SetSize(160, 30)
 
 	view := m.View()
@@ -152,10 +160,10 @@ func TestSearch_TreeView_Golden_ChildrenMode(t *testing.T) {
 		{ID: "task-3", TitleText: "Blocked task (dependency)", Type: beads.TypeTask, Priority: 2, Status: beads.StatusOpen}, // No ParentID - pure dependency
 	}
 
-	m := createTestModelWithTree(rootIssue, issues)
+	m := createTestModelWithTree(t, rootIssue, issues)
 	issueMap := buildIssueMap(issues)
 	// Use children mode - should only show task-1 and task-2, NOT task-3
-	m.tree = tree.New(rootIssue.ID, issueMap, tree.DirectionDown, tree.ModeChildren, testClock)
+	m.tree = tree.New(rootIssue.ID, issueMap, tree.DirectionDown, tree.ModeChildren, newTestClock(t))
 	m = m.SetSize(160, 30)
 
 	view := m.View()
@@ -198,7 +206,7 @@ func TestRenderCompactProgress(t *testing.T) {
 }
 
 func TestSearch_TreeSubMode_Initialization(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 
 	// Enter tree sub-mode via EnterMsg
 	m, _ = m.Update(EnterMsg{SubMode: mode.SubModeTree, IssueID: "test-123"})
@@ -211,7 +219,7 @@ func TestSearch_TreeSubMode_Initialization(t *testing.T) {
 
 func TestSearch_TreeSubMode_EnterListClearsTreeState(t *testing.T) {
 	rootIssue := beads.Issue{ID: "root", TitleText: "Root"}
-	m := createTestModelWithTree(rootIssue, []beads.Issue{rootIssue})
+	m := createTestModelWithTree(t, rootIssue, []beads.Issue{rootIssue})
 
 	// Verify tree state is set
 	assert.Equal(t, mode.SubModeTree, m.subMode)
@@ -233,7 +241,7 @@ func TestSearch_EnterTreeMode_ClearsOldTreeState(t *testing.T) {
 	// would restore selection to Task A (if it's a child of Epic B).
 
 	rootIssue := beads.Issue{ID: "task-1", TitleText: "Task A"}
-	m := createTestModelWithTree(rootIssue, []beads.Issue{rootIssue})
+	m := createTestModelWithTree(t, rootIssue, []beads.Issue{rootIssue})
 
 	// Verify tree state exists (simulating previous tree session)
 	assert.NotNil(t, m.tree, "precondition: tree should be set")
@@ -252,7 +260,7 @@ func TestSearch_EnterTreeMode_ClearsOldTreeState(t *testing.T) {
 // Key handling tests for tree sub-mode
 
 // createTreeTestModel creates a model in tree sub-mode with multiple children for key testing.
-func createTreeTestModel() Model {
+func createTreeTestModel(t *testing.T) Model {
 	rootIssue := beads.Issue{
 		ID:        "root-1",
 		TitleText: "Root Issue",
@@ -267,13 +275,13 @@ func createTreeTestModel() Model {
 		{ID: "child-3", TitleText: "Third Child", Type: beads.TypeTask, Status: beads.StatusOpen, ParentID: "root-1"},
 	}
 
-	m := createTestModelWithTree(rootIssue, issues)
+	m := createTestModelWithTree(t, rootIssue, issues)
 	m = m.SetSize(100, 30)
 	return m
 }
 
 func TestTreeSubMode_JKey_MovesCursorDown(t *testing.T) {
-	m := createTreeTestModel()
+	m := createTreeTestModel(t)
 	initialID := m.tree.SelectedNode().Issue.ID
 
 	// Press j to move down
@@ -284,7 +292,7 @@ func TestTreeSubMode_JKey_MovesCursorDown(t *testing.T) {
 }
 
 func TestTreeSubMode_KKey_MovesCursorUp(t *testing.T) {
-	m := createTreeTestModel()
+	m := createTreeTestModel(t)
 
 	// First move down, then test k
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
@@ -299,7 +307,7 @@ func TestTreeSubMode_KKey_MovesCursorUp(t *testing.T) {
 }
 
 func TestTreeSubMode_DownArrow_MovesCursorDown(t *testing.T) {
-	m := createTreeTestModel()
+	m := createTreeTestModel(t)
 	initialID := m.tree.SelectedNode().Issue.ID
 
 	// Press down arrow
@@ -309,7 +317,7 @@ func TestTreeSubMode_DownArrow_MovesCursorDown(t *testing.T) {
 }
 
 func TestTreeSubMode_UpArrow_MovesCursorUp(t *testing.T) {
-	m := createTreeTestModel()
+	m := createTreeTestModel(t)
 
 	// First move down
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
@@ -321,7 +329,7 @@ func TestTreeSubMode_UpArrow_MovesCursorUp(t *testing.T) {
 }
 
 func TestTreeSubMode_SlashKey_SwitchesToListMode(t *testing.T) {
-	m := createTreeTestModel()
+	m := createTreeTestModel(t)
 
 	// Press / to switch to list mode
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
@@ -331,7 +339,7 @@ func TestTreeSubMode_SlashKey_SwitchesToListMode(t *testing.T) {
 }
 
 func TestTreeSubMode_DKey_TogglesDirection(t *testing.T) {
-	m := createTreeTestModel()
+	m := createTreeTestModel(t)
 	initialDirection := m.tree.Direction()
 
 	// Press d to toggle direction
@@ -342,7 +350,7 @@ func TestTreeSubMode_DKey_TogglesDirection(t *testing.T) {
 }
 
 func TestTreeSubMode_MKey_TogglesMode(t *testing.T) {
-	m := createTreeTestModel()
+	m := createTreeTestModel(t)
 	initialMode := m.tree.Mode()
 	assert.Equal(t, tree.ModeDeps, initialMode, "should start in deps mode")
 
@@ -360,7 +368,7 @@ func TestTreeSubMode_MKey_TogglesMode(t *testing.T) {
 }
 
 func TestTreeSubMode_LKey_FocusesDetails(t *testing.T) {
-	m := createTreeTestModel()
+	m := createTreeTestModel(t)
 	assert.Equal(t, FocusResults, m.focus, "should start with focus on results")
 
 	// Press l to move focus to details
@@ -370,7 +378,7 @@ func TestTreeSubMode_LKey_FocusesDetails(t *testing.T) {
 }
 
 func TestTreeSubMode_RightArrow_FocusesDetails(t *testing.T) {
-	m := createTreeTestModel()
+	m := createTreeTestModel(t)
 
 	// Press right arrow
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
@@ -379,7 +387,7 @@ func TestTreeSubMode_RightArrow_FocusesDetails(t *testing.T) {
 }
 
 func TestTreeSubMode_TabKey_FocusesDetails(t *testing.T) {
-	m := createTreeTestModel()
+	m := createTreeTestModel(t)
 
 	// Press tab
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
@@ -388,7 +396,7 @@ func TestTreeSubMode_TabKey_FocusesDetails(t *testing.T) {
 }
 
 func TestTreeSubMode_TabKey_CyclesBetweenTreeAndDetails(t *testing.T) {
-	m := createTreeTestModel()
+	m := createTreeTestModel(t)
 
 	// Start on tree (FocusResults)
 	assert.Equal(t, FocusResults, m.focus, "should start on tree")
@@ -403,7 +411,7 @@ func TestTreeSubMode_TabKey_CyclesBetweenTreeAndDetails(t *testing.T) {
 }
 
 func TestTreeSubMode_EscKey_ReturnsToKanban(t *testing.T) {
-	m := createTreeTestModel()
+	m := createTreeTestModel(t)
 
 	// Press esc - should return command that sends ExitToKanbanMsg
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
@@ -419,7 +427,7 @@ func TestTreeSubMode_EscKey_ReturnsToKanban(t *testing.T) {
 }
 
 func TestTreeSubMode_HelpKey_ShowsHelp(t *testing.T) {
-	m := createTreeTestModel()
+	m := createTreeTestModel(t)
 
 	// Press ? to show help
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
@@ -428,7 +436,7 @@ func TestTreeSubMode_HelpKey_ShowsHelp(t *testing.T) {
 }
 
 func TestTreeSubMode_CtrlC_Quits(t *testing.T) {
-	m := createTreeTestModel()
+	m := createTreeTestModel(t)
 
 	// Press ctrl+c - should return quit command
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
@@ -437,7 +445,7 @@ func TestTreeSubMode_CtrlC_Quits(t *testing.T) {
 }
 
 func TestTreeSubMode_NotFocused_KeysPassThrough(t *testing.T) {
-	m := createTreeTestModel()
+	m := createTreeTestModel(t)
 	m.focus = FocusDetails // Not focused on tree
 
 	initialID := m.tree.SelectedNode().Issue.ID
@@ -450,7 +458,7 @@ func TestTreeSubMode_NotFocused_KeysPassThrough(t *testing.T) {
 }
 
 func TestTreeSubMode_EnterKey_RefocusesTree(t *testing.T) {
-	m := createTreeTestModel()
+	m := createTreeTestModel(t)
 	originalRootID := m.tree.Root().Issue.ID
 
 	// Move cursor to first child
@@ -470,7 +478,7 @@ func TestTreeSubMode_EnterKey_RefocusesTree(t *testing.T) {
 }
 
 func TestTreeSubMode_UKey_GoesBack(t *testing.T) {
-	m := createTreeTestModel()
+	m := createTreeTestModel(t)
 	originalRootID := m.tree.Root().Issue.ID
 
 	// First refocus to a child (Enter on child)
@@ -489,7 +497,7 @@ func TestTreeSubMode_UKey_GoesBack(t *testing.T) {
 }
 
 func TestTreeSubMode_UCapitalKey_GoesToOriginal(t *testing.T) {
-	m := createTreeTestModel()
+	m := createTreeTestModel(t)
 	originalRootID := m.tree.Root().Issue.ID
 
 	// First refocus to a child
@@ -514,7 +522,7 @@ func TestTreeSubMode_UCapitalKey_GoesToOriginal(t *testing.T) {
 
 func TestHandleIssueDeleted_TreeMode_NonRootDeletion(t *testing.T) {
 	// Setup: Tree mode with a root and children
-	m := createTreeTestModel()
+	m := createTreeTestModel(t)
 	assert.Equal(t, mode.SubModeTree, m.subMode)
 	assert.NotNil(t, m.treeRoot)
 	rootID := m.treeRoot.ID
@@ -550,7 +558,7 @@ func TestHandleIssueDeleted_TreeMode_RootDeletionWithParent(t *testing.T) {
 	}
 	issues := []beads.Issue{rootIssue}
 
-	m := createTestModelWithTree(rootIssue, issues)
+	m := createTestModelWithTree(t, rootIssue, issues)
 	assert.Equal(t, mode.SubModeTree, m.subMode)
 
 	// Delete the root issue (wasTreeRoot=true, has parent)
@@ -581,7 +589,7 @@ func TestHandleIssueDeleted_TreeMode_RootDeletionWithoutParent(t *testing.T) {
 	}
 	issues := []beads.Issue{rootIssue}
 
-	m := createTestModelWithTree(rootIssue, issues)
+	m := createTestModelWithTree(t, rootIssue, issues)
 	assert.Equal(t, mode.SubModeTree, m.subMode)
 
 	// Delete the root issue (wasTreeRoot=true, no parent)
@@ -606,7 +614,7 @@ func TestHandleIssueDeleted_TreeMode_RootDeletionWithoutParent(t *testing.T) {
 
 func TestHandleIssueDeleted_ListMode_Deletion(t *testing.T) {
 	// Setup: List mode (default)
-	m := createTestModelWithResults()
+	m := createTestModelWithResults(t)
 	assert.Equal(t, mode.SubModeList, m.subMode)
 
 	// Delete an issue in list mode
@@ -628,7 +636,7 @@ func TestHandleIssueDeleted_ListMode_Deletion(t *testing.T) {
 
 func TestHandleIssueDeleted_Error(t *testing.T) {
 	// Setup: Any mode
-	m := createTreeTestModel()
+	m := createTreeTestModel(t)
 
 	// Delete fails with error
 	msg := issueDeletedMsg{

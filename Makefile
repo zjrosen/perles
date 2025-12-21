@@ -1,4 +1,4 @@
-.PHONY: all build run install test test-v test-update clean lint
+.PHONY: all build run install test test-v test-update clean lint mocks mocks-clean
 
 # Version from git (tag or commit hash)
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -56,6 +56,14 @@ test-update:
 # Run linter (requires golangci-lint)
 lint:
 	golangci-lint run ./...
+
+# Generate all mocks (clean first)
+mocks: mocks-clean
+	mockery
+
+# Clean generated mocks
+mocks-clean:
+	@rm -rf ./internal/mocks
 
 # Clean build artifacts
 clean:

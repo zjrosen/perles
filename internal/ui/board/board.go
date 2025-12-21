@@ -41,15 +41,15 @@ type Model struct {
 	// Active view's columns (for backward compatibility)
 	columns  []BoardColumn
 	configs  []config.ColumnConfig
-	executor *bql.Executor // BQL executor for column loading
-	clock    shared.Clock  // Clock for timestamp formatting
+	executor bql.BQLExecutor // BQL executor for column loading
+	clock    shared.Clock    // Clock for timestamp formatting
 	focused  int
 	width    int
 	height   int
 }
 
 // NewFromViews creates a board from multiple view configurations.
-func NewFromViews(viewConfigs []config.ViewConfig, executor *bql.Executor, clock shared.Clock) Model {
+func NewFromViews(viewConfigs []config.ViewConfig, executor bql.BQLExecutor, clock shared.Clock) Model {
 	views := make([]View, len(viewConfigs))
 
 	for i, vc := range viewConfigs {

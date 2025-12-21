@@ -7,18 +7,13 @@ import (
 )
 
 // Clipboard defines the interface for clipboard operations.
+// Use SystemClipboard for production and mocks.MockClipboard for testing.
 type Clipboard interface {
 	Copy(text string) error
 }
 
 // SystemClipboard implements Clipboard using the system clipboard.
 type SystemClipboard struct{}
-
-// MockClipboard is a no-op clipboard for testing.
-type MockClipboard struct{}
-
-// Copy is a no-op that always succeeds.
-func (MockClipboard) Copy(string) error { return nil }
 
 // Copy copies text to the system clipboard.
 func (SystemClipboard) Copy(text string) error {

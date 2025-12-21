@@ -44,8 +44,8 @@ type Controller interface {
 
 // Services contains shared dependencies injected into mode controllers.
 type Services struct {
-	Client     *beads.Client
-	Executor   *bql.Executor
+	Client     beads.BeadsClient
+	Executor   bql.BQLExecutor
 	Config     *config.Config
 	ConfigPath string
 	DBPath     string

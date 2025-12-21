@@ -16,6 +16,11 @@ type Client struct {
 	dbPath string
 }
 
+type BeadsClient interface {
+	Version() (string, error)
+	GetComments(issueID string) ([]Comment, error)
+}
+
 // NewClient creates a client connected to the beads database.
 func NewClient(projectPath string) (*Client, error) {
 	dbPath := projectPath + "/.beads/beads.db"

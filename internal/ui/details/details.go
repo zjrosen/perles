@@ -26,17 +26,6 @@ const (
 	columnGap          = 2   // Gap between columns
 )
 
-// DependencyLoader provides the ability to load issue data for dependencies.
-// This interface allows for mocking in tests.
-type DependencyLoader interface {
-	Execute(query string) ([]beads.Issue, error)
-}
-
-// CommentLoader provides the ability to load comments for an issue.
-type CommentLoader interface {
-	GetComments(issueID string) ([]beads.Comment, error)
-}
-
 // DependencyItem holds loaded dependency data for display.
 type DependencyItem struct {
 	Issue    *beads.Issue // Full issue data (nil if load failed)
@@ -99,12 +88,12 @@ type Model struct {
 	width              int
 	height             int
 	ready              bool
-	focusPane          FocusPane // Which pane has focus
+	focusPane          FocusPane
 	dependencies       []DependencyItem
 	selectedDependency int // Index into dependencies slice
-	loader             DependencyLoader
+	executor           bql.BQLExecutor
 	comments           []beads.Comment
-	commentLoader      CommentLoader
+	commentLoader      beads.BeadsClient
 	commentsLoaded     bool
 	commentsError      error
 }
@@ -113,10 +102,10 @@ type Model struct {
 // The optional loader parameter enables loading full issue data for dependencies.
 // The optional commentLoader enables loading comments for the issue.
 // Pass *beads.Client for both (it implements both interfaces); nil disables loading.
-func New(issue beads.Issue, loader DependencyLoader, commentLoader CommentLoader) Model {
+func New(issue beads.Issue, executor bql.BQLExecutor, commentLoader beads.BeadsClient) Model {
 	m := Model{
 		issue:         issue,
-		loader:        loader,
+		executor:      executor,
 		commentLoader: commentLoader,
 	}
 	m.loadDependencies()
@@ -956,32 +945,29 @@ func (m *Model) loadDependencies() {
 		return
 	}
 
-	// If we have a loader, fetch full issue data
-	if m.loader != nil {
-		ids := make([]string, len(items))
-		for i, item := range items {
-			ids[i] = item.ID
-		}
+	ids := make([]string, len(items))
+	for i, item := range items {
+		ids[i] = item.ID
+	}
 
-		query := bql.BuildIDQuery(ids)
-		if query != "" {
-			issues, err := m.loader.Execute(query)
-			if err == nil {
-				// Build a lookup map
-				issueMap := make(map[string]*beads.Issue)
-				for i := range issues {
-					issueMap[issues[i].ID] = &issues[i]
-				}
+	query := bql.BuildIDQuery(ids)
+	if query != "" {
+		issues, err := m.executor.Execute(query)
+		if err == nil {
+			// Build a lookup map
+			issueMap := make(map[string]*beads.Issue)
+			for i := range issues {
+				issueMap[issues[i].ID] = &issues[i]
+			}
 
-				// Populate Issue field for each item
-				for i := range items {
-					if issue, ok := issueMap[items[i].ID]; ok {
-						items[i].Issue = issue
-					}
+			// Populate Issue field for each item
+			for i := range items {
+				if issue, ok := issueMap[items[i].ID]; ok {
+					items[i].Issue = issue
 				}
 			}
-			// On error, we keep items with nil Issue (fallback to ID display)
 		}
+		// On error, we keep items with nil Issue (fallback to ID display)
 	}
 
 	m.dependencies = items
@@ -989,7 +975,7 @@ func (m *Model) loadDependencies() {
 
 // loadComments fetches comments for the current issue using the comment loader.
 func (m *Model) loadComments() {
-	if m.commentLoader == nil || m.commentsLoaded {
+	if m.commentsLoaded {
 		return
 	}
 	comments, err := m.commentLoader.GetComments(m.issue.ID)

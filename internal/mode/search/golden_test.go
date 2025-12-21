@@ -6,24 +6,34 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/exp/teatest"
+	"github.com/stretchr/testify/mock"
 
 	"perles/internal/beads"
 	"perles/internal/config"
+	"perles/internal/mocks"
 	"perles/internal/mode"
-	"perles/internal/mode/shared"
 	"perles/internal/ui/shared/formmodal"
 )
 
 // testNow is a fixed reference time for golden tests to ensure reproducible timestamps.
 var testNow = time.Date(2025, 12, 13, 12, 0, 0, 0, time.UTC)
 
-// createGoldenTestModel creates a Model with a fake clock for reproducible golden tests.
-func createGoldenTestModel() Model {
+// createGoldenTestModel creates a Model with a mock clock for reproducible golden tests.
+func createGoldenTestModel(t *testing.T) Model {
 	cfg := config.Defaults()
+	clipboard := mocks.NewMockClipboard(t)
+	clipboard.EXPECT().Copy(mock.Anything).Return(nil).Maybe()
+	clock := mocks.NewMockClock(t)
+	clock.EXPECT().Now().Return(testNow).Maybe()
+
+	mockClient := mocks.NewMockBeadsClient(t)
+	mockClient.EXPECT().GetComments(mock.Anything).Return([]beads.Comment{}, nil).Maybe()
+
 	services := mode.Services{
+		Client:    mockClient,
 		Config:    &cfg,
-		Clipboard: shared.MockClipboard{},
-		Clock:     shared.FakeClock{FixedTime: testNow},
+		Clipboard: clipboard,
+		Clock:     clock,
 	}
 
 	m := New(services)
@@ -32,18 +42,22 @@ func createGoldenTestModel() Model {
 	return m
 }
 
-// createGoldenTestModelWithViews creates a Model with views and a fake clock.
-func createGoldenTestModelWithViews() Model {
+// createGoldenTestModelWithViews creates a Model with views and a mock clock.
+func createGoldenTestModelWithViews(t *testing.T) Model {
 	cfg := config.Defaults()
 	cfg.Views = []config.ViewConfig{
 		{Name: "Inbox"},
 		{Name: "Critical"},
 		{Name: "In Progress"},
 	}
+	clipboard := mocks.NewMockClipboard(t)
+	clipboard.EXPECT().Copy(mock.Anything).Return(nil).Maybe()
+	clock := mocks.NewMockClock(t)
+	clock.EXPECT().Now().Return(testNow).Maybe()
 	services := mode.Services{
 		Config:    &cfg,
-		Clipboard: shared.MockClipboard{},
-		Clock:     shared.FakeClock{FixedTime: testNow},
+		Clipboard: clipboard,
+		Clock:     clock,
 	}
 
 	m := New(services)
@@ -56,14 +70,14 @@ func createGoldenTestModelWithViews() Model {
 // Run with -update flag to update golden files: go test -update ./internal/mode/search/...
 
 func TestSearch_View_Golden_Empty(t *testing.T) {
-	m := createGoldenTestModel()
+	m := createGoldenTestModel(t)
 	m = m.SetSize(100, 30)
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))
 }
 
 func TestSearch_View_Golden_WithResults(t *testing.T) {
-	m := createGoldenTestModel()
+	m := createGoldenTestModel(t)
 	m = m.SetSize(100, 30)
 
 	// Load some results with timestamps and comments
@@ -90,7 +104,7 @@ func TestSearch_View_Golden_WithResults(t *testing.T) {
 }
 
 func TestSearch_View_Golden_Error(t *testing.T) {
-	m := createGoldenTestModel()
+	m := createGoldenTestModel(t)
 	m = m.SetSize(100, 30)
 	m.input.SetValue("invalid query syntax ===")
 
@@ -104,7 +118,7 @@ func TestSearch_View_Golden_Error(t *testing.T) {
 }
 
 func TestSearch_View_Golden_NoResults(t *testing.T) {
-	m := createGoldenTestModel()
+	m := createGoldenTestModel(t)
 	m = m.SetSize(100, 30)
 	m.input.SetValue("status = closed")
 
@@ -116,7 +130,7 @@ func TestSearch_View_Golden_NoResults(t *testing.T) {
 }
 
 func TestSearch_View_Golden_Wide(t *testing.T) {
-	m := createGoldenTestModel()
+	m := createGoldenTestModel(t)
 	m = m.SetSize(200, 40)
 
 	// Load some results with timestamps
@@ -138,7 +152,7 @@ func TestSearch_View_Golden_Wide(t *testing.T) {
 }
 
 func TestSearch_View_Golden_Narrow(t *testing.T) {
-	m := createGoldenTestModel()
+	m := createGoldenTestModel(t)
 	m = m.SetSize(80, 24)
 
 	// Load some results with timestamp (narrow width should truncate title)
@@ -155,7 +169,7 @@ func TestSearch_View_Golden_Narrow(t *testing.T) {
 }
 
 func TestSearch_View_Golden_NewViewModal(t *testing.T) {
-	m := createGoldenTestModelWithViews()
+	m := createGoldenTestModelWithViews(t)
 	m = m.SetSize(100, 30)
 	m.input.SetValue("status = open")
 
@@ -169,7 +183,7 @@ func TestSearch_View_Golden_NewViewModal(t *testing.T) {
 }
 
 func TestSearch_View_Golden_SaveColumnModal(t *testing.T) {
-	m := createGoldenTestModelWithViews()
+	m := createGoldenTestModelWithViews(t)
 	m = m.SetSize(100, 30)
 	m.input.SetValue("priority = 0")
 

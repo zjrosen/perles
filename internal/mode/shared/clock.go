@@ -7,7 +7,7 @@ import (
 )
 
 // Clock provides the current time. Use RealClock for production
-// and FakeClock for testing.
+// and mocks.MockClock for testing.
 type Clock interface {
 	Now() time.Time
 }
@@ -17,14 +17,6 @@ type RealClock struct{}
 
 // Now returns the current time.
 func (RealClock) Now() time.Time { return time.Now() }
-
-// FakeClock returns a fixed time for testing.
-type FakeClock struct {
-	FixedTime time.Time
-}
-
-// Now returns the fixed time.
-func (c FakeClock) Now() time.Time { return c.FixedTime }
 
 // FormatRelativeTimeWithClock returns a human-friendly relative timestamp using the provided clock.
 // Examples: "now", "5m ago", "3h ago", "2d ago", "1w ago", "3mo ago", "1y ago"

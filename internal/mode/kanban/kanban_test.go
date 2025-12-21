@@ -5,10 +5,12 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"perles/internal/beads"
 	"perles/internal/config"
+	"perles/internal/mocks"
 	"perles/internal/mode"
 	"perles/internal/mode/shared"
 	"perles/internal/ui/board"
@@ -18,11 +20,16 @@ import (
 
 // createTestModel creates a minimal Model for testing state transitions.
 // It does not require a database connection.
-func createTestModel() Model {
+func createTestModel(t *testing.T) Model {
 	cfg := config.Defaults()
+	clipboard := mocks.NewMockClipboard(t)
+	clipboard.EXPECT().Copy(mock.Anything).Return(nil).Maybe()
+
+	mockExecutor := mocks.NewMockBQLExecutor(t)
 	services := mode.Services{
 		Config:    &cfg,
-		Clipboard: shared.MockClipboard{},
+		Clipboard: clipboard,
+		Executor:  mockExecutor,
 	}
 
 	return Model{
@@ -34,7 +41,11 @@ func createTestModel() Model {
 }
 
 func TestDeleteFlow_CancelReturnsToDetails(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
+
+	mockCommentLoader := mocks.NewMockBeadsClient(t)
+	mockCommentLoader.EXPECT().GetComments(mock.Anything).
+		Return([]beads.Comment{}, nil)
 
 	// Set up delete confirm view
 	issue := beads.Issue{
@@ -43,7 +54,7 @@ func TestDeleteFlow_CancelReturnsToDetails(t *testing.T) {
 		Type:      beads.TypeTask,
 	}
 	m.view = ViewDeleteConfirm
-	m.details = details.New(issue, nil, nil).SetSize(100, 40)
+	m.details = details.New(issue, m.services.Executor, mockCommentLoader).SetSize(100, 40)
 	m.selectedIssue = &issue
 
 	// Simulate modal cancel
@@ -54,7 +65,7 @@ func TestDeleteFlow_CancelReturnsToDetails(t *testing.T) {
 }
 
 func TestDeleteFlow_SubmitTriggersDelete(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 
 	// Set up delete confirm view with selected issue
 	issue := beads.Issue{
@@ -74,7 +85,7 @@ func TestDeleteFlow_SubmitTriggersDelete(t *testing.T) {
 }
 
 func TestDeleteFlow_IssueDeletedMsgReturnsToBoard(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 
 	// Simulate receiving success message
 	msg := issueDeletedMsg{
@@ -89,7 +100,7 @@ func TestDeleteFlow_IssueDeletedMsgReturnsToBoard(t *testing.T) {
 }
 
 func TestDeleteFlow_IssueDeletedMsgWithErrorShowsError(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 
 	// Simulate receiving error message
 	msg := issueDeletedMsg{
@@ -104,7 +115,8 @@ func TestDeleteFlow_IssueDeletedMsgWithErrorShowsError(t *testing.T) {
 }
 
 func TestCreateDeleteModal_RegularIssue(t *testing.T) {
-	m := createTestModel()
+	mockExecutor := mocks.NewMockBQLExecutor(t)
+	// No expectations needed - Execute won't be called for non-epic
 
 	issue := &beads.Issue{
 		ID:        "test-456",
@@ -112,7 +124,7 @@ func TestCreateDeleteModal_RegularIssue(t *testing.T) {
 		Type:      beads.TypeTask,
 	}
 
-	modal, isCascade, issueIDs := shared.CreateDeleteModal(issue, m.services.Executor)
+	modal, isCascade, issueIDs := shared.CreateDeleteModal(issue, mockExecutor)
 
 	require.NotNil(t, modal)
 	require.False(t, isCascade, "expected non-cascade for regular task")
@@ -120,16 +132,17 @@ func TestCreateDeleteModal_RegularIssue(t *testing.T) {
 }
 
 func TestCreateDeleteModal_EpicWithoutChildren(t *testing.T) {
-	m := createTestModel()
+	mockExecutor := mocks.NewMockBQLExecutor(t)
+	// No expectations needed - Execute won't be called for epic without children
 
 	issue := &beads.Issue{
 		ID:        "epic-1",
 		TitleText: "Epic Without Children",
 		Type:      beads.TypeEpic,
-		Blocks:    []string{}, // No children
+		Children:  []string{}, // No children
 	}
 
-	modal, isCascade, issueIDs := shared.CreateDeleteModal(issue, m.services.Executor)
+	modal, isCascade, issueIDs := shared.CreateDeleteModal(issue, mockExecutor)
 
 	require.NotNil(t, modal)
 	require.False(t, isCascade, "expected non-cascade for epic without children")
@@ -137,7 +150,13 @@ func TestCreateDeleteModal_EpicWithoutChildren(t *testing.T) {
 }
 
 func TestCreateDeleteModal_EpicWithChildren(t *testing.T) {
-	m := createTestModel()
+	mockExecutor := mocks.NewMockBQLExecutor(t)
+	mockExecutor.EXPECT().Execute(mock.Anything).Return([]beads.Issue{
+		{ID: "epic-1", Type: beads.TypeEpic, TitleText: "Epic With Children"},
+		{ID: "task-1", Type: beads.TypeTask, TitleText: "Child 1"},
+		{ID: "task-2", Type: beads.TypeTask, TitleText: "Child 2"},
+		{ID: "task-3", Type: beads.TypeTask, TitleText: "Child 3"},
+	}, nil)
 
 	issue := &beads.Issue{
 		ID:        "epic-1",
@@ -146,17 +165,19 @@ func TestCreateDeleteModal_EpicWithChildren(t *testing.T) {
 		Children:  []string{"task-1", "task-2", "task-3"},
 	}
 
-	modal, isCascade, issueIDs := shared.CreateDeleteModal(issue, m.services.Executor)
+	modal, isCascade, issueIDs := shared.CreateDeleteModal(issue, mockExecutor)
 
 	require.NotNil(t, modal)
 	require.True(t, isCascade, "expected cascade for epic with children")
-	// issueIDs includes epic and all descendants from BQL expand
-	// Since mock executor returns empty results, we get just the epic ID
+	require.Len(t, issueIDs, 4, "expected 4 IDs (epic + 3 children)")
 	require.Contains(t, issueIDs, "epic-1", "expected epic ID in delete list")
+	require.Contains(t, issueIDs, "task-1", "expected child task-1 in delete list")
+	require.Contains(t, issueIDs, "task-2", "expected child task-2 in delete list")
+	require.Contains(t, issueIDs, "task-3", "expected child task-3 in delete list")
 }
 
 func TestDeleteFlow_CascadeSubmit(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 
 	// Set up cascade delete scenario
 	issue := beads.Issue{
@@ -179,7 +200,7 @@ func TestDeleteFlow_CascadeSubmit(t *testing.T) {
 }
 
 func TestDeleteFlow_CancelClearsDeleteState(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 
 	issue := beads.Issue{
 		ID:        "epic-1",
@@ -197,7 +218,7 @@ func TestDeleteFlow_CancelClearsDeleteState(t *testing.T) {
 }
 
 func TestDeleteFlow_SubmitWithNoSelectedIssue(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 
 	// Set up delete confirm view but NO selected issue
 	m.view = ViewDeleteConfirm

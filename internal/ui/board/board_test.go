@@ -2,6 +2,7 @@ package board
 
 import (
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/exp/teatest"
@@ -9,7 +10,7 @@ import (
 
 	"perles/internal/beads"
 	"perles/internal/config"
-	"perles/internal/mode/shared"
+	"perles/internal/mocks"
 )
 
 func TestBoard_New_DefaultFocus(t *testing.T) {
@@ -812,7 +813,11 @@ func TestBoard_View_WithTreeColumn_Golden(t *testing.T) {
 		},
 	}
 
-	m := NewFromViews(views, nil, shared.FakeClock{})
+	// Use a fixed time for deterministic golden test output
+	fixedTime := time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)
+	clock := mocks.NewMockClock(t)
+	clock.EXPECT().Now().Return(fixedTime).Maybe()
+	m := NewFromViews(views, nil, clock)
 	m = m.SetSize(120, 40)
 
 	// Populate BQL columns with test issues
@@ -838,16 +843,17 @@ func TestBoard_View_WithTreeColumn_Golden(t *testing.T) {
 	m, _ = m.Update(doneMsg)
 
 	// Populate tree column with dependency tree data
+	// Set CreatedAt to fixedTime so relative time shows "now"
 	treeMsg := TreeColumnLoadedMsg{
 		ViewIndex:   0,
 		ColumnIndex: 1, // Dependencies is at index 1
 		ColumnTitle: "Dependencies",
 		RootID:      "root-1",
 		IssueMap: map[string]*beads.Issue{
-			"root-1":  {ID: "root-1", TitleText: "Epic: Feature X", Type: beads.TypeEpic, Priority: beads.PriorityHigh, Children: []string{"child-1", "child-2"}},
-			"child-1": {ID: "child-1", TitleText: "Task: Backend API", Type: beads.TypeTask, Priority: beads.PriorityMedium, ParentID: "root-1"},
-			"child-2": {ID: "child-2", TitleText: "Task: Frontend UI", Type: beads.TypeTask, Priority: beads.PriorityMedium, ParentID: "root-1", Children: []string{"child-3"}},
-			"child-3": {ID: "child-3", TitleText: "Subtask: Button", Type: beads.TypeTask, Priority: beads.PriorityLow, ParentID: "child-2"},
+			"root-1":  {ID: "root-1", TitleText: "Epic: Feature X", Type: beads.TypeEpic, Priority: beads.PriorityHigh, Children: []string{"child-1", "child-2"}, CreatedAt: fixedTime},
+			"child-1": {ID: "child-1", TitleText: "Task: Backend API", Type: beads.TypeTask, Priority: beads.PriorityMedium, ParentID: "root-1", CreatedAt: fixedTime},
+			"child-2": {ID: "child-2", TitleText: "Task: Frontend UI", Type: beads.TypeTask, Priority: beads.PriorityMedium, ParentID: "root-1", Children: []string{"child-3"}, CreatedAt: fixedTime},
+			"child-3": {ID: "child-3", TitleText: "Subtask: Button", Type: beads.TypeTask, Priority: beads.PriorityLow, ParentID: "child-2", CreatedAt: fixedTime},
 		},
 	}
 	m, _ = m.Update(treeMsg)

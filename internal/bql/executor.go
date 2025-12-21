@@ -9,6 +9,15 @@ import (
 	"perles/internal/log"
 )
 
+// BQLExecutor executes BQL queries and returns matching issues.
+// This interface is implemented by *Executor and mocked in tests.
+type BQLExecutor interface {
+	Execute(query string) ([]beads.Issue, error)
+}
+
+// Verify Executor implements BQLExecutor at compile time.
+var _ BQLExecutor = (*Executor)(nil)
+
 // Executor runs BQL queries against the database.
 type Executor struct {
 	db *sql.DB

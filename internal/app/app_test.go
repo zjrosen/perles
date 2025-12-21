@@ -3,24 +3,27 @@ package app
 import (
 	"testing"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"perles/internal/config"
+	"perles/internal/mocks"
 	"perles/internal/mode"
 	"perles/internal/mode/kanban"
 	"perles/internal/mode/search"
-	"perles/internal/mode/shared"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 // createTestModel creates a minimal Model for testing.
 // It does not require a database connection.
-func createTestModel() Model {
+func createTestModel(t *testing.T) Model {
 	cfg := config.Defaults()
+	clipboard := mocks.NewMockClipboard(t)
+	clipboard.EXPECT().Copy(mock.Anything).Return(nil).Maybe()
 	services := mode.Services{
 		Config:    &cfg,
-		Clipboard: shared.MockClipboard{},
+		Clipboard: clipboard,
 	}
 
 	return Model{
@@ -34,12 +37,12 @@ func createTestModel() Model {
 }
 
 func TestApp_DefaultMode(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 	require.Equal(t, mode.ModeKanban, m.currentMode, "expected default mode to be kanban")
 }
 
 func TestApp_WindowSizeMsg(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 
 	// Simulate window resize
 	newModel, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 50})
@@ -50,7 +53,7 @@ func TestApp_WindowSizeMsg(t *testing.T) {
 }
 
 func TestApp_CtrlSpaceSwitchesMode(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 
 	// Ctrl+Space (ctrl+@) should switch from kanban to search mode
 	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlAt})
@@ -67,7 +70,7 @@ func TestApp_CtrlSpaceSwitchesMode(t *testing.T) {
 }
 
 func TestApp_ViewDelegates(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 
 	// View should delegate to kanban
 	view := m.View()
@@ -75,7 +78,7 @@ func TestApp_ViewDelegates(t *testing.T) {
 }
 
 func TestApp_ModeSwitchPreservesSize(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 
 	// Set initial window size
 	newModel, _ := m.Update(tea.WindowSizeMsg{Width: 150, Height: 60})
@@ -106,7 +109,7 @@ func TestApp_ModeSwitchPreservesSize(t *testing.T) {
 }
 
 func TestApp_SearchModeInit(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 
 	// Switch to search mode (Ctrl+Space)
 	newModel, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlAt})
@@ -126,7 +129,7 @@ func TestApp_SearchModeInit(t *testing.T) {
 }
 
 func TestApp_KanbanModeExtracted(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 
 	// Verify kanban mode exists and works
 	require.NotNil(t, m.kanban, "kanban mode should be initialized")
@@ -145,7 +148,7 @@ func TestApp_KanbanModeExtracted(t *testing.T) {
 }
 
 func TestApp_CtrlCQuits(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 
 	// Ctrl+C should return quit command
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
@@ -155,7 +158,7 @@ func TestApp_CtrlCQuits(t *testing.T) {
 }
 
 func TestApp_SearchModeReceivesUpdates(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 
 	// Switch to search mode (Ctrl+Space)
 	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlAt})
@@ -174,7 +177,7 @@ func TestApp_SearchModeReceivesUpdates(t *testing.T) {
 }
 
 func TestApp_ModeSwitchRoundTrip(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 
 	// Multiple round trips should work (Ctrl+Space)
 	for i := 0; i < 3; i++ {
@@ -191,7 +194,7 @@ func TestApp_ModeSwitchRoundTrip(t *testing.T) {
 }
 
 func TestApp_SwitchToSearchMsg_WithQuery(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 
 	// Simulate receiving SwitchToSearchMsg from kanban mode
 	newModel, cmd := m.Update(kanban.SwitchToSearchMsg{Query: "status:open"})
@@ -209,7 +212,7 @@ func TestApp_SwitchToSearchMsg_WithQuery(t *testing.T) {
 }
 
 func TestApp_SwitchToSearchMsg_EmptyQuery(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 
 	// Simulate SwitchToSearchMsg with empty query (no column focused)
 	newModel, cmd := m.Update(kanban.SwitchToSearchMsg{Query: ""})
@@ -227,7 +230,7 @@ func TestApp_SwitchToSearchMsg_EmptyQuery(t *testing.T) {
 }
 
 func TestApp_ExitToKanbanMsg(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 
 	// Switch to search mode first (Ctrl+Space)
 	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlAt})
@@ -247,7 +250,7 @@ func TestApp_ExitToKanbanMsg(t *testing.T) {
 }
 
 func TestApp_SaveSearchToNewView(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 	initialViewCount := len(m.services.Config.Views)
 
 	// Simulate SaveSearchToNewViewMsg (without config path, so AddView will fail)
@@ -270,7 +273,7 @@ func TestApp_SaveSearchToNewView(t *testing.T) {
 }
 
 func TestApp_SaveSearchToNewView_Structure(t *testing.T) {
-	m := createTestModel()
+	m := createTestModel(t)
 
 	// Test with a temporary config to verify correct structure
 	msg := search.SaveSearchToNewViewMsg{
