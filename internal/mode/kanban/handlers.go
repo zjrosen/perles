@@ -79,11 +79,7 @@ func (m Model) handleBoardKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.autoRefreshed = false
 		// Invalidate other views so they reload when switched to
 		m.board = m.board.InvalidateViews()
-		cmds := []tea.Cmd{m.spinner.Tick}
-		if loadCmd := m.board.LoadAllColumns(); loadCmd != nil {
-			cmds = append(cmds, loadCmd)
-		}
-		return m, tea.Batch(cmds...)
+		return m, m.board.LoadAllColumns()
 
 	case key.Matches(msg, keys.Kanban.Yank):
 		// Yank (copy) selected issue ID to clipboard
@@ -190,11 +186,10 @@ func (m Model) handleBoardKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 			if cmd != nil {
 				m.loading = true
-				cmds := []tea.Cmd{cmd, m.spinner.Tick}
 				if toastCmd != nil {
-					cmds = append(cmds, toastCmd)
+					return m, tea.Batch(cmd, toastCmd)
 				}
-				return m, tea.Batch(cmds...)
+				return m, cmd
 			}
 			return m, toastCmd
 		}
@@ -221,11 +216,10 @@ func (m Model) handleBoardKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 			if cmd != nil {
 				m.loading = true
-				cmds := []tea.Cmd{cmd, m.spinner.Tick}
 				if toastCmd != nil {
-					cmds = append(cmds, toastCmd)
+					return m, tea.Batch(cmd, toastCmd)
 				}
-				return m, tea.Batch(cmds...)
+				return m, cmd
 			}
 			return m, toastCmd
 		}
@@ -296,6 +290,12 @@ func (m Model) handleBoardKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				SubMode: mode.SubModeList,
 				Query:   query,
 			}
+		}
+
+	case key.Matches(msg, keys.Kanban.Orchestrate):
+		// Start orchestration mode
+		return m, func() tea.Msg {
+			return SwitchToOrchestrationMsg{}
 		}
 	}
 
@@ -588,14 +588,10 @@ func (m Model) HandleDBChanged() (Model, tea.Cmd) {
 	m.board = m.board.InvalidateViews()
 
 	// Only reload current view if views are configured, otherwise load all
-	var loadCmd tea.Cmd
 	if m.board.ViewCount() > 0 {
-		loadCmd = m.board.LoadCurrentViewCmd()
-	} else {
-		loadCmd = m.board.LoadAllColumns()
+		return m, m.board.LoadCurrentViewCmd()
 	}
-
-	return m, tea.Batch(m.spinner.Tick, loadCmd)
+	return m, m.board.LoadAllColumns()
 }
 
 // handleColEditorSave processes column editor save.
@@ -620,7 +616,6 @@ func (m Model) handleColEditorSave(msg coleditor.SaveMsg) (Model, tea.Cmd) {
 	m.view = ViewBoard
 	m.loading = true
 	cmds := []tea.Cmd{
-		m.spinner.Tick,
 		func() tea.Msg { return mode.ShowToastMsg{Message: "Column saved", Style: toaster.StyleSuccess} },
 	}
 	if loadCmd := m.loadBoardCmd(); loadCmd != nil {
@@ -651,7 +646,6 @@ func (m Model) handleColEditorDelete(msg coleditor.DeleteMsg) (Model, tea.Cmd) {
 	m.view = ViewBoard
 	m.loading = true
 	cmds := []tea.Cmd{
-		m.spinner.Tick,
 		func() tea.Msg { return mode.ShowToastMsg{Message: "Column deleted", Style: toaster.StyleSuccess} },
 	}
 	if loadCmd := m.loadBoardCmd(); loadCmd != nil {
@@ -693,7 +687,6 @@ func (m Model) handleColEditorAdd(msg coleditor.AddMsg) (Model, tea.Cmd) {
 	m.view = ViewBoard
 	m.loading = true
 	cmds := []tea.Cmd{
-		m.spinner.Tick,
 		func() tea.Msg { return mode.ShowToastMsg{Message: "Column added", Style: toaster.StyleSuccess} },
 	}
 	if loadCmd := m.loadBoardCmd(); loadCmd != nil {

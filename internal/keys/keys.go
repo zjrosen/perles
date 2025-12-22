@@ -67,6 +67,7 @@ var Kanban = struct {
 	SearchFromColumn key.Binding
 	SwitchMode       key.Binding
 	ToggleStatus     key.Binding
+	Orchestrate      key.Binding // Start orchestration mode
 }{
 	Enter: key.NewBinding(
 		key.WithKeys("enter"),
@@ -135,6 +136,10 @@ var Kanban = struct {
 	ToggleStatus: key.NewBinding(
 		key.WithKeys("w"),
 		key.WithHelp("w", "toggle status bar"),
+	),
+	Orchestrate: key.NewBinding(
+		key.WithKeys("ctrl+o"),
+		key.WithHelp("ctrl+o", "orchestration mode"),
 	),
 }
 

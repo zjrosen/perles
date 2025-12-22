@@ -34,3 +34,10 @@ linters:
           mapstructure: snake
           env: upperSnake
           envconfig: upperSnake
+
+  exclusions:
+    rules:
+      # MCP protocol requires camelCase for JSON field names per spec
+      - path: internal/orchestration/mcp/(protocol|config)\.go
+        linters:
+          - tagliatelle

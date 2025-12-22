@@ -17,6 +17,7 @@ type AppMode int
 const (
 	ModeKanban AppMode = iota
 	ModeSearch
+	ModeOrchestration
 )
 
 // SubMode represents the two rendering modes within search.

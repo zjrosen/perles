@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"perles/internal/beads"
 	"perles/internal/bql"
@@ -63,7 +61,6 @@ type Model struct {
 	colEditor   coleditor.Model
 	modal       modal.Model
 	labelEditor labeleditor.Model
-	spinner     spinner.Model
 	view        ViewMode
 	width       int
 	height      int
@@ -99,10 +96,6 @@ func New(services mode.Services) Model {
 	}
 	_ = styles.ApplyTheme(themeCfg) // Ignore error for now, validation will be added
 
-	s := spinner.New()
-	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(styles.SpinnerColor)
-
 	// Create board from views (GetViews returns defaults if none configured)
 	clock := services.Clock
 	boardModel := board.NewFromViews(services.Config.GetViews(), services.Executor, clock).
@@ -113,7 +106,6 @@ func New(services mode.Services) Model {
 		view:                ViewBoard,
 		board:               boardModel,
 		help:                help.New(),
-		spinner:             s,
 		loading:             true,
 		showStatusBar:       services.Config.UI.ShowStatusBar,
 		pendingDeleteColumn: -1,
@@ -122,14 +114,8 @@ func New(services mode.Services) Model {
 
 // Init returns initial commands for the mode.
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.spinner.Tick}
-
 	// Trigger initial column load via BQL
-	if loadCmd := m.board.LoadAllColumns(); loadCmd != nil {
-		cmds = append(cmds, loadCmd)
-	}
-
-	return tea.Batch(cmds...)
+	return m.board.LoadAllColumns()
 }
 
 // Refresh triggers a data reload.
@@ -177,11 +163,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		return m.handleKey(msg)
-
-	case spinner.TickMsg:
-		var cmd tea.Cmd
-		m.spinner, cmd = m.spinner.Update(msg)
-		return m, cmd
 
 	case board.ColumnLoadedMsg:
 		return m.handleColumnLoaded(msg)
@@ -723,7 +704,6 @@ func (m Model) deleteColumn() (Model, tea.Cmd) {
 	m.view = ViewBoard
 	m.loading = true
 	cmds := []tea.Cmd{
-		m.spinner.Tick,
 		func() tea.Msg { return mode.ShowToastMsg{Message: "Column deleted", Style: toaster.StyleSuccess} },
 	}
 	if loadCmd := m.loadBoardCmd(); loadCmd != nil {
@@ -758,7 +738,6 @@ func (m Model) createNewView(viewName string) (Model, tea.Cmd) {
 	m.view = ViewBoard
 	m.loading = true
 	cmds := []tea.Cmd{
-		m.spinner.Tick,
 		func() tea.Msg {
 			return mode.ShowToastMsg{Message: "Created view: " + viewName, Style: toaster.StyleSuccess}
 		},
@@ -795,7 +774,6 @@ func (m Model) deleteCurrentView() (Model, tea.Cmd) {
 
 	m.loading = true
 	cmds := []tea.Cmd{
-		m.spinner.Tick,
 		func() tea.Msg {
 			return mode.ShowToastMsg{Message: "Deleted view: " + viewName, Style: toaster.StyleSuccess}
 		},
@@ -835,6 +813,9 @@ type SwitchToSearchMsg struct {
 	SubMode mode.SubMode // Which sub-mode to enter
 	IssueID string       // For tree sub-mode
 }
+
+// SwitchToOrchestrationMsg requests switching to orchestration mode.
+type SwitchToOrchestrationMsg struct{}
 
 type errMsg struct {
 	err     error

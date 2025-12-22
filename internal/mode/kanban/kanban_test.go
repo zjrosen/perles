@@ -357,3 +357,23 @@ func TestKanban_TKey_NoIssue_NoCommand(t *testing.T) {
 	// Should return nil command when no issue is selected
 	require.Nil(t, cmd, "expected nil command when no issue selected")
 }
+
+// =============================================================================
+// Orchestration Mode Entry Tests
+// =============================================================================
+
+func TestKanban_CtrlO_SendsOrchestrationMsg(t *testing.T) {
+	m := createTestModelWithIssue("task-123", "status = open")
+
+	// Simulate 'ctrl+o' keypress
+	msg := tea.KeyMsg{Type: tea.KeyCtrlO}
+	_, cmd := m.handleBoardKey(msg)
+
+	// Execute the command to get the message
+	require.NotNil(t, cmd, "expected command from 'ctrl+o' key")
+	result := cmd()
+
+	// Verify it's a SwitchToOrchestrationMsg
+	_, ok := result.(SwitchToOrchestrationMsg)
+	require.True(t, ok, "expected SwitchToOrchestrationMsg, got %T", result)
+}

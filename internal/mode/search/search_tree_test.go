@@ -1,13 +1,14 @@
 package search
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/exp/teatest"
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"perles/internal/beads"
 	"perles/internal/mocks"
@@ -15,6 +16,9 @@ import (
 	"perles/internal/mode/shared"
 	"perles/internal/ui/tree"
 )
+
+// errTest is a sentinel error for testing
+var errTest = errors.New("test error")
 
 // testClockTime for deterministic timestamps in tests.
 var testClockTime = time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)
@@ -193,13 +197,13 @@ func TestRenderCompactProgress(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			result := renderCompactProgress(tc.closed, tc.total)
 			if tc.expectedEmpty {
-				assert.Empty(t, result)
+				require.Empty(t, result)
 			} else {
 				// Check suffix (percentage and counts)
-				assert.Contains(t, result, tc.expectedSuffix)
+				require.Contains(t, result, tc.expectedSuffix)
 				// Check that progress bar characters are present (either filled or empty)
 				hasBar := strings.Contains(result, "█") || strings.Contains(result, "░")
-				assert.True(t, hasBar, "progress bar should contain bar characters")
+				require.True(t, hasBar, "progress bar should contain bar characters")
 			}
 		})
 	}
@@ -211,10 +215,10 @@ func TestSearch_TreeSubMode_Initialization(t *testing.T) {
 	// Enter tree sub-mode via EnterMsg
 	m, _ = m.Update(EnterMsg{SubMode: mode.SubModeTree, IssueID: "test-123"})
 
-	assert.Equal(t, mode.SubModeTree, m.subMode)
-	assert.Equal(t, FocusResults, m.focus, "should focus tree panel when entering tree mode from kanban")
-	assert.NotNil(t, m.treeRoot)
-	assert.Equal(t, "test-123", m.treeRoot.ID)
+	require.Equal(t, mode.SubModeTree, m.subMode)
+	require.Equal(t, FocusResults, m.focus, "should focus tree panel when entering tree mode from kanban")
+	require.NotNil(t, m.treeRoot)
+	require.Equal(t, "test-123", m.treeRoot.ID)
 }
 
 func TestSearch_TreeSubMode_EnterListClearsTreeState(t *testing.T) {
@@ -222,17 +226,17 @@ func TestSearch_TreeSubMode_EnterListClearsTreeState(t *testing.T) {
 	m := createTestModelWithTree(t, rootIssue, []beads.Issue{rootIssue})
 
 	// Verify tree state is set
-	assert.Equal(t, mode.SubModeTree, m.subMode)
-	assert.NotNil(t, m.tree)
-	assert.NotNil(t, m.treeRoot)
+	require.Equal(t, mode.SubModeTree, m.subMode)
+	require.NotNil(t, m.tree)
+	require.NotNil(t, m.treeRoot)
 
 	// EnterMsg with list mode should clear tree state
 	m, _ = m.Update(EnterMsg{SubMode: mode.SubModeList, Query: "status = open"})
 
-	assert.Equal(t, mode.SubModeList, m.subMode)
-	assert.Equal(t, FocusSearch, m.focus)
-	assert.Nil(t, m.tree)
-	assert.Nil(t, m.treeRoot)
+	require.Equal(t, mode.SubModeList, m.subMode)
+	require.Equal(t, FocusSearch, m.focus)
+	require.Nil(t, m.tree)
+	require.Nil(t, m.treeRoot)
 }
 
 func TestSearch_EnterTreeMode_ClearsOldTreeState(t *testing.T) {
@@ -244,17 +248,17 @@ func TestSearch_EnterTreeMode_ClearsOldTreeState(t *testing.T) {
 	m := createTestModelWithTree(t, rootIssue, []beads.Issue{rootIssue})
 
 	// Verify tree state exists (simulating previous tree session)
-	assert.NotNil(t, m.tree, "precondition: tree should be set")
-	assert.Equal(t, "task-1", m.treeRoot.ID)
+	require.NotNil(t, m.tree, "precondition: tree should be set")
+	require.Equal(t, "task-1", m.treeRoot.ID)
 
 	// User enters tree mode for a DIFFERENT issue (Epic B)
 	m, _ = m.Update(EnterMsg{SubMode: mode.SubModeTree, IssueID: "epic-1"})
 
 	// m.tree should be nil to prevent handleTreeLoaded from restoring stale selection
-	assert.Nil(t, m.tree, "EnterMsg should clear tree state")
-	assert.Equal(t, "epic-1", m.treeRoot.ID, "treeRoot should be set to new issue")
-	assert.Equal(t, mode.SubModeTree, m.subMode, "should remain in tree mode")
-	assert.Equal(t, FocusResults, m.focus, "focus should be on results")
+	require.Nil(t, m.tree, "EnterMsg should clear tree state")
+	require.Equal(t, "epic-1", m.treeRoot.ID, "treeRoot should be set to new issue")
+	require.Equal(t, mode.SubModeTree, m.subMode, "should remain in tree mode")
+	require.Equal(t, FocusResults, m.focus, "focus should be on results")
 }
 
 // Key handling tests for tree sub-mode
@@ -288,7 +292,7 @@ func TestTreeSubMode_JKey_MovesCursorDown(t *testing.T) {
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 
 	// Selected node should have changed (moved to first child)
-	assert.NotEqual(t, initialID, m.tree.SelectedNode().Issue.ID, "j should move cursor down")
+	require.NotEqual(t, initialID, m.tree.SelectedNode().Issue.ID, "j should move cursor down")
 }
 
 func TestTreeSubMode_KKey_MovesCursorUp(t *testing.T) {
@@ -302,8 +306,8 @@ func TestTreeSubMode_KKey_MovesCursorUp(t *testing.T) {
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
 
 	// Should be back at root
-	assert.NotEqual(t, idAfterJ, m.tree.SelectedNode().Issue.ID, "k should move cursor up")
-	assert.Equal(t, "root-1", m.tree.SelectedNode().Issue.ID, "should be back at root")
+	require.NotEqual(t, idAfterJ, m.tree.SelectedNode().Issue.ID, "k should move cursor up")
+	require.Equal(t, "root-1", m.tree.SelectedNode().Issue.ID, "should be back at root")
 }
 
 func TestTreeSubMode_DownArrow_MovesCursorDown(t *testing.T) {
@@ -313,7 +317,7 @@ func TestTreeSubMode_DownArrow_MovesCursorDown(t *testing.T) {
 	// Press down arrow
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 
-	assert.NotEqual(t, initialID, m.tree.SelectedNode().Issue.ID, "down arrow should move cursor down")
+	require.NotEqual(t, initialID, m.tree.SelectedNode().Issue.ID, "down arrow should move cursor down")
 }
 
 func TestTreeSubMode_UpArrow_MovesCursorUp(t *testing.T) {
@@ -325,7 +329,7 @@ func TestTreeSubMode_UpArrow_MovesCursorUp(t *testing.T) {
 	// Press up arrow
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
 
-	assert.Equal(t, "root-1", m.tree.SelectedNode().Issue.ID, "up arrow should move cursor up to root")
+	require.Equal(t, "root-1", m.tree.SelectedNode().Issue.ID, "up arrow should move cursor up to root")
 }
 
 func TestTreeSubMode_SlashKey_SwitchesToListMode(t *testing.T) {
@@ -334,8 +338,8 @@ func TestTreeSubMode_SlashKey_SwitchesToListMode(t *testing.T) {
 	// Press / to switch to list mode
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
 
-	assert.Equal(t, mode.SubModeList, m.subMode, "/ should switch to list sub-mode")
-	assert.Equal(t, FocusSearch, m.focus, "/ should focus search input")
+	require.Equal(t, mode.SubModeList, m.subMode, "/ should switch to list sub-mode")
+	require.Equal(t, FocusSearch, m.focus, "/ should focus search input")
 }
 
 func TestTreeSubMode_DKey_TogglesDirection(t *testing.T) {
@@ -346,35 +350,35 @@ func TestTreeSubMode_DKey_TogglesDirection(t *testing.T) {
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
 
 	// Direction should have changed
-	assert.NotEqual(t, initialDirection, m.tree.Direction(), "d should toggle direction")
+	require.NotEqual(t, initialDirection, m.tree.Direction(), "d should toggle direction")
 }
 
 func TestTreeSubMode_MKey_TogglesMode(t *testing.T) {
 	m := createTreeTestModel(t)
 	initialMode := m.tree.Mode()
-	assert.Equal(t, tree.ModeDeps, initialMode, "should start in deps mode")
+	require.Equal(t, tree.ModeDeps, initialMode, "should start in deps mode")
 
 	// Press m to toggle mode
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
 
 	// Mode should have changed to children
-	assert.Equal(t, tree.ModeChildren, m.tree.Mode(), "m should toggle to children mode")
+	require.Equal(t, tree.ModeChildren, m.tree.Mode(), "m should toggle to children mode")
 
 	// Press m again to toggle back
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
 
 	// Mode should have changed back to deps
-	assert.Equal(t, tree.ModeDeps, m.tree.Mode(), "m should toggle back to deps mode")
+	require.Equal(t, tree.ModeDeps, m.tree.Mode(), "m should toggle back to deps mode")
 }
 
 func TestTreeSubMode_LKey_FocusesDetails(t *testing.T) {
 	m := createTreeTestModel(t)
-	assert.Equal(t, FocusResults, m.focus, "should start with focus on results")
+	require.Equal(t, FocusResults, m.focus, "should start with focus on results")
 
 	// Press l to move focus to details
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
 
-	assert.Equal(t, FocusDetails, m.focus, "l should move focus to details")
+	require.Equal(t, FocusDetails, m.focus, "l should move focus to details")
 }
 
 func TestTreeSubMode_RightArrow_FocusesDetails(t *testing.T) {
@@ -383,7 +387,7 @@ func TestTreeSubMode_RightArrow_FocusesDetails(t *testing.T) {
 	// Press right arrow
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
 
-	assert.Equal(t, FocusDetails, m.focus, "right arrow should move focus to details")
+	require.Equal(t, FocusDetails, m.focus, "right arrow should move focus to details")
 }
 
 func TestTreeSubMode_TabKey_FocusesDetails(t *testing.T) {
@@ -392,22 +396,22 @@ func TestTreeSubMode_TabKey_FocusesDetails(t *testing.T) {
 	// Press tab
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 
-	assert.Equal(t, FocusDetails, m.focus, "tab should move focus to details")
+	require.Equal(t, FocusDetails, m.focus, "tab should move focus to details")
 }
 
 func TestTreeSubMode_TabKey_CyclesBetweenTreeAndDetails(t *testing.T) {
 	m := createTreeTestModel(t)
 
 	// Start on tree (FocusResults)
-	assert.Equal(t, FocusResults, m.focus, "should start on tree")
+	require.Equal(t, FocusResults, m.focus, "should start on tree")
 
 	// Tab to details
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	assert.Equal(t, FocusDetails, m.focus, "tab should move focus to details")
+	require.Equal(t, FocusDetails, m.focus, "tab should move focus to details")
 
 	// Tab back to tree (not search input, since tree mode has no search input)
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	assert.Equal(t, FocusResults, m.focus, "tab should cycle back to tree, not search input")
+	require.Equal(t, FocusResults, m.focus, "tab should cycle back to tree, not search input")
 }
 
 func TestTreeSubMode_EscKey_ReturnsToKanban(t *testing.T) {
@@ -420,7 +424,7 @@ func TestTreeSubMode_EscKey_ReturnsToKanban(t *testing.T) {
 	if cmd != nil {
 		msg := cmd()
 		_, ok := msg.(ExitToKanbanMsg)
-		assert.True(t, ok, "esc should return ExitToKanbanMsg")
+		require.True(t, ok, "esc should return ExitToKanbanMsg")
 	} else {
 		t.Error("esc should return a command")
 	}
@@ -432,7 +436,7 @@ func TestTreeSubMode_HelpKey_ShowsHelp(t *testing.T) {
 	// Press ? to show help
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
 
-	assert.Equal(t, ViewHelp, m.view, "? should switch to help view")
+	require.Equal(t, ViewHelp, m.view, "? should switch to help view")
 }
 
 func TestTreeSubMode_CtrlC_Quits(t *testing.T) {
@@ -441,7 +445,7 @@ func TestTreeSubMode_CtrlC_Quits(t *testing.T) {
 	// Press ctrl+c - should return quit command
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 
-	assert.NotNil(t, cmd, "ctrl+c should return quit command")
+	require.NotNil(t, cmd, "ctrl+c should return quit command")
 }
 
 func TestTreeSubMode_NotFocused_KeysPassThrough(t *testing.T) {
@@ -454,7 +458,7 @@ func TestTreeSubMode_NotFocused_KeysPassThrough(t *testing.T) {
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 
 	// Cursor should not move since tree isn't focused
-	assert.Equal(t, initialID, m.tree.SelectedNode().Issue.ID, "j should not move cursor when tree not focused")
+	require.Equal(t, initialID, m.tree.SelectedNode().Issue.ID, "j should not move cursor when tree not focused")
 }
 
 func TestTreeSubMode_EnterKey_RefocusesTree(t *testing.T) {
@@ -464,7 +468,7 @@ func TestTreeSubMode_EnterKey_RefocusesTree(t *testing.T) {
 	// Move cursor to first child
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	selectedBeforeEnter := m.tree.SelectedNode().Issue.ID
-	assert.NotEqual(t, originalRootID, selectedBeforeEnter, "should have moved to child")
+	require.NotEqual(t, originalRootID, selectedBeforeEnter, "should have moved to child")
 
 	// Press Enter to refocus tree on selected node
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -472,9 +476,9 @@ func TestTreeSubMode_EnterKey_RefocusesTree(t *testing.T) {
 	// The tree should now be focused on the child
 	// After refocus, the root becomes the previously selected node
 	newRootID := m.tree.Root().Issue.ID
-	assert.Equal(t, selectedBeforeEnter, newRootID, "enter should refocus tree on selected node")
+	require.Equal(t, selectedBeforeEnter, newRootID, "enter should refocus tree on selected node")
 	// treeRoot should also be updated
-	assert.Equal(t, selectedBeforeEnter, m.treeRoot.ID, "treeRoot should match new root")
+	require.Equal(t, selectedBeforeEnter, m.treeRoot.ID, "treeRoot should match new root")
 }
 
 func TestTreeSubMode_UKey_GoesBack(t *testing.T) {
@@ -486,14 +490,14 @@ func TestTreeSubMode_UKey_GoesBack(t *testing.T) {
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 	newRootID := m.tree.Root().Issue.ID
-	assert.NotEqual(t, originalRootID, newRootID, "should have refocused to child")
+	require.NotEqual(t, originalRootID, newRootID, "should have refocused to child")
 
 	// Press u to go back
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
 
 	// Should be back at original root
-	assert.Equal(t, originalRootID, m.tree.Root().Issue.ID, "u should go back to previous root")
-	assert.Equal(t, originalRootID, m.treeRoot.ID, "treeRoot should be updated")
+	require.Equal(t, originalRootID, m.tree.Root().Issue.ID, "u should go back to previous root")
+	require.Equal(t, originalRootID, m.treeRoot.ID, "treeRoot should be updated")
 }
 
 func TestTreeSubMode_UCapitalKey_GoesToOriginal(t *testing.T) {
@@ -508,14 +512,14 @@ func TestTreeSubMode_UCapitalKey_GoesToOriginal(t *testing.T) {
 	// Note: In our test data, children don't have grandchildren,
 	// so we just verify that U returns to original after one level
 	currentRootID := m.tree.Root().Issue.ID
-	assert.NotEqual(t, originalRootID, currentRootID, "should be at child level")
+	require.NotEqual(t, originalRootID, currentRootID, "should be at child level")
 
 	// Press U to go to original root
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'U'}})
 
 	// Should be back at original root
-	assert.Equal(t, originalRootID, m.tree.Root().Issue.ID, "U should go to original root")
-	assert.Equal(t, originalRootID, m.treeRoot.ID, "treeRoot should be updated")
+	require.Equal(t, originalRootID, m.tree.Root().Issue.ID, "U should go to original root")
+	require.Equal(t, originalRootID, m.treeRoot.ID, "treeRoot should be updated")
 }
 
 // Tests for handleIssueDeleted tree-aware deletion handling
@@ -523,8 +527,8 @@ func TestTreeSubMode_UCapitalKey_GoesToOriginal(t *testing.T) {
 func TestHandleIssueDeleted_TreeMode_NonRootDeletion(t *testing.T) {
 	// Setup: Tree mode with a root and children
 	m := createTreeTestModel(t)
-	assert.Equal(t, mode.SubModeTree, m.subMode)
-	assert.NotNil(t, m.treeRoot)
+	require.Equal(t, mode.SubModeTree, m.subMode)
+	require.NotNil(t, m.treeRoot)
 	rootID := m.treeRoot.ID
 
 	// Delete a non-root issue (wasTreeRoot=false)
@@ -537,14 +541,14 @@ func TestHandleIssueDeleted_TreeMode_NonRootDeletion(t *testing.T) {
 	m, cmd := m.handleIssueDeleted(msg)
 
 	// Verify state after deletion
-	assert.Equal(t, ViewSearch, m.view, "view should return to search")
-	assert.Nil(t, m.selectedIssue, "selectedIssue should be cleared")
+	require.Equal(t, ViewSearch, m.view, "view should return to search")
+	require.Nil(t, m.selectedIssue, "selectedIssue should be cleared")
 
 	// Verify command is returned (loadTree with same root + toast)
-	assert.NotNil(t, cmd, "should return command")
+	require.NotNil(t, cmd, "should return command")
 
 	// The tree root should still be the same (refreshed with same root)
-	assert.Equal(t, rootID, m.treeRoot.ID, "treeRoot should remain unchanged for non-root deletion")
+	require.Equal(t, rootID, m.treeRoot.ID, "treeRoot should remain unchanged for non-root deletion")
 }
 
 func TestHandleIssueDeleted_TreeMode_RootDeletionWithParent(t *testing.T) {
@@ -559,7 +563,7 @@ func TestHandleIssueDeleted_TreeMode_RootDeletionWithParent(t *testing.T) {
 	issues := []beads.Issue{rootIssue}
 
 	m := createTestModelWithTree(t, rootIssue, issues)
-	assert.Equal(t, mode.SubModeTree, m.subMode)
+	require.Equal(t, mode.SubModeTree, m.subMode)
 
 	// Delete the root issue (wasTreeRoot=true, has parent)
 	msg := issueDeletedMsg{
@@ -571,11 +575,11 @@ func TestHandleIssueDeleted_TreeMode_RootDeletionWithParent(t *testing.T) {
 	m, cmd := m.handleIssueDeleted(msg)
 
 	// Verify state
-	assert.Equal(t, ViewSearch, m.view, "view should return to search")
-	assert.Nil(t, m.selectedIssue, "selectedIssue should be cleared")
+	require.Equal(t, ViewSearch, m.view, "view should return to search")
+	require.Nil(t, m.selectedIssue, "selectedIssue should be cleared")
 
 	// Should return loadTree command with parentID as new root
-	assert.NotNil(t, cmd, "should return command for re-rooting to parent")
+	require.NotNil(t, cmd, "should return command for re-rooting to parent")
 }
 
 func TestHandleIssueDeleted_TreeMode_RootDeletionWithoutParent(t *testing.T) {
@@ -590,7 +594,7 @@ func TestHandleIssueDeleted_TreeMode_RootDeletionWithoutParent(t *testing.T) {
 	issues := []beads.Issue{rootIssue}
 
 	m := createTestModelWithTree(t, rootIssue, issues)
-	assert.Equal(t, mode.SubModeTree, m.subMode)
+	require.Equal(t, mode.SubModeTree, m.subMode)
 
 	// Delete the root issue (wasTreeRoot=true, no parent)
 	msg := issueDeletedMsg{
@@ -602,11 +606,11 @@ func TestHandleIssueDeleted_TreeMode_RootDeletionWithoutParent(t *testing.T) {
 	m, cmd := m.handleIssueDeleted(msg)
 
 	// Verify state
-	assert.Equal(t, ViewSearch, m.view, "view should return to search")
-	assert.Nil(t, m.selectedIssue, "selectedIssue should be cleared")
+	require.Equal(t, ViewSearch, m.view, "view should return to search")
+	require.Nil(t, m.selectedIssue, "selectedIssue should be cleared")
 
 	// Should return ExitToKanbanMsg command
-	assert.NotNil(t, cmd, "should return command")
+	require.NotNil(t, cmd, "should return command")
 
 	// Execute the batch command - one of them should be ExitToKanbanMsg
 	// Note: tea.Batch returns multiple commands, we check that it exists
@@ -615,7 +619,7 @@ func TestHandleIssueDeleted_TreeMode_RootDeletionWithoutParent(t *testing.T) {
 func TestHandleIssueDeleted_ListMode_Deletion(t *testing.T) {
 	// Setup: List mode (default)
 	m := createTestModelWithResults(t)
-	assert.Equal(t, mode.SubModeList, m.subMode)
+	require.Equal(t, mode.SubModeList, m.subMode)
 
 	// Delete an issue in list mode
 	msg := issueDeletedMsg{
@@ -627,11 +631,11 @@ func TestHandleIssueDeleted_ListMode_Deletion(t *testing.T) {
 	m, cmd := m.handleIssueDeleted(msg)
 
 	// Verify state
-	assert.Equal(t, ViewSearch, m.view, "view should return to search")
-	assert.Nil(t, m.selectedIssue, "selectedIssue should be cleared")
+	require.Equal(t, ViewSearch, m.view, "view should return to search")
+	require.Nil(t, m.selectedIssue, "selectedIssue should be cleared")
 
 	// Should return executeSearch command + toast
-	assert.NotNil(t, cmd, "should return command for list refresh")
+	require.NotNil(t, cmd, "should return command for list refresh")
 }
 
 func TestHandleIssueDeleted_Error(t *testing.T) {
@@ -643,14 +647,14 @@ func TestHandleIssueDeleted_Error(t *testing.T) {
 		issueID:     "any-issue",
 		parentID:    "",
 		wasTreeRoot: false,
-		err:         assert.AnError,
+		err:         errTest,
 	}
 	m, cmd := m.handleIssueDeleted(msg)
 
 	// Verify state
-	assert.Equal(t, ViewSearch, m.view, "view should return to search")
-	assert.Nil(t, m.selectedIssue, "selectedIssue should be cleared")
+	require.Equal(t, ViewSearch, m.view, "view should return to search")
+	require.Nil(t, m.selectedIssue, "selectedIssue should be cleared")
 
 	// Should return error toast command
-	assert.NotNil(t, cmd, "should return command for error toast")
+	require.NotNil(t, cmd, "should return command for error toast")
 }

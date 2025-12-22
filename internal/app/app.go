@@ -2,6 +2,8 @@
 package app
 
 import (
+	"context"
+	"path/filepath"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -14,8 +16,10 @@ import (
 	"perles/internal/log"
 	"perles/internal/mode"
 	"perles/internal/mode/kanban"
+	"perles/internal/mode/orchestration"
 	"perles/internal/mode/search"
 	"perles/internal/mode/shared"
+
 	"perles/internal/ui/shared/logoverlay"
 	"perles/internal/ui/shared/toaster"
 	"perles/internal/watcher"
@@ -28,9 +32,10 @@ type DBChangedMsg struct{}
 // Model is the root application state.
 type Model struct {
 	// Mode management
-	currentMode mode.AppMode
-	kanban      kanban.Model
-	search      search.Model
+	currentMode   mode.AppMode
+	kanban        kanban.Model
+	search        search.Model
+	orchestration orchestration.Model
 
 	// Shared services (passed to mode controllers)
 	services mode.Services
@@ -116,6 +121,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.kanban = m.kanban.SetSize(msg.Width, msg.Height)
 		m.search = m.search.SetSize(msg.Width, msg.Height)
+		m.orchestration = m.orchestration.SetSize(msg.Width, msg.Height)
 		m.toaster = m.toaster.SetSize(msg.Width, msg.Height)
 		m.logOverlay.SetSize(msg.Width, msg.Height)
 
@@ -156,6 +162,57 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.currentMode = mode.ModeKanban
 
 		// Rebuild kanban from config to reflect any column changes made in search mode
+		var cmd tea.Cmd
+		m.kanban, cmd = m.kanban.RefreshFromConfig()
+		return m, cmd
+
+	case kanban.SwitchToOrchestrationMsg:
+		log.Info(log.CatMode, "Switching mode", "from", "kanban", "to", "orchestration")
+		m.currentMode = mode.ModeOrchestration
+
+		// Work directory is the project root (parent of .beads)
+		beadsDir := filepath.Dir(m.services.DBPath)
+		workDir := filepath.Dir(beadsDir)
+
+		// Get orchestration config from services.Config
+		orchConfig := m.services.Config.Orchestration
+
+		m.orchestration = orchestration.New(orchestration.Config{
+			Services:    m.services,
+			WorkDir:     workDir,
+			ClientType:  orchConfig.Client,
+			ClaudeModel: orchConfig.Claude.Model,
+			AmpModel:    orchConfig.Amp.Model,
+			AmpMode:     orchConfig.Amp.Mode,
+		}).SetSize(m.width, m.height)
+		return m, m.orchestration.Init()
+
+	case orchestration.QuitMsg:
+		// Switch back to kanban mode from orchestration
+		log.Info(log.CatMode, "Switching mode", "from", "orchestration", "to", "kanban")
+
+		// Cancel pub/sub subscriptions first
+		m.orchestration.CancelSubscriptions()
+
+		// Clean up coordinator and pool before switching modes
+		if coord := m.orchestration.Coordinator(); coord != nil {
+			log.Debug(log.CatMode, "Cancelling coordinator")
+			_ = coord.Cancel() // Preserves state for resume
+		}
+		if pool := m.orchestration.Pool(); pool != nil {
+			log.Debug(log.CatMode, "Closing worker pool")
+			pool.Close()
+		}
+		// Shut down MCP server synchronously to free the port
+		if srv := m.orchestration.MCPServer(); srv != nil {
+			log.Debug(log.CatMode, "Shutting down MCP server")
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_ = srv.Shutdown(ctx)
+			cancel()
+		}
+
+		m.currentMode = mode.ModeKanban
+		// Refresh kanban to show any changes made during orchestration
 		var cmd tea.Cmd
 		m.kanban, cmd = m.kanban.RefreshFromConfig()
 		return m, cmd
@@ -212,6 +269,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case mode.ModeSearch:
 		var cmd tea.Cmd
 		m.search, cmd = m.search.Update(msg)
+
+		return m, cmd
+
+	case mode.ModeOrchestration:
+		var cmd tea.Cmd
+		m.orchestration, cmd = m.orchestration.Update(msg)
 
 		return m, cmd
 	}
@@ -370,10 +433,14 @@ func (m Model) handleSaveTreeAsColumn(msg search.SaveTreeAsColumnMsg) (tea.Model
 
 // View implements tea.Model.
 func (m Model) View() string {
+	log.Debug(log.CatMode, "View: rendering mode", "current_mode", m.currentMode)
+
 	var view string
 	switch m.currentMode {
 	case mode.ModeSearch:
 		view = m.search.View()
+	case mode.ModeOrchestration:
+		view = m.orchestration.View()
 	default:
 		view = m.kanban.View()
 	}
@@ -404,6 +471,16 @@ func (m Model) watchDatabase() tea.Cmd {
 
 // Close releases resources held by the application.
 func (m *Model) Close() error {
+	// Clean up orchestration mode resources if active
+	if m.currentMode == mode.ModeOrchestration {
+		if coord := m.orchestration.Coordinator(); coord != nil {
+			_ = coord.Cancel() // Preserves state for resume
+		}
+		if pool := m.orchestration.Pool(); pool != nil {
+			pool.Close()
+		}
+	}
+
 	// Close mode controllers
 	if err := m.kanban.Close(); err != nil {
 		return err

@@ -51,6 +51,7 @@ test-update:
 		./internal/ui/styles/... \
 		./internal/ui/tree/... \
 		./internal/mode/search/... \
+		./internal/mode/orchestration/... \
 		-update
 
 # Run linter (requires golangci-lint)

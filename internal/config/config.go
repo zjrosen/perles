@@ -27,11 +27,12 @@ type ViewConfig struct {
 
 // Config holds all configuration options for perles.
 type Config struct {
-	BeadsDir    string       `mapstructure:"beads_dir"`
-	AutoRefresh bool         `mapstructure:"auto_refresh"`
-	UI          UIConfig     `mapstructure:"ui"`
-	Theme       ThemeConfig  `mapstructure:"theme"`
-	Views       []ViewConfig `mapstructure:"views"`
+	BeadsDir      string              `mapstructure:"beads_dir"`
+	AutoRefresh   bool                `mapstructure:"auto_refresh"`
+	UI            UIConfig            `mapstructure:"ui"`
+	Theme         ThemeConfig         `mapstructure:"theme"`
+	Views         []ViewConfig        `mapstructure:"views"`
+	Orchestration OrchestrationConfig `mapstructure:"orchestration"`
 }
 
 // UIConfig holds user interface configuration options.
@@ -54,6 +55,24 @@ type ThemeConfig struct {
 	// Colors allows overriding individual color tokens.
 	// Keys use dot notation: "text.primary", "status.error", etc.
 	Colors map[string]string `mapstructure:"colors"`
+}
+
+// OrchestrationConfig holds orchestration mode configuration.
+type OrchestrationConfig struct {
+	Client string             `mapstructure:"client"` // "claude" (default) or "amp"
+	Claude ClaudeClientConfig `mapstructure:"claude"`
+	Amp    AmpClientConfig    `mapstructure:"amp"`
+}
+
+// ClaudeClientConfig holds Claude-specific settings.
+type ClaudeClientConfig struct {
+	Model string `mapstructure:"model"` // sonnet (default), opus, haiku
+}
+
+// AmpClientConfig holds Amp-specific settings.
+type AmpClientConfig struct {
+	Model string `mapstructure:"model"` // opus (default), sonnet
+	Mode  string `mapstructure:"mode"`  // free, rush, smart (default)
 }
 
 // DefaultColumns returns the default column configuration matching current behavior.
@@ -143,6 +162,27 @@ func ValidateViews(views []ViewConfig) error {
 	return nil
 }
 
+// ValidateOrchestration checks orchestration configuration for errors.
+// Returns nil if the configuration is valid (empty values use defaults).
+func ValidateOrchestration(orch OrchestrationConfig) error {
+	// Validate client type
+	if orch.Client != "" && orch.Client != "claude" && orch.Client != "amp" {
+		return fmt.Errorf("orchestration.client must be \"claude\" or \"amp\", got %q", orch.Client)
+	}
+
+	// Validate Amp mode
+	if orch.Amp.Mode != "" {
+		switch orch.Amp.Mode {
+		case "free", "rush", "smart":
+			// Valid
+		default:
+			return fmt.Errorf("orchestration.amp.mode must be \"free\", \"rush\", or \"smart\", got %q", orch.Amp.Mode)
+		}
+	}
+
+	return nil
+}
+
 // GetColumns returns the columns for the first view, or defaults if no views configured.
 // This provides backward compatibility during the transition to multi-view support.
 func (c Config) GetColumns() []ColumnConfig {
@@ -199,6 +239,16 @@ func Defaults() Config {
 			Preset: "",
 		},
 		Views: DefaultViews(),
+		Orchestration: OrchestrationConfig{
+			Client: "claude",
+			Claude: ClaudeClientConfig{
+				Model: "claude-opus-4-5",
+			},
+			Amp: AmpClientConfig{
+				Model: "opus",
+				Mode:  "smart",
+			},
+		},
 	}
 }
 
@@ -285,6 +335,21 @@ views:
 #     blocked = true
 #     label in (urgent, critical)
 #     title ~ auth
+
+# Orchestration mode settings
+# Configure which AI client to use when entering orchestration mode
+orchestration:
+  # AI client provider: "claude" (default) or "amp"
+  client: claude
+
+  # Claude-specific settings (only used when client: claude)
+  claude:
+    model: sonnet  # sonnet (default), opus, or haiku
+
+  # Amp-specific settings (only used when client: amp)
+  amp:
+    model: opus    # opus (default) or sonnet
+    mode: smart    # free, rush, or smart (default)
 `
 }
 

@@ -10,6 +10,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.3
 	github.com/charmbracelet/x/exp/teatest v0.0.0-20251126160633-0b68cdcd21da
 	github.com/fsnotify/fsnotify v1.9.0
+	github.com/google/uuid v1.6.0
 	github.com/muesli/reflow v0.3.0
 	github.com/muesli/termenv v0.16.0
 	github.com/ncruces/go-sqlite3 v0.30.4

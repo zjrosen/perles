@@ -340,3 +340,93 @@ func TestValidateColumns_TreeWithMode(t *testing.T) {
 	err := ValidateColumns(cols)
 	require.NoError(t, err)
 }
+
+// Tests for orchestration config validation
+
+func TestValidateOrchestration_Empty(t *testing.T) {
+	// Empty config should be valid (uses defaults)
+	err := ValidateOrchestration(OrchestrationConfig{})
+	require.NoError(t, err)
+}
+
+func TestValidateOrchestration_ValidClaude(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Client: "claude",
+		Claude: ClaudeClientConfig{Model: "sonnet"},
+	}
+	err := ValidateOrchestration(cfg)
+	require.NoError(t, err)
+}
+
+func TestValidateOrchestration_ValidAmp(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Client: "amp",
+		Amp:    AmpClientConfig{Model: "opus", Mode: "smart"},
+	}
+	err := ValidateOrchestration(cfg)
+	require.NoError(t, err)
+}
+
+func TestValidateOrchestration_InvalidClient(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Client: "invalid",
+	}
+	err := ValidateOrchestration(cfg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "orchestration.client must be")
+}
+
+func TestValidateOrchestration_ValidClaudeModels(t *testing.T) {
+	models := []string{"sonnet", "opus", "haiku"}
+	for _, model := range models {
+		cfg := OrchestrationConfig{
+			Client: "claude",
+			Claude: ClaudeClientConfig{Model: model},
+		}
+		err := ValidateOrchestration(cfg)
+		require.NoError(t, err, "model %q should be valid", model)
+	}
+}
+
+func TestValidateOrchestration_ValidAmpModels(t *testing.T) {
+	models := []string{"opus", "sonnet"}
+	for _, model := range models {
+		cfg := OrchestrationConfig{
+			Client: "amp",
+			Amp:    AmpClientConfig{Model: model},
+		}
+		err := ValidateOrchestration(cfg)
+		require.NoError(t, err, "model %q should be valid", model)
+	}
+}
+
+func TestValidateOrchestration_InvalidAmpMode(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Client: "amp",
+		Amp:    AmpClientConfig{Mode: "invalid"},
+	}
+	err := ValidateOrchestration(cfg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "orchestration.amp.mode must be")
+}
+
+func TestValidateOrchestration_ValidAmpModes(t *testing.T) {
+	modes := []string{"free", "rush", "smart"}
+	for _, mode := range modes {
+		cfg := OrchestrationConfig{
+			Client: "amp",
+			Amp:    AmpClientConfig{Mode: mode},
+		}
+		err := ValidateOrchestration(cfg)
+		require.NoError(t, err, "mode %q should be valid", mode)
+	}
+}
+
+func TestDefaults_Orchestration(t *testing.T) {
+	cfg := Defaults()
+
+	require.Equal(t, "claude", cfg.Orchestration.Client)
+	require.Equal(t, "claude-opus-4-5", cfg.Orchestration.Claude.Model)
+	require.Equal(t, "opus", cfg.Orchestration.Amp.Model)
+	require.Equal(t, "smart", cfg.Orchestration.Amp.Mode)
+}

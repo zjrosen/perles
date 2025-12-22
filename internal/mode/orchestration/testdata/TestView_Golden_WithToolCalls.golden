@@ -1,0 +1,30 @@
+╭─ ○ COORDINATOR ────────────────────────╮╭─ MESSAGE LOG ──────────────────────╮╭─ ● WORKER-1 ─────────────────────────╮
+│User                                    ││                                    ││                                      │
+│Start working on the epic               ││                                    ││                                      │
+│                                        ││                                    ││                                      │
+│Coordinator                             ││                                    ││                                      │
+│I'll load the necessary tools first     ││                                    ││                                      │
+│                                        ││                                    ││                                      │
+│Coordinator                             ││                                    ││                                      │
+│├╴ MCPSearch                            ││                                    ││                                      │
+│├╴ MCPSearch                            ││                                    ││                                      │
+│╰╴ MCPSearch                            ││                                    ││                                      │
+│                                        ││                                    ││                                      │
+│Coordinator                             ││                                    ││                                      │
+│Perfect! Now I'll spawn workers for     ││                                    ││                                      │
+│the ready tasks.                        ││                                    ││                                      │
+│                                        ││                                    ││Worker                                │
+│Coordinator                             ││                                    ││I'll start by checking for            │
+│├╴ mcp__perles-orchestrator__post_messag││                                    ││messages                              │
+│├╴ mcp__perles-orchestrator__spawn_worke││                                    ││                                      │
+│├╴ mcp__perles-orchestrator__spawn_worke││                                    ││Worker                                │
+│╰╴ mcp__perles-orchestrator__list_worker││                                    ││├╴ mcp__perles-worker__check_messages │
+│                                        ││                                    ││╰╴ mcp__perles-worker__post_message   │
+│Coordinator                             ││                                    ││                                      │
+│I've spawned 2 workers. Monitoring      ││                                    ││Worker                                │
+│their progress.                         ││                                    ││Task completed successfully!          │
+╰────────────────────────────────────────╯╰────────────────────────────────────╯╰──────────────────────────────────────╯
+╭─ COORDINATOR ────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ > Type message to coordinator...                                                                                     │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

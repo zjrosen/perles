@@ -6,7 +6,6 @@ import (
 
 	"perles/internal/testutil"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -33,7 +32,7 @@ func TestCompareVersions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := CompareVersions(tt.a, tt.b)
-			assert.Equal(t, tt.want, got, "CompareVersions(%q, %q)", tt.a, tt.b)
+			require.Equal(t, tt.want, got, "CompareVersions(%q, %q)", tt.a, tt.b)
 		})
 	}
 }
@@ -59,11 +58,11 @@ func TestCheckVersion(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := CheckVersion(tt.current)
 			if tt.wantErr {
-				assert.Error(t, err, "CheckVersion(%q) should return error", tt.current)
-				assert.Contains(t, err.Error(), MinBeadsVersion)
-				assert.Contains(t, err.Error(), tt.current)
+				require.Error(t, err, "CheckVersion(%q) should return error", tt.current)
+				require.Contains(t, err.Error(), MinBeadsVersion)
+				require.Contains(t, err.Error(), tt.current)
 			} else {
-				assert.NoError(t, err, "CheckVersion(%q) should not return error", tt.current)
+				require.NoError(t, err, "CheckVersion(%q) should not return error", tt.current)
 			}
 		})
 	}
@@ -84,7 +83,7 @@ func TestClient_Version(t *testing.T) {
 		client := &Client{db: db}
 		version, err := client.Version()
 		require.NoError(t, err)
-		assert.Equal(t, "0.31.0", version)
+		require.Equal(t, "0.31.0", version)
 	})
 
 	t.Run("returns error when bd_version missing", func(t *testing.T) {
@@ -94,7 +93,7 @@ func TestClient_Version(t *testing.T) {
 		client := &Client{db: db}
 		_, err = client.Version()
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "reading bd_version from metadata")
+		require.Contains(t, err.Error(), "reading bd_version from metadata")
 	})
 }
 
@@ -107,5 +106,5 @@ func TestClient_Version_NoMetadataTable(t *testing.T) {
 	client := &Client{db: db}
 	_, err = client.Version()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "reading bd_version from metadata")
+	require.Contains(t, err.Error(), "reading bd_version from metadata")
 }

@@ -473,6 +473,144 @@ PERLES_DEBUG=1 ./perles     # Alternative debug enable
 4. Define keybindings in `internal/keys/`
 5. Add help documentation
 
+## Pub/Sub Event System
+
+Perles uses a generic pub/sub broker for decoupled event communication between the orchestration layer and TUI. This architecture enables multiple subscribers (TUI, logging, metrics) to receive events without tight coupling.
+
+### Event Types
+
+Two event types are used in orchestration:
+
+**CoordinatorEvent** (`internal/orchestration/events/coordinator.go`):
+- `CoordinatorChat` - Text output from the coordinator
+- `CoordinatorStatusChange` - Status transitions (ready, working, paused, stopped)
+- `CoordinatorTokenUsage` - Token usage updates
+- `CoordinatorError` - Error notifications
+- `CoordinatorReady` - Coordinator ready for input
+- `CoordinatorWorking` - Coordinator processing
+
+**WorkerEvent** (`internal/orchestration/events/worker.go`):
+- `WorkerSpawned` - New worker created
+- `WorkerOutput` - Worker produced output
+- `WorkerStatusChange` - Worker status changed
+- `WorkerTokenUsage` - Worker token usage update
+- `WorkerIncoming` - Message sent to worker
+- `WorkerError` - Worker error occurred
+
+### Subscribing to Events
+
+Events are delivered via the pub/sub broker. Subscribe with a context for automatic cleanup:
+
+```go
+import (
+    "context"
+    "perles/internal/orchestration/events"
+    "perles/internal/pubsub"
+)
+
+// Subscribe to coordinator events
+ctx, cancel := context.WithCancel(context.Background())
+defer cancel()
+
+coordCh := coordinator.Subscribe(ctx)
+workerCh := coordinator.Workers().Subscribe(ctx)
+
+// Receive events
+for event := range coordCh {
+    switch event.Payload.Type {
+    case events.CoordinatorChat:
+        fmt.Printf("[%s] %s\n", event.Payload.Role, event.Payload.Content)
+    case events.CoordinatorTokenUsage:
+        fmt.Printf("Tokens: %d/%d\n", event.Payload.ContextTokens, event.Payload.ContextWindow)
+    }
+}
+```
+
+### Using ContinuousListener in Bubble Tea
+
+For Bubble Tea integration, use `ContinuousListener` to maintain subscription state across the update loop:
+
+```go
+import (
+    "context"
+    tea "github.com/charmbracelet/bubbletea"
+    "perles/internal/orchestration/events"
+    "perles/internal/pubsub"
+)
+
+type Model struct {
+    coordListener  *pubsub.ContinuousListener[events.CoordinatorEvent]
+    workerListener *pubsub.ContinuousListener[events.WorkerEvent]
+    ctx            context.Context
+    cancel         context.CancelFunc
+}
+
+// Initialize listeners after coordinator starts
+func (m Model) initListeners(coord *coordinator.Coordinator) (Model, tea.Cmd) {
+    m.coordListener = pubsub.NewContinuousListener(m.ctx, coord.Broker)
+    m.workerListener = pubsub.NewContinuousListener(m.ctx, coord.Workers())
+
+    return m, tea.Batch(
+        m.coordListener.Listen(),
+        m.workerListener.Listen(),
+    )
+}
+
+// Handle events in Update
+func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
+    switch msg := msg.(type) {
+    case pubsub.Event[events.CoordinatorEvent]:
+        // Handle coordinator event
+        switch msg.Payload.Type {
+        case events.CoordinatorChat:
+            m = m.addMessage(msg.Payload.Role, msg.Payload.Content)
+        case events.CoordinatorReady:
+            m.status = "ready"
+        }
+        // Continue listening (always!)
+        return m, m.coordListener.Listen()
+
+    case pubsub.Event[events.WorkerEvent]:
+        // Handle worker event
+        switch msg.Payload.Type {
+        case events.WorkerOutput:
+            m = m.addWorkerOutput(msg.Payload.WorkerID, msg.Payload.Output)
+        }
+        // Continue listening (always!)
+        return m, m.workerListener.Listen()
+    }
+    return m, nil
+}
+```
+
+### Key Points
+
+1. **Context-based cleanup**: Subscriptions are automatically removed when the context is cancelled
+2. **Non-blocking publish**: Events are dropped if subscriber channels are full (prevents blocking)
+3. **Multiple subscribers**: Any number of subscribers can receive the same events
+4. **Thread-safe**: Brokers are safe for concurrent publish/subscribe operations
+5. **Always continue listening**: In Bubble Tea, always return a new `Listen()` command after handling an event
+
+### Broker Methods
+
+```go
+// Create a broker
+broker := pubsub.NewBroker[T]()
+broker := pubsub.NewBrokerWithBuffer[T](bufferSize) // Custom buffer
+
+// Subscribe (auto-cleanup on context cancel)
+ch := broker.Subscribe(ctx)
+
+// Publish (non-blocking)
+broker.Publish(pubsub.UpdatedEvent, payload)
+
+// Check subscriber count
+count := broker.SubscriberCount()
+
+// Clean shutdown
+broker.Close()
+```
+
 ## Resources
 
 - [Bubble Tea Documentation](https://github.com/charmbracelet/bubbletea)

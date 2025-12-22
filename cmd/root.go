@@ -51,7 +51,7 @@ func init() {
 		"config file (default: ~/.config/perles/config.yaml)")
 	rootCmd.Flags().StringP("beads-dir", "b", "",
 		"path to beads database directory")
-	rootCmd.Flags().BoolVarP(&debugFlag, "debug", "d", false,
+	rootCmd.PersistentFlags().BoolVarP(&debugFlag, "debug", "d", false,
 		"enable debug mode with logging (also: PERLES_DEBUG=1)")
 
 	// Bind flags to viper
@@ -63,6 +63,11 @@ func initConfig() {
 	viper.SetDefault("auto_refresh", defaults.AutoRefresh)
 	viper.SetDefault("ui.show_counts", defaults.UI.ShowCounts)
 	viper.SetDefault("theme.preset", defaults.Theme.Preset)
+	// Orchestration defaults
+	viper.SetDefault("orchestration.client", defaults.Orchestration.Client)
+	viper.SetDefault("orchestration.claude.model", defaults.Orchestration.Claude.Model)
+	viper.SetDefault("orchestration.amp.model", defaults.Orchestration.Amp.Model)
+	viper.SetDefault("orchestration.amp.mode", defaults.Orchestration.Amp.Mode)
 
 	if cfgFile != "" {
 		viper.SetConfigFile(cfgFile)
@@ -117,6 +122,10 @@ func runApp(cmd *cobra.Command, args []string) error {
 
 	if err := config.ValidateViews(cfg.Views); err != nil {
 		return fmt.Errorf("invalid view configuration: %w", err)
+	}
+
+	if err := config.ValidateOrchestration(cfg.Orchestration); err != nil {
+		return fmt.Errorf("invalid orchestration configuration: %w", err)
 	}
 
 	// Use provided beads directory or current directory

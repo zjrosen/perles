@@ -369,6 +369,8 @@ func (c *Column) updatePerPage() {
 	}
 
 	c.list.Paginator.PerPage = itemsThatFit
+	// Also update TotalPages to match our custom PerPage
+	c.list.Paginator.SetTotalPages(len(c.items))
 }
 
 // SetShowCounts sets whether to display counts in the column title.
@@ -422,6 +424,8 @@ func (c Column) SelectByID(id string) (Column, bool) {
 func (c Column) Update(msg tea.Msg) (BoardColumn, tea.Cmd) {
 	var cmd tea.Cmd
 	c.list, cmd = c.list.Update(msg)
+	// Re-apply our custom PerPage after list.Update() resets it via updatePagination()
+	c.updatePerPage()
 	return c, cmd
 }
 

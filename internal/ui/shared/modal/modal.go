@@ -38,6 +38,7 @@ type Config struct {
 	Inputs         []InputConfig // Input fields; if empty, modal is in confirmation mode
 	ConfirmVariant ButtonVariant // Style for confirm button (default: ButtonPrimary)
 	MinWidth       int           // Minimum width (0 = default 40)
+	HideButtons    bool          // If true, hide confirm/cancel buttons (message-only modal)
 }
 
 // SubmitMsg is sent when the user confirms the modal (Enter on Save button).
@@ -297,8 +298,10 @@ func (m Model) View() string {
 		content.WriteString("\n\n")
 	}
 
-	// Buttons
-	content.WriteString(m.renderButtons())
+	// Buttons (unless hidden)
+	if !m.config.HideButtons {
+		content.WriteString(m.renderButtons())
+	}
 
 	// Build final layout: title (flush), divider, padded content
 	var result strings.Builder

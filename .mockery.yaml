@@ -12,3 +12,7 @@ packages:
     interfaces:
       Clock:
       Clipboard:
+  perles/internal/orchestration/client:
+    interfaces:
+      HeadlessClient:
+      HeadlessProcess:
