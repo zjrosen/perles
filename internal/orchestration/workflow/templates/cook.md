@@ -51,7 +51,7 @@ bd show <epic-id> --json
 
 ### Phase 2: Task Execution Loop
 
-For each task in sequence:
+For each task in sequence (from first to last) NEVER parallelize only work on a single task at a time:
 
 #### Step 1: Assign Implementation Worker
 
