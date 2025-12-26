@@ -28,6 +28,9 @@ const (
 	// MessageHandoff indicates a coordinator context refresh handoff.
 	// Contains summary of current state for the incoming coordinator.
 	MessageHandoff MessageType = "handoff"
+
+	// MessageWorkerReady indicates a worker has booted and is ready for task assignment.
+	MessageWorkerReady MessageType = "worker-ready"
 )
 
 // Entry represents a single message in the communication log.

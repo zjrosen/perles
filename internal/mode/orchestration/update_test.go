@@ -3,6 +3,7 @@ package orchestration
 import (
 	"context"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/require"
@@ -652,4 +653,115 @@ func TestHandoffTimeout_IgnoredWhenNotPending(t *testing.T) {
 	// Verify no fallback message was posted
 	entries := msgIssue.Entries()
 	require.Len(t, entries, 0, "should not post any message when not pending")
+}
+
+func TestHandleMessageEvent_WorkerReady_AppearsInMessagePane(t *testing.T) {
+	// Test that MessageWorkerReady messages appear in the message pane
+	m := New(Config{})
+	m = m.SetSize(120, 40)
+
+	// Set up message log and listener
+	msgIssue := message.New()
+	workerPool := pool.NewWorkerPool(pool.Config{})
+	defer workerPool.Close()
+
+	coord, err := coordinator.New(coordinator.Config{
+		Client:       claude.NewClient(),
+		WorkDir:      "/tmp",
+		Pool:         workerPool,
+		MessageIssue: msgIssue,
+	})
+	require.NoError(t, err)
+
+	m.coord = coord
+
+	// Set up a message listener
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	m.messageListener = pubsub.NewContinuousListener(ctx, msgIssue.Broker())
+
+	// Create a worker ready message event
+	readyEntry := message.Entry{
+		ID:      "test-ready-123",
+		From:    "WORKER.1",
+		To:      message.ActorCoordinator,
+		Content: "Worker WORKER.1 ready for task assignment",
+		Type:    message.MessageWorkerReady,
+	}
+	event := pubsub.Event[message.Event]{
+		Type: pubsub.UpdatedEvent,
+		Payload: message.Event{
+			Type:  message.EventPosted,
+			Entry: readyEntry,
+		},
+	}
+
+	// Handle the message event
+	m, _ = m.handleMessageEvent(event)
+
+	// Verify the message was appended to the message pane
+	require.Len(t, m.messagePane.entries, 1, "should append worker ready entry to message pane")
+	require.Equal(t, message.MessageWorkerReady, m.messagePane.entries[0].Type)
+	require.Equal(t, "WORKER.1", m.messagePane.entries[0].From)
+}
+
+func TestHandleMessageEvent_RegularMessage_UsesDebounce(t *testing.T) {
+	// Test that regular messages use debounce (contrast with worker ready)
+	m := New(Config{})
+	m = m.SetSize(120, 40)
+
+	// Set up message log and listener
+	msgIssue := message.New()
+	workerPool := pool.NewWorkerPool(pool.Config{})
+	defer workerPool.Close()
+
+	coord, err := coordinator.New(coordinator.Config{
+		Client:       claude.NewClient(),
+		WorkDir:      "/tmp",
+		Pool:         workerPool,
+		MessageIssue: msgIssue,
+	})
+	require.NoError(t, err)
+
+	m.coord = coord
+
+	// Set up a message listener
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	m.messageListener = pubsub.NewContinuousListener(ctx, msgIssue.Broker())
+
+	// Set up nudge batcher with tracking
+	var nudgeCallCount int
+	m.nudgeBatcher = NewNudgeBatcher(100 * time.Millisecond) // Short debounce for test
+	m.nudgeBatcher.SetOnNudge(func(messagesByType map[MessageType][]string) {
+		nudgeCallCount++
+	})
+
+	// Create a regular info message event
+	infoEntry := message.Entry{
+		ID:      "test-info-789",
+		From:    "WORKER.1",
+		To:      message.ActorCoordinator,
+		Content: "Task completed",
+		Type:    message.MessageInfo,
+	}
+	event := pubsub.Event[message.Event]{
+		Type: pubsub.UpdatedEvent,
+		Payload: message.Event{
+			Type:  message.EventPosted,
+			Entry: infoEntry,
+		},
+	}
+
+	// Handle the message event
+	m, _ = m.handleMessageEvent(event)
+
+	// Immediately check - should NOT have fired yet (debounce pending)
+	require.Equal(t, 0, nudgeCallCount, "should not nudge immediately for regular messages")
+
+	// Wait for debounce
+	time.Sleep(150 * time.Millisecond)
+
+	// Now it should have fired
+	require.Equal(t, 1, nudgeCallCount, "should nudge after debounce for regular messages")
 }

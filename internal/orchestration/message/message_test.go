@@ -37,6 +37,7 @@ func TestMessageTypeConstants(t *testing.T) {
 	require.Equal(t, "completion", string(MessageCompletion))
 	require.Equal(t, "error", string(MessageError))
 	require.Equal(t, "handoff", string(MessageHandoff))
+	require.Equal(t, "worker-ready", string(MessageWorkerReady))
 }
 
 func TestMessageHandoffType(t *testing.T) {

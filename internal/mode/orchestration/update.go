@@ -583,10 +583,15 @@ func (m Model) handleMessageEvent(event pubsub.Event[message.Event]) (Model, tea
 			return m, tea.Batch(m.messageListener.Listen(), cmd)
 		}
 
-		// Nudge coordinator if message is to COORDINATOR or ALL (via debounced batcher)
+		// Nudge coordinator if message is to COORDINATOR or ALL
 		if entry.To == message.ActorCoordinator || entry.To == message.ActorAll {
 			if m.coord != nil && m.nudgeBatcher != nil && entry.From != message.ActorCoordinator {
-				m.nudgeBatcher.Add(entry.From)
+				// Determine message type based on the entry type
+				msgType := WorkerNewMessage
+				if entry.Type == message.MessageWorkerReady {
+					msgType = WorkerReady
+				}
+				m.nudgeBatcher.Add(entry.From, msgType)
 			}
 		}
 	}
@@ -632,20 +637,37 @@ func (m Model) handleInitializerEvent(event pubsub.Event[InitializerEvent]) (Mod
 				// Set up nudge batcher early so worker ready messages get forwarded
 				if m.nudgeBatcher == nil {
 					m.nudgeBatcher = NewNudgeBatcher(1 * time.Second)
-					m.nudgeBatcher.SetOnNudge(func(workerIDs []string) {
+					m.nudgeBatcher.SetOnNudge(func(messagesByType map[MessageType][]string) {
 						if m.coord == nil {
 							return
 						}
 
-						var nudge string
-						if len(workerIDs) == 1 {
-							nudge = fmt.Sprintf("[%s sent a message] Use read_message_log to check for new messages.", workerIDs[0])
-						} else {
-							nudge = fmt.Sprintf("[%s sent messages] Use read_message_log to check for new messages.", strings.Join(workerIDs, ", "))
+						var (
+							nudge                 string
+							readyMessageWorkerIds []string
+							newMessageWorkerIds   []string
+						)
+						for messageType, workerIds := range messagesByType {
+							switch messageType {
+							case WorkerReady:
+								readyMessageWorkerIds = append(readyMessageWorkerIds, workerIds...)
+							case WorkerNewMessage:
+								newMessageWorkerIds = append(newMessageWorkerIds, workerIds...)
+							}
 						}
 
-						if err := m.coord.SendUserMessage(nudge); err != nil {
-							log.Debug(log.CatOrch, "Failed to nudge coordinator", "subsystem", "update", "error", err)
+						if len(readyMessageWorkerIds) > 0 {
+							nudge = fmt.Sprintf("[%s] have started up and are now ready", strings.Join(readyMessageWorkerIds, ", "))
+							if err := m.coord.SendUserMessage(nudge); err != nil {
+								log.Debug(log.CatOrch, "Failed to nudge coordinator", "subsystem", "update", "error", err)
+							}
+						}
+
+						if len(newMessageWorkerIds) > 0 {
+							nudge = fmt.Sprintf("[%s sent messages] Use read_message_log to check for new messages.", strings.Join(newMessageWorkerIds, ", "))
+							if err := m.coord.SendUserMessage(nudge); err != nil {
+								log.Debug(log.CatOrch, "Failed to nudge coordinator", "subsystem", "update", "error", err)
+							}
 						}
 					})
 				}

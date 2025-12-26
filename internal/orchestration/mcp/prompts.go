@@ -7,7 +7,7 @@ import "fmt"
 func WorkerIdlePrompt(workerID string) string {
 	return fmt.Sprintf(`You are %s. You are now in IDLE state waiting for task assignment.
 
-Use post_message to tell the coordinator you are ready, then STOP.
+Use signal_ready to tell the coordinator you are ready, then STOP.
 Do NOT run any other tools. Do NOT check for tasks. Do NOT start any work.
 
 You will receive task assignments from the coordinator in a follow-up message.`, workerID)
@@ -27,7 +27,7 @@ func WorkerSystemPrompt(workerID string) string {
 **Available MCP Tools (use MCPSearch to load them):**
 - mcp__perles-worker__check_messages: Check for new messages addressed to you
 - mcp__perles-worker__post_message: Send a message to the coordinator (REQUIRED when task complete)
-- mcp__perles-worker__signal_coordinator: Send an urgent signal (blocked, need help)
+- mcp__perles-worker__signal_ready: Signal that you are ready for task assignment (call on startup)
 
 **HOW TO REPORT COMPLETION:**
 1. Call: mcp__perles-worker__post_message(to="COORDINATOR", content="Task completed! [brief summary]")
@@ -36,7 +36,7 @@ func WorkerSystemPrompt(workerID string) string {
 - NEVER update the bd task status yourself; coordinator handles that
 - NEVER use bd to update tasks
 - ALWAYS call post_message when task is complete
-- If stuck, use signal_coordinator or post_message to ask for help`, workerID)
+- If stuck, use post_message to ask coordinator for help`, workerID)
 }
 
 // TaskAssignmentPrompt generates the prompt sent to a worker when assigning a task.

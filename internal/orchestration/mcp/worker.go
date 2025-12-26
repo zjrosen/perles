@@ -93,28 +93,22 @@ func (ws *WorkerServer) registerTools() {
 		},
 	}, ws.handlePostMessage)
 
-	// signal_coordinator - Urgent notification
+	// signal_ready - Worker ready notification
 	ws.RegisterTool(Tool{
-		Name:        "signal_coordinator",
-		Description: "Send an urgent signal to the coordinator. Use when blocked, need a decision, or encountered an error.",
+		Name:        "signal_ready",
+		Description: "Signal that you are ready for task assignment. Call this once when you first boot up.",
 		InputSchema: &InputSchema{
-			Type: "object",
-			Properties: map[string]*PropertySchema{
-				"reason": {Type: "string", Description: "Reason for signaling (e.g., 'blocked on dependency', 'need clarification')"},
-			},
-			Required: []string{"reason"},
+			Type:       "object",
+			Properties: map[string]*PropertySchema{},
+			Required:   []string{},
 		},
-	}, ws.handleSignalCoordinator)
+	}, ws.handleSignalReady)
 }
 
 // Tool argument structs for JSON parsing.
 type sendMessageArgs struct {
 	To      string `json:"to"`
 	Content string `json:"content"`
-}
-
-type signalCoordinatorArgs struct {
-	Reason string `json:"reason"`
 }
 
 // checkMessagesResponse is the structured response for check_messages.
@@ -203,30 +197,21 @@ func (ws *WorkerServer) handlePostMessage(_ context.Context, rawArgs json.RawMes
 	return SuccessResult(fmt.Sprintf("Message sent to %s", args.To)), nil
 }
 
-// handleSignalCoordinator sends an urgent signal to the coordinator.
-func (ws *WorkerServer) handleSignalCoordinator(_ context.Context, rawArgs json.RawMessage) (*ToolCallResult, error) {
-	var args signalCoordinatorArgs
-	if err := json.Unmarshal(rawArgs, &args); err != nil {
-		return nil, fmt.Errorf("invalid arguments: %w", err)
-	}
-
-	if args.Reason == "" {
-		return nil, fmt.Errorf("reason is required")
-	}
-
+// handleSignalReady signals the coordinator that this worker is ready for task assignment.
+func (ws *WorkerServer) handleSignalReady(_ context.Context, _ json.RawMessage) (*ToolCallResult, error) {
 	if ws.msgStore == nil {
 		return nil, fmt.Errorf("message store not available")
 	}
 
-	// Send as an urgent request message to coordinator
-	signalContent := fmt.Sprintf("[URGENT SIGNAL] %s", args.Reason)
-	_, err := ws.msgStore.Append(ws.workerID, message.ActorCoordinator, signalContent, message.MessageRequest)
+	// Send ready signal to coordinator
+	readyContent := fmt.Sprintf("Worker %s ready for task assignment", ws.workerID)
+	_, err := ws.msgStore.Append(ws.workerID, message.ActorCoordinator, readyContent, message.MessageWorkerReady)
 	if err != nil {
-		log.Debug(log.CatMCP, "Failed to signal coordinator", "workerID", ws.workerID, "reason", args.Reason, "error", err)
-		return nil, fmt.Errorf("failed to signal coordinator: %w", err)
+		log.Debug(log.CatMCP, "Failed to signal ready", "workerID", ws.workerID, "error", err)
+		return nil, fmt.Errorf("failed to signal ready: %w", err)
 	}
 
-	log.Debug(log.CatMCP, "Signaled coordinator", "workerID", ws.workerID, "reason", args.Reason)
+	log.Debug(log.CatMCP, "Worker signaled ready", "workerID", ws.workerID)
 
-	return SuccessResult(fmt.Sprintf("Urgent signal sent to coordinator: %s", args.Reason)), nil
+	return SuccessResult("Ready signal sent to coordinator"), nil
 }

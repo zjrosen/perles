@@ -114,7 +114,7 @@ func TestWorkerServer_RegistersAllTools(t *testing.T) {
 	expectedTools := []string{
 		"check_messages",
 		"post_message",
-		"signal_coordinator",
+		"signal_ready",
 	}
 
 	for _, toolName := range expectedTools {
@@ -465,59 +465,28 @@ func TestWorkerServer_SendMessageHappyPath(t *testing.T) {
 	}
 }
 
-// TestWorkerServer_SignalCoordinatorValidation tests input validation for signal_coordinator.
-func TestWorkerServer_SignalCoordinatorValidation(t *testing.T) {
+// TestWorkerServer_SignalReadyValidation tests input validation for signal_ready.
+func TestWorkerServer_SignalReadyValidation(t *testing.T) {
 	ws := NewWorkerServer("WORKER.1", nil)
-	handler := ws.handlers["signal_coordinator"]
+	handler := ws.handlers["signal_ready"]
 
-	tests := []struct {
-		name    string
-		args    string
-		wantErr string
-	}{
-		{
-			name:    "missing reason",
-			args:    `{}`,
-			wantErr: "reason is required",
-		},
-		{
-			name:    "empty reason",
-			args:    `{"reason": ""}`,
-			wantErr: "reason is required",
-		},
-		{
-			name:    "message store not available",
-			args:    `{"reason": "blocked"}`,
-			wantErr: "message store not available",
-		},
-		{
-			name:    "invalid json",
-			args:    `not json`,
-			wantErr: "invalid arguments",
-		},
+	// signal_ready takes no parameters, so only test message store error
+	_, err := handler(context.Background(), json.RawMessage(`{}`))
+	if err == nil {
+		t.Error("Expected error when message store is nil")
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := handler(context.Background(), json.RawMessage(tt.args))
-			if err == nil {
-				t.Error("Expected error but got none")
-				return
-			}
-			if !strings.Contains(err.Error(), tt.wantErr) {
-				t.Errorf("Error should contain %q, got: %v", tt.wantErr, err)
-			}
-		})
+	if !strings.Contains(err.Error(), "message store not available") {
+		t.Errorf("Error should contain 'message store not available', got: %v", err)
 	}
 }
 
-// TestWorkerServer_SignalCoordinatorHappyPath tests successful coordinator signaling.
-func TestWorkerServer_SignalCoordinatorHappyPath(t *testing.T) {
+// TestWorkerServer_SignalReadyHappyPath tests successful ready signaling.
+func TestWorkerServer_SignalReadyHappyPath(t *testing.T) {
 	store := newMockMessageStore()
 	ws := NewWorkerServer("WORKER.1", store)
-	handler := ws.handlers["signal_coordinator"]
+	handler := ws.handlers["signal_ready"]
 
-	result, err := handler(context.Background(), json.RawMessage(`{"reason": "blocked on dependency"}`))
+	result, err := handler(context.Background(), json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -533,18 +502,16 @@ func TestWorkerServer_SignalCoordinatorHappyPath(t *testing.T) {
 	if call.To != message.ActorCoordinator {
 		t.Errorf("To = %q, want %q", call.To, message.ActorCoordinator)
 	}
-	if !strings.Contains(call.Content, "[URGENT SIGNAL]") {
-		t.Errorf("Content should contain [URGENT SIGNAL], got: %s", call.Content)
+	expectedContent := "Worker WORKER.1 ready for task assignment"
+	if call.Content != expectedContent {
+		t.Errorf("Content = %q, want %q", call.Content, expectedContent)
 	}
-	if !strings.Contains(call.Content, "blocked on dependency") {
-		t.Errorf("Content should contain reason, got: %s", call.Content)
-	}
-	if call.Type != message.MessageRequest {
-		t.Errorf("Type = %v, want %v", call.Type, message.MessageRequest)
+	if call.Type != message.MessageWorkerReady {
+		t.Errorf("Type = %v, want %v", call.Type, message.MessageWorkerReady)
 	}
 
 	// Verify success result
-	if !strings.Contains(result.Content[0].Text, "Urgent signal sent") {
+	if !strings.Contains(result.Content[0].Text, "Ready signal sent") {
 		t.Errorf("Result should confirm signal, got: %s", result.Content[0].Text)
 	}
 }
@@ -569,8 +536,8 @@ func TestWorkerServer_ToolDescriptionsAreHelpful(t *testing.T) {
 			descMinLength: 30,
 		},
 		{
-			toolName:      "signal_coordinator",
-			mustContain:   []string{"urgent", "signal", "coordinator"},
+			toolName:      "signal_ready",
+			mustContain:   []string{"ready", "task", "assignment"},
 			descMinLength: 30,
 		},
 	}
@@ -598,7 +565,7 @@ func TestWorkerServer_InstructionsContainToolNames(t *testing.T) {
 	ws := NewWorkerServer("WORKER.1", nil)
 	instructions := strings.ToLower(ws.instructions)
 
-	toolNames := []string{"check_messages", "post_message", "signal_coordinator"}
+	toolNames := []string{"check_messages", "post_message", "signal_ready"}
 	for _, name := range toolNames {
 		if !strings.Contains(instructions, name) {
 			t.Errorf("Instructions should mention %q", name)
@@ -645,19 +612,19 @@ func TestWorkerServer_SendMessageSchema(t *testing.T) {
 	}
 }
 
-// TestWorkerServer_SignalCoordinatorSchema verifies signal_coordinator tool schema.
-func TestWorkerServer_SignalCoordinatorSchema(t *testing.T) {
+// TestWorkerServer_SignalReadySchema verifies signal_ready tool schema.
+func TestWorkerServer_SignalReadySchema(t *testing.T) {
 	ws := NewWorkerServer("WORKER.1", nil)
 
-	tool, ok := ws.tools["signal_coordinator"]
+	tool, ok := ws.tools["signal_ready"]
 	if !ok {
-		t.Fatal("signal_coordinator tool not registered")
+		t.Fatal("signal_ready tool not registered")
 	}
 
-	if len(tool.InputSchema.Required) != 1 {
-		t.Errorf("signal_coordinator should have 1 required parameter, got %d", len(tool.InputSchema.Required))
+	if len(tool.InputSchema.Required) != 0 {
+		t.Errorf("signal_ready should have 0 required parameters, got %d", len(tool.InputSchema.Required))
 	}
-	if tool.InputSchema.Required[0] != "reason" {
-		t.Errorf("Required[0] = %q, want %q", tool.InputSchema.Required[0], "reason")
+	if len(tool.InputSchema.Properties) != 0 {
+		t.Errorf("signal_ready should have 0 properties, got %d", len(tool.InputSchema.Properties))
 	}
 }

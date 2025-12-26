@@ -164,26 +164,25 @@ func TestWorkerServer_PostMessage_Deduplication_Concurrent(t *testing.T) {
 		"Concurrent duplicate sends should only result in one Append call")
 }
 
-// TestWorkerServer_SignalCoordinator_NotDeduplicated verifies that signal_coordinator
-// calls are NOT deduplicated (signals are always urgent and should always go through).
-func TestWorkerServer_SignalCoordinator_NotDeduplicated(t *testing.T) {
+// TestWorkerServer_SignalReady_NotDeduplicated verifies that signal_ready
+// calls are NOT deduplicated (ready signals should always go through).
+func TestWorkerServer_SignalReady_NotDeduplicated(t *testing.T) {
 	store := newMockMessageStore()
 	ws := NewWorkerServer("WORKER.1", store)
 
 	ctx := context.Background()
-	signalArgs := `{"reason": "blocked on dependency"}`
 
-	// Send first signal
-	result1, err := ws.handleSignalCoordinator(ctx, json.RawMessage(signalArgs))
+	// Send first ready signal
+	result1, err := ws.handleSignalReady(ctx, json.RawMessage(`{}`))
 	require.NoError(t, err)
 	require.NotNil(t, result1)
 
-	// Send identical signal again - should NOT be deduplicated
-	result2, err := ws.handleSignalCoordinator(ctx, json.RawMessage(signalArgs))
+	// Send ready signal again - should NOT be deduplicated
+	result2, err := ws.handleSignalReady(ctx, json.RawMessage(`{}`))
 	require.NoError(t, err)
 	require.NotNil(t, result2)
 
-	// Both signals should go through (signals are urgent and not deduplicated)
+	// Both signals should go through (ready signals are not deduplicated)
 	assert.Equal(t, 2, len(store.appendCalls),
-		"Urgent signals should NOT be deduplicated - both should trigger Append")
+		"Ready signals should NOT be deduplicated - both should trigger Append")
 }

@@ -6,7 +6,6 @@ import (
 	"maps"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -534,8 +533,8 @@ func (i *Initializer) handleMessageEvent(event pubsub.Event[message.Event]) bool
 
 	entry := payload.Entry
 
-	// Only track worker messages
-	if !strings.HasPrefix(strings.ToLower(entry.From), "worker") {
+	// Only track worker ready messages
+	if entry.Type != message.MessageWorkerReady {
 		return false
 	}
 
