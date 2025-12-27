@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/zjrosen/perles/internal/orchestration/message"
+	"github.com/zjrosen/perles/internal/ui/shared/panes"
 	"github.com/zjrosen/perles/internal/ui/styles"
 )
 
@@ -57,17 +58,17 @@ func (m Model) renderMessagePane(width, height int, fullscreen bool) string {
 		leftTitle = "MESSAGES"
 		hasNewContent = false
 		titleColor = styles.TextMutedColor
-		borderColor = styles.TextMutedColor
+		borderColor = styles.BorderDefaultColor
 	} else {
 		// Normal: full title with new content indicator
 		leftTitle = "MESSAGE LOG"
 		hasNewContent = m.messagePane.hasNewContent
 		titleColor = styles.TextSecondaryColor
-		borderColor = lipgloss.AdaptiveColor{Light: "#54A0FF", Dark: "#54A0FF"}
+		borderColor = styles.BorderDefaultColor
 	}
 
-	// Use renderScrollablePane helper for viewport setup, padding, and auto-scroll
-	result := renderScrollablePane(width, height, ScrollablePaneConfig{
+	// Use panes.ScrollablePane helper for viewport setup, padding, and auto-scroll
+	result := panes.ScrollablePane(width, height, panes.ScrollableConfig{
 		Viewport:       &vp,
 		ContentDirty:   m.messagePane.contentDirty,
 		HasNewContent:  hasNewContent,

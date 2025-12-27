@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/zjrosen/perles/internal/orchestration/coordinator"
+	"github.com/zjrosen/perles/internal/ui/shared/panes"
 	"github.com/zjrosen/perles/internal/ui/styles"
 )
 
@@ -23,13 +23,6 @@ var (
 
 	toolCallStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.AdaptiveColor{Light: "#999999", Dark: "#666666"})
-
-	newContentIndicatorStyle = lipgloss.NewStyle().
-					Foreground(lipgloss.AdaptiveColor{Light: "#FECA57", Dark: "#FECA57"}). // Yellow/amber for attention
-					Bold(true)
-
-	scrollIndicatorStyle = lipgloss.NewStyle().
-				Foreground(styles.TextMutedColor) // Muted color for scroll position
 )
 
 // renderCoordinatorPane renders the left pane showing coordinator chat history.
@@ -56,11 +49,11 @@ func (m Model) renderCoordinatorPane(width, height int, fullscreen bool) string 
 			metricsDisplay = m.coordinatorMetrics.FormatContextDisplay()
 		}
 		hasNewContent = m.coordinatorPane.hasNewContent
-		borderColor = lipgloss.AdaptiveColor{Light: "#54A0FF", Dark: "#54A0FF"}
+		borderColor = styles.BorderDefaultColor
 	}
 
-	// Use renderScrollablePane helper for viewport setup, padding, and auto-scroll
-	result := renderScrollablePane(width, height, ScrollablePaneConfig{
+	// Use panes.ScrollablePane helper for viewport setup, padding, and auto-scroll
+	result := panes.ScrollablePane(width, height, panes.ScrollableConfig{
 		Viewport:       &vp,
 		ContentDirty:   m.coordinatorPane.contentDirty,
 		HasNewContent:  hasNewContent,
@@ -167,17 +160,4 @@ func wordWrap(text string, width int) string {
 	}
 
 	return result.String()
-}
-
-// buildScrollIndicator returns a styled scroll position indicator for the viewport.
-// Returns empty string if content fits in viewport or if at bottom (live view).
-// Returns styled "↑XX%" when scrolled up from bottom.
-func buildScrollIndicator(vp viewport.Model) string {
-	if vp.TotalLineCount() <= vp.Height {
-		return "" // Content fits, no indicator needed
-	}
-	if vp.AtBottom() {
-		return "" // At live position, no indicator needed
-	}
-	return scrollIndicatorStyle.Render(fmt.Sprintf("↑%.0f%%", vp.ScrollPercent()*100))
 }

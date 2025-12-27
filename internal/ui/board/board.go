@@ -7,6 +7,7 @@ import (
 	"github.com/zjrosen/perles/internal/config"
 	"github.com/zjrosen/perles/internal/keys"
 	"github.com/zjrosen/perles/internal/mode/shared"
+	"github.com/zjrosen/perles/internal/ui/shared/panes"
 	"github.com/zjrosen/perles/internal/ui/styles"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -463,16 +464,16 @@ func (m Model) View() string {
 		colColor := col.Color()
 
 		// Render column with bordered title
-		rendered := styles.RenderWithTitleBorder(
-			col.View(),
-			col.Title(),
-			col.RightTitle(),
-			col.Width(),
-			contentHeight,
-			isFocused,
-			colColor,
-			colColor,
-		)
+		rendered := panes.BorderedPane(panes.BorderConfig{
+			Content:            col.View(),
+			Width:              col.Width(),
+			Height:             contentHeight,
+			TopLeft:            col.Title(),
+			TopRight:           col.RightTitle(),
+			Focused:            isFocused,
+			TitleColor:         colColor,
+			FocusedBorderColor: colColor,
+		})
 		cols = append(cols, rendered)
 	}
 

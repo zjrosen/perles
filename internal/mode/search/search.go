@@ -27,6 +27,7 @@ import (
 	"github.com/zjrosen/perles/internal/ui/shared/colorpicker"
 	"github.com/zjrosen/perles/internal/ui/shared/formmodal"
 	"github.com/zjrosen/perles/internal/ui/shared/modal"
+	"github.com/zjrosen/perles/internal/ui/shared/panes"
 	"github.com/zjrosen/perles/internal/ui/shared/picker"
 	"github.com/zjrosen/perles/internal/ui/shared/toaster"
 	"github.com/zjrosen/perles/internal/ui/styles"
@@ -1822,16 +1823,15 @@ func (m Model) renderListLeftPanel(width int) string {
 
 	// BQL Search input with titled border
 	inputContent := m.input.View()
-	inputBorder := styles.RenderWithTitleBorder(
-		inputContent,
-		"BQL Search",
-		"",
-		width,
-		inputHeight,
-		m.focus == FocusSearch,
-		styles.OverlayTitleColor,
-		styles.BorderHighlightFocusColor,
-	)
+	inputBorder := panes.BorderedPane(panes.BorderConfig{
+		Content:            inputContent,
+		Width:              width,
+		Height:             inputHeight,
+		TopLeft:            "BQL Search",
+		Focused:            m.focus == FocusSearch,
+		TitleColor:         styles.OverlayTitleColor,
+		FocusedBorderColor: styles.BorderHighlightFocusColor,
+	})
 	sb.WriteString(inputBorder)
 	sb.WriteString("\n")
 
@@ -1866,16 +1866,15 @@ func (m Model) renderListLeftPanel(width int) string {
 	}
 
 	// Results with titled border
-	resultsBorder := styles.RenderWithTitleBorder(
-		resultsContent,
-		resultsTitle,
-		"",
-		width,
-		resultsHeight,
-		m.focus == FocusResults,
-		styles.OverlayTitleColor,
-		styles.BorderHighlightFocusColor,
-	)
+	resultsBorder := panes.BorderedPane(panes.BorderConfig{
+		Content:            resultsContent,
+		Width:              width,
+		Height:             resultsHeight,
+		TopLeft:            resultsTitle,
+		Focused:            m.focus == FocusResults,
+		TitleColor:         styles.OverlayTitleColor,
+		FocusedBorderColor: styles.BorderHighlightFocusColor,
+	})
 	sb.WriteString(resultsBorder)
 
 	return sb.String()
@@ -1897,16 +1896,15 @@ func (m Model) renderRightPanel(width int) string {
 	}
 
 	// Wrap in titled border
-	return styles.RenderWithTitleBorder(
-		content,
-		"Issue Details",
-		"",
-		width,
-		panelHeight,
-		m.focus == FocusDetails,
-		styles.OverlayTitleColor,
-		styles.BorderHighlightFocusColor,
-	)
+	return panes.BorderedPane(panes.BorderConfig{
+		Content:            content,
+		Width:              width,
+		Height:             panelHeight,
+		TopLeft:            "Issue Details",
+		Focused:            m.focus == FocusDetails,
+		TitleColor:         styles.OverlayTitleColor,
+		FocusedBorderColor: styles.BorderHighlightFocusColor,
+	})
 }
 
 // renderCompactProgress renders a compact progress bar with percentage and counts.
@@ -1959,16 +1957,16 @@ func (m Model) renderTreeLeftPanel(width int) string {
 		rightTitle = renderCompactProgress(closed, total)
 	}
 
-	return styles.RenderWithTitleBorder(
-		content,
-		leftTitle,
-		rightTitle,
-		width,
-		m.height,
-		m.focus == FocusResults, // Tree panel uses "results" focus
-		styles.OverlayTitleColor,
-		styles.BorderHighlightFocusColor,
-	)
+	return panes.BorderedPane(panes.BorderConfig{
+		Content:            content,
+		Width:              width,
+		Height:             m.height,
+		TopLeft:            leftTitle,
+		TopRight:           rightTitle,
+		Focused:            m.focus == FocusResults, // Tree panel uses "results" focus
+		TitleColor:         styles.OverlayTitleColor,
+		FocusedBorderColor: styles.BorderHighlightFocusColor,
+	})
 }
 
 // Message types

@@ -10,6 +10,7 @@ import (
 
 	"github.com/zjrosen/perles/internal/orchestration/message"
 	"github.com/zjrosen/perles/internal/orchestration/pool"
+	"github.com/zjrosen/perles/internal/ui/shared/panes"
 )
 
 // =============================================================================
@@ -61,7 +62,7 @@ func TestShortContent_CoordinatorNoScrollIndicator(t *testing.T) {
 	_ = m.View() // Render to populate viewport
 
 	// Scroll indicator should not appear
-	indicator := buildScrollIndicator(m.coordinatorPane.viewports[viewportKey])
+	indicator := panes.BuildScrollIndicator(m.coordinatorPane.viewports[viewportKey])
 	require.Equal(t, "", indicator, "short content should show no scroll indicator")
 }
 
@@ -83,7 +84,7 @@ func TestShortContent_MessageNoScrollIndicator(t *testing.T) {
 	m = m.SetMessageEntries(entries)
 	_ = m.View()
 
-	indicator := buildScrollIndicator(m.messagePane.viewports[viewportKey])
+	indicator := panes.BuildScrollIndicator(m.messagePane.viewports[viewportKey])
 	require.Equal(t, "", indicator, "short content should show no scroll indicator")
 }
 
@@ -96,7 +97,7 @@ func TestShortContent_WorkerNoScrollIndicator(t *testing.T) {
 	_ = m.View()
 
 	if vp, ok := m.workerPane.viewports["worker-1"]; ok {
-		indicator := buildScrollIndicator(vp)
+		indicator := panes.BuildScrollIndicator(vp)
 		require.Equal(t, "", indicator, "short content should show no scroll indicator")
 	}
 }
@@ -606,7 +607,7 @@ func TestBuildScrollIndicator_EdgeCases(t *testing.T) {
 			}
 			vp.SetYOffset(tt.yOffset)
 
-			got := buildScrollIndicator(vp)
+			got := panes.BuildScrollIndicator(vp)
 			require.Equal(t, tt.wantIndicator, got)
 		})
 	}

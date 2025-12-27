@@ -12,6 +12,7 @@ import (
 
 	"github.com/zjrosen/perles/internal/orchestration/message"
 	"github.com/zjrosen/perles/internal/orchestration/pool"
+	"github.com/zjrosen/perles/internal/ui/shared/panes"
 )
 
 // testNow is a fixed reference time for reproducible golden tests.
@@ -864,14 +865,14 @@ func TestBuildScrollIndicator(t *testing.T) {
 			vp.SetContent(content)
 			vp.SetYOffset(tt.yOffset)
 
-			got := buildScrollIndicator(vp)
+			got := panes.BuildScrollIndicator(vp)
 			require.Equal(t, tt.want, got)
 		})
 	}
 }
 
-// Invariant tests for renderScrollablePane helper.
-// These tests verify the critical invariants documented in pane_helpers.go.
+// Invariant tests for panes.ScrollablePane helper.
+// These tests verify the critical invariants documented in the scrollable pane implementation.
 
 func TestRenderScrollablePane_WasAtBottomTiming(t *testing.T) {
 	// This test verifies that wasAtBottom is checked BEFORE SetContent().
@@ -894,9 +895,9 @@ func TestRenderScrollablePane_WasAtBottomTiming(t *testing.T) {
 	vp.SetYOffset(40)
 	require.False(t, vp.AtBottom(), "should be scrolled up initially")
 
-	// Call renderScrollablePane with contentDirty=true
+	// Call panes.ScrollablePane with contentDirty=true
 	// Content still exceeds viewport to properly test scroll preservation
-	_ = renderScrollablePane(84, 22, ScrollablePaneConfig{
+	_ = panes.ScrollablePane(84, 22, panes.ScrollableConfig{
 		Viewport:       &vp,
 		ContentDirty:   true,
 		HasNewContent:  false,
@@ -930,7 +931,7 @@ func TestRenderScrollablePane_PaddingIsPrepended(t *testing.T) {
 	vp := viewport.New(80, 20)
 
 	// Call with short content that needs padding
-	result := renderScrollablePane(84, 22, ScrollablePaneConfig{
+	result := panes.ScrollablePane(84, 22, panes.ScrollableConfig{
 		Viewport:       &vp,
 		ContentDirty:   false,
 		HasNewContent:  false,
@@ -981,8 +982,8 @@ func TestRenderScrollablePane_ViewportReferenceSemantics(t *testing.T) {
 	vp.SetYOffset(30)
 	initialOffset := vp.YOffset
 
-	// Call renderScrollablePane with contentDirty=false (shouldn't auto-scroll)
-	_ = renderScrollablePane(84, 22, ScrollablePaneConfig{
+	// Call panes.ScrollablePane with contentDirty=false (shouldn't auto-scroll)
+	_ = panes.ScrollablePane(84, 22, panes.ScrollableConfig{
 		Viewport:       &vp, // Pointer, not value
 		ContentDirty:   false,
 		HasNewContent:  false,

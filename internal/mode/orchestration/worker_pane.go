@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/zjrosen/perles/internal/orchestration/pool"
+	"github.com/zjrosen/perles/internal/ui/shared/panes"
 	"github.com/zjrosen/perles/internal/ui/styles"
 )
 
@@ -149,15 +150,15 @@ func (m Model) renderSingleWorkerPane(workerID string, width, height int) string
 		metricsDisplay = workerMetrics.FormatContextDisplay()
 	}
 
-	// Use renderScrollablePane helper for viewport setup, padding, and auto-scroll
-	result := renderScrollablePane(width, height, ScrollablePaneConfig{
+	// Use panes.ScrollablePane helper for viewport setup, padding, and auto-scroll
+	result := panes.ScrollablePane(width, height, panes.ScrollableConfig{
 		Viewport:       &vp,
 		ContentDirty:   m.workerPane.contentDirty[workerID],
 		HasNewContent:  m.workerPane.hasNewContent[workerID],
 		MetricsDisplay: metricsDisplay,
 		LeftTitle:      leftTitle,
 		TitleColor:     WorkerColor,
-		BorderColor:    lipgloss.AdaptiveColor{Light: "#54A0FF", Dark: "#54A0FF"},
+		BorderColor:    styles.BorderDefaultColor,
 	}, func(wrapWidth int) string {
 		return m.renderWorkerContent(workerID, wrapWidth, 0)
 	})

@@ -6,6 +6,17 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// Border characters (rounded) - used by RenderFormSection.
+// Note: These are also defined in ui/shared/panes/border.go for the pane components.
+const (
+	borderTopLeft     = "╭"
+	borderTopRight    = "╮"
+	borderBottomLeft  = "╰"
+	borderBottomRight = "╯"
+	borderHorizontal  = "─"
+	borderVertical    = "│"
+)
+
 // RenderFormSection renders a bordered section with an optional title and hint.
 // When focused is true, the border uses focusedBorderColor instead of BorderDefaultColor.
 // This is the shared renderer for form components (coleditor, viewselector, labeleditor, modal).

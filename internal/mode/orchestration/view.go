@@ -5,6 +5,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/zjrosen/perles/internal/ui/shared/panes"
 	"github.com/zjrosen/perles/internal/ui/styles"
 )
 
@@ -114,16 +115,15 @@ func (m Model) renderInputBar() string {
 			Render(navStyle.Render(navHelp))
 
 		greyColor := lipgloss.AdaptiveColor{Light: "#666666", Dark: "#888888"}
-		return styles.RenderWithTitleBorder(
-			content,
-			"Select fullscreen pane:",
-			"",
-			m.width,
-			inputHeight,
-			true,
-			greyColor,
-			greyColor,
-		)
+		return panes.BorderedPane(panes.BorderConfig{
+			Content:            content,
+			Width:              m.width,
+			Height:             inputHeight,
+			TopLeft:            "Select fullscreen pane:",
+			Focused:            true,
+			TitleColor:         greyColor,
+			FocusedBorderColor: greyColor,
+		})
 	}
 
 	// Color based on target for visual distinction
@@ -164,16 +164,15 @@ func (m Model) renderInputBar() string {
 	// Build target label for left title - show who we're messaging (uppercase for consistency)
 	targetLabel := strings.ToUpper(m.messageTarget)
 
-	return styles.RenderWithTitleBorder(
-		content,
-		targetLabel, // Left title shows target
-		"",          // No right title
-		m.width,
-		inputHeight,       // Taller input area
-		m.input.Focused(), // Highlight border when input is focused
-		titleColor,
-		borderColor,
-	)
+	return panes.BorderedPane(panes.BorderConfig{
+		Content:            content,
+		Width:              m.width,
+		Height:             inputHeight,
+		TopLeft:            targetLabel,       // Left title shows target
+		Focused:            m.input.Focused(), // Highlight border when input is focused
+		TitleColor:         titleColor,
+		FocusedBorderColor: borderColor,
+	})
 }
 
 // Resume prompt styles

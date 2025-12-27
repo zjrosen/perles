@@ -1,6 +1,8 @@
-package orchestration
+// Package panes contains reusable bordered pane UI components.
+package panes
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/viewport"
@@ -9,10 +11,27 @@ import (
 	"github.com/zjrosen/perles/internal/ui/styles"
 )
 
-// ScrollablePaneConfig holds the configuration for rendering a scrollable pane.
-type ScrollablePaneConfig struct {
-	// Viewport is a pointer to the viewport in the pane's map.
+// Scroll indicator styles
+var (
+	// ScrollIndicatorStyle is the style for scroll position indicators (e.g., "↑50%").
+	// Uses muted text color for subtlety.
+	ScrollIndicatorStyle = lipgloss.NewStyle().
+				Foreground(styles.TextMutedColor)
+
+	// NewContentIndicatorStyle is the style for the "↓New" indicator shown when
+	// new content arrives while scrolled up. Uses attention-grabbing yellow/amber.
+	NewContentIndicatorStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.AdaptiveColor{Light: "#FECA57", Dark: "#FECA57"}).
+					Bold(true)
+)
+
+// ScrollableConfig holds the configuration for rendering a scrollable pane.
+// This is the shared version extracted from orchestration mode for reuse
+// across different parts of the codebase.
+type ScrollableConfig struct {
+	// Viewport is a pointer to the viewport model.
 	// CRITICAL: Must be a pointer to preserve reference semantics for scroll state persistence.
+	// The viewport will be modified by ScrollablePane (dimensions, content, scroll position).
 	Viewport *viewport.Model
 
 	// ContentDirty indicates whether the content has changed since last render.
@@ -35,10 +54,16 @@ type ScrollablePaneConfig struct {
 
 	// BorderColor is the color for the pane border.
 	BorderColor lipgloss.AdaptiveColor
+
+	// Focused indicates whether the pane has focus.
+	// Passed through to BorderedPane for border styling.
+	Focused bool
 }
 
-// renderScrollablePane handles the common viewport setup, content padding, auto-scroll,
-// and border rendering pattern used by all pane render functions.
+// ScrollablePane handles the common viewport setup, content padding, auto-scroll,
+// and border rendering pattern used by scrollable pane components.
+//
+// This function composes with BorderedPane internally to render the final output.
 //
 // CRITICAL INVARIANTS (do not change the order of operations):
 //  1. wasAtBottom MUST be captured BEFORE SetContent() to preserve user scroll position.
@@ -48,9 +73,9 @@ type ScrollablePaneConfig struct {
 //  3. Viewport MUST use pointer semantics (stored in map) for scroll state to persist across renders.
 //
 // contentFn receives the available width (viewport width) and returns the rendered content string.
-func renderScrollablePane(
+func ScrollablePane(
 	width, height int,
-	cfg ScrollablePaneConfig,
+	cfg ScrollableConfig,
 	contentFn func(wrapWidth int) string,
 ) string {
 	// Calculate viewport dimensions (subtract 2 for borders)
@@ -93,17 +118,17 @@ func renderScrollablePane(
 	// This must happen AFTER SetContent so scroll indicator is accurate
 	rightTitle := buildRightTitle(*cfg.Viewport, cfg.HasNewContent, cfg.MetricsDisplay)
 
-	// Render pane with bordered title
-	return styles.RenderWithTitleBorder(
-		viewportContent,
-		cfg.LeftTitle,
-		rightTitle,
-		width,
-		height,
-		false,
-		cfg.TitleColor,
-		cfg.BorderColor,
-	)
+	// Render pane with bordered title using the BorderedPane API
+	return BorderedPane(BorderConfig{
+		Content:     viewportContent,
+		Width:       width,
+		Height:      height,
+		TopLeft:     cfg.LeftTitle,
+		TopRight:    rightTitle,
+		Focused:     cfg.Focused,
+		TitleColor:  cfg.TitleColor,
+		BorderColor: cfg.BorderColor,
+	})
 }
 
 // buildRightTitle constructs the right title section for pane borders.
@@ -113,18 +138,34 @@ func buildRightTitle(vp viewport.Model, hasNewContent bool, metricsDisplay strin
 
 	// Add new content indicator if scrolled up and new content arrived
 	if hasNewContent {
-		parts = append(parts, newContentIndicatorStyle.Render("↓New"))
+		parts = append(parts, NewContentIndicatorStyle.Render("↓New"))
 	}
 
 	// Add scroll indicator if scrolled up from bottom
-	if scrollIndicator := buildScrollIndicator(vp); scrollIndicator != "" {
+	if scrollIndicator := BuildScrollIndicator(vp); scrollIndicator != "" {
 		parts = append(parts, scrollIndicator)
 	}
 
 	// Add metrics display if available (e.g., "27k/200k" for context usage)
 	if metricsDisplay != "" {
-		parts = append(parts, scrollIndicatorStyle.Render(metricsDisplay))
+		parts = append(parts, ScrollIndicatorStyle.Render(metricsDisplay))
 	}
 
 	return strings.Join(parts, " ")
+}
+
+// BuildScrollIndicator returns a styled scroll position indicator for the viewport.
+// Returns empty string if content fits in viewport or if at bottom (live view).
+// Returns styled "↑XX%" when scrolled up from bottom.
+//
+// This function is exported for use by external packages that may need to build
+// custom scroll indicators or test the scroll indicator logic.
+func BuildScrollIndicator(vp viewport.Model) string {
+	if vp.TotalLineCount() <= vp.Height {
+		return "" // Content fits, no indicator needed
+	}
+	if vp.AtBottom() {
+		return "" // At live position, no indicator needed
+	}
+	return ScrollIndicatorStyle.Render(fmt.Sprintf("↑%.0f%%", vp.ScrollPercent()*100))
 }

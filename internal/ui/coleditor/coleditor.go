@@ -16,6 +16,7 @@ import (
 	"github.com/zjrosen/perles/internal/ui/modals/help"
 	"github.com/zjrosen/perles/internal/ui/shared/colorpicker"
 	"github.com/zjrosen/perles/internal/ui/shared/modal"
+	"github.com/zjrosen/perles/internal/ui/shared/panes"
 	"github.com/zjrosen/perles/internal/ui/styles"
 	"github.com/zjrosen/perles/internal/ui/tree"
 
@@ -947,16 +948,15 @@ func (m Model) renderPreview(width int) string {
 			// Account for border wrapper (2 chars for left/right border, 2 for top/bottom)
 			treeModel.SetSize(colWidth-2, colHeight-2)
 			countInfo = countStyle.Render(fmt.Sprintf("Tree with %d nodes", len(m.treeIssueMap)))
-			columnView = styles.RenderWithTitleBorder(
-				treeModel.View(),
-				cfg.Name,
-				"",
-				colWidth,
-				colHeight,
-				true,
-				lipgloss.Color(cfg.Color),
-				lipgloss.Color(cfg.Color),
-			)
+			columnView = panes.BorderedPane(panes.BorderConfig{
+				Content:            treeModel.View(),
+				Width:              colWidth,
+				Height:             colHeight,
+				TopLeft:            cfg.Name,
+				Focused:            true,
+				TitleColor:         lipgloss.Color(cfg.Color),
+				FocusedBorderColor: lipgloss.Color(cfg.Color),
+			})
 		} else {
 			// No tree data yet
 			emptyMsg := lipgloss.NewStyle().
@@ -964,16 +964,15 @@ func (m Model) renderPreview(width int) string {
 				Italic(true).
 				Render("Enter an issue ID to preview the tree")
 			countInfo = countStyle.Render("No tree data")
-			columnView = styles.RenderWithTitleBorder(
-				emptyMsg,
-				cfg.Name,
-				"",
-				colWidth,
-				colHeight,
-				true,
-				lipgloss.Color(cfg.Color),
-				lipgloss.Color(cfg.Color),
-			)
+			columnView = panes.BorderedPane(panes.BorderConfig{
+				Content:            emptyMsg,
+				Width:              colWidth,
+				Height:             colHeight,
+				TopLeft:            cfg.Name,
+				Focused:            true,
+				TitleColor:         lipgloss.Color(cfg.Color),
+				FocusedBorderColor: lipgloss.Color(cfg.Color),
+			})
 		}
 	} else {
 		// Render BQL column preview (existing logic)
@@ -988,16 +987,15 @@ func (m Model) renderPreview(width int) string {
 		previewCol = previewCol.SetFocused(true).(board.Column)
 		previewCol = previewCol.SetSize(colWidth, colHeight).(board.Column)
 
-		columnView = styles.RenderWithTitleBorder(
-			previewCol.View(),
-			previewCol.Title(),
-			"",
-			colWidth,
-			colHeight,
-			true, // focused
-			previewCol.Color(),
-			previewCol.Color(),
-		)
+		columnView = panes.BorderedPane(panes.BorderConfig{
+			Content:            previewCol.View(),
+			Width:              colWidth,
+			Height:             colHeight,
+			TopLeft:            previewCol.Title(),
+			Focused:            true,
+			TitleColor:         previewCol.Color(),
+			FocusedBorderColor: previewCol.Color(),
+		})
 	}
 
 	return previewStyle.Render(header + "\n" + countInfo + "\n\n" + columnView)
