@@ -3,7 +3,6 @@ package app
 
 import (
 	"context"
-	"path/filepath"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -60,7 +59,7 @@ type Model struct {
 // dbPath is the path to the database file for watching changes.
 // configPath is the path to the config file for saving column changes.
 // debugMode enables the log overlay (Ctrl+X toggle).
-func NewWithConfig(client *beads.Client, cfg config.Config, dbPath, configPath string, debugMode bool) Model {
+func NewWithConfig(client *beads.Client, cfg config.Config, dbPath, configPath, workDir string, debugMode bool) Model {
 	// Initialize file watcher if auto-refresh is enabled
 	var (
 		watcherHandle   *watcher.Watcher
@@ -90,6 +89,7 @@ func NewWithConfig(client *beads.Client, cfg config.Config, dbPath, configPath s
 		Config:     &cfg,
 		ConfigPath: configPath,
 		DBPath:     dbPath,
+		WorkDir:    workDir,
 		Executor:   bql.NewExecutor(client.DB()),
 		Clipboard:  shared.SystemClipboard{},
 		Clock:      shared.RealClock{},
@@ -206,10 +206,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		log.Info(log.CatMode, "Switching mode", "from", "kanban", "to", "orchestration")
 		m.currentMode = mode.ModeOrchestration
 
-		// Work directory is the project root (parent of .beads)
-		beadsDir := filepath.Dir(m.services.DBPath)
-		workDir := filepath.Dir(beadsDir)
-
 		// Get orchestration config from services.Config
 		orchConfig := m.services.Config.Orchestration
 
@@ -223,7 +219,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.orchestration = orchestration.New(orchestration.Config{
 			Services:         m.services,
-			WorkDir:          workDir,
+			WorkDir:          m.services.WorkDir,
 			ClientType:       orchConfig.Client,
 			ClaudeModel:      orchConfig.Claude.Model,
 			AmpModel:         orchConfig.Amp.Model,

@@ -131,14 +131,16 @@ func runApp(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid orchestration configuration: %w", err)
 	}
 
-	// Use provided beads directory or current directory
+	// Working directory is always the current directory (where perles was invoked)
+	workDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("getting current directory: %w", err)
+	}
+
+	// Use provided beads directory or current directory for database
 	dbPath := cfg.BeadsDir
 	if dbPath == "" {
-		var err error
-		dbPath, err = os.Getwd()
-		if err != nil {
-			return fmt.Errorf("getting current directory: %w", err)
-		}
+		dbPath = workDir
 	}
 
 	client, err := beads.NewClient(dbPath)
@@ -173,7 +175,7 @@ func runApp(cmd *cobra.Command, args []string) error {
 	}
 
 	// Pass config to app with database and config paths (debug for log overlay)
-	model := app.NewWithConfig(client, cfg, dbPath+"/.beads/beads.db", configFilePath, debug)
+	model := app.NewWithConfig(client, cfg, dbPath+"/.beads/beads.db", configFilePath, workDir, debug)
 	p := tea.NewProgram(
 		&model,
 		tea.WithAltScreen(),
