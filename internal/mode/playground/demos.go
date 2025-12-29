@@ -1345,6 +1345,11 @@ type IssueBadgeDemoModel struct {
 	height      int
 }
 
+// ptrBool returns a pointer to a bool value.
+func ptrBool(b bool) *bool {
+	return &b
+}
+
 // sampleIssues provides examples for the demo, showcasing all issue types and priorities.
 var sampleIssues = []beads.Issue{
 	// All 5 issue types
@@ -1361,6 +1366,8 @@ var sampleIssues = []beads.Issue{
 	{ID: "demo-p4", Type: beads.TypeTask, Priority: 4, TitleText: "P4 Backlog: Future consideration"},
 	// Long title for truncation demo
 	{ID: "demo-long", Type: beads.TypeFeature, Priority: 2, TitleText: "This is a very long title that will be truncated to demonstrate the MaxWidth configuration option in action"},
+	// Pinned issue demo
+	{ID: "demo-pin", Type: beads.TypeTask, Priority: 1, TitleText: "Pinned: Important task always visible", Pinned: ptrBool(true)},
 }
 
 func createIssueBadgeDemo(width, height int) DemoModel {
@@ -1443,7 +1450,19 @@ func (m *IssueBadgeDemoModel) View() string {
 	sb.WriteString(truncatedLine)
 	sb.WriteString("\n")
 
-	// Section 4: Badge Only (no title)
+	// Section 4: Pinned Issue
+	sb.WriteString("\n")
+	sb.WriteString(sectionStyle.Render("Pinned Issue (📌 indicator):"))
+	sb.WriteString("\n")
+	pinnedIssue := sampleIssues[11]
+	pinnedLine := issuebadge.Render(pinnedIssue, issuebadge.Config{
+		ShowSelection: true,
+		Selected:      m.selectedIdx == 11,
+	})
+	sb.WriteString(pinnedLine)
+	sb.WriteString("\n")
+
+	// Section 5: Badge Only (no title)
 	sb.WriteString("\n")
 	sb.WriteString(sectionStyle.Render("Badge Only (RenderBadge):"))
 	sb.WriteString("\n")
@@ -1452,6 +1471,8 @@ func (m *IssueBadgeDemoModel) View() string {
 		sb.WriteString(badge)
 		sb.WriteString(" ")
 	}
+	// Also show pinned badge
+	sb.WriteString(issuebadge.RenderBadge(sampleIssues[11]))
 	sb.WriteString("\n")
 
 	return sb.String()

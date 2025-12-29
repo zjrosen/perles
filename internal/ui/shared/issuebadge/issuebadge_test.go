@@ -373,3 +373,95 @@ func TestRender_Truncated_Golden(t *testing.T) {
 	})
 	teatest.RequireEqualOutput(t, []byte(got))
 }
+
+// boolPtr returns a pointer to the given bool value.
+func boolPtr(b bool) *bool {
+	return &b
+}
+
+// TestRenderBadge_PinnedNil verifies no pin emoji when Pinned is nil (default).
+func TestRenderBadge_PinnedNil(t *testing.T) {
+	issue := beads.Issue{
+		ID:        "test-123",
+		Type:      beads.TypeTask,
+		Priority:  beads.PriorityMedium,
+		TitleText: "Test issue",
+		Pinned:    nil, // explicitly nil
+	}
+
+	got := RenderBadge(issue)
+	stripped := stripANSI(got)
+
+	if strings.Contains(stripped, "📌") {
+		t.Errorf("RenderBadge() with Pinned=nil should not contain pin emoji, got: %q", stripped)
+	}
+
+	// Should still contain the expected badge format
+	if !strings.Contains(stripped, "[T][P2][test-123]") {
+		t.Errorf("RenderBadge() = %q, want format [T][P2][test-123]", stripped)
+	}
+}
+
+// TestRenderBadge_PinnedFalse verifies no pin emoji when Pinned is false.
+func TestRenderBadge_PinnedFalse(t *testing.T) {
+	issue := beads.Issue{
+		ID:        "test-456",
+		Type:      beads.TypeTask,
+		Priority:  beads.PriorityMedium,
+		TitleText: "Test issue",
+		Pinned:    boolPtr(false),
+	}
+
+	got := RenderBadge(issue)
+	stripped := stripANSI(got)
+
+	if strings.Contains(stripped, "📌") {
+		t.Errorf("RenderBadge() with Pinned=false should not contain pin emoji, got: %q", stripped)
+	}
+
+	// Should still contain the expected badge format
+	if !strings.Contains(stripped, "[T][P2][test-456]") {
+		t.Errorf("RenderBadge() = %q, want format [T][P2][test-456]", stripped)
+	}
+}
+
+// TestRenderBadge_PinnedTrue verifies pin emoji appears when Pinned is true.
+func TestRenderBadge_PinnedTrue(t *testing.T) {
+	issue := beads.Issue{
+		ID:        "test-789",
+		Type:      beads.TypeTask,
+		Priority:  beads.PriorityMedium,
+		TitleText: "Test issue",
+		Pinned:    boolPtr(true),
+	}
+
+	got := RenderBadge(issue)
+	stripped := stripANSI(got)
+
+	if !strings.Contains(stripped, "📌") {
+		t.Errorf("RenderBadge() with Pinned=true should contain pin emoji, got: %q", stripped)
+	}
+
+	// Pin should come before the type indicator
+	if !strings.HasPrefix(stripped, "📌[T]") {
+		t.Errorf("RenderBadge() = %q, pin should precede type indicator [T]", stripped)
+	}
+
+	// Should contain full badge format with pin
+	if !strings.Contains(stripped, "📌[T][P2][test-789]") {
+		t.Errorf("RenderBadge() = %q, want format 📌[T][P2][test-789]", stripped)
+	}
+}
+
+// TestRenderBadge_Pinned_Golden captures exact ANSI output for pinned badge.
+func TestRenderBadge_Pinned_Golden(t *testing.T) {
+	issue := beads.Issue{
+		ID:       "pinned-1",
+		Type:     beads.TypeTask,
+		Priority: beads.PriorityHigh,
+		Pinned:   boolPtr(true),
+	}
+
+	got := RenderBadge(issue)
+	teatest.RequireEqualOutput(t, []byte(got))
+}

@@ -27,6 +27,7 @@ type Config struct {
 }
 
 // RenderBadge returns the issue badge without the title: [T][Pn][id]
+// When the issue is pinned, prepends 📌: 📌[T][Pn][id]
 // This is useful when callers need to add their own metadata after the badge.
 func RenderBadge(issue beads.Issue) string {
 	priorityText := fmt.Sprintf("[P%d]", issue.Priority)
@@ -37,11 +38,20 @@ func RenderBadge(issue beads.Issue) string {
 	typeStyle := styles.GetTypeStyle(issue.Type)
 	issueIDStyle := lipgloss.NewStyle().Foreground(styles.TextSecondaryColor)
 
-	return strings.Join([]string{
+	var parts []string
+
+	// Add pin indicator if issue is pinned
+	if issue.Pinned != nil && *issue.Pinned {
+		parts = append(parts, "📌")
+	}
+
+	parts = append(parts,
 		typeStyle.Render(typeText),
 		priorityStyle.Render(priorityText),
 		issueIDStyle.Render(issueID),
-	}, "")
+	)
+
+	return strings.Join(parts, "")
 }
 
 // Render returns the full issue line with badge and title.
