@@ -34,10 +34,7 @@ theme:
 	require.Equal(t, "#CDD6F4", styles.TextPrimaryColor.Dark)
 }
 
-// TestThemeConfig_WithColorOverrides tests applying color overrides.
-// Note: This tests the styles.ApplyTheme behavior directly rather than YAML parsing,
-// because YAML parsers interpret dotted keys (like "text.primary") as nested objects.
-// The config struct's Colors map works correctly when populated programmatically.
+// TestThemeConfig_WithColorOverrides tests applying color overrides programmatically.
 func TestThemeConfig_WithColorOverrides(t *testing.T) {
 	cfg := Config{
 		Theme: ThemeConfig{
@@ -63,6 +60,37 @@ func TestThemeConfig_WithColorOverrides(t *testing.T) {
 
 	require.Equal(t, "#FF0000", styles.TextPrimaryColor.Dark)
 	require.Equal(t, "#00FF00", styles.StatusErrorColor.Dark)
+}
+
+// TestThemeConfig_WithColorOverridesFromYAML tests that dotted color tokens
+// in YAML config files are correctly parsed when using custom viper key delimiter.
+func TestThemeConfig_WithColorOverridesFromYAML(t *testing.T) {
+	configYAML := `
+theme:
+  colors:
+    text.primary: "#FF0000"
+    status.error: "#00FF00"
+    selection.indicator: "#0000FF"
+`
+	cfg := loadConfigFromYAML(t, configYAML)
+
+	require.NotNil(t, cfg.Theme.Colors)
+	require.Equal(t, "#FF0000", cfg.Theme.Colors["text.primary"])
+	require.Equal(t, "#00FF00", cfg.Theme.Colors["status.error"])
+	require.Equal(t, "#0000FF", cfg.Theme.Colors["selection.indicator"])
+
+	// Apply theme and verify colors applied
+	themeCfg := styles.ThemeConfig{
+		Preset: cfg.Theme.Preset,
+		Mode:   cfg.Theme.Mode,
+		Colors: cfg.Theme.Colors,
+	}
+	err := styles.ApplyTheme(themeCfg)
+	require.NoError(t, err)
+
+	require.Equal(t, "#FF0000", styles.TextPrimaryColor.Dark)
+	require.Equal(t, "#00FF00", styles.StatusErrorColor.Dark)
+	require.Equal(t, "#0000FF", styles.SelectionIndicatorColor.Dark)
 }
 
 // TestThemeConfig_PresetWithOverrides tests that color overrides take precedence over preset.
@@ -222,8 +250,9 @@ func loadConfigFromYAML(t *testing.T, yaml string) Config {
 	err := os.WriteFile(configPath, []byte(yaml), 0644)
 	require.NoError(t, err)
 
-	// Reset viper for each test
-	v := viper.New()
+	// Use custom key delimiter "::" to allow dotted keys like "text.primary"
+	// in the theme.colors map without viper treating them as nested paths.
+	v := viper.NewWithOptions(viper.KeyDelimiter("::"))
 	v.SetConfigFile(configPath)
 	err = v.ReadInConfig()
 	require.NoError(t, err)

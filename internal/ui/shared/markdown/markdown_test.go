@@ -16,7 +16,7 @@ func stripANSI(s string) string {
 }
 
 func TestNew(t *testing.T) {
-	r, err := New(80)
+	r, err := New(80, "")
 	require.NoError(t, err, "unexpected error")
 	require.NotNil(t, r, "expected non-nil renderer")
 	require.Equal(t, 80, r.Width())
@@ -25,14 +25,14 @@ func TestNew(t *testing.T) {
 func TestRenderer_Width(t *testing.T) {
 	tests := []int{40, 80, 120}
 	for _, w := range tests {
-		r, err := New(w)
+		r, err := New(w, "")
 		require.NoError(t, err, "New(%d) error", w)
 		require.Equal(t, w, r.Width())
 	}
 }
 
 func TestRenderer_Render_Heading(t *testing.T) {
-	r, err := New(80)
+	r, err := New(80, "")
 	require.NoError(t, err, "New error")
 
 	result, err := r.Render("# Title\n\nContent")
@@ -43,7 +43,7 @@ func TestRenderer_Render_Heading(t *testing.T) {
 }
 
 func TestRenderer_Render_CodeBlock(t *testing.T) {
-	r, err := New(80)
+	r, err := New(80, "")
 	require.NoError(t, err, "New error")
 
 	result, err := r.Render("```go\nfunc main() {}\n```")
@@ -54,7 +54,7 @@ func TestRenderer_Render_CodeBlock(t *testing.T) {
 }
 
 func TestRenderer_Render_List(t *testing.T) {
-	r, err := New(80)
+	r, err := New(80, "")
 	require.NoError(t, err, "New error")
 
 	result, err := r.Render("- Item 1\n- Item 2\n- Item 3")
@@ -67,7 +67,7 @@ func TestRenderer_Render_List(t *testing.T) {
 }
 
 func TestRenderer_Render_Bold(t *testing.T) {
-	r, err := New(80)
+	r, err := New(80, "")
 	require.NoError(t, err, "New error")
 
 	result, err := r.Render("This is **bold** text")
@@ -77,7 +77,7 @@ func TestRenderer_Render_Bold(t *testing.T) {
 }
 
 func TestRenderer_Render_EmptyString(t *testing.T) {
-	r, err := New(80)
+	r, err := New(80, "")
 	require.NoError(t, err, "New error")
 
 	result, err := r.Render("")
@@ -88,7 +88,7 @@ func TestRenderer_Render_EmptyString(t *testing.T) {
 }
 
 func TestRenderer_Render_PlainText(t *testing.T) {
-	r, err := New(80)
+	r, err := New(80, "")
 	require.NoError(t, err, "New error")
 
 	result, err := r.Render("Just plain text without any markdown")
