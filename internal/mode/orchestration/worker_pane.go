@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/zjrosen/perles/internal/orchestration/events"
 	"github.com/zjrosen/perles/internal/orchestration/pool"
 	"github.com/zjrosen/perles/internal/ui/shared/panes"
 	"github.com/zjrosen/perles/internal/ui/styles"
@@ -71,6 +72,49 @@ func statusIndicator(status pool.WorkerStatus) (string, lipgloss.Style) {
 	}
 }
 
+// phaseShortName returns a short display name for a workflow phase.
+// Used in pane titles to keep them compact.
+func phaseShortName(phase events.WorkerPhase) string {
+	switch phase {
+	case events.PhaseImplementing:
+		return "impl"
+	case events.PhaseAwaitingReview:
+		return "await"
+	case events.PhaseReviewing:
+		return "review"
+	case events.PhaseAddressingFeedback:
+		return "feedback"
+	case events.PhaseCommitting:
+		return "commit"
+	case events.PhaseIdle:
+		return "" // No display for idle
+	default:
+		return "" // Unknown phases get no display
+	}
+}
+
+// formatWorkerTitle builds the left title for a worker pane.
+// Format: "● WORKER-1 perles-abc.1 (impl)" when working with task,
+// or "○ WORKER-1" when idle/ready.
+func formatWorkerTitle(workerID string, status pool.WorkerStatus, taskID string, phase events.WorkerPhase) string {
+	indicator, indicatorStyle := statusIndicator(status)
+
+	// Base title: "● WORKER-1"
+	title := fmt.Sprintf("%s %s", indicatorStyle.Render(indicator), strings.ToUpper(workerID))
+
+	// Add task context if present
+	if taskID != "" {
+		title += " " + TitleContextStyle.Render(taskID)
+
+		// Add phase in parentheses if not idle
+		if shortName := phaseShortName(phase); shortName != "" {
+			title += " " + TitleContextStyle.Render("("+shortName+")")
+		}
+	}
+
+	return title
+}
+
 // renderWorkerPanes renders all worker panes stacked vertically.
 // Each worker gets its own bordered pane with title.
 // Retired workers are filtered out.
@@ -131,7 +175,6 @@ func (m Model) renderEmptyWorkerPane(width, height int) string {
 // renderSingleWorkerPane renders a single worker's pane with its own border and title.
 func (m Model) renderSingleWorkerPane(workerID string, width, height int) string {
 	status := m.workerPane.workerStatus[workerID]
-	indicator, indicatorStyle := statusIndicator(status)
 
 	// Get or create viewport for this worker
 	vp, exists := m.workerPane.viewports[workerID]
@@ -141,8 +184,18 @@ func (m Model) renderSingleWorkerPane(workerID string, width, height int) string
 		vp = viewport.New(vpWidth, vpHeight)
 	}
 
-	// Build title: "● WORKER-1" with colored indicator
-	leftTitle := fmt.Sprintf("%s %s", indicatorStyle.Render(indicator), strings.ToUpper(workerID))
+	// Get task ID and phase from pool (if available)
+	var taskID string
+	var phase events.WorkerPhase
+	if m.pool != nil {
+		if worker := m.pool.GetWorker(workerID); worker != nil {
+			taskID = worker.GetTaskID()
+			phase = worker.GetPhase()
+		}
+	}
+
+	// Build title with task context: "● WORKER-1 perles-abc.1 (impl)"
+	leftTitle := formatWorkerTitle(workerID, status, taskID, phase)
 
 	// Build metrics display for right title
 	var metricsDisplay string

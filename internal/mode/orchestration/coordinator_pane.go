@@ -70,6 +70,7 @@ func (m Model) renderCoordinatorPane(width, height int, fullscreen bool) string 
 }
 
 // buildCoordinatorTitle builds the left title with status indicator for the coordinator pane.
+// When port is available (> 0), it appends the port in muted style: "● COORDINATOR (8467)"
 func (m Model) buildCoordinatorTitle() string {
 	var indicator string
 	var indicatorStyle lipgloss.Style
@@ -102,7 +103,15 @@ func (m Model) buildCoordinatorTitle() string {
 		indicatorStyle = lipgloss.NewStyle().Foreground(styles.TextSecondaryColor)
 	}
 
-	return fmt.Sprintf("%s COORDINATOR", indicatorStyle.Render(indicator))
+	title := fmt.Sprintf("%s COORDINATOR", indicatorStyle.Render(indicator))
+
+	// Append port in muted style if available
+	if m.mcpPort > 0 {
+		portDisplay := TitleContextStyle.Render(fmt.Sprintf("(%d)", m.mcpPort))
+		title = fmt.Sprintf("%s %s", title, portDisplay)
+	}
+
+	return title
 }
 
 // renderCoordinatorContent builds the pre-wrapped content string for the viewport.
