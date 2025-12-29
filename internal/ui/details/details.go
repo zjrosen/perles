@@ -87,6 +87,7 @@ type Model struct {
 	issue              beads.Issue
 	viewport           viewport.Model
 	mdRenderer         *markdown.Renderer
+	markdownStyle      string // "dark" or "light"
 	width              int
 	height             int
 	ready              bool
@@ -109,9 +110,18 @@ func New(issue beads.Issue, executor bql.BQLExecutor, commentLoader beads.BeadsC
 		issue:         issue,
 		executor:      executor,
 		commentLoader: commentLoader,
+		markdownStyle: "dark", // Default, will be overridden by SetMarkdownStyle
 	}
 	m.loadDependencies()
 	m.loadComments()
+	return m
+}
+
+// SetMarkdownStyle sets the markdown rendering style ("dark" or "light").
+func (m Model) SetMarkdownStyle(style string) Model {
+	m.markdownStyle = style
+	// Clear renderer to force recreation with new style
+	m.mdRenderer = nil
 	return m
 }
 
@@ -130,7 +140,7 @@ func (m Model) SetSize(width, height int) Model {
 
 	// Initialize or update markdown renderer (uses left column width)
 	if m.mdRenderer == nil || m.mdRenderer.Width() != leftColWidth {
-		if r, err := markdown.New(leftColWidth); err == nil {
+		if r, err := markdown.New(leftColWidth, m.markdownStyle); err == nil {
 			m.mdRenderer = r
 		}
 	}

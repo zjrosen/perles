@@ -51,17 +51,21 @@ func init() {
 		"config file (default: ~/.config/perles/config.yaml)")
 	rootCmd.Flags().StringP("beads-dir", "b", "",
 		"path to beads database directory")
+	rootCmd.Flags().StringP("markdown-style", "", "",
+		"markdown rendering style: \"dark\" (default) or \"light\"")
 	rootCmd.PersistentFlags().BoolVarP(&debugFlag, "debug", "d", false,
 		"enable debug mode with logging (also: PERLES_DEBUG=1)")
 
 	// Bind flags to viper
 	_ = viper.BindPFlag("beads_dir", rootCmd.Flags().Lookup("beads-dir"))
+	_ = viper.BindPFlag("ui.markdown_style", rootCmd.Flags().Lookup("markdown-style"))
 }
 
 func initConfig() {
 	defaults := config.Defaults()
 	viper.SetDefault("auto_refresh", defaults.AutoRefresh)
 	viper.SetDefault("ui.show_counts", defaults.UI.ShowCounts)
+	viper.SetDefault("ui.markdown_style", defaults.UI.MarkdownStyle)
 	viper.SetDefault("theme.preset", defaults.Theme.Preset)
 	// Orchestration defaults
 	viper.SetDefault("orchestration.client", defaults.Orchestration.Client)

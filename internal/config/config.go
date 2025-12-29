@@ -37,8 +37,9 @@ type Config struct {
 
 // UIConfig holds user interface configuration options.
 type UIConfig struct {
-	ShowCounts    bool `mapstructure:"show_counts"`
-	ShowStatusBar bool `mapstructure:"show_status_bar"`
+	ShowCounts      bool   `mapstructure:"show_counts"`
+	ShowStatusBar   bool   `mapstructure:"show_status_bar"`
+	MarkdownStyle   string `mapstructure:"markdown_style"` // "dark" (default) or "light"
 }
 
 // ThemeConfig holds all theme customization options.
@@ -259,6 +260,7 @@ func Defaults() Config {
 		UI: UIConfig{
 			ShowCounts:    true,
 			ShowStatusBar: true,
+			MarkdownStyle: "dark",
 		},
 		Theme: ThemeConfig{
 			// Default theme uses the "default" preset
@@ -290,8 +292,9 @@ auto_refresh: true
 
 # UI settings
 ui:
-  show_counts: true      # Show issue counts in column headers
-  show_status_bar: true  # Show status bar at bottom
+  show_counts: true        # Show issue counts in column headers
+  show_status_bar: true    # Show status bar at bottom
+  # markdown_style: dark   # Markdown rendering style: "dark" (default) or "light"
 
 # Theme configuration
 # Use a preset theme or customize individual colors

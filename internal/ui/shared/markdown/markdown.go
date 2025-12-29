@@ -20,14 +20,19 @@ type Renderer struct {
 	width    int
 }
 
-// New creates a markdown renderer with the given width.
-func New(width int) (*Renderer, error) {
+// New creates a markdown renderer with the given width and style.
+// style should be "dark" or "light". Defaults to "dark" if empty.
+// Use DarkStyle instead of WithAutoStyle() to avoid terminal OSC queries.
+// WithAutoStyle() creates a new lipgloss renderer that detects light/dark
+// background by querying the terminal, which causes escape sequence responses
+// to leak into the input stream.
+func New(width int, style string) (*Renderer, error) {
+	if style == "" {
+		style = "dark"
+	}
+
 	r, err := glamour.NewTermRenderer(
-		// Use DarkStyle instead of WithAutoStyle() to avoid terminal OSC queries.
-		// WithAutoStyle() creates a new lipgloss renderer that detects light/dark
-		// background by querying the terminal, which causes escape sequence responses
-		// to leak into the input stream.
-		glamour.WithStylePath("dark"),
+		glamour.WithStylePath(style),
 		glamour.WithStylesFromJSONBytes([]byte(noMarginStyle)),
 		glamour.WithWordWrap(width),
 	)

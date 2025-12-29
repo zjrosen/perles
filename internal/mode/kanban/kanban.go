@@ -253,7 +253,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		// Create new details view for the dependency (pass executor for deps, client for comments)
-		m.details = details.New(*issue, m.services.Executor, m.services.Client).SetSize(m.width, m.height)
+		m.details = details.New(*issue, m.services.Executor, m.services.Client).
+			SetMarkdownStyle(m.services.Config.UI.MarkdownStyle).
+			SetSize(m.width, m.height)
 		return m, nil
 
 	case openDetailsMsg:
@@ -261,7 +263,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if issue == nil {
 			return m, nil
 		}
-		m.details = details.New(*issue, m.services.Executor, m.services.Client).SetSize(m.width, m.height)
+		m.details = details.New(*issue, m.services.Executor, m.services.Client).
+			SetMarkdownStyle(m.services.Config.UI.MarkdownStyle).
+			SetSize(m.width, m.height)
 		m.view = ViewDetails
 		return m, nil
 
