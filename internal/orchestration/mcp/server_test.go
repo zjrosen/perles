@@ -16,19 +16,13 @@ import (
 func TestNewServer(t *testing.T) {
 	s := NewServer("test-server", "1.0.0")
 	require.NotNil(t, s, "NewServer returned nil")
-	if s.info.Name != "test-server" {
-		t.Errorf("info.Name = %q, want %q", s.info.Name, "test-server")
-	}
-	if s.info.Version != "1.0.0" {
-		t.Errorf("info.Version = %q, want %q", s.info.Version, "1.0.0")
-	}
+	require.Equal(t, "test-server", s.info.Name, "info.Name mismatch")
+	require.Equal(t, "1.0.0", s.info.Version, "info.Version mismatch")
 }
 
 func TestNewServerWithInstructions(t *testing.T) {
 	s := NewServer("test", "1.0.0", WithInstructions("Use these tools"))
-	if s.instructions != "Use these tools" {
-		t.Errorf("instructions = %q, want %q", s.instructions, "Use these tools")
-	}
+	require.Equal(t, "Use these tools", s.instructions, "instructions mismatch")
 }
 
 func TestRegisterTool(t *testing.T) {
@@ -47,12 +41,10 @@ func TestRegisterTool(t *testing.T) {
 	s.RegisterTool(tool, handler)
 
 	// Verify tool was registered
-	if _, ok := s.tools["test_tool"]; !ok {
-		t.Error("Tool was not registered")
-	}
-	if _, ok := s.handlers["test_tool"]; !ok {
-		t.Error("Handler was not registered")
-	}
+	_, toolOk := s.tools["test_tool"]
+	require.True(t, toolOk, "Tool was not registered")
+	_, handlerOk := s.handlers["test_tool"]
+	require.True(t, handlerOk, "Handler was not registered")
 }
 
 func TestServerInitialize(t *testing.T) {
@@ -101,15 +93,9 @@ func TestServerInitialize(t *testing.T) {
 	var initResult InitializeResult
 	require.NoError(t, json.Unmarshal(resultData, &initResult), "Failed to parse InitializeResult")
 
-	if initResult.ProtocolVersion != ProtocolVersion {
-		t.Errorf("ProtocolVersion = %q, want %q", initResult.ProtocolVersion, ProtocolVersion)
-	}
-	if initResult.ServerInfo.Name != "test-server" {
-		t.Errorf("ServerInfo.Name = %q, want %q", initResult.ServerInfo.Name, "test-server")
-	}
-	if initResult.Instructions != "Test instructions" {
-		t.Errorf("Instructions = %q, want %q", initResult.Instructions, "Test instructions")
-	}
+	require.Equal(t, ProtocolVersion, initResult.ProtocolVersion, "ProtocolVersion mismatch")
+	require.Equal(t, "test-server", initResult.ServerInfo.Name, "ServerInfo.Name mismatch")
+	require.Equal(t, "Test instructions", initResult.Instructions, "Instructions mismatch")
 }
 
 func TestServerToolsList(t *testing.T) {
@@ -163,9 +149,7 @@ func TestServerToolsList(t *testing.T) {
 	var listResult ToolsListResult
 	require.NoError(t, json.Unmarshal(resultData, &listResult), "Failed to parse ToolsListResult")
 
-	if len(listResult.Tools) != 2 {
-		t.Errorf("Tools length = %d, want 2", len(listResult.Tools))
-	}
+	require.Len(t, listResult.Tools, 2, "Tools length mismatch")
 }
 
 func TestServerToolsCall(t *testing.T) {
@@ -223,13 +207,9 @@ func TestServerToolsCall(t *testing.T) {
 	var callResult ToolCallResult
 	require.NoError(t, json.Unmarshal(resultData, &callResult), "Failed to parse ToolCallResult")
 
-	if callResult.IsError {
-		t.Error("Expected success result")
-	}
-	require.Len(t, callResult.Content, 1, "Content length = %d, want 1", len(callResult.Content))
-	if callResult.Content[0].Text != "Echo: hello" {
-		t.Errorf("Content[0].Text = %q, want %q", callResult.Content[0].Text, "Echo: hello")
-	}
+	require.False(t, callResult.IsError, "Expected success result")
+	require.Len(t, callResult.Content, 1, "Content length mismatch")
+	require.Equal(t, "Echo: hello", callResult.Content[0].Text, "Content[0].Text mismatch")
 }
 
 func TestServerToolNotFound(t *testing.T) {
@@ -261,9 +241,7 @@ func TestServerToolNotFound(t *testing.T) {
 	require.NoError(t, json.Unmarshal(output.Bytes(), &resp), "Failed to parse response")
 
 	require.NotNil(t, resp.Error, "Expected error for nonexistent tool")
-	if resp.Error.Code != ErrCodeToolNotFound {
-		t.Errorf("Error.Code = %d, want %d", resp.Error.Code, ErrCodeToolNotFound)
-	}
+	require.Equal(t, ErrCodeToolNotFound, resp.Error.Code, "Error.Code mismatch")
 }
 
 func TestServerMethodNotFound(t *testing.T) {
@@ -295,9 +273,7 @@ func TestServerMethodNotFound(t *testing.T) {
 	require.NoError(t, json.Unmarshal(output.Bytes(), &resp), "Failed to parse response")
 
 	require.NotNil(t, resp.Error, "Expected error for unknown method")
-	if resp.Error.Code != ErrCodeMethodNotFound {
-		t.Errorf("Error.Code = %d, want %d", resp.Error.Code, ErrCodeMethodNotFound)
-	}
+	require.Equal(t, ErrCodeMethodNotFound, resp.Error.Code, "Error.Code mismatch")
 }
 
 func TestServerNotification(t *testing.T) {
@@ -324,18 +300,14 @@ func TestServerNotification(t *testing.T) {
 	}
 
 	// No response should be sent for notifications
-	if output.Len() > 0 {
-		t.Errorf("Unexpected response for notification: %s", output.String())
-	}
+	require.Empty(t, output.Bytes(), "Unexpected response for notification")
 
 	// Verify initialized flag was set
 	s.mu.RLock()
 	initialized := s.initialized
 	s.mu.RUnlock()
 
-	if !initialized {
-		t.Error("Server should be marked as initialized")
-	}
+	require.True(t, initialized, "Server should be marked as initialized")
 }
 
 func TestServerPing(t *testing.T) {
@@ -367,9 +339,7 @@ func TestServerPing(t *testing.T) {
 
 	require.Nil(t, resp.Error, "Unexpected error: %v", resp.Error)
 	// Ping should return empty object
-	if resp.Result == nil {
-		t.Error("Expected non-nil result for ping")
-	}
+	require.NotNil(t, resp.Result, "Expected non-nil result for ping")
 }
 
 func TestServerStop(t *testing.T) {
@@ -417,9 +387,7 @@ func TestServerParseError(t *testing.T) {
 	require.NoError(t, json.Unmarshal(output.Bytes(), &resp), "Failed to parse response")
 
 	require.NotNil(t, resp.Error, "Expected parse error")
-	if resp.Error.Code != ErrCodeParseError {
-		t.Errorf("Error.Code = %d, want %d", resp.Error.Code, ErrCodeParseError)
-	}
+	require.Equal(t, ErrCodeParseError, resp.Error.Code, "Error.Code mismatch")
 }
 
 func TestServerToolHandlerError(t *testing.T) {
@@ -465,9 +433,7 @@ func TestServerToolHandlerError(t *testing.T) {
 	var callResult ToolCallResult
 	require.NoError(t, json.Unmarshal(resultData, &callResult), "Failed to parse ToolCallResult")
 
-	if !callResult.IsError {
-		t.Error("Expected IsError to be true for tool error")
-	}
+	require.True(t, callResult.IsError, "Expected IsError to be true for tool error")
 }
 
 func TestServerMultipleRequests(t *testing.T) {
@@ -510,7 +476,5 @@ func TestServerMultipleRequests(t *testing.T) {
 
 	// Should have 3 responses
 	lines := strings.Split(strings.TrimSpace(output.String()), "\n")
-	if len(lines) != 3 {
-		t.Errorf("Response count = %d, want 3 (output: %s)", len(lines), output.String())
-	}
+	require.Len(t, lines, 3, "Response count mismatch")
 }

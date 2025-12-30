@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/zjrosen/perles/internal/mocks"
 	"github.com/zjrosen/perles/internal/orchestration/claude"
 	"github.com/zjrosen/perles/internal/orchestration/events"
@@ -77,9 +78,7 @@ func TestProperty_NoWorkerHasMultipleTasks(t *testing.T) {
 		}
 
 		for workerID, count := range workerTaskCount {
-			if count > 1 {
-				t.Errorf("Worker %s has %d tasks, expected at most 1", workerID, count)
-			}
+			require.LessOrEqual(t, count, 1, "Worker %s has %d tasks, expected at most 1", workerID, count)
 		}
 	})
 }
@@ -119,9 +118,7 @@ func TestProperty_NoTaskHasMultipleImplementers(t *testing.T) {
 		}
 
 		for taskID, count := range taskImplementerCount {
-			if count > 1 {
-				t.Errorf("Task %s has %d implementers, expected at most 1", taskID, count)
-			}
+			require.LessOrEqual(t, count, 1, "Task %s has %d implementers, expected at most 1", taskID, count)
 		}
 	})
 }
@@ -155,9 +152,7 @@ func TestProperty_ReviewerCannotBeSameAsImplementer(t *testing.T) {
 
 		// INVARIANT: Self-review should always be rejected
 		err := cs.validateReviewAssignment(workerID, taskID, workerID)
-		if err == nil {
-			t.Error("Expected error for self-review, but got none")
-		}
+		require.Error(t, err, "Expected error for self-review, but got none")
 	})
 }
 
@@ -260,13 +255,9 @@ func TestProperty_TaskStatusConsistentWithPhase(t *testing.T) {
 		// Verify consistency rules
 		switch wa.Phase {
 		case events.PhaseImplementing:
-			if ta.Status != TaskImplementing {
-				t.Errorf("Phase %s should have status %s, got %s", wa.Phase, TaskImplementing, ta.Status)
-			}
+			require.Equal(t, TaskImplementing, ta.Status, "Phase %s should have status %s", wa.Phase, TaskImplementing)
 		case events.PhaseCommitting:
-			if ta.Status != TaskCommitting {
-				t.Errorf("Phase %s should have status %s, got %s", wa.Phase, TaskCommitting, ta.Status)
-			}
+			require.Equal(t, TaskCommitting, ta.Status, "Phase %s should have status %s", wa.Phase, TaskCommitting)
 		}
 	})
 }
@@ -331,7 +322,7 @@ func TestRace_ConcurrentTaskAssignment(t *testing.T) {
 
 	// Check for errors
 	for err := range errChan {
-		t.Errorf("Race condition error: %v", err)
+		require.Fail(t, "Race condition error: %v", err)
 	}
 
 	// Verify invariants after concurrent execution
@@ -340,9 +331,7 @@ func TestRace_ConcurrentTaskAssignment(t *testing.T) {
 
 	// Each worker should have at most one assignment
 	for workerID, wa := range cs.workerAssignments {
-		if wa == nil {
-			t.Errorf("Worker %s has nil assignment", workerID)
-		}
+		require.NotNil(t, wa, "Worker %s has nil assignment", workerID)
 	}
 
 	// Each task should have at most one implementer
@@ -353,9 +342,7 @@ func TestRace_ConcurrentTaskAssignment(t *testing.T) {
 		}
 	}
 	for taskID, count := range implementerCount {
-		if count > 1 {
-			t.Errorf("Task %s has %d implementers", taskID, count)
-		}
+		require.LessOrEqual(t, count, 1, "Task %s has %d implementers", taskID, count)
 	}
 }
 
@@ -533,8 +520,8 @@ func TestEdge_EmptyTaskID(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			args := fmt.Sprintf(`{"worker_id": "worker-1", "task_id": %q}`, tt.taskID)
 			_, err := handler(context.Background(), json.RawMessage(args))
-			if tt.wantErr && err == nil {
-				t.Error("Expected error but got none")
+			if tt.wantErr {
+				require.Error(t, err, "Expected error but got none")
 			}
 		})
 	}
@@ -562,8 +549,8 @@ func TestEdge_EmptyWorkerID(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			args := fmt.Sprintf(`{"worker_id": %q, "task_id": "perles-abc.1"}`, tt.workerID)
 			_, err := handler(context.Background(), json.RawMessage(args))
-			if tt.wantErr && err == nil {
-				t.Error("Expected error but got none")
+			if tt.wantErr {
+				require.Error(t, err, "Expected error but got none")
 			}
 		})
 	}
@@ -583,9 +570,7 @@ func TestEdge_VeryLongTaskID(t *testing.T) {
 
 	args := fmt.Sprintf(`{"worker_id": "worker-1", "task_id": %q}`, longSuffix)
 	_, err := handler(context.Background(), json.RawMessage(args))
-	if err == nil {
-		t.Error("Expected error for task ID with >10 char suffix")
-	}
+	require.Error(t, err, "Expected error for task ID with >10 char suffix")
 }
 
 // TestEdge_SpecialCharactersInTaskID tests rejection of special characters.
@@ -616,9 +601,7 @@ func TestEdge_SpecialCharactersInTaskID(t *testing.T) {
 		t.Run(taskID, func(t *testing.T) {
 			args := fmt.Sprintf(`{"worker_id": "worker-1", "task_id": %q}`, taskID)
 			_, err := handler(context.Background(), json.RawMessage(args))
-			if err == nil {
-				t.Errorf("Expected error for special char task ID %q", taskID)
-			}
+			require.Error(t, err, "Expected error for special char task ID %q", taskID)
 		})
 	}
 }
@@ -635,9 +618,7 @@ func TestEdge_MaxWorkersLimit(t *testing.T) {
 	// Verify we can't add more
 	// Note: AddTestWorker bypasses limit check, so we test via pool logic
 	activeCount := len(workerPool.ActiveWorkers())
-	if activeCount != 2 {
-		t.Errorf("Expected 2 active workers, got %d", activeCount)
-	}
+	require.Equal(t, 2, activeCount, "Expected 2 active workers")
 }
 
 // TestEdge_NilMessageStore tests handling when message store is nil.
@@ -649,9 +630,7 @@ func TestEdge_NilMessageStore(t *testing.T) {
 
 	handler := cs.handlers["post_message"]
 	_, err := handler(context.Background(), json.RawMessage(`{"to": "ALL", "content": "test"}`))
-	if err == nil {
-		t.Error("Expected error when message store is nil")
-	}
+	require.Error(t, err, "Expected error when message store is nil")
 }
 
 // TestEdge_WorkerStateWithNoAssignment tests query_worker_state for workers without assignments.
@@ -666,22 +645,15 @@ func TestEdge_WorkerStateWithNoAssignment(t *testing.T) {
 
 	handler := cs.handlers["query_worker_state"]
 	result, err := handler(context.Background(), json.RawMessage(`{}`))
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
+	require.NoError(t, err, "Unexpected error")
 
 	var response workerStateResponse
-	if err := json.Unmarshal([]byte(result.Content[0].Text), &response); err != nil {
-		t.Fatalf("Failed to parse response: %v", err)
-	}
+	err = json.Unmarshal([]byte(result.Content[0].Text), &response)
+	require.NoError(t, err, "Failed to parse response")
 
 	// Worker should show up with idle phase
-	if len(response.Workers) != 1 {
-		t.Fatalf("Expected 1 worker, got %d", len(response.Workers))
-	}
-	if response.Workers[0].Phase != "idle" {
-		t.Errorf("Expected phase 'idle', got %q", response.Workers[0].Phase)
-	}
+	require.Len(t, response.Workers, 1, "Expected 1 worker")
+	require.Equal(t, "idle", response.Workers[0].Phase, "Expected phase 'idle'")
 }
 
 // TestEdge_OrphanDetectionWithMissingWorker tests orphan detection when worker is completely missing.
@@ -699,9 +671,8 @@ func TestEdge_OrphanDetectionWithMissingWorker(t *testing.T) {
 	}
 
 	orphans := cs.detectOrphanedTasks()
-	if len(orphans) != 1 || orphans[0] != "perles-abc.1" {
-		t.Errorf("Expected orphan perles-abc.1, got %v", orphans)
-	}
+	require.Len(t, orphans, 1, "Expected 1 orphan")
+	require.Equal(t, "perles-abc.1", orphans[0], "Expected orphan perles-abc.1")
 }
 
 // TestEdge_StuckWorkerWithZeroTaskDuration tests stuck detection with just-assigned workers.
@@ -718,9 +689,7 @@ func TestEdge_StuckWorkerWithZeroTaskDuration(t *testing.T) {
 	}
 
 	stuck := cs.checkStuckWorkers()
-	if len(stuck) != 0 {
-		t.Errorf("Just-assigned worker should not be stuck, got %v", stuck)
-	}
+	require.Empty(t, stuck, "Just-assigned worker should not be stuck")
 }
 
 // TestEdge_StuckWorkerAtExactThreshold tests stuck detection at exactly MaxTaskDuration.
@@ -739,9 +708,7 @@ func TestEdge_StuckWorkerAtExactThreshold(t *testing.T) {
 
 	stuck := cs.checkStuckWorkers()
 	// Just under threshold, not exceeded - should not be stuck
-	if len(stuck) != 0 {
-		t.Errorf("Worker just under threshold should not be stuck, got %v", stuck)
-	}
+	require.Empty(t, stuck, "Worker just under threshold should not be stuck")
 }
 
 // TestEdge_DuplicateTaskAssignment tests assigning same task twice.
@@ -770,9 +737,7 @@ func TestEdge_DuplicateTaskAssignment(t *testing.T) {
 
 	// Second assignment to different worker should fail
 	err := cs.validateTaskAssignment("worker-2", taskID)
-	if err == nil {
-		t.Error("Expected error when assigning already-assigned task")
-	}
+	require.Error(t, err, "Expected error when assigning already-assigned task")
 }
 
 // TestEdge_ReviewAssignmentToRetiredWorker tests assigning review to retired worker.
@@ -799,9 +764,7 @@ func TestEdge_ReviewAssignmentToRetiredWorker(t *testing.T) {
 	_ = workerPool.AddTestWorker("worker-2", pool.WorkerRetired)
 
 	err := cs.validateReviewAssignment("worker-2", taskID, "worker-1")
-	if err == nil {
-		t.Error("Expected error when assigning review to retired worker")
-	}
+	require.Error(t, err, "Expected error when assigning review to retired worker")
 }
 
 // ============================================================================
@@ -823,9 +786,8 @@ func TestStateMachine_ImplementerLifecycle(t *testing.T) {
 	_ = workerPool.AddTestWorker(workerID, pool.WorkerReady)
 
 	// No assignment yet
-	if _, exists := cs.workerAssignments[workerID]; exists {
-		t.Error("Worker should not have assignment initially")
-	}
+	_, exists := cs.workerAssignments[workerID]
+	require.False(t, exists, "Worker should not have assignment initially")
 
 	// 2. Assign task -> Implementing phase
 	cs.assignmentsMu.Lock()
@@ -844,9 +806,7 @@ func TestStateMachine_ImplementerLifecycle(t *testing.T) {
 	cs.assignmentsMu.Unlock()
 
 	cs.assignmentsMu.RLock()
-	if cs.workerAssignments[workerID].Phase != events.PhaseImplementing {
-		t.Errorf("Expected phase %s, got %s", events.PhaseImplementing, cs.workerAssignments[workerID].Phase)
-	}
+	require.Equal(t, events.PhaseImplementing, cs.workerAssignments[workerID].Phase, "Expected phase implementing")
 	cs.assignmentsMu.RUnlock()
 
 	// 3. Implementation complete -> AwaitingReview phase
@@ -861,14 +821,10 @@ func TestStateMachine_ImplementerLifecycle(t *testing.T) {
 
 	handler := ws.handlers["report_implementation_complete"]
 	_, err := handler(context.Background(), json.RawMessage(`{"summary": "completed task"}`))
-	if err != nil {
-		t.Fatalf("Failed to report implementation complete: %v", err)
-	}
+	require.NoError(t, err, "Failed to report implementation complete")
 
 	cs.assignmentsMu.RLock()
-	if cs.workerAssignments[workerID].Phase != events.PhaseAwaitingReview {
-		t.Errorf("Expected phase %s, got %s", events.PhaseAwaitingReview, cs.workerAssignments[workerID].Phase)
-	}
+	require.Equal(t, events.PhaseAwaitingReview, cs.workerAssignments[workerID].Phase, "Expected phase awaiting_review")
 	cs.assignmentsMu.RUnlock()
 }
 
@@ -915,9 +871,7 @@ func TestStateMachine_ReviewerLifecycle(t *testing.T) {
 
 	// Verify reviewer is in Reviewing phase
 	cs.assignmentsMu.RLock()
-	if cs.workerAssignments[reviewerID].Phase != events.PhaseReviewing {
-		t.Errorf("Expected phase %s, got %s", events.PhaseReviewing, cs.workerAssignments[reviewerID].Phase)
-	}
+	require.Equal(t, events.PhaseReviewing, cs.workerAssignments[reviewerID].Phase, "Expected phase reviewing")
 	cs.assignmentsMu.RUnlock()
 
 	// 2. Submit verdict -> back to Idle
@@ -927,15 +881,11 @@ func TestStateMachine_ReviewerLifecycle(t *testing.T) {
 
 	handler := ws.handlers["report_review_verdict"]
 	_, err := handler(context.Background(), json.RawMessage(`{"verdict": "APPROVED", "comments": "LGTM"}`))
-	if err != nil {
-		t.Fatalf("Failed to report review verdict: %v", err)
-	}
+	require.NoError(t, err, "Failed to report review verdict")
 
 	// Reviewer should be back to idle
 	cs.assignmentsMu.RLock()
-	if cs.workerAssignments[reviewerID].Phase != events.PhaseIdle {
-		t.Errorf("Expected phase %s, got %s", events.PhaseIdle, cs.workerAssignments[reviewerID].Phase)
-	}
+	require.Equal(t, events.PhaseIdle, cs.workerAssignments[reviewerID].Phase, "Expected phase idle")
 	cs.assignmentsMu.RUnlock()
 }
 
@@ -971,9 +921,7 @@ func TestStateMachine_DeniedReviewCycle(t *testing.T) {
 	cs.assignmentsMu.Unlock()
 
 	cs.assignmentsMu.RLock()
-	if cs.workerAssignments[implementerID].Phase != events.PhaseAddressingFeedback {
-		t.Errorf("Expected phase %s, got %s", events.PhaseAddressingFeedback, cs.workerAssignments[implementerID].Phase)
-	}
+	require.Equal(t, events.PhaseAddressingFeedback, cs.workerAssignments[implementerID].Phase, "Expected phase addressing_feedback")
 	cs.assignmentsMu.RUnlock()
 
 	// 2. Complete fixes -> AwaitingReview again
@@ -984,9 +932,7 @@ func TestStateMachine_DeniedReviewCycle(t *testing.T) {
 	cs.assignmentsMu.Unlock()
 
 	cs.assignmentsMu.RLock()
-	if cs.workerAssignments[implementerID].Phase != events.PhaseAwaitingReview {
-		t.Errorf("Expected phase %s, got %s", events.PhaseAwaitingReview, cs.workerAssignments[implementerID].Phase)
-	}
+	require.Equal(t, events.PhaseAwaitingReview, cs.workerAssignments[implementerID].Phase, "Expected phase awaiting_review")
 	cs.assignmentsMu.RUnlock()
 }
 
@@ -1023,9 +969,7 @@ func TestStateMachine_ApprovalToCommit(t *testing.T) {
 	cs.assignmentsMu.Unlock()
 
 	cs.assignmentsMu.RLock()
-	if cs.workerAssignments[implementerID].Phase != events.PhaseCommitting {
-		t.Errorf("Expected phase %s, got %s", events.PhaseCommitting, cs.workerAssignments[implementerID].Phase)
-	}
+	require.Equal(t, events.PhaseCommitting, cs.workerAssignments[implementerID].Phase, "Expected phase committing")
 	cs.assignmentsMu.RUnlock()
 
 	// 2. Commit complete -> Completed status, worker idle
@@ -1036,12 +980,8 @@ func TestStateMachine_ApprovalToCommit(t *testing.T) {
 	cs.assignmentsMu.Unlock()
 
 	cs.assignmentsMu.RLock()
-	if cs.workerAssignments[implementerID].Phase != events.PhaseIdle {
-		t.Errorf("Expected phase %s, got %s", events.PhaseIdle, cs.workerAssignments[implementerID].Phase)
-	}
-	if cs.taskAssignments[taskID].Status != TaskCompleted {
-		t.Errorf("Expected status %s, got %s", TaskCompleted, cs.taskAssignments[taskID].Status)
-	}
+	require.Equal(t, events.PhaseIdle, cs.workerAssignments[implementerID].Phase, "Expected phase idle")
+	require.Equal(t, TaskCompleted, cs.taskAssignments[taskID].Status, "Expected status completed")
 	cs.assignmentsMu.RUnlock()
 }
 
@@ -1071,9 +1011,7 @@ func TestStateMachine_InvalidTransitionRejected(t *testing.T) {
 
 	handler := ws.handlers["report_implementation_complete"]
 	_, err := handler(context.Background(), json.RawMessage(`{"summary": "done"}`))
-	if err == nil {
-		t.Error("Expected error when reporting implementation complete from idle phase")
-	}
+	require.Error(t, err, "Expected error when reporting implementation complete from idle phase")
 }
 
 // TestStateMachine_AllTransitions tests all valid state transitions.
@@ -1114,8 +1052,8 @@ func TestStateMachine_AllTransitions(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Just verify the transition is documented correctly
 			// The actual enforcement is tested in tool-specific tests
-			if tt.valid && tt.action == "" {
-				t.Error("Valid transitions should have an action")
+			if tt.valid {
+				require.NotEmpty(t, tt.action, "Valid transitions should have an action")
 			}
 		})
 	}

@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/zjrosen/perles/internal/mocks"
 	"github.com/zjrosen/perles/internal/orchestration/claude"
 	"github.com/zjrosen/perles/internal/orchestration/events"
@@ -29,46 +31,31 @@ func TestEdge_EmptyPool(t *testing.T) {
 	t.Run("list_workers_empty", func(t *testing.T) {
 		handler := cs.handlers["list_workers"]
 		result, err := handler(context.Background(), nil)
-		if err != nil {
-			t.Fatalf("Unexpected error: %v", err)
-		}
-		if result.Content[0].Text != "No active workers." {
-			t.Errorf("Expected 'No active workers.', got %q", result.Content[0].Text)
-		}
+		require.NoError(t, err, "Unexpected error")
+		require.Equal(t, "No active workers.", result.Content[0].Text, "Unexpected result")
 	})
 
 	t.Run("query_worker_state_empty", func(t *testing.T) {
 		handler := cs.handlers["query_worker_state"]
 		result, err := handler(context.Background(), json.RawMessage(`{}`))
-		if err != nil {
-			t.Fatalf("Unexpected error: %v", err)
-		}
+		require.NoError(t, err, "Unexpected error")
 
 		var response workerStateResponse
-		if err := json.Unmarshal([]byte(result.Content[0].Text), &response); err != nil {
-			t.Fatalf("Failed to parse: %v", err)
-		}
+		err = json.Unmarshal([]byte(result.Content[0].Text), &response)
+		require.NoError(t, err, "Failed to parse")
 
-		if len(response.Workers) != 0 {
-			t.Errorf("Expected 0 workers, got %d", len(response.Workers))
-		}
-		if len(response.ReadyWorkers) != 0 {
-			t.Errorf("Expected 0 ready workers, got %d", len(response.ReadyWorkers))
-		}
+		require.Empty(t, response.Workers, "Expected 0 workers")
+		require.Empty(t, response.ReadyWorkers, "Expected 0 ready workers")
 	})
 
 	t.Run("detect_orphaned_tasks_empty", func(t *testing.T) {
 		orphans := cs.detectOrphanedTasks()
-		if len(orphans) != 0 {
-			t.Errorf("Expected 0 orphans, got %d", len(orphans))
-		}
+		require.Empty(t, orphans, "Expected 0 orphans")
 	})
 
 	t.Run("check_stuck_workers_empty", func(t *testing.T) {
 		stuck := cs.checkStuckWorkers()
-		if len(stuck) != 0 {
-			t.Errorf("Expected 0 stuck workers, got %d", len(stuck))
-		}
+		require.Empty(t, stuck, "Expected 0 stuck workers")
 	})
 }
 
@@ -92,16 +79,12 @@ func TestEdge_AllWorkersRetired(t *testing.T) {
 		var response workerStateResponse
 		_ = json.Unmarshal([]byte(result.Content[0].Text), &response)
 
-		if len(response.ReadyWorkers) != 0 {
-			t.Errorf("Expected 0 ready workers, got %d", len(response.ReadyWorkers))
-		}
+		require.Empty(t, response.ReadyWorkers, "Expected 0 ready workers")
 	})
 
 	t.Run("validate_assignment_fails_retired", func(t *testing.T) {
 		err := cs.validateTaskAssignment("worker-1", "perles-abc.1")
-		if err == nil {
-			t.Error("Expected error assigning to retired worker")
-		}
+		require.Error(t, err, "Expected error assigning to retired worker")
 	})
 }
 
@@ -149,9 +132,7 @@ func TestEdge_TaskIDFormats(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := isValidTaskID(tt.taskID)
-			if result != tt.isValid {
-				t.Errorf("IsValidTaskID(%q) = %v, want %v", tt.taskID, result, tt.isValid)
-			}
+			require.Equal(t, tt.isValid, result, "IsValidTaskID(%q) mismatch", tt.taskID)
 		})
 	}
 }
@@ -180,8 +161,10 @@ func TestEdge_WorkerIDFormats(t *testing.T) {
 			handler := cs.handlers["send_to_worker"]
 			args := `{"worker_id": "` + tt.workerID + `", "message": "test"}`
 			_, err := handler(context.Background(), json.RawMessage(args))
-			if (err != nil) != tt.wantErr {
-				t.Errorf("error = %v, wantErr = %v", err, tt.wantErr)
+			if tt.wantErr {
+				require.Error(t, err, "Expected error for worker ID %q", tt.workerID)
+			} else {
+				require.NoError(t, err, "Unexpected error for worker ID %q", tt.workerID)
 			}
 		})
 	}
@@ -218,9 +201,7 @@ func TestEdge_MaxTaskDurationBoundary(t *testing.T) {
 			stuck := cs.checkStuckWorkers()
 			isStuck := len(stuck) > 0
 
-			if isStuck != tt.expectStuck {
-				t.Errorf("For duration %v: stuck = %v, expectStuck = %v", tt.duration, isStuck, tt.expectStuck)
-			}
+			require.Equal(t, tt.expectStuck, isStuck, "For duration %v: stuck mismatch", tt.duration)
 		})
 	}
 }
@@ -258,12 +239,8 @@ func TestEdge_AssignmentMapsConsistency(t *testing.T) {
 		ta := cs.taskAssignments["perles-abc.1"]
 		wa := cs.workerAssignments["worker-1"]
 
-		if ta.Implementer != "worker-1" {
-			t.Errorf("Task implementer = %q, want %q", ta.Implementer, "worker-1")
-		}
-		if wa.TaskID != "perles-abc.1" {
-			t.Errorf("Worker task = %q, want %q", wa.TaskID, "perles-abc.1")
-		}
+		require.Equal(t, "worker-1", ta.Implementer, "Task implementer mismatch")
+		require.Equal(t, "perles-abc.1", wa.TaskID, "Worker task mismatch")
 	})
 
 	// Test inconsistent state detection
@@ -277,16 +254,7 @@ func TestEdge_AssignmentMapsConsistency(t *testing.T) {
 
 		// This should be detected as an orphan
 		orphans := cs.detectOrphanedTasks()
-		found := false
-		for _, o := range orphans {
-			if o == "perles-xyz.1" {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Error("Expected perles-xyz.1 to be detected as orphan")
-		}
+		require.Contains(t, orphans, "perles-xyz.1", "Expected perles-xyz.1 to be detected as orphan")
 	})
 }
 
@@ -302,26 +270,20 @@ func TestEdge_NilMessageIssue(t *testing.T) {
 		handler := cs.handlers["post_message"]
 		args := `{"to": "ALL", "content": "test"}`
 		_, err := handler(context.Background(), json.RawMessage(args))
-		if err == nil {
-			t.Error("Expected error when message issue is nil")
-		}
+		require.Error(t, err, "Expected error when message issue is nil")
 	})
 
 	t.Run("read_message_log_fails", func(t *testing.T) {
 		handler := cs.handlers["read_message_log"]
 		_, err := handler(context.Background(), nil)
-		if err == nil {
-			t.Error("Expected error when message issue is nil")
-		}
+		require.Error(t, err, "Expected error when message issue is nil")
 	})
 
 	t.Run("prepare_handoff_fails", func(t *testing.T) {
 		handler := cs.handlers["prepare_handoff"]
 		args := `{"summary": "test summary"}`
 		_, err := handler(context.Background(), json.RawMessage(args))
-		if err == nil {
-			t.Error("Expected error when message issue is nil")
-		}
+		require.Error(t, err, "Expected error when message issue is nil")
 	})
 }
 
@@ -341,38 +303,24 @@ func TestEdge_LargeNumberOfWorkers(t *testing.T) {
 	t.Run("list_workers_all", func(t *testing.T) {
 		handler := cs.handlers["list_workers"]
 		result, err := handler(context.Background(), nil)
-		if err != nil {
-			t.Fatalf("Unexpected error: %v", err)
-		}
+		require.NoError(t, err, "Unexpected error")
 
 		var infos []map[string]any
-		if err := json.Unmarshal([]byte(result.Content[0].Text), &infos); err != nil {
-			t.Fatalf("Failed to parse: %v", err)
-		}
+		require.NoError(t, json.Unmarshal([]byte(result.Content[0].Text), &infos), "Failed to parse")
 
-		if len(infos) != 100 {
-			t.Errorf("Expected 100 workers, got %d", len(infos))
-		}
+		require.Len(t, infos, 100, "Expected 100 workers")
 	})
 
 	t.Run("query_worker_state_all", func(t *testing.T) {
 		handler := cs.handlers["query_worker_state"]
 		result, err := handler(context.Background(), json.RawMessage(`{}`))
-		if err != nil {
-			t.Fatalf("Unexpected error: %v", err)
-		}
+		require.NoError(t, err, "Unexpected error")
 
 		var response workerStateResponse
-		if err := json.Unmarshal([]byte(result.Content[0].Text), &response); err != nil {
-			t.Fatalf("Failed to parse: %v", err)
-		}
+		require.NoError(t, json.Unmarshal([]byte(result.Content[0].Text), &response), "Failed to parse")
 
-		if len(response.Workers) != 100 {
-			t.Errorf("Expected 100 workers, got %d", len(response.Workers))
-		}
-		if len(response.ReadyWorkers) != 100 {
-			t.Errorf("Expected 100 ready workers, got %d", len(response.ReadyWorkers))
-		}
+		require.Len(t, response.Workers, 100, "Expected 100 workers")
+		require.Len(t, response.ReadyWorkers, 100, "Expected 100 ready workers")
 	})
 }
 
@@ -397,26 +345,18 @@ func TestEdge_LargeNumberOfTasks(t *testing.T) {
 	t.Run("query_worker_state_with_many_tasks", func(t *testing.T) {
 		handler := cs.handlers["query_worker_state"]
 		result, err := handler(context.Background(), json.RawMessage(`{}`))
-		if err != nil {
-			t.Fatalf("Unexpected error: %v", err)
-		}
+		require.NoError(t, err, "Unexpected error")
 
 		var response workerStateResponse
-		if err := json.Unmarshal([]byte(result.Content[0].Text), &response); err != nil {
-			t.Fatalf("Failed to parse: %v", err)
-		}
+		require.NoError(t, json.Unmarshal([]byte(result.Content[0].Text), &response), "Failed to parse")
 
-		if len(response.TaskAssignments) != 100 {
-			t.Errorf("Expected 100 task assignments, got %d", len(response.TaskAssignments))
-		}
+		require.Len(t, response.TaskAssignments, 100, "Expected 100 task assignments")
 	})
 
 	t.Run("detect_orphaned_tasks_many", func(t *testing.T) {
 		// All tasks have nonexistent workers, so all should be orphans
 		orphans := cs.detectOrphanedTasks()
-		if len(orphans) != 100 {
-			t.Errorf("Expected 100 orphans (workers don't exist), got %d", len(orphans))
-		}
+		require.Len(t, orphans, 100, "Expected 100 orphans (workers don't exist)")
 	})
 }
 
@@ -446,9 +386,7 @@ func TestEdge_MalformedJSON(t *testing.T) {
 			t.Run(handler+"_"+malformed, func(t *testing.T) {
 				h := cs.handlers[handler]
 				_, err := h(context.Background(), json.RawMessage(malformed))
-				if err == nil {
-					t.Error("Expected error for malformed JSON")
-				}
+				require.Error(t, err, "Expected error for malformed JSON")
 			})
 		}
 	}
@@ -484,12 +422,8 @@ func TestEdge_UnicodeContent(t *testing.T) {
 			jsonContent, _ := json.Marshal(content)
 			args := `{"to": "ALL", "content": ` + string(jsonContent) + `}`
 			result, err := handler(ctx, json.RawMessage(args))
-			if err != nil {
-				t.Errorf("Failed for unicode content: %v", err)
-			}
-			if result == nil {
-				t.Error("Expected non-nil result")
-			}
+			require.NoError(t, err, "Failed for unicode content")
+			require.NotNil(t, result, "Expected non-nil result")
 		})
 	}
 }
@@ -522,18 +456,14 @@ func TestEdge_WorkerPhaseTransitions(t *testing.T) {
 
 			handler := cs.handlers["query_worker_state"]
 			result, err := handler(context.Background(), json.RawMessage(`{"worker_id": "worker-1"}`))
-			if err != nil {
-				t.Fatalf("Unexpected error: %v", err)
-			}
+			require.NoError(t, err, "Unexpected error")
 
 			var response workerStateResponse
-			if err := json.Unmarshal([]byte(result.Content[0].Text), &response); err != nil {
-				t.Fatalf("Failed to parse: %v", err)
-			}
+			require.NoError(t, json.Unmarshal([]byte(result.Content[0].Text), &response), "Failed to parse")
 
 			// Phase should be preserved and queryable
-			if len(response.Workers) > 0 && response.Workers[0].Phase != string(phase) {
-				t.Errorf("Phase = %q, want %q", response.Workers[0].Phase, phase)
+			if len(response.Workers) > 0 {
+				require.Equal(t, string(phase), response.Workers[0].Phase, "Phase mismatch")
 			}
 		})
 	}
@@ -565,20 +495,14 @@ func TestEdge_TaskStatusTransitions(t *testing.T) {
 
 			handler := cs.handlers["query_worker_state"]
 			result, err := handler(context.Background(), json.RawMessage(`{}`))
-			if err != nil {
-				t.Fatalf("Unexpected error: %v", err)
-			}
+			require.NoError(t, err, "Unexpected error")
 
 			var response workerStateResponse
-			if err := json.Unmarshal([]byte(result.Content[0].Text), &response); err != nil {
-				t.Fatalf("Failed to parse: %v", err)
-			}
+			require.NoError(t, json.Unmarshal([]byte(result.Content[0].Text), &response), "Failed to parse")
 
 			// Status should be preserved
 			if ta, ok := response.TaskAssignments["perles-abc.1"]; ok {
-				if ta.Status != string(status) {
-					t.Errorf("Status = %q, want %q", ta.Status, status)
-				}
+				require.Equal(t, string(status), ta.Status, "Status mismatch")
 			}
 		})
 	}

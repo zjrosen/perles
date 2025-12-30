@@ -78,25 +78,16 @@ func TestStateMachine_CompleteTaskWorkflow(t *testing.T) {
 		for _, w := range response.Workers {
 			if w.WorkerID == "implementer" {
 				foundImplementer = true
-				if w.Phase != "implementing" {
-					t.Errorf("Implementer phase = %q, want %q", w.Phase, "implementing")
-				}
-				if w.Role != "implementer" {
-					t.Errorf("Implementer role = %q, want %q", w.Role, "implementer")
-				}
+				require.Equal(t, "implementing", w.Phase, "Implementer phase mismatch")
+				require.Equal(t, "implementer", w.Role, "Implementer role mismatch")
 			}
 		}
-		if !foundImplementer {
-			t.Error("Implementer not found in workers list")
-		}
+		require.True(t, foundImplementer, "Implementer not found in workers list")
 
 		// Check task assignment
 		ta, ok := response.TaskAssignments["perles-abc.1"]
-		if !ok {
-			t.Error("Task assignment not found")
-		} else if ta.Implementer != "implementer" {
-			t.Errorf("Task implementer = %q, want %q", ta.Implementer, "implementer")
-		}
+		require.True(t, ok, "Task assignment not found")
+		require.Equal(t, "implementer", ta.Implementer, "Task implementer mismatch")
 	})
 
 	// Step 3: Implementer reports implementation complete
@@ -112,9 +103,8 @@ func TestStateMachine_CompleteTaskWorkflow(t *testing.T) {
 		var response workerStateResponse
 		_ = json.Unmarshal([]byte(result.Content[0].Text), &response)
 
-		if len(response.Workers) > 0 && response.Workers[0].Phase != "awaiting_review" {
-			t.Errorf("Phase = %q, want %q", response.Workers[0].Phase, "awaiting_review")
-		}
+		require.NotEmpty(t, response.Workers, "Workers list should not be empty")
+		require.Equal(t, "awaiting_review", response.Workers[0].Phase, "Phase mismatch")
 	})
 
 	// Step 4: Validate and assign reviewer
@@ -149,26 +139,16 @@ func TestStateMachine_CompleteTaskWorkflow(t *testing.T) {
 		for _, w := range response.Workers {
 			if w.WorkerID == "reviewer" {
 				foundReviewer = true
-				if w.Phase != "reviewing" {
-					t.Errorf("Reviewer phase = %q, want %q", w.Phase, "reviewing")
-				}
-				if w.Role != "reviewer" {
-					t.Errorf("Reviewer role = %q, want %q", w.Role, "reviewer")
-				}
+				require.Equal(t, "reviewing", w.Phase, "Reviewer phase mismatch")
+				require.Equal(t, "reviewer", w.Role, "Reviewer role mismatch")
 			}
 		}
-		if !foundReviewer {
-			t.Error("Reviewer not found")
-		}
+		require.True(t, foundReviewer, "Reviewer not found")
 
 		// Check task has reviewer
 		ta := response.TaskAssignments["perles-abc.1"]
-		if ta.Reviewer != "reviewer" {
-			t.Errorf("Task reviewer = %q, want %q", ta.Reviewer, "reviewer")
-		}
-		if ta.Status != "in_review" {
-			t.Errorf("Task status = %q, want %q", ta.Status, "in_review")
-		}
+		require.Equal(t, "reviewer", ta.Reviewer, "Task reviewer mismatch")
+		require.Equal(t, "in_review", ta.Status, "Task status mismatch")
 	})
 
 	// Step 5: Reviewer approves
@@ -186,16 +166,13 @@ func TestStateMachine_CompleteTaskWorkflow(t *testing.T) {
 		var response workerStateResponse
 		_ = json.Unmarshal([]byte(result.Content[0].Text), &response)
 
-		if len(response.Workers) > 0 && response.Workers[0].Phase != "idle" {
-			t.Errorf("Reviewer phase = %q, want %q", response.Workers[0].Phase, "idle")
-		}
+		require.NotEmpty(t, response.Workers, "Workers list should not be empty")
+		require.Equal(t, "idle", response.Workers[0].Phase, "Reviewer phase mismatch")
 
 		// Verify task status
 		result, _ = handler(ctx, json.RawMessage(`{}`))
 		_ = json.Unmarshal([]byte(result.Content[0].Text), &response)
-		if response.TaskAssignments["perles-abc.1"].Status != "approved" {
-			t.Errorf("Task status = %q, want %q", response.TaskAssignments["perles-abc.1"].Status, "approved")
-		}
+		require.Equal(t, "approved", response.TaskAssignments["perles-abc.1"].Status, "Task status mismatch")
 	})
 
 	// Step 6: Approve commit
@@ -211,9 +188,8 @@ func TestStateMachine_CompleteTaskWorkflow(t *testing.T) {
 		var response workerStateResponse
 		_ = json.Unmarshal([]byte(result.Content[0].Text), &response)
 
-		if len(response.Workers) > 0 && response.Workers[0].Phase != "committing" {
-			t.Errorf("Implementer phase = %q, want %q", response.Workers[0].Phase, "committing")
-		}
+		require.NotEmpty(t, response.Workers, "Workers list should not be empty")
+		require.Equal(t, "committing", response.Workers[0].Phase, "Implementer phase mismatch")
 	})
 
 	// Step 7: Task complete
@@ -234,14 +210,10 @@ func TestStateMachine_CompleteTaskWorkflow(t *testing.T) {
 		_ = json.Unmarshal([]byte(result.Content[0].Text), &response)
 
 		// Both workers should be idle and available
-		if len(response.ReadyWorkers) < 2 {
-			t.Errorf("Expected 2 ready workers, got %d", len(response.ReadyWorkers))
-		}
+		require.GreaterOrEqual(t, len(response.ReadyWorkers), 2, "Expected at least 2 ready workers")
 
 		// Task should be completed
-		if response.TaskAssignments["perles-abc.1"].Status != "completed" {
-			t.Errorf("Task status = %q, want %q", response.TaskAssignments["perles-abc.1"].Status, "completed")
-		}
+		require.Equal(t, "completed", response.TaskAssignments["perles-abc.1"].Status, "Task status mismatch")
 	})
 }
 
@@ -299,21 +271,10 @@ func TestStateMachine_ReviewDenialAndRework(t *testing.T) {
 		var response workerStateResponse
 		_ = json.Unmarshal([]byte(result.Content[0].Text), &response)
 
-		if response.TaskAssignments["perles-abc.1"].Status != "denied" {
-			t.Errorf("Task status = %q, want %q", response.TaskAssignments["perles-abc.1"].Status, "denied")
-		}
+		require.Equal(t, "denied", response.TaskAssignments["perles-abc.1"].Status, "Task status mismatch")
 
 		// Reviewer should be back to ready
-		foundReviewerReady := false
-		for _, wID := range response.ReadyWorkers {
-			if wID == "reviewer" {
-				foundReviewerReady = true
-				break
-			}
-		}
-		if !foundReviewerReady {
-			t.Error("Reviewer should be in ready_workers list")
-		}
+		require.Contains(t, response.ReadyWorkers, "reviewer", "Reviewer should be in ready_workers list")
 	})
 
 	// Step 2: Send feedback to implementer
@@ -330,9 +291,8 @@ func TestStateMachine_ReviewDenialAndRework(t *testing.T) {
 		var response workerStateResponse
 		_ = json.Unmarshal([]byte(result.Content[0].Text), &response)
 
-		if len(response.Workers) > 0 && response.Workers[0].Phase != "addressing_feedback" {
-			t.Errorf("Phase = %q, want %q", response.Workers[0].Phase, "addressing_feedback")
-		}
+		require.NotEmpty(t, response.Workers, "Workers list should not be empty")
+		require.Equal(t, "addressing_feedback", response.Workers[0].Phase, "Phase mismatch")
 	})
 
 	// Step 3: Implementer completes rework
@@ -343,9 +303,7 @@ func TestStateMachine_ReviewDenialAndRework(t *testing.T) {
 
 		// Can now assign a new reviewer
 		err := cs.validateReviewAssignment("reviewer", "perles-abc.1", "implementer")
-		if err != nil {
-			t.Errorf("Should be able to assign reviewer again: %v", err)
-		}
+		require.NoError(t, err, "Should be able to assign reviewer again")
 	})
 }
 
@@ -378,9 +336,7 @@ func TestStateMachine_MessagingDuringWorkflow(t *testing.T) {
 			"content": msg.content,
 		})
 		_, err := postHandler(ctx, json.RawMessage(args))
-		if err != nil {
-			t.Errorf("Failed to post message to %q: %v", msg.to, err)
-		}
+		require.NoError(t, err, "Failed to post message to %q", msg.to)
 	}
 
 	// Read messages back
@@ -392,9 +348,7 @@ func TestStateMachine_MessagingDuringWorkflow(t *testing.T) {
 	err = json.Unmarshal([]byte(result.Content[0].Text), &response)
 	require.NoError(t, err, "Failed to parse response")
 
-	if response.TotalCount != 4 {
-		t.Errorf("Expected 4 messages, got %d", response.TotalCount)
-	}
+	require.Equal(t, 4, response.TotalCount, "Expected 4 messages")
 }
 
 // TestStateMachine_OrphanDetection tests detection of orphaned tasks.
@@ -421,9 +375,7 @@ func TestStateMachine_OrphanDetection(t *testing.T) {
 	// No orphans initially
 	t.Run("no_orphans_initially", func(t *testing.T) {
 		orphans := cs.detectOrphanedTasks()
-		if len(orphans) != 0 {
-			t.Errorf("Expected 0 orphans, got %d: %v", len(orphans), orphans)
-		}
+		require.Empty(t, orphans, "Expected 0 orphans")
 	})
 
 	// Retire the worker - task becomes orphaned
@@ -431,12 +383,8 @@ func TestStateMachine_OrphanDetection(t *testing.T) {
 		worker.Retire()
 
 		orphans := cs.detectOrphanedTasks()
-		if len(orphans) != 1 {
-			t.Errorf("Expected 1 orphan, got %d: %v", len(orphans), orphans)
-		}
-		if len(orphans) > 0 && orphans[0] != "perles-abc.1" {
-			t.Errorf("Expected orphan perles-abc.1, got %s", orphans[0])
-		}
+		require.Len(t, orphans, 1, "Expected 1 orphan")
+		require.Equal(t, "perles-abc.1", orphans[0], "Expected orphan perles-abc.1")
 	})
 
 	// Add task with nonexistent implementer
@@ -448,9 +396,7 @@ func TestStateMachine_OrphanDetection(t *testing.T) {
 		})
 
 		orphans := cs.detectOrphanedTasks()
-		if len(orphans) != 2 {
-			t.Errorf("Expected 2 orphans, got %d: %v", len(orphans), orphans)
-		}
+		require.Len(t, orphans, 2, "Expected 2 orphans")
 	})
 }
 
@@ -479,12 +425,8 @@ func TestStateMachine_StuckWorkerDetection(t *testing.T) {
 
 	stuck := cs.checkStuckWorkers()
 
-	if len(stuck) != 1 {
-		t.Errorf("Expected 1 stuck worker, got %d: %v", len(stuck), stuck)
-	}
-	if len(stuck) > 0 && stuck[0] != "worker-2" {
-		t.Errorf("Expected worker-2 to be stuck, got %s", stuck[0])
-	}
+	require.Len(t, stuck, 1, "Expected 1 stuck worker")
+	require.Equal(t, "worker-2", stuck[0], "Expected worker-2 to be stuck")
 }
 
 // TestStateMachine_PrepareHandoff tests handoff message posting.
@@ -516,21 +458,15 @@ func TestStateMachine_PrepareHandoff(t *testing.T) {
 	result, err := handler(context.Background(), json.RawMessage(args))
 	require.NoError(t, err, "prepare_handoff failed")
 
-	if result.Content[0].Text != "Handoff message posted. Refresh will proceed." {
-		t.Errorf("Unexpected result: %q", result.Content[0].Text)
-	}
+	require.Equal(t, "Handoff message posted. Refresh will proceed.", result.Content[0].Text, "Unexpected result")
 
 	// Verify message was posted
 	entries := msgIssue.Entries()
 	require.Len(t, entries, 1)
 
 	entry := entries[0]
-	if entry.Type != message.MessageHandoff {
-		t.Errorf("Message type = %q, want %q", entry.Type, message.MessageHandoff)
-	}
-	if entry.From != message.ActorCoordinator {
-		t.Errorf("From = %q, want %q", entry.From, message.ActorCoordinator)
-	}
+	require.Equal(t, message.MessageHandoff, entry.Type, "Message type mismatch")
+	require.Equal(t, message.ActorCoordinator, entry.From, "From mismatch")
 }
 
 // TestStateMachine_MultipleTasksMultipleWorkers tests managing multiple concurrent tasks.
@@ -588,17 +524,9 @@ func TestStateMachine_MultipleTasksMultipleWorkers(t *testing.T) {
 			workingCount++
 		}
 	}
-	if workingCount != 3 {
-		t.Errorf("Expected 3 working workers, got %d", workingCount)
-	}
-
-	if len(response.ReadyWorkers) != 2 {
-		t.Errorf("Expected 2 ready workers, got %d", len(response.ReadyWorkers))
-	}
-
-	if len(response.TaskAssignments) != 3 {
-		t.Errorf("Expected 3 task assignments, got %d", len(response.TaskAssignments))
-	}
+	require.Equal(t, 3, workingCount, "Expected 3 working workers")
+	require.Len(t, response.ReadyWorkers, 2, "Expected 2 ready workers")
+	require.Len(t, response.TaskAssignments, 3, "Expected 3 task assignments")
 }
 
 // TestStateMachine_WorkerReplacementFlow tests the worker replacement workflow.
@@ -632,9 +560,7 @@ func TestStateMachine_WorkerReplacementFlow(t *testing.T) {
 
 	// Task should now be orphaned
 	orphans := cs.detectOrphanedTasks()
-	if len(orphans) != 1 {
-		t.Errorf("Expected 1 orphan after worker replacement started, got %d", len(orphans))
-	}
+	require.Len(t, orphans, 1, "Expected 1 orphan after worker replacement started")
 
 	// Create a new worker to take over
 	newWorker := workerPool.AddTestWorker("worker-2", pool.WorkerReady)
@@ -657,8 +583,6 @@ func TestStateMachine_WorkerReplacementFlow(t *testing.T) {
 
 		// No longer orphaned
 		orphans = cs.detectOrphanedTasks()
-		if len(orphans) != 0 {
-			t.Errorf("Expected 0 orphans after reassignment, got %d: %v", len(orphans), orphans)
-		}
+		require.Empty(t, orphans, "Expected 0 orphans after reassignment")
 	}
 }

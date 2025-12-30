@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/zjrosen/perles/internal/mocks"
 	"github.com/zjrosen/perles/internal/orchestration/claude"
 	"github.com/zjrosen/perles/internal/orchestration/events"
@@ -143,9 +145,7 @@ func verifyNoTaskHasMultipleImplementers(t *testing.T, cs *CoordinatorServer) {
 
 	// Check each task
 	for taskID, implementers := range taskImplementers {
-		if len(implementers) > 1 {
-			t.Errorf("INVARIANT VIOLATION: Task %s has multiple implementers: %v", taskID, implementers)
-		}
+		require.LessOrEqual(t, len(implementers), 1, "INVARIANT VIOLATION: Task %s has multiple implementers: %v", taskID, implementers)
 	}
 }
 
@@ -220,9 +220,7 @@ func verifyNoTaskHasMultipleReviewers(t *testing.T, cs *CoordinatorServer) {
 
 	// Check each task
 	for taskID, reviewers := range taskReviewers {
-		if len(reviewers) > 1 {
-			t.Errorf("INVARIANT VIOLATION: Task %s has multiple reviewers: %v", taskID, reviewers)
-		}
+		require.LessOrEqual(t, len(reviewers), 1, "INVARIANT VIOLATION: Task %s has multiple reviewers: %v", taskID, reviewers)
 	}
 }
 
@@ -298,9 +296,7 @@ func verifyWorkerHasSingleActiveTask(t *testing.T, cs *CoordinatorServer) {
 	}
 
 	for workerID, count := range workerTaskCount {
-		if count > 1 {
-			t.Errorf("INVARIANT VIOLATION: Worker %s has %d active tasks (should be <= 1)", workerID, count)
-		}
+		require.LessOrEqual(t, count, 1, "INVARIANT VIOLATION: Worker %s has %d active tasks (should be <= 1)", workerID, count)
 	}
 }
 
@@ -343,11 +339,10 @@ func TestInvariant_ReviewerNotImplementer(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			err := cs.validateReviewAssignment(tc.reviewerID, "perles-abc.1", "worker-1")
 
-			if tc.expectReject && err == nil {
-				t.Error("Expected self-review to be rejected, but it was allowed")
-			}
-			if !tc.expectReject && err != nil {
-				t.Errorf("Expected review to be allowed, but got error: %v", err)
+			if tc.expectReject {
+				require.Error(t, err, "Expected self-review to be rejected, but it was allowed")
+			} else {
+				require.NoError(t, err, "Expected review to be allowed")
 			}
 
 			// If valid, apply assignment
@@ -381,9 +376,7 @@ func verifyReviewerNotImplementer(t *testing.T, cs *CoordinatorServer) {
 
 	for taskID, ta := range cs.taskAssignments {
 		if ta != nil && ta.Reviewer != "" && ta.Status == TaskInReview {
-			if ta.Implementer == ta.Reviewer {
-				t.Errorf("INVARIANT VIOLATION: Task %s has same implementer and reviewer: %s", taskID, ta.Implementer)
-			}
+			require.NotEqual(t, ta.Implementer, ta.Reviewer, "INVARIANT VIOLATION: Task %s has same implementer and reviewer: %s", taskID, ta.Implementer)
 		}
 	}
 }
@@ -415,9 +408,7 @@ func TestInvariant_TaskInReviewHasImplementerAwaitingReview(t *testing.T) {
 
 	// Try to assign reviewer - should fail because implementer not awaiting review
 	err := cs.validateReviewAssignment("worker-2", "perles-abc.1", "worker-1")
-	if err == nil {
-		t.Error("Expected review assignment to be rejected when implementer not awaiting review")
-	}
+	require.Error(t, err, "Expected review assignment to be rejected when implementer not awaiting review")
 
 	// Now set implementer to awaiting review
 	cs.SetWorkerAssignment("worker-1", &WorkerAssignment{
@@ -428,9 +419,7 @@ func TestInvariant_TaskInReviewHasImplementerAwaitingReview(t *testing.T) {
 
 	// Should now succeed
 	err = cs.validateReviewAssignment("worker-2", "perles-abc.1", "worker-1")
-	if err != nil {
-		t.Errorf("Expected review assignment to succeed when implementer awaiting review, got: %v", err)
-	}
+	require.NoError(t, err, "Expected review assignment to succeed when implementer awaiting review")
 }
 
 // TestInvariant_TaskWithReviewerHasReviewerInReviewingPhase verifies that when
@@ -499,11 +488,10 @@ func verifyTaskWithReviewerPhase(t *testing.T, cs *CoordinatorServer, expectVali
 		}
 	}
 
-	if expectValid && len(violations) > 0 {
-		t.Errorf("INVARIANT VIOLATION: Tasks with reviewer not in Reviewing phase: %v", violations)
-	}
-	if !expectValid && len(violations) == 0 {
-		t.Error("Expected invariant violation to be detected, but none found")
+	if expectValid {
+		require.Empty(t, violations, "INVARIANT VIOLATION: Tasks with reviewer not in Reviewing phase: %v", violations)
+	} else {
+		require.NotEmpty(t, violations, "Expected invariant violation to be detected, but none found")
 	}
 }
 
@@ -525,9 +513,7 @@ func TestInvariant_AfterAllOperations(t *testing.T) {
 	t.Log("Step 1: Assign task to worker-1")
 	{
 		err := cs.validateTaskAssignment("worker-1", "perles-abc.1")
-		if err != nil {
-			t.Fatalf("Unexpected error: %v", err)
-		}
+		require.NoError(t, err, "Unexpected error")
 		cs.SetTaskAssignment("perles-abc.1", &TaskAssignment{
 			TaskID:      "perles-abc.1",
 			Implementer: "worker-1",
@@ -557,9 +543,7 @@ func TestInvariant_AfterAllOperations(t *testing.T) {
 	t.Log("Step 3: Assign reviewer (worker-2)")
 	{
 		err := cs.validateReviewAssignment("worker-2", "perles-abc.1", "worker-1")
-		if err != nil {
-			t.Fatalf("Unexpected error: %v", err)
-		}
+		require.NoError(t, err, "Unexpected error")
 		cs.assignmentsMu.Lock()
 		cs.workerAssignments["worker-2"] = &WorkerAssignment{
 			TaskID:        "perles-abc.1",
@@ -588,9 +572,7 @@ func TestInvariant_AfterAllOperations(t *testing.T) {
 	t.Log("Step 5: Assign new task to different worker while first completes")
 	{
 		err := cs.validateTaskAssignment("worker-3", "perles-abc.2")
-		if err != nil {
-			t.Fatalf("Unexpected error: %v", err)
-		}
+		require.NoError(t, err, "Unexpected error")
 		cs.SetTaskAssignment("perles-abc.2", &TaskAssignment{
 			TaskID:      "perles-abc.2",
 			Implementer: "worker-3",

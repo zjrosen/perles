@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/exp/teatest"
+	"github.com/stretchr/testify/require"
 )
 
 // stripANSI removes ANSI escape codes for easier testing of content
@@ -74,9 +75,7 @@ func TestRenderBadge_IssueTypes(t *testing.T) {
 			got := RenderBadge(issue)
 			stripped := stripANSI(got)
 
-			if !strings.Contains(stripped, tt.wantContains) {
-				t.Errorf("RenderBadge() = %q (stripped: %q), want to contain %q", got, stripped, tt.wantContains)
-			}
+			require.Contains(t, stripped, tt.wantContains, "RenderBadge() = %q (stripped: %q)", got, stripped)
 		})
 	}
 }
@@ -126,9 +125,7 @@ func TestRenderBadge_Priorities(t *testing.T) {
 			got := RenderBadge(issue)
 			stripped := stripANSI(got)
 
-			if !strings.Contains(stripped, tt.wantContains) {
-				t.Errorf("RenderBadge() = %q (stripped: %q), want to contain %q", got, stripped, tt.wantContains)
-			}
+			require.Contains(t, stripped, tt.wantContains, "RenderBadge() = %q (stripped: %q)", got, stripped)
 		})
 	}
 }
@@ -145,14 +142,10 @@ func TestRenderBadge_Format(t *testing.T) {
 	stripped := stripANSI(got)
 
 	// Should contain type, priority, and ID in that order
-	if !strings.Contains(stripped, "[T][P2][abc-123]") {
-		t.Errorf("RenderBadge() = %q (stripped: %q), want format [T][P2][abc-123]", got, stripped)
-	}
+	require.Contains(t, stripped, "[T][P2][abc-123]", "RenderBadge() = %q (stripped: %q)", got, stripped)
 
 	// Should NOT contain the title
-	if strings.Contains(stripped, "Test issue") {
-		t.Errorf("RenderBadge() should not contain title, got: %q", stripped)
-	}
+	require.NotContains(t, stripped, "Test issue", "RenderBadge() should not contain title")
 }
 
 func TestRender_IncludesTitle(t *testing.T) {
@@ -166,9 +159,7 @@ func TestRender_IncludesTitle(t *testing.T) {
 	got := Render(issue, Config{})
 	stripped := stripANSI(got)
 
-	if !strings.Contains(stripped, "My test title") {
-		t.Errorf("Render() = %q (stripped: %q), want to contain title", got, stripped)
-	}
+	require.Contains(t, stripped, "My test title", "Render() = %q (stripped: %q)", got, stripped)
 }
 
 func TestRender_SelectionIndicator(t *testing.T) {
@@ -207,9 +198,7 @@ func TestRender_SelectionIndicator(t *testing.T) {
 			got := Render(issue, tt.cfg)
 			stripped := stripANSI(got)
 
-			if !strings.HasPrefix(stripped, tt.wantPrefix) {
-				t.Errorf("Render() = %q (stripped: %q), want prefix %q", got, stripped, tt.wantPrefix)
-			}
+			require.True(t, strings.HasPrefix(stripped, tt.wantPrefix), "Render() = %q (stripped: %q), want prefix %q", got, stripped, tt.wantPrefix)
 		})
 	}
 }
@@ -235,15 +224,11 @@ func TestRender_TitleTruncation(t *testing.T) {
 
 	// The rendered output should be at most 30 characters wide
 	width := lipgloss.Width(got)
-	if width > 30 {
-		t.Errorf("Render() width = %d, want <= 30", width)
-	}
+	require.LessOrEqual(t, width, 30, "Render() width = %d, want <= 30", width)
 
 	// Should contain ellipsis since title was truncated
 	stripped := stripANSI(got)
-	if !strings.Contains(stripped, "...") {
-		t.Errorf("Render() = %q, expected truncation with ellipsis", stripped)
-	}
+	require.Contains(t, stripped, "...", "Render() = %q, expected truncation with ellipsis", stripped)
 }
 
 func TestRender_NoTruncationWhenFits(t *testing.T) {
@@ -259,14 +244,10 @@ func TestRender_NoTruncationWhenFits(t *testing.T) {
 	})
 
 	stripped := stripANSI(got)
-	if !strings.Contains(stripped, "Short") {
-		t.Errorf("Render() = %q, want to contain full title 'Short'", stripped)
-	}
+	require.Contains(t, stripped, "Short", "Render() = %q, want to contain full title 'Short'", stripped)
 
 	// Should NOT contain ellipsis
-	if strings.Contains(stripped, "...") {
-		t.Errorf("Render() = %q, should not truncate short title", stripped)
-	}
+	require.NotContains(t, stripped, "...", "Render() = %q, should not truncate short title", stripped)
 }
 
 func TestRender_ZeroMaxWidthNoTruncation(t *testing.T) {
@@ -282,9 +263,7 @@ func TestRender_ZeroMaxWidthNoTruncation(t *testing.T) {
 	})
 
 	stripped := stripANSI(got)
-	if !strings.Contains(stripped, "This is a very long title that should not be truncated when MaxWidth is 0") {
-		t.Errorf("Render() = %q, want to contain full title", stripped)
-	}
+	require.Contains(t, stripped, "This is a very long title that should not be truncated when MaxWidth is 0", "Render() = %q, want to contain full title", stripped)
 }
 
 // TestRenderBadge_Golden tests badge rendering with ANSI styles.
@@ -392,14 +371,10 @@ func TestRenderBadge_PinnedNil(t *testing.T) {
 	got := RenderBadge(issue)
 	stripped := stripANSI(got)
 
-	if strings.Contains(stripped, "📌") {
-		t.Errorf("RenderBadge() with Pinned=nil should not contain pin emoji, got: %q", stripped)
-	}
+	require.NotContains(t, stripped, "📌", "RenderBadge() with Pinned=nil should not contain pin emoji")
 
 	// Should still contain the expected badge format
-	if !strings.Contains(stripped, "[T][P2][test-123]") {
-		t.Errorf("RenderBadge() = %q, want format [T][P2][test-123]", stripped)
-	}
+	require.Contains(t, stripped, "[T][P2][test-123]", "RenderBadge() = %q", stripped)
 }
 
 // TestRenderBadge_PinnedFalse verifies no pin emoji when Pinned is false.
@@ -415,14 +390,10 @@ func TestRenderBadge_PinnedFalse(t *testing.T) {
 	got := RenderBadge(issue)
 	stripped := stripANSI(got)
 
-	if strings.Contains(stripped, "📌") {
-		t.Errorf("RenderBadge() with Pinned=false should not contain pin emoji, got: %q", stripped)
-	}
+	require.NotContains(t, stripped, "📌", "RenderBadge() with Pinned=false should not contain pin emoji")
 
 	// Should still contain the expected badge format
-	if !strings.Contains(stripped, "[T][P2][test-456]") {
-		t.Errorf("RenderBadge() = %q, want format [T][P2][test-456]", stripped)
-	}
+	require.Contains(t, stripped, "[T][P2][test-456]", "RenderBadge() = %q", stripped)
 }
 
 // TestRenderBadge_PinnedTrue verifies pin emoji appears when Pinned is true.
@@ -438,19 +409,13 @@ func TestRenderBadge_PinnedTrue(t *testing.T) {
 	got := RenderBadge(issue)
 	stripped := stripANSI(got)
 
-	if !strings.Contains(stripped, "📌") {
-		t.Errorf("RenderBadge() with Pinned=true should contain pin emoji, got: %q", stripped)
-	}
+	require.Contains(t, stripped, "📌", "RenderBadge() with Pinned=true should contain pin emoji")
 
 	// Pin should come before the type indicator
-	if !strings.HasPrefix(stripped, "📌[T]") {
-		t.Errorf("RenderBadge() = %q, pin should precede type indicator [T]", stripped)
-	}
+	require.True(t, strings.HasPrefix(stripped, "📌[T]"), "RenderBadge() = %q, pin should precede type indicator [T]", stripped)
 
 	// Should contain full badge format with pin
-	if !strings.Contains(stripped, "📌[T][P2][test-789]") {
-		t.Errorf("RenderBadge() = %q, want format 📌[T][P2][test-789]", stripped)
-	}
+	require.Contains(t, stripped, "📌[T][P2][test-789]", "RenderBadge() = %q", stripped)
 }
 
 // TestRenderBadge_Pinned_Golden captures exact ANSI output for pinned badge.

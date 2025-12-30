@@ -173,7 +173,7 @@ func TestIssue_ConcurrentAccess(t *testing.T) {
 
 	// Should have no race conditions
 	for err := range errors {
-		t.Errorf("Concurrent access error: %v", err)
+		require.Fail(t, "Concurrent access error", "%v", err)
 	}
 }
 
@@ -214,7 +214,7 @@ func TestIssue_Append_PublishesEvent(t *testing.T) {
 		require.Equal(t, "Hello", event.Payload.Entry.Content)
 		require.Equal(t, MessageInfo, event.Payload.Entry.Type)
 	case <-time.After(time.Second):
-		t.Fatal("timeout waiting for event")
+		require.FailNow(t, "timeout waiting for event")
 	}
 }
 
@@ -237,10 +237,10 @@ func TestIssue_MultipleSubscribers(t *testing.T) {
 			require.Equal(t, e1.Payload.Entry.ID, e2.Payload.Entry.ID)
 			require.Equal(t, "Broadcast", e1.Payload.Entry.Content)
 		case <-time.After(time.Second):
-			t.Fatal("timeout waiting for event on ch2")
+			require.FailNow(t, "timeout waiting for event on ch2")
 		}
 	case <-time.After(time.Second):
-		t.Fatal("timeout waiting for event on ch1")
+		require.FailNow(t, "timeout waiting for event on ch1")
 	}
 }
 

@@ -451,9 +451,7 @@ func TestQueryWorkerState_WithFilters(t *testing.T) {
 			err = json.Unmarshal([]byte(result.Content[0].Text), &response)
 			require.NoError(t, err, "Failed to parse response")
 
-			if checkErr := tt.checkFunc(response); checkErr != nil {
-				t.Error(checkErr)
-			}
+			require.NoError(t, tt.checkFunc(response), "Check function failed")
 		})
 	}
 }
@@ -500,9 +498,7 @@ func TestListWorkers_AllPhases(t *testing.T) {
 	err = json.Unmarshal([]byte(result.Content[0].Text), &infos)
 	require.NoError(t, err, "Failed to parse response")
 
-	if len(infos) != len(phases) {
-		t.Errorf("Expected %d workers, got %d", len(phases), len(infos))
-	}
+	require.Len(t, infos, len(phases), "Expected %d workers", len(phases))
 
 	// Verify each phase is represented
 	phaseFound := make(map[string]bool)
@@ -511,9 +507,7 @@ func TestListWorkers_AllPhases(t *testing.T) {
 	}
 
 	for _, phase := range phases {
-		if !phaseFound[string(phase)] {
-			t.Errorf("Phase %s not found in response", phase)
-		}
+		require.True(t, phaseFound[string(phase)], "Phase %s not found in response", phase)
 	}
 }
 
@@ -561,9 +555,7 @@ func TestReadMessageLog_WithMessages(t *testing.T) {
 	require.NotNil(t, result)
 	require.NotEmpty(t, result.Content, "Expected result with content")
 	text := result.Content[0].Text
-	if len(text) < 10 {
-		t.Error("Expected message log content")
-	}
+	require.GreaterOrEqual(t, len(text), 10, "Expected message log content")
 }
 
 // TestReadMessageLog_WithLimit tests read_message_log with limit parameter.
@@ -609,9 +601,7 @@ func TestPrepareHandoff_WithLongSummary(t *testing.T) {
 	result, err := handler(context.Background(), json.RawMessage(args))
 	require.NoError(t, err)
 
-	if result.Content[0].Text != "Handoff message posted. Refresh will proceed." {
-		t.Errorf("Unexpected result: %s", result.Content[0].Text)
-	}
+	require.Equal(t, "Handoff message posted. Refresh will proceed.", result.Content[0].Text, "Unexpected result")
 }
 
 // TestCoordinatorServer_WorkerStateCallbackImpl tests the WorkerStateCallback implementation.
@@ -628,12 +618,8 @@ func TestCoordinatorServer_WorkerStateCallbackImpl(t *testing.T) {
 
 	// Test GetWorkerPhase for non-existent worker
 	phase, err := cs.GetWorkerPhase("nonexistent")
-	if err != nil {
-		t.Errorf("Expected no error for missing worker, got: %v", err)
-	}
-	if phase != events.PhaseIdle {
-		t.Errorf("Expected idle phase for missing worker, got: %s", phase)
-	}
+	require.NoError(t, err, "Expected no error for missing worker")
+	require.Equal(t, events.PhaseIdle, phase, "Expected idle phase for missing worker")
 
 	// Setup worker assignment
 	workerID := "worker-1"
@@ -653,24 +639,16 @@ func TestCoordinatorServer_WorkerStateCallbackImpl(t *testing.T) {
 
 	// Test GetWorkerPhase for existing worker
 	phase, err = cs.GetWorkerPhase(workerID)
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-	if phase != events.PhaseImplementing {
-		t.Errorf("Expected implementing phase, got: %s", phase)
-	}
+	require.NoError(t, err, "Unexpected error")
+	require.Equal(t, events.PhaseImplementing, phase, "Expected implementing phase")
 
 	// Test OnImplementationComplete
 	err = cs.OnImplementationComplete(workerID, "completed feature")
-	if err != nil {
-		t.Errorf("OnImplementationComplete error: %v", err)
-	}
+	require.NoError(t, err, "OnImplementationComplete error")
 
 	// Verify phase changed
 	cs.assignmentsMu.RLock()
-	if cs.workerAssignments[workerID].Phase != events.PhaseAwaitingReview {
-		t.Errorf("Expected awaiting_review phase, got: %s", cs.workerAssignments[workerID].Phase)
-	}
+	require.Equal(t, events.PhaseAwaitingReview, cs.workerAssignments[workerID].Phase, "Expected awaiting_review phase")
 	cs.assignmentsMu.RUnlock()
 
 	// Setup for review test
@@ -687,18 +665,12 @@ func TestCoordinatorServer_WorkerStateCallbackImpl(t *testing.T) {
 
 	// Test OnReviewVerdict - APPROVED
 	err = cs.OnReviewVerdict(reviewerID, "APPROVED", "LGTM")
-	if err != nil {
-		t.Errorf("OnReviewVerdict error: %v", err)
-	}
+	require.NoError(t, err, "OnReviewVerdict error")
 
 	// Verify reviewer is idle and task is approved
 	cs.assignmentsMu.RLock()
-	if cs.workerAssignments[reviewerID].Phase != events.PhaseIdle {
-		t.Errorf("Expected reviewer idle phase, got: %s", cs.workerAssignments[reviewerID].Phase)
-	}
-	if cs.taskAssignments[taskID].Status != TaskApproved {
-		t.Errorf("Expected task approved status, got: %s", cs.taskAssignments[taskID].Status)
-	}
+	require.Equal(t, events.PhaseIdle, cs.workerAssignments[reviewerID].Phase, "Expected reviewer idle phase")
+	require.Equal(t, TaskApproved, cs.taskAssignments[taskID].Status, "Expected task approved status")
 	cs.assignmentsMu.RUnlock()
 }
 
@@ -706,96 +678,60 @@ func TestCoordinatorServer_WorkerStateCallbackImpl(t *testing.T) {
 func TestPrompts(t *testing.T) {
 	// Test WorkerIdlePrompt
 	idlePrompt := WorkerIdlePrompt("worker-1")
-	if idlePrompt == "" {
-		t.Error("WorkerIdlePrompt returned empty string")
-	}
+	require.NotEmpty(t, idlePrompt, "WorkerIdlePrompt returned empty string")
 
 	// Test WorkerSystemPrompt
 	systemPrompt := WorkerSystemPrompt("worker-1")
-	if systemPrompt == "" {
-		t.Error("WorkerSystemPrompt returned empty string")
-	}
-	if len(systemPrompt) < 100 {
-		t.Error("WorkerSystemPrompt seems too short")
-	}
+	require.NotEmpty(t, systemPrompt, "WorkerSystemPrompt returned empty string")
+	require.GreaterOrEqual(t, len(systemPrompt), 100, "WorkerSystemPrompt seems too short")
 
 	// Test TaskAssignmentPrompt (taskID, title, summary)
 	taskPrompt := TaskAssignmentPrompt("perles-abc.1", "Implement feature X", "Coordinator Summary")
-	if taskPrompt == "" {
-		t.Error("TaskAssignmentPrompt returned empty string")
-	}
+	require.NotEmpty(t, taskPrompt, "TaskAssignmentPrompt returned empty string")
 
 	// Test ReviewAssignmentPrompt
 	reviewPrompt := ReviewAssignmentPrompt("perles-abc.1", "worker-1", "Implemented feature X")
-	if reviewPrompt == "" {
-		t.Error("ReviewAssignmentPrompt returned empty string")
-	}
+	require.NotEmpty(t, reviewPrompt, "ReviewAssignmentPrompt returned empty string")
 
 	// Test ReviewFeedbackPrompt
 	feedbackPrompt := ReviewFeedbackPrompt("perles-abc.1", "Please fix the error handling")
-	if feedbackPrompt == "" {
-		t.Error("ReviewFeedbackPrompt returned empty string")
-	}
+	require.NotEmpty(t, feedbackPrompt, "ReviewFeedbackPrompt returned empty string")
 
 	// Test CommitApprovalPrompt (taskID, commitMessage)
 	commitPrompt := CommitApprovalPrompt("perles-abc.1", "feat: add feature X")
-	if commitPrompt == "" {
-		t.Error("CommitApprovalPrompt returned empty string")
-	}
+	require.NotEmpty(t, commitPrompt, "CommitApprovalPrompt returned empty string")
 }
 
 // TestConfigGeneration tests MCP config generation functions.
 func TestConfigGeneration(t *testing.T) {
 	// Test GenerateCoordinatorConfig (workDir string)
 	coordConfig, err := GenerateCoordinatorConfigHTTP(8765)
-	if err != nil {
-		t.Errorf("GenerateCoordinatorConfig error: %v", err)
-	}
-	if coordConfig == "" {
-		t.Error("GenerateCoordinatorConfig returned empty string")
-	}
+	require.NoError(t, err, "GenerateCoordinatorConfig error")
+	require.NotEmpty(t, coordConfig, "GenerateCoordinatorConfig returned empty string")
 
 	// Test GenerateCoordinatorConfigHTTP
 	httpConfig, err := GenerateCoordinatorConfigHTTP(8765)
-	if err != nil {
-		t.Errorf("GenerateCoordinatorConfigHTTP error: %v", err)
-	}
-	if httpConfig == "" {
-		t.Error("GenerateCoordinatorConfigHTTP returned empty string")
-	}
+	require.NoError(t, err, "GenerateCoordinatorConfigHTTP error")
+	require.NotEmpty(t, httpConfig, "GenerateCoordinatorConfigHTTP returned empty string")
 
 	// Test GenerateWorkerConfig (workerID, workDir string)
 	workerConfig, err := GenerateWorkerConfig("worker-1", "/tmp/test")
-	if err != nil {
-		t.Errorf("GenerateWorkerConfig error: %v", err)
-	}
-	if workerConfig == "" {
-		t.Error("GenerateWorkerConfig returned empty string")
-	}
+	require.NoError(t, err, "GenerateWorkerConfig error")
+	require.NotEmpty(t, workerConfig, "GenerateWorkerConfig returned empty string")
 
 	// Test GenerateWorkerConfigHTTP
 	workerHTTPConfig, err := GenerateWorkerConfigHTTP(8765, "worker-1")
-	if err != nil {
-		t.Errorf("GenerateWorkerConfigHTTP error: %v", err)
-	}
-	if workerHTTPConfig == "" {
-		t.Error("GenerateWorkerConfigHTTP returned empty string")
-	}
+	require.NoError(t, err, "GenerateWorkerConfigHTTP error")
+	require.NotEmpty(t, workerHTTPConfig, "GenerateWorkerConfigHTTP returned empty string")
 
 	// Test ConfigToFlag
 	flag := ConfigToFlag(coordConfig)
-	if flag == "" {
-		t.Error("ConfigToFlag returned empty string")
-	}
+	require.NotEmpty(t, flag, "ConfigToFlag returned empty string")
 
 	// Test ParseMCPConfig
 	parsed, err := ParseMCPConfig(coordConfig)
-	if err != nil {
-		t.Errorf("ParseMCPConfig error: %v", err)
-	}
-	if parsed == nil {
-		t.Error("ParseMCPConfig returned nil")
-	}
+	require.NoError(t, err, "ParseMCPConfig error")
+	require.NotNil(t, parsed, "ParseMCPConfig returned nil")
 }
 
 // TestMessageDeduplicator_EdgeCases tests deduplicator edge cases.
@@ -803,51 +739,35 @@ func TestMessageDeduplicator_EdgeCases(t *testing.T) {
 	dedup := NewMessageDeduplicator(100 * time.Millisecond)
 
 	// Test empty message
-	if dedup.IsDuplicate("worker-1", "") {
-		t.Error("Empty message should not be considered duplicate on first call")
-	}
-	if !dedup.IsDuplicate("worker-1", "") {
-		t.Error("Empty message should be duplicate on second call")
-	}
+	require.False(t, dedup.IsDuplicate("worker-1", ""), "Empty message should not be considered duplicate on first call")
+	require.True(t, dedup.IsDuplicate("worker-1", ""), "Empty message should be duplicate on second call")
 
 	// Test very long message
 	longMsg := ""
 	for i := 0; i < 1000; i++ {
 		longMsg += "a"
 	}
-	if dedup.IsDuplicate("worker-1", longMsg) {
-		t.Error("Long message should not be duplicate on first call")
-	}
+	require.False(t, dedup.IsDuplicate("worker-1", longMsg), "Long message should not be duplicate on first call")
 
 	// Test special characters
 	specialMsg := "Message with special chars: !@#$%^&*()[]{}|\\:;<>?,./`~"
-	if dedup.IsDuplicate("worker-1", specialMsg) {
-		t.Error("Special char message should not be duplicate on first call")
-	}
+	require.False(t, dedup.IsDuplicate("worker-1", specialMsg), "Special char message should not be duplicate on first call")
 
 	// Test Unicode
 	unicodeMsg := "Message with Unicode: 你好世界 🎉 émojis"
-	if dedup.IsDuplicate("worker-1", unicodeMsg) {
-		t.Error("Unicode message should not be duplicate on first call")
-	}
+	require.False(t, dedup.IsDuplicate("worker-1", unicodeMsg), "Unicode message should not be duplicate on first call")
 
 	// Test expiration
 	time.Sleep(150 * time.Millisecond)
-	if dedup.IsDuplicate("worker-1", "") {
-		t.Error("Message should not be duplicate after expiration")
-	}
+	require.False(t, dedup.IsDuplicate("worker-1", ""), "Message should not be duplicate after expiration")
 
 	// Test Len and Clear
 	_ = dedup.IsDuplicate("worker-1", "msg1")
 	_ = dedup.IsDuplicate("worker-1", "msg2")
-	if dedup.Len() < 2 {
-		t.Errorf("Expected at least 2 entries, got %d", dedup.Len())
-	}
+	require.GreaterOrEqual(t, dedup.Len(), 2, "Expected at least 2 entries")
 
 	dedup.Clear()
-	if dedup.Len() != 0 {
-		t.Errorf("Expected 0 entries after clear, got %d", dedup.Len())
-	}
+	require.Equal(t, 0, dedup.Len(), "Expected 0 entries after clear")
 }
 
 // helper function for creating error

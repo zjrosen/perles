@@ -326,7 +326,7 @@ func TestWorkerPool_Broker(t *testing.T) {
 	case event := <-sub:
 		require.Equal(t, "test", event.Payload.WorkerID)
 	case <-time.After(time.Second):
-		t.Error("Timeout waiting for event")
+		require.Fail(t, "Timeout waiting for event")
 	}
 }
 
@@ -380,7 +380,7 @@ func TestWorkerPool_SpawnWorker_WithMockClient(t *testing.T) {
 		require.Equal(t, events.WorkerSpawned, event.Payload.Type)
 		require.Equal(t, workerID, event.Payload.WorkerID)
 	case <-time.After(time.Second):
-		t.Fatal("timeout waiting for spawn event")
+		require.FailNow(t, "timeout waiting for spawn event")
 	}
 
 	// Clean up

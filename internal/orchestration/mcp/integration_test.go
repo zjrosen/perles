@@ -54,9 +54,7 @@ func TestIntegration_FullTaskLifecycle(t *testing.T) {
 
 	// Verify state
 	cs.assignmentsMu.RLock()
-	if cs.workerAssignments[implementerID].Phase != events.PhaseImplementing {
-		t.Errorf("Expected phase %s, got %s", events.PhaseImplementing, cs.workerAssignments[implementerID].Phase)
-	}
+	require.Equal(t, events.PhaseImplementing, cs.workerAssignments[implementerID].Phase, "Phase mismatch")
 	cs.assignmentsMu.RUnlock()
 
 	// Step 2: Implementer completes implementation
@@ -71,9 +69,7 @@ func TestIntegration_FullTaskLifecycle(t *testing.T) {
 
 	// Verify transition to awaiting review
 	cs.assignmentsMu.RLock()
-	if cs.workerAssignments[implementerID].Phase != events.PhaseAwaitingReview {
-		t.Errorf("Expected phase %s, got %s", events.PhaseAwaitingReview, cs.workerAssignments[implementerID].Phase)
-	}
+	require.Equal(t, events.PhaseAwaitingReview, cs.workerAssignments[implementerID].Phase, "Phase mismatch")
 	cs.assignmentsMu.RUnlock()
 
 	// Step 3: Assign reviewer
@@ -101,9 +97,7 @@ func TestIntegration_FullTaskLifecycle(t *testing.T) {
 
 	// Verify reviewer back to idle
 	cs.assignmentsMu.RLock()
-	if cs.workerAssignments[reviewerID].Phase != events.PhaseIdle {
-		t.Errorf("Expected reviewer phase %s, got %s", events.PhaseIdle, cs.workerAssignments[reviewerID].Phase)
-	}
+	require.Equal(t, events.PhaseIdle, cs.workerAssignments[reviewerID].Phase, "Reviewer phase mismatch")
 	cs.assignmentsMu.RUnlock()
 
 	// Step 5: Approve commit (simulated coordinator action)
@@ -126,12 +120,8 @@ func TestIntegration_FullTaskLifecycle(t *testing.T) {
 
 	// Final verification
 	cs.assignmentsMu.RLock()
-	if cs.taskAssignments[taskID].Status != TaskCompleted {
-		t.Errorf("Expected task status %s, got %s", TaskCompleted, cs.taskAssignments[taskID].Status)
-	}
-	if cs.workerAssignments[implementerID].Phase != events.PhaseIdle {
-		t.Errorf("Expected implementer phase %s, got %s", events.PhaseIdle, cs.workerAssignments[implementerID].Phase)
-	}
+	require.Equal(t, TaskCompleted, cs.taskAssignments[taskID].Status, "Task status mismatch")
+	require.Equal(t, events.PhaseIdle, cs.workerAssignments[implementerID].Phase, "Implementer phase mismatch")
 	cs.assignmentsMu.RUnlock()
 }
 
@@ -188,9 +178,7 @@ func TestIntegration_DenialCycle(t *testing.T) {
 
 	// Verify task status is denied and implementer gets feedback assignment
 	cs.assignmentsMu.RLock()
-	if cs.taskAssignments[taskID].Status != TaskDenied {
-		t.Errorf("Expected task status %s, got %s", TaskDenied, cs.taskAssignments[taskID].Status)
-	}
+	require.Equal(t, TaskDenied, cs.taskAssignments[taskID].Status, "Task status mismatch")
 	cs.assignmentsMu.RUnlock()
 
 	// Coordinator assigns feedback to implementer
@@ -210,9 +198,7 @@ func TestIntegration_DenialCycle(t *testing.T) {
 
 	// Verify back to awaiting review
 	cs.assignmentsMu.RLock()
-	if cs.workerAssignments[implementerID].Phase != events.PhaseAwaitingReview {
-		t.Errorf("Expected phase %s, got %s", events.PhaseAwaitingReview, cs.workerAssignments[implementerID].Phase)
-	}
+	require.Equal(t, events.PhaseAwaitingReview, cs.workerAssignments[implementerID].Phase, "Phase mismatch")
 	cs.assignmentsMu.RUnlock()
 }
 
@@ -322,14 +308,10 @@ func TestIntegration_MultipleWorkersMultipleTasks(t *testing.T) {
 			implementingCount++
 		}
 	}
-	if implementingCount != 2 {
-		t.Errorf("Expected 2 workers implementing, got %d", implementingCount)
-	}
+	require.Equal(t, 2, implementingCount, "Expected 2 workers implementing")
 
 	// Check task assignments
-	if len(response.TaskAssignments) != 2 {
-		t.Errorf("Expected 2 task assignments, got %d", len(response.TaskAssignments))
-	}
+	require.Len(t, response.TaskAssignments, 2, "Expected 2 task assignments")
 }
 
 // TestIntegration_OrphanRecovery tests detection and recovery of orphaned tasks.
@@ -353,18 +335,15 @@ func TestIntegration_OrphanRecovery(t *testing.T) {
 
 	// No orphans yet
 	orphans := cs.detectOrphanedTasks()
-	if len(orphans) != 0 {
-		t.Errorf("Expected no orphans, got %v", orphans)
-	}
+	require.Empty(t, orphans, "Expected no orphans")
 
 	// Retire the worker (simulating crash/timeout)
 	workerPool.GetWorker("worker-1").Retire()
 
 	// Now task should be orphaned
 	orphans = cs.detectOrphanedTasks()
-	if len(orphans) != 1 || orphans[0] != taskID {
-		t.Errorf("Expected orphan %s, got %v", taskID, orphans)
-	}
+	require.Len(t, orphans, 1, "Expected 1 orphan")
+	require.Equal(t, taskID, orphans[0], "Expected orphan to be the task")
 }
 
 // TestIntegration_ConcurrentToolCalls tests handling of concurrent tool calls.
@@ -436,10 +415,9 @@ func TestIntegration_ConcurrentToolCalls(t *testing.T) {
 	for workerID, wa := range cs.workerAssignments {
 		if wa.TaskID != "" {
 			if ta, ok := cs.taskAssignments[wa.TaskID]; ok {
-				if ta.Implementer != workerID {
-					t.Errorf("Inconsistent state: worker %s has task %s but task implementer is %s",
-						workerID, wa.TaskID, ta.Implementer)
-				}
+				require.Equal(t, workerID, ta.Implementer,
+					"Inconsistent state: worker %s has task %s but task implementer is %s",
+					workerID, wa.TaskID, ta.Implementer)
 			}
 		}
 	}
@@ -467,9 +445,7 @@ func TestIntegration_MessageFlow(t *testing.T) {
 
 	// Verify ready message was posted
 	require.Len(t, workerStore.appendCalls, 1)
-	if workerStore.appendCalls[0].Type != message.MessageWorkerReady {
-		t.Errorf("Expected message type %v, got %v", message.MessageWorkerReady, workerStore.appendCalls[0].Type)
-	}
+	require.Equal(t, message.MessageWorkerReady, workerStore.appendCalls[0].Type, "Message type mismatch")
 
 	// Worker posts status update
 	postHandler := ws.handlers["post_message"]
@@ -495,21 +471,15 @@ func TestIntegration_ValidateAssignmentConstraints(t *testing.T) {
 
 	// Test 1: Assigning to ready worker should pass validation
 	err := cs.validateTaskAssignment("worker-1", taskID)
-	if err != nil {
-		t.Errorf("Expected no error for ready worker, got: %v", err)
-	}
+	require.NoError(t, err, "Expected no error for ready worker")
 
 	// Test 2: Assigning to working worker should fail
 	err = cs.validateTaskAssignment("worker-2", taskID)
-	if err == nil {
-		t.Error("Expected error for working worker")
-	}
+	require.Error(t, err, "Expected error for working worker")
 
 	// Test 3: Assigning to non-existent worker should fail
 	err = cs.validateTaskAssignment("nonexistent", taskID)
-	if err == nil {
-		t.Error("Expected error for non-existent worker")
-	}
+	require.Error(t, err, "Expected error for non-existent worker")
 
 	// Test 4: Assigning when worker already has task should fail
 	cs.workerAssignments["worker-1"] = &WorkerAssignment{
@@ -518,9 +488,7 @@ func TestIntegration_ValidateAssignmentConstraints(t *testing.T) {
 		Phase:  events.PhaseImplementing,
 	}
 	err = cs.validateTaskAssignment("worker-1", taskID)
-	if err == nil {
-		t.Error("Expected error when worker already has task")
-	}
+	require.Error(t, err, "Expected error when worker already has task")
 }
 
 // TestIntegration_StuckWorkerDetection tests stuck worker detection integration.
@@ -545,10 +513,6 @@ func TestIntegration_StuckWorkerDetection(t *testing.T) {
 	}
 
 	stuck := cs.checkStuckWorkers()
-	if len(stuck) != 1 {
-		t.Errorf("Expected 1 stuck worker, got %d: %v", len(stuck), stuck)
-	}
-	if len(stuck) > 0 && stuck[0] != "worker-1" {
-		t.Errorf("Expected stuck worker worker-1, got %s", stuck[0])
-	}
+	require.Len(t, stuck, 1, "Expected 1 stuck worker")
+	require.Equal(t, "worker-1", stuck[0], "Expected stuck worker worker-1")
 }

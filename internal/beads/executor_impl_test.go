@@ -22,7 +22,7 @@ func skipIfBDNotEnabled(t *testing.T) {
 	if os.Getenv("BD_INTEGRATION_TESTS") == "1" {
 		// Environment says to run BD tests, but verify bd is available
 		if _, err := exec.LookPath("bd"); err != nil {
-			t.Fatal("BD_INTEGRATION_TESTS=1 but bd CLI not available")
+			require.FailNow(t, "BD_INTEGRATION_TESTS=1 but bd CLI not available")
 		}
 		return // Run the test
 	}

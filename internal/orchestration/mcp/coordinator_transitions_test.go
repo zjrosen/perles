@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/zjrosen/perles/internal/mocks"
 	"github.com/zjrosen/perles/internal/orchestration/claude"
 	"github.com/zjrosen/perles/internal/orchestration/events"
@@ -259,12 +261,10 @@ func TestStateTransition_ImplementerWorkflow(t *testing.T) {
 			wa := cs.workerAssignments["implementer"]
 			ta := cs.taskAssignments["perles-abc.1"]
 
-			if wa != nil && wa.Phase != step.expectedPhase && step.name != "mark_task_complete" {
-				t.Errorf("Phase = %q, want %q", wa.Phase, step.expectedPhase)
+			if wa != nil && step.name != "mark_task_complete" {
+				require.Equal(t, step.expectedPhase, wa.Phase, "Phase mismatch")
 			}
-			if ta.Status != step.expectedStatus {
-				t.Errorf("Status = %q, want %q", ta.Status, step.expectedStatus)
-			}
+			require.Equal(t, step.expectedStatus, ta.Status, "Status mismatch")
 		})
 	}
 }
@@ -322,8 +322,8 @@ func TestStateTransition_ReviewerWorkflow(t *testing.T) {
 			wa := cs.workerAssignments["reviewer"]
 			cs.assignmentsMu.RUnlock()
 
-			if wa != nil && wa.Phase != step.expectedPhase {
-				t.Errorf("Phase = %q, want %q", wa.Phase, step.expectedPhase)
+			if wa != nil {
+				require.Equal(t, step.expectedPhase, wa.Phase, "Phase mismatch")
 			}
 		})
 	}
@@ -369,12 +369,8 @@ func TestStateTransition_DenialWorkflow(t *testing.T) {
 		cs.assignmentsMu.RLock()
 		defer cs.assignmentsMu.RUnlock()
 
-		if cs.taskAssignments["perles-abc.1"].Status != TaskDenied {
-			t.Errorf("Status = %q, want %q", cs.taskAssignments["perles-abc.1"].Status, TaskDenied)
-		}
-		if cs.workerAssignments["reviewer"].Phase != events.PhaseIdle {
-			t.Errorf("Reviewer phase = %q, want %q", cs.workerAssignments["reviewer"].Phase, events.PhaseIdle)
-		}
+		require.Equal(t, TaskDenied, cs.taskAssignments["perles-abc.1"].Status, "Status mismatch")
+		require.Equal(t, events.PhaseIdle, cs.workerAssignments["reviewer"].Phase, "Reviewer phase mismatch")
 	})
 
 	// Step 2: Implementer starts addressing feedback
@@ -389,9 +385,7 @@ func TestStateTransition_DenialWorkflow(t *testing.T) {
 		cs.assignmentsMu.RLock()
 		defer cs.assignmentsMu.RUnlock()
 
-		if cs.workerAssignments["implementer"].Phase != events.PhaseAddressingFeedback {
-			t.Errorf("Phase = %q, want %q", cs.workerAssignments["implementer"].Phase, events.PhaseAddressingFeedback)
-		}
+		require.Equal(t, events.PhaseAddressingFeedback, cs.workerAssignments["implementer"].Phase, "Phase mismatch")
 	})
 
 	// Step 3: Implementer reports new implementation complete
@@ -403,9 +397,7 @@ func TestStateTransition_DenialWorkflow(t *testing.T) {
 		cs.assignmentsMu.RLock()
 		defer cs.assignmentsMu.RUnlock()
 
-		if cs.workerAssignments["implementer"].Phase != events.PhaseAwaitingReview {
-			t.Errorf("Phase = %q, want %q", cs.workerAssignments["implementer"].Phase, events.PhaseAwaitingReview)
-		}
+		require.Equal(t, events.PhaseAwaitingReview, cs.workerAssignments["implementer"].Phase, "Phase mismatch")
 	})
 }
 
@@ -511,13 +503,10 @@ func TestStateTransition_InvalidTransitionsRejected(t *testing.T) {
 			err := tc.action()
 
 			if tc.expectError {
-				if err == nil {
-					t.Errorf("Expected error containing %q, got nil", tc.errorSubstr)
-				} else if !containsStr(err.Error(), tc.errorSubstr) {
-					t.Errorf("Expected error containing %q, got %q", tc.errorSubstr, err.Error())
-				}
-			} else if err != nil {
-				t.Errorf("Unexpected error: %v", err)
+				require.Error(t, err, "Expected error containing %q", tc.errorSubstr)
+				require.Contains(t, err.Error(), tc.errorSubstr, "Error message mismatch")
+			} else {
+				require.NoError(t, err, "Unexpected error")
 			}
 		})
 	}
@@ -587,12 +576,8 @@ func TestMarkTaskComplete_HappyPath(t *testing.T) {
 
 	// Verify pre-state
 	cs.assignmentsMu.RLock()
-	if cs.taskAssignments["perles-abc.1"].Status != TaskCommitting {
-		t.Fatalf("Pre-state: expected TaskCommitting, got %s", cs.taskAssignments["perles-abc.1"].Status)
-	}
-	if cs.workerAssignments["implementer"].Phase != events.PhaseCommitting {
-		t.Fatalf("Pre-state: expected PhaseCommitting, got %s", cs.workerAssignments["implementer"].Phase)
-	}
+	require.Equal(t, TaskCommitting, cs.taskAssignments["perles-abc.1"].Status, "Pre-state: expected TaskCommitting")
+	require.Equal(t, events.PhaseCommitting, cs.workerAssignments["implementer"].Phase, "Pre-state: expected PhaseCommitting")
 	cs.assignmentsMu.RUnlock()
 
 	// Call handleMarkTaskComplete (mocking bd call by checking state changes only)
@@ -613,19 +598,13 @@ func TestMarkTaskComplete_HappyPath(t *testing.T) {
 	defer cs.assignmentsMu.RUnlock()
 
 	// Task status should be TaskCompleted
-	if cs.taskAssignments["perles-abc.1"].Status != TaskCompleted {
-		t.Errorf("Task status = %q, want %q", cs.taskAssignments["perles-abc.1"].Status, TaskCompleted)
-	}
+	require.Equal(t, TaskCompleted, cs.taskAssignments["perles-abc.1"].Status, "Task status mismatch")
 
 	// Worker phase should be PhaseIdle
-	if cs.workerAssignments["implementer"].Phase != events.PhaseIdle {
-		t.Errorf("Worker phase = %q, want %q", cs.workerAssignments["implementer"].Phase, events.PhaseIdle)
-	}
+	require.Equal(t, events.PhaseIdle, cs.workerAssignments["implementer"].Phase, "Worker phase mismatch")
 
 	// Worker task reference should be cleared
-	if cs.workerAssignments["implementer"].TaskID != "" {
-		t.Errorf("Worker TaskID = %q, want empty", cs.workerAssignments["implementer"].TaskID)
-	}
+	require.Empty(t, cs.workerAssignments["implementer"].TaskID, "Worker TaskID should be empty")
 }
 
 // TestMarkTaskComplete_TaskStatusTransition verifies taskAssignments status update.
@@ -652,9 +631,7 @@ func TestMarkTaskComplete_TaskStatusTransition(t *testing.T) {
 	cs.assignmentsMu.RLock()
 	defer cs.assignmentsMu.RUnlock()
 
-	if cs.taskAssignments["perles-xyz.1"].Status != TaskCompleted {
-		t.Errorf("Status = %q, want %q", cs.taskAssignments["perles-xyz.1"].Status, TaskCompleted)
-	}
+	require.Equal(t, TaskCompleted, cs.taskAssignments["perles-xyz.1"].Status, "Status mismatch")
 }
 
 // TestMarkTaskComplete_WorkerAssignmentCleanup verifies workerAssignments cleanup.
@@ -684,12 +661,8 @@ func TestMarkTaskComplete_WorkerAssignmentCleanup(t *testing.T) {
 	cs.assignmentsMu.RLock()
 	defer cs.assignmentsMu.RUnlock()
 
-	if cs.workerAssignments["worker-1"].Phase != events.PhaseIdle {
-		t.Errorf("Phase = %q, want %q", cs.workerAssignments["worker-1"].Phase, events.PhaseIdle)
-	}
-	if cs.workerAssignments["worker-1"].TaskID != "" {
-		t.Errorf("TaskID = %q, want empty", cs.workerAssignments["worker-1"].TaskID)
-	}
+	require.Equal(t, events.PhaseIdle, cs.workerAssignments["worker-1"].Phase, "Phase mismatch")
+	require.Empty(t, cs.workerAssignments["worker-1"].TaskID, "TaskID should be empty")
 }
 
 // TestMarkTaskComplete_ErrorNotCommitting verifies error for wrong status.
@@ -725,9 +698,7 @@ func TestMarkTaskComplete_ErrorNotCommitting(t *testing.T) {
 			status := ta.Status
 			cs.assignmentsMu.RUnlock()
 
-			if status == TaskCommitting {
-				t.Errorf("Expected status %s to NOT be TaskCommitting", tc.status)
-			}
+			require.NotEqual(t, TaskCommitting, status, "Expected status %s to NOT be TaskCommitting", tc.status)
 		})
 	}
 }
@@ -746,9 +717,7 @@ func TestMarkTaskComplete_ErrorNonExistentTask(t *testing.T) {
 	_, ok := cs.taskAssignments["perles-nonexistent.1"]
 	cs.assignmentsMu.RUnlock()
 
-	if ok {
-		t.Error("Expected task to not exist")
-	}
+	require.False(t, ok, "Expected task to not exist")
 }
 
 // TestMarkTaskComplete_WorkerCleanupBestEffort verifies worker cleanup handles missing worker.
@@ -774,9 +743,7 @@ func TestMarkTaskComplete_WorkerCleanupBestEffort(t *testing.T) {
 
 	// Simulate the pool.GetWorker returning nil
 	worker := cs.pool.GetWorker("gone-worker")
-	if worker != nil {
-		t.Error("Expected worker to not exist in pool")
-	}
+	require.Nil(t, worker, "Expected worker to not exist in pool")
 
 	// Worker cleanup should still work on workerAssignments even if pool worker is gone
 	cs.assignmentsMu.Lock()
@@ -791,12 +758,8 @@ func TestMarkTaskComplete_WorkerCleanupBestEffort(t *testing.T) {
 	cs.assignmentsMu.RLock()
 	defer cs.assignmentsMu.RUnlock()
 
-	if cs.taskAssignments["perles-abc.1"].Status != TaskCompleted {
-		t.Errorf("Task status = %q, want %q", cs.taskAssignments["perles-abc.1"].Status, TaskCompleted)
-	}
-	if cs.workerAssignments["gone-worker"].Phase != events.PhaseIdle {
-		t.Errorf("Worker phase = %q, want %q", cs.workerAssignments["gone-worker"].Phase, events.PhaseIdle)
-	}
+	require.Equal(t, TaskCompleted, cs.taskAssignments["perles-abc.1"].Status, "Task status mismatch")
+	require.Equal(t, events.PhaseIdle, cs.workerAssignments["gone-worker"].Phase, "Worker phase mismatch")
 }
 
 // TestMarkTaskComplete_PoolWorkerPhaseUpdate verifies pool worker phase is updated.
@@ -811,9 +774,7 @@ func TestMarkTaskComplete_PoolWorkerPhaseUpdate(t *testing.T) {
 	worker.SetPhase(events.PhaseCommitting)
 
 	// Verify pre-state
-	if worker.GetPhase() != events.PhaseCommitting {
-		t.Fatalf("Pre-state: expected PhaseCommitting, got %s", worker.GetPhase())
-	}
+	require.Equal(t, events.PhaseCommitting, worker.GetPhase(), "Pre-state: expected PhaseCommitting")
 
 	// Simulate handleMarkTaskComplete updating pool worker
 	if implementer := cs.pool.GetWorker("implementer"); implementer != nil {
@@ -821,7 +782,5 @@ func TestMarkTaskComplete_PoolWorkerPhaseUpdate(t *testing.T) {
 	}
 
 	// Verify
-	if worker.GetPhase() != events.PhaseIdle {
-		t.Errorf("Pool worker phase = %q, want %q", worker.GetPhase(), events.PhaseIdle)
-	}
+	require.Equal(t, events.PhaseIdle, worker.GetPhase(), "Pool worker phase mismatch")
 }

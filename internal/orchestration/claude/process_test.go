@@ -491,7 +491,7 @@ func TestProcessLifecycle_Cancel(t *testing.T) {
 	case <-p.ctx.Done():
 		// Expected - context was cancelled
 	default:
-		t.Error("Context should be cancelled after Cancel()")
+		require.Fail(t, "Context should be cancelled after Cancel()")
 	}
 }
 
@@ -563,7 +563,7 @@ func TestProcessLifecycle_Channels(t *testing.T) {
 	case event := <-eventsCh:
 		require.Equal(t, client.EventType("test"), event.Type)
 	case <-time.After(time.Second):
-		t.Error("Timeout waiting for event")
+		require.Fail(t, "Timeout waiting for event")
 	}
 
 	// Send an error
@@ -575,7 +575,7 @@ func TestProcessLifecycle_Channels(t *testing.T) {
 	case err := <-errorsCh:
 		require.Equal(t, errTest, err)
 	case <-time.After(time.Second):
-		t.Error("Timeout waiting for error")
+		require.Fail(t, "Timeout waiting for error")
 	}
 }
 
@@ -589,7 +589,7 @@ func TestProcessLifecycle_SendError(t *testing.T) {
 	case err := <-p.errors:
 		require.Equal(t, ErrTimeout, err)
 	default:
-		t.Error("Error should have been sent to channel")
+		require.Fail(t, "Error should have been sent to channel")
 	}
 }
 
@@ -614,7 +614,7 @@ func TestProcessLifecycle_SendErrorOverflow(t *testing.T) {
 	case <-done:
 		// Expected - sendError returned without blocking
 	case <-time.After(100 * time.Millisecond):
-		t.Error("sendError blocked on full channel - should have dropped error")
+		require.Fail(t, "sendError blocked on full channel - should have dropped error")
 	}
 
 	// Original errors should still be in channel
@@ -637,7 +637,7 @@ func TestProcessLifecycle_Wait(t *testing.T) {
 	// Wait should be blocking
 	select {
 	case <-done:
-		t.Error("Wait should be blocking")
+		require.Fail(t, "Wait should be blocking")
 	case <-time.After(10 * time.Millisecond):
 		// Expected - still waiting
 	}
@@ -650,7 +650,7 @@ func TestProcessLifecycle_Wait(t *testing.T) {
 	case <-done:
 		// Expected - Wait completed
 	case <-time.After(time.Second):
-		t.Error("Wait should have completed after wg.Done()")
+		require.Fail(t, "Wait should have completed after wg.Done()")
 	}
 }
 

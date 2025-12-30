@@ -7,7 +7,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,18 +23,18 @@ func TestWorkerServer_PostMessage_Deduplication(t *testing.T) {
 	result1, err := ws.handlePostMessage(ctx, json.RawMessage(messageArgs))
 	require.NoError(t, err)
 	require.NotNil(t, result1)
-	assert.True(t, strings.Contains(result1.Content[0].Text, "Message sent"),
+	require.True(t, strings.Contains(result1.Content[0].Text, "Message sent"),
 		"First send should succeed with 'Message sent' response")
 
 	// Immediate duplicate should also return success (idempotent)
 	result2, err := ws.handlePostMessage(ctx, json.RawMessage(messageArgs))
 	require.NoError(t, err)
 	require.NotNil(t, result2)
-	assert.True(t, strings.Contains(result2.Content[0].Text, "Message sent"),
+	require.True(t, strings.Contains(result2.Content[0].Text, "Message sent"),
 		"Duplicate send should still return success (idempotent)")
 
 	// CRITICAL: Verify Append was only called once
-	assert.Equal(t, 1, len(store.appendCalls),
+	require.Len(t, store.appendCalls, 1,
 		"Append should only be called once despite duplicate post_message calls")
 }
 
@@ -60,12 +59,12 @@ func TestWorkerServer_PostMessage_DifferentMessages(t *testing.T) {
 	require.NotNil(t, result2)
 
 	// Both messages should trigger appends (different content = different hash)
-	assert.Equal(t, 2, len(store.appendCalls),
+	require.Len(t, store.appendCalls, 2,
 		"Different messages should both trigger Append calls")
 
 	// Verify both messages were stored
-	assert.Equal(t, "first message", store.appendCalls[0].Content)
-	assert.Equal(t, "second message", store.appendCalls[1].Content)
+	require.Equal(t, "first message", store.appendCalls[0].Content)
+	require.Equal(t, "second message", store.appendCalls[1].Content)
 }
 
 // TestWorkerServer_PostMessage_DifferentRecipients verifies that the same message
@@ -90,7 +89,7 @@ func TestWorkerServer_PostMessage_DifferentRecipients(t *testing.T) {
 	require.NotNil(t, result2)
 
 	// Only the first should trigger append (same worker + same content = duplicate)
-	assert.Equal(t, 1, len(store.appendCalls),
+	require.Len(t, store.appendCalls, 1,
 		"Same message to different recipients should be deduplicated (based on worker+content)")
 }
 
@@ -117,12 +116,12 @@ func TestWorkerServer_PostMessage_DifferentWorkers(t *testing.T) {
 	require.NotNil(t, result2)
 
 	// Both should trigger appends (different worker = different hash key)
-	assert.Equal(t, 2, len(store.appendCalls),
+	require.Len(t, store.appendCalls, 2,
 		"Same message from different workers should both trigger Append calls")
 
 	// Verify both workers sent their messages
-	assert.Equal(t, "WORKER.1", store.appendCalls[0].From)
-	assert.Equal(t, "WORKER.2", store.appendCalls[1].From)
+	require.Equal(t, "WORKER.1", store.appendCalls[0].From)
+	require.Equal(t, "WORKER.2", store.appendCalls[1].From)
 }
 
 // TestWorkerServer_PostMessage_Deduplication_Concurrent verifies that concurrent
@@ -155,12 +154,12 @@ func TestWorkerServer_PostMessage_Deduplication_Concurrent(t *testing.T) {
 
 	// Check for errors
 	for err := range errors {
-		t.Errorf("Unexpected error from concurrent send: %v", err)
+		require.NoError(t, err, "Unexpected error from concurrent send")
 	}
 
 	// CRITICAL: Despite 10 concurrent sends of identical message,
 	// only ONE should have triggered an actual Append
-	assert.Equal(t, 1, len(store.appendCalls),
+	require.Len(t, store.appendCalls, 1,
 		"Concurrent duplicate sends should only result in one Append call")
 }
 
@@ -183,6 +182,6 @@ func TestWorkerServer_SignalReady_NotDeduplicated(t *testing.T) {
 	require.NotNil(t, result2)
 
 	// Both signals should go through (ready signals are not deduplicated)
-	assert.Equal(t, 2, len(store.appendCalls),
+	require.Len(t, store.appendCalls, 2,
 		"Ready signals should NOT be deduplicated - both should trigger Append")
 }

@@ -19,15 +19,11 @@ func TestGenerateWorkerConfig(t *testing.T) {
 	require.True(t, ok, "Missing perles-worker server in config")
 
 	// Check it's HTTP transport
-	if server.Type != "http" {
-		t.Errorf("Type should be 'http', got %q", server.Type)
-	}
+	require.Equal(t, "http", server.Type, "Type should be 'http'")
 
 	// Check URL includes worker ID
 	expectedURL := "http://localhost:8765/worker/worker-1"
-	if server.URL != expectedURL {
-		t.Errorf("URL should be %q, got %q", expectedURL, server.URL)
-	}
+	require.Equal(t, expectedURL, server.URL, "URL mismatch")
 }
 
 func TestGenerateWorkerConfigHTTP(t *testing.T) {
@@ -40,22 +36,16 @@ func TestGenerateWorkerConfigHTTP(t *testing.T) {
 	server, ok := config.MCPServers["perles-worker"]
 	require.True(t, ok, "Missing perles-worker server in config")
 
-	if server.Type != "http" {
-		t.Errorf("Type should be 'http', got %q", server.Type)
-	}
+	require.Equal(t, "http", server.Type, "Type should be 'http'")
 
 	expectedURL := "http://localhost:9000/worker/WORKER.3"
-	if server.URL != expectedURL {
-		t.Errorf("URL should be %q, got %q", expectedURL, server.URL)
-	}
+	require.Equal(t, expectedURL, server.URL, "URL mismatch")
 }
 
 func TestConfigToFlag(t *testing.T) {
 	input := `{"mcpServers":{"test":{"command":"test"}}}`
 	result := ConfigToFlag(input)
-	if result != input {
-		t.Errorf("ConfigToFlag = %q, want %q", result, input)
-	}
+	require.Equal(t, input, result, "ConfigToFlag mismatch")
 }
 
 func TestParseMCPConfig(t *testing.T) {
@@ -75,28 +65,18 @@ func TestParseMCPConfig(t *testing.T) {
 	config, err := ParseMCPConfig(input)
 	require.NoError(t, err, "ParseMCPConfig failed")
 
-	if len(config.MCPServers) != 2 {
-		t.Errorf("Server count = %d, want 2", len(config.MCPServers))
-	}
+	require.Len(t, config.MCPServers, 2, "Server count mismatch")
 
 	server1, ok := config.MCPServers["server1"]
 	require.True(t, ok, "Missing server1")
-	if server1.Command != "/bin/server1" {
-		t.Errorf("server1.Command = %q, want %q", server1.Command, "/bin/server1")
-	}
-	if len(server1.Args) != 1 || server1.Args[0] != "--flag" {
-		t.Errorf("server1.Args = %v, want [--flag]", server1.Args)
-	}
-	if server1.Env["KEY"] != "VALUE" {
-		t.Errorf("server1.Env[KEY] = %q, want %q", server1.Env["KEY"], "VALUE")
-	}
+	require.Equal(t, "/bin/server1", server1.Command, "server1.Command mismatch")
+	require.Equal(t, []string{"--flag"}, server1.Args, "server1.Args mismatch")
+	require.Equal(t, "VALUE", server1.Env["KEY"], "server1.Env[KEY] mismatch")
 }
 
 func TestParseMCPConfigInvalid(t *testing.T) {
 	_, err := ParseMCPConfig("not valid json")
-	if err == nil {
-		t.Error("Expected error for invalid JSON")
-	}
+	require.Error(t, err, "Expected error for invalid JSON")
 }
 
 func TestMCPConfigSerialization(t *testing.T) {
@@ -120,24 +100,18 @@ func TestMCPConfigSerialization(t *testing.T) {
 
 	server, ok := parsed.MCPServers["test-server"]
 	require.True(t, ok, "Missing test-server")
-	if server.Command != config.MCPServers["test-server"].Command {
-		t.Errorf("Command = %q, want %q", server.Command, config.MCPServers["test-server"].Command)
-	}
+	require.Equal(t, config.MCPServers["test-server"].Command, server.Command, "Command mismatch")
 }
 
 func TestGenerateCoordinatorConfigHTTP(t *testing.T) {
 	configJSON, err := GenerateCoordinatorConfigHTTP(9000)
 	require.NoError(t, err, "GenerateCoordinatorConfigHTTP failed")
 
-	var config MCPConfig
-	require.NoError(t, json.Unmarshal([]byte(configJSON), &config), "Failed to parse config")
+	var cfg MCPConfig
+	require.NoError(t, json.Unmarshal([]byte(configJSON), &cfg), "Failed to parse config")
 
-	server := config.MCPServers["perles-orchestrator"]
-	if server.Type != "http" {
-		t.Errorf("Type = %q, want \"http\"", server.Type)
-	}
+	server := cfg.MCPServers["perles-orchestrator"]
+	require.Equal(t, "http", server.Type, "Type mismatch")
 	expectedURL := "http://localhost:9000/mcp"
-	if server.URL != expectedURL {
-		t.Errorf("URL = %q, want %q", server.URL, expectedURL)
-	}
+	require.Equal(t, expectedURL, server.URL, "URL mismatch")
 }

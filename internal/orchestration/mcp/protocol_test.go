@@ -3,15 +3,15 @@ package mcp
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestRPCError_Error(t *testing.T) {
 	err := &RPCError{Code: -32600, Message: "Invalid Request"}
 	got := err.Error()
 	want := "RPC error -32600: Invalid Request"
-	if got != want {
-		t.Errorf("Error() = %q, want %q", got, want)
-	}
+	require.Equal(t, want, got, "Error() mismatch")
 }
 
 func TestErrorConstructors(t *testing.T) {
@@ -31,62 +31,38 @@ func TestErrorConstructors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.err.Code != tt.wantCode {
-				t.Errorf("Code = %d, want %d", tt.err.Code, tt.wantCode)
-			}
+			require.Equal(t, tt.wantCode, tt.err.Code, "Code mismatch")
 		})
 	}
 }
 
 func TestTextContent(t *testing.T) {
 	content := TextContent("hello world")
-	if content.Type != "text" {
-		t.Errorf("Type = %q, want %q", content.Type, "text")
-	}
-	if content.Text != "hello world" {
-		t.Errorf("Text = %q, want %q", content.Text, "hello world")
-	}
+	require.Equal(t, "text", content.Type, "Type mismatch")
+	require.Equal(t, "hello world", content.Text, "Text mismatch")
 }
 
 func TestSuccessResult(t *testing.T) {
 	result := SuccessResult("task completed")
-	if result.IsError {
-		t.Error("IsError should be false for success")
-	}
-	if len(result.Content) != 1 {
-		t.Fatalf("Content length = %d, want 1", len(result.Content))
-	}
-	if result.Content[0].Text != "task completed" {
-		t.Errorf("Text = %q, want %q", result.Content[0].Text, "task completed")
-	}
+	require.False(t, result.IsError, "IsError should be false for success")
+	require.Len(t, result.Content, 1, "Content length mismatch")
+	require.Equal(t, "task completed", result.Content[0].Text, "Text mismatch")
 }
 
 func TestErrorResult(t *testing.T) {
 	result := ErrorResult("something failed")
-	if !result.IsError {
-		t.Error("IsError should be true for error result")
-	}
-	if len(result.Content) != 1 {
-		t.Fatalf("Content length = %d, want 1", len(result.Content))
-	}
-	if result.Content[0].Text != "something failed" {
-		t.Errorf("Text = %q, want %q", result.Content[0].Text, "something failed")
-	}
+	require.True(t, result.IsError, "IsError should be true for error result")
+	require.Len(t, result.Content, 1, "Content length mismatch")
+	require.Equal(t, "something failed", result.Content[0].Text, "Text mismatch")
 }
 
 func TestNewResponse(t *testing.T) {
 	id := json.RawMessage(`1`)
 	resp := NewResponse(id, map[string]string{"key": "value"})
 
-	if resp.JSONRPC != JSONRPCVersion {
-		t.Errorf("JSONRPC = %q, want %q", resp.JSONRPC, JSONRPCVersion)
-	}
-	if string(resp.ID) != "1" {
-		t.Errorf("ID = %q, want %q", string(resp.ID), "1")
-	}
-	if resp.Error != nil {
-		t.Error("Error should be nil for success response")
-	}
+	require.Equal(t, JSONRPCVersion, resp.JSONRPC, "JSONRPC mismatch")
+	require.Equal(t, "1", string(resp.ID), "ID mismatch")
+	require.Nil(t, resp.Error, "Error should be nil for success response")
 }
 
 func TestNewErrorResponse(t *testing.T) {
@@ -94,18 +70,10 @@ func TestNewErrorResponse(t *testing.T) {
 	rpcErr := NewMethodNotFound("unknown_method")
 	resp := NewErrorResponse(id, rpcErr)
 
-	if resp.JSONRPC != JSONRPCVersion {
-		t.Errorf("JSONRPC = %q, want %q", resp.JSONRPC, JSONRPCVersion)
-	}
-	if string(resp.ID) != `"req-123"` {
-		t.Errorf("ID = %q, want %q", string(resp.ID), `"req-123"`)
-	}
-	if resp.Error == nil {
-		t.Error("Error should not be nil")
-	}
-	if resp.Error.Code != ErrCodeMethodNotFound {
-		t.Errorf("Error.Code = %d, want %d", resp.Error.Code, ErrCodeMethodNotFound)
-	}
+	require.Equal(t, JSONRPCVersion, resp.JSONRPC, "JSONRPC mismatch")
+	require.Equal(t, `"req-123"`, string(resp.ID), "ID mismatch")
+	require.NotNil(t, resp.Error, "Error should not be nil")
+	require.Equal(t, ErrCodeMethodNotFound, resp.Error.Code, "Error.Code mismatch")
 }
 
 func TestRequestSerialization(t *testing.T) {
@@ -117,18 +85,13 @@ func TestRequestSerialization(t *testing.T) {
 	}
 
 	data, err := json.Marshal(req)
-	if err != nil {
-		t.Fatalf("Marshal failed: %v", err)
-	}
+	require.NoError(t, err, "Marshal failed")
 
 	var parsed Request
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		t.Fatalf("Unmarshal failed: %v", err)
-	}
+	err = json.Unmarshal(data, &parsed)
+	require.NoError(t, err, "Unmarshal failed")
 
-	if parsed.Method != req.Method {
-		t.Errorf("Method = %q, want %q", parsed.Method, req.Method)
-	}
+	require.Equal(t, req.Method, parsed.Method, "Method mismatch")
 }
 
 func TestToolSerialization(t *testing.T) {
@@ -147,27 +110,16 @@ func TestToolSerialization(t *testing.T) {
 	}
 
 	data, err := json.Marshal(tool)
-	if err != nil {
-		t.Fatalf("Marshal failed: %v", err)
-	}
+	require.NoError(t, err, "Marshal failed")
 
 	var parsed Tool
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		t.Fatalf("Unmarshal failed: %v", err)
-	}
+	err = json.Unmarshal(data, &parsed)
+	require.NoError(t, err, "Unmarshal failed")
 
-	if parsed.Name != tool.Name {
-		t.Errorf("Name = %q, want %q", parsed.Name, tool.Name)
-	}
-	if parsed.Description != tool.Description {
-		t.Errorf("Description = %q, want %q", parsed.Description, tool.Description)
-	}
-	if len(parsed.InputSchema.Properties) != 2 {
-		t.Errorf("Properties length = %d, want 2", len(parsed.InputSchema.Properties))
-	}
-	if len(parsed.InputSchema.Required) != 1 {
-		t.Errorf("Required length = %d, want 1", len(parsed.InputSchema.Required))
-	}
+	require.Equal(t, tool.Name, parsed.Name, "Name mismatch")
+	require.Equal(t, tool.Description, parsed.Description, "Description mismatch")
+	require.Len(t, parsed.InputSchema.Properties, 2, "Properties length mismatch")
+	require.Len(t, parsed.InputSchema.Required, 1, "Required length mismatch")
 }
 
 func TestInitializeResultSerialization(t *testing.T) {
@@ -184,24 +136,15 @@ func TestInitializeResultSerialization(t *testing.T) {
 	}
 
 	data, err := json.Marshal(result)
-	if err != nil {
-		t.Fatalf("Marshal failed: %v", err)
-	}
+	require.NoError(t, err, "Marshal failed")
 
 	var parsed InitializeResult
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		t.Fatalf("Unmarshal failed: %v", err)
-	}
+	err = json.Unmarshal(data, &parsed)
+	require.NoError(t, err, "Unmarshal failed")
 
-	if parsed.ProtocolVersion != ProtocolVersion {
-		t.Errorf("ProtocolVersion = %q, want %q", parsed.ProtocolVersion, ProtocolVersion)
-	}
-	if parsed.ServerInfo.Name != "test-server" {
-		t.Errorf("ServerInfo.Name = %q, want %q", parsed.ServerInfo.Name, "test-server")
-	}
-	if parsed.Capabilities.Tools == nil {
-		t.Error("Capabilities.Tools should not be nil")
-	}
+	require.Equal(t, ProtocolVersion, parsed.ProtocolVersion, "ProtocolVersion mismatch")
+	require.Equal(t, "test-server", parsed.ServerInfo.Name, "ServerInfo.Name mismatch")
+	require.NotNil(t, parsed.Capabilities.Tools, "Capabilities.Tools should not be nil")
 }
 
 func TestToolCallParamsSerialization(t *testing.T) {
@@ -211,18 +154,13 @@ func TestToolCallParamsSerialization(t *testing.T) {
 	}
 
 	data, err := json.Marshal(params)
-	if err != nil {
-		t.Fatalf("Marshal failed: %v", err)
-	}
+	require.NoError(t, err, "Marshal failed")
 
 	var parsed ToolCallParams
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		t.Fatalf("Unmarshal failed: %v", err)
-	}
+	err = json.Unmarshal(data, &parsed)
+	require.NoError(t, err, "Unmarshal failed")
 
-	if parsed.Name != params.Name {
-		t.Errorf("Name = %q, want %q", parsed.Name, params.Name)
-	}
+	require.Equal(t, params.Name, parsed.Name, "Name mismatch")
 }
 
 func TestToolCallResultSerialization(t *testing.T) {
@@ -234,22 +172,13 @@ func TestToolCallResultSerialization(t *testing.T) {
 	}
 
 	data, err := json.Marshal(result)
-	if err != nil {
-		t.Fatalf("Marshal failed: %v", err)
-	}
+	require.NoError(t, err, "Marshal failed")
 
 	var parsed ToolCallResult
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		t.Fatalf("Unmarshal failed: %v", err)
-	}
+	err = json.Unmarshal(data, &parsed)
+	require.NoError(t, err, "Unmarshal failed")
 
-	if parsed.IsError {
-		t.Error("IsError should be false")
-	}
-	if len(parsed.Content) != 1 {
-		t.Fatalf("Content length = %d, want 1", len(parsed.Content))
-	}
-	if parsed.Content[0].Type != "text" {
-		t.Errorf("Content[0].Type = %q, want %q", parsed.Content[0].Type, "text")
-	}
+	require.False(t, parsed.IsError, "IsError should be false")
+	require.Len(t, parsed.Content, 1, "Content length mismatch")
+	require.Equal(t, "text", parsed.Content[0].Type, "Content[0].Type mismatch")
 }

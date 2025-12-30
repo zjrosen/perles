@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/zjrosen/perles/internal/mocks"
 	"github.com/zjrosen/perles/internal/orchestration/claude"
 	"github.com/zjrosen/perles/internal/orchestration/events"
@@ -86,9 +88,7 @@ func TestRace_ConcurrentWorkerAssignments(t *testing.T) {
 	close(errChan)
 
 	for err := range errChan {
-		if err != nil {
-			t.Errorf("Concurrent operation error: %v", err)
-		}
+		require.NoError(t, err, "Concurrent operation error")
 	}
 }
 
@@ -278,9 +278,7 @@ func TestRace_AssignTaskWhileValidating(t *testing.T) {
 		}
 	}
 
-	if len(assignedWorkers) > 1 {
-		t.Errorf("Race condition: Task assigned to multiple workers: %v", assignedWorkers)
-	}
+	require.LessOrEqual(t, len(assignedWorkers), 1, "Race condition: Task assigned to multiple workers: %v", assignedWorkers)
 }
 
 // TestRace_ReviewAssignmentWhileImplementing tests concurrent review and implementation.
@@ -350,9 +348,7 @@ func TestRace_ReviewAssignmentWhileImplementing(t *testing.T) {
 		}
 	}
 
-	if len(reviewers) > 1 {
-		t.Errorf("Race condition: Task has multiple reviewers: %v", reviewers)
-	}
+	require.LessOrEqual(t, len(reviewers), 1, "Race condition: Task has multiple reviewers: %v", reviewers)
 }
 
 // TestRace_MessagePostWhileRead tests concurrent message posting and reading.

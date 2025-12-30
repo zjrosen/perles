@@ -421,13 +421,10 @@ func TestTreeSubMode_EscKey_ReturnsToKanban(t *testing.T) {
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 
 	// Execute the command to get the message
-	if cmd != nil {
-		msg := cmd()
-		_, ok := msg.(ExitToKanbanMsg)
-		require.True(t, ok, "esc should return ExitToKanbanMsg")
-	} else {
-		t.Error("esc should return a command")
-	}
+	require.NotNil(t, cmd, "esc should return a command")
+	msg := cmd()
+	_, ok := msg.(ExitToKanbanMsg)
+	require.True(t, ok, "esc should return ExitToKanbanMsg")
 }
 
 func TestTreeSubMode_HelpKey_ShowsHelp(t *testing.T) {

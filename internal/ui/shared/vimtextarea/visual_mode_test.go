@@ -472,12 +472,8 @@ func TestSelectionBounds_Property_StartAlwaysBeforeOrEqualEnd(t *testing.T) {
 		start, end := m.SelectionBounds()
 
 		// Property: start should always be <= end lexicographically
-		if start.Row > end.Row {
-			t.Fatalf("start.Row (%d) > end.Row (%d)", start.Row, end.Row)
-		}
-		if start.Row == end.Row && start.Col > end.Col {
-			t.Fatalf("same row but start.Col (%d) > end.Col (%d)", start.Col, end.Col)
-		}
+		require.False(t, start.Row > end.Row, "start.Row (%d) > end.Row (%d)", start.Row, end.Row)
+		require.False(t, start.Row == end.Row && start.Col > end.Col, "same row but start.Col (%d) > end.Col (%d)", start.Col, end.Col)
 	})
 }
 
@@ -512,16 +508,12 @@ func TestSelectionBounds_Property_LinewiseModeFullLines(t *testing.T) {
 		start, end := m.SelectionBounds()
 
 		// Property: in line-wise mode, start.Col should always be 0
-		if start.Col != 0 {
-			t.Fatalf("line-wise mode should have start.Col = 0, got %d", start.Col)
-		}
+		require.Equal(t, 0, start.Col, "line-wise mode should have start.Col = 0")
 
 		// Property: in line-wise mode, end.Col should be line length
 		if end.Row < len(content) {
 			expectedEndCol := len(content[end.Row])
-			if end.Col != expectedEndCol {
-				t.Fatalf("line-wise mode should have end.Col = line length (%d), got %d", expectedEndCol, end.Col)
-			}
+			require.Equal(t, expectedEndCol, end.Col, "line-wise mode should have end.Col = line length")
 		}
 	})
 }
@@ -571,8 +563,8 @@ func TestSelectedText_Property_NotEmptyWhenInVisualMode(t *testing.T) {
 				}
 			}
 			if hasContent && len(content[anchorRow]) > 0 && len(content[cursorRow]) > 0 {
-				t.Fatalf("expected non-empty selection, got empty. anchor=(%d,%d) cursor=(%d,%d) content=%v",
-					anchorRow, anchorCol, cursorRow, cursorCol, content)
+				require.Fail(t, "expected non-empty selection, got empty",
+					"anchor=(%d,%d) cursor=(%d,%d) content=%v", anchorRow, anchorCol, cursorRow, cursorCol, content)
 			}
 		}
 	})
@@ -1199,24 +1191,16 @@ func TestVisualMode_Property_SelectionAtGraphemeBoundary(t *testing.T) {
 		start, end := m.SelectionBounds()
 
 		// Property: selection bounds should be valid grapheme indices
-		if start.Col < 0 || start.Col >= graphemeCount {
-			t.Fatalf("start.Col %d out of bounds [0, %d)", start.Col, graphemeCount)
-		}
-		if end.Col < 0 || end.Col >= graphemeCount {
-			t.Fatalf("end.Col %d out of bounds [0, %d)", end.Col, graphemeCount)
-		}
+		require.True(t, start.Col >= 0 && start.Col < graphemeCount, "start.Col %d out of bounds [0, %d)", start.Col, graphemeCount)
+		require.True(t, end.Col >= 0 && end.Col < graphemeCount, "end.Col %d out of bounds [0, %d)", end.Col, graphemeCount)
 
 		// Property: selected text should not be empty (since we have valid bounds)
 		text := m.SelectedText()
-		if text == "" && content != "" {
-			t.Fatalf("expected non-empty selection for content %q with bounds (%d, %d)", content, start.Col, end.Col)
-		}
+		require.False(t, text == "" && content != "", "expected non-empty selection for content %q with bounds (%d, %d)", content, start.Col, end.Col)
 
 		// Property: selected text should not contain partial graphemes
 		selectedGraphemes := GraphemeCount(text)
 		expectedCount := end.Col - start.Col + 1
-		if selectedGraphemes != expectedCount {
-			t.Fatalf("selection grapheme count mismatch: got %d, expected %d for selection %q", selectedGraphemes, expectedCount, text)
-		}
+		require.Equal(t, expectedCount, selectedGraphemes, "selection grapheme count mismatch for selection %q", text)
 	})
 }

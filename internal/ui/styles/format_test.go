@@ -1,6 +1,10 @@
 package styles
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestFormatCommentIndicator(t *testing.T) {
 	tests := []struct {
@@ -19,10 +23,7 @@ func TestFormatCommentIndicator(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := FormatCommentIndicator(tt.count)
-			if got != tt.expected {
-				t.Errorf("FormatCommentIndicator(%d) = %q, want %q",
-					tt.count, got, tt.expected)
-			}
+			require.Equal(t, tt.expected, got, "FormatCommentIndicator(%d)", tt.count)
 		})
 	}
 }

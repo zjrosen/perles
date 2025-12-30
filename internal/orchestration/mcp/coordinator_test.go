@@ -55,17 +55,13 @@ func TestCoordinatorServer_RegistersAllTools(t *testing.T) {
 	}
 
 	for _, toolName := range expectedTools {
-		if _, ok := cs.tools[toolName]; !ok {
-			t.Errorf("Tool %q not registered", toolName)
-		}
-		if _, ok := cs.handlers[toolName]; !ok {
-			t.Errorf("Handler for %q not registered", toolName)
-		}
+		_, ok := cs.tools[toolName]
+		require.True(t, ok, "Tool %q not registered", toolName)
+		_, ok = cs.handlers[toolName]
+		require.True(t, ok, "Handler for %q not registered", toolName)
 	}
 
-	if len(cs.tools) != len(expectedTools) {
-		t.Errorf("Tool count = %d, want %d", len(cs.tools), len(expectedTools))
-	}
+	require.Equal(t, len(expectedTools), len(cs.tools), "Tool count mismatch")
 }
 
 // TestCoordinatorServer_ToolSchemas verifies tool schemas are valid.
@@ -77,17 +73,11 @@ func TestCoordinatorServer_ToolSchemas(t *testing.T) {
 
 	for name, tool := range cs.tools {
 		t.Run(name, func(t *testing.T) {
-			if tool.Name == "" {
-				t.Error("Tool name is empty")
-			}
-			if tool.Description == "" {
-				t.Error("Tool description is empty")
-			}
-			if tool.InputSchema == nil {
-				t.Error("Tool inputSchema is nil")
-			}
-			if tool.InputSchema != nil && tool.InputSchema.Type != "object" {
-				t.Errorf("InputSchema.Type = %q, want %q", tool.InputSchema.Type, "object")
+			require.NotEmpty(t, tool.Name, "Tool name is empty")
+			require.NotEmpty(t, tool.Description, "Tool description is empty")
+			require.NotNil(t, tool.InputSchema, "Tool inputSchema is nil")
+			if tool.InputSchema != nil {
+				require.Equal(t, "object", tool.InputSchema.Type, "InputSchema.Type mismatch")
 			}
 		})
 	}
@@ -105,9 +95,7 @@ func TestCoordinatorServer_SpawnWorker(t *testing.T) {
 	// spawn_worker takes no args, so empty args should be accepted (but will fail to actually spawn)
 	_, err := handler(context.Background(), json.RawMessage(`{}`))
 	// Expect error because we can't actually spawn Claude in a unit test
-	if err == nil {
-		t.Error("Expected error when spawning worker (no Claude available)")
-	}
+	require.Error(t, err, "Expected error when spawning worker (no Claude available)")
 }
 
 // TestCoordinatorServer_AssignTaskValidation tests input validation for assign_task.
@@ -153,9 +141,7 @@ func TestCoordinatorServer_AssignTaskValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := handler(context.Background(), json.RawMessage(tt.args))
-			if (err != nil) != tt.wantErr {
-				t.Errorf("error = %v, wantErr = %v", err, tt.wantErr)
-			}
+			require.Equal(t, tt.wantErr, err != nil, "error = %v, wantErr = %v", err, tt.wantErr)
 		})
 	}
 }
@@ -193,9 +179,7 @@ func TestCoordinatorServer_ReplaceWorkerValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := handler(context.Background(), json.RawMessage(tt.args))
-			if (err != nil) != tt.wantErr {
-				t.Errorf("error = %v, wantErr = %v", err, tt.wantErr)
-			}
+			require.Equal(t, tt.wantErr, err != nil, "error = %v, wantErr = %v", err, tt.wantErr)
 		})
 	}
 }
@@ -233,9 +217,7 @@ func TestCoordinatorServer_SendToWorkerValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := handler(context.Background(), json.RawMessage(tt.args))
-			if (err != nil) != tt.wantErr {
-				t.Errorf("error = %v, wantErr = %v", err, tt.wantErr)
-			}
+			require.Equal(t, tt.wantErr, err != nil, "error = %v, wantErr = %v", err, tt.wantErr)
 		})
 	}
 }
@@ -274,9 +256,7 @@ func TestCoordinatorServer_PostMessageValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := handler(context.Background(), json.RawMessage(tt.args))
-			if (err != nil) != tt.wantErr {
-				t.Errorf("error = %v, wantErr = %v", err, tt.wantErr)
-			}
+			require.Equal(t, tt.wantErr, err != nil, "error = %v, wantErr = %v", err, tt.wantErr)
 		})
 	}
 }
@@ -309,9 +289,7 @@ func TestCoordinatorServer_GetTaskStatusValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := handler(context.Background(), json.RawMessage(tt.args))
-			if (err != nil) != tt.wantErr {
-				t.Errorf("error = %v, wantErr = %v", err, tt.wantErr)
-			}
+			require.Equal(t, tt.wantErr, err != nil, "error = %v, wantErr = %v", err, tt.wantErr)
 		})
 	}
 }
@@ -344,9 +322,7 @@ func TestCoordinatorServer_MarkTaskCompleteValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := handler(context.Background(), json.RawMessage(tt.args))
-			if (err != nil) != tt.wantErr {
-				t.Errorf("error = %v, wantErr = %v", err, tt.wantErr)
-			}
+			require.Equal(t, tt.wantErr, err != nil, "error = %v, wantErr = %v", err, tt.wantErr)
 		})
 	}
 }
@@ -389,9 +365,7 @@ func TestCoordinatorServer_MarkTaskFailedValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := handler(context.Background(), json.RawMessage(tt.args))
-			if (err != nil) != tt.wantErr {
-				t.Errorf("error = %v, wantErr = %v", err, tt.wantErr)
-			}
+			require.Equal(t, tt.wantErr, err != nil, "error = %v, wantErr = %v", err, tt.wantErr)
 		})
 	}
 }
@@ -405,9 +379,7 @@ func TestCoordinatorServer_ReadMessageLogNoIssue(t *testing.T) {
 	handler := cs.handlers["read_message_log"]
 
 	_, err := handler(context.Background(), json.RawMessage(`{}`))
-	if err == nil {
-		t.Error("Expected error when message issue is nil")
-	}
+	require.Error(t, err, "Expected error when message issue is nil")
 }
 
 // TestCoordinatorServer_GetPool tests the pool accessor.
@@ -417,9 +389,7 @@ func TestCoordinatorServer_GetPool(t *testing.T) {
 
 	cs := NewCoordinatorServer(claude.NewClient(), workerPool, nil, "/tmp/test", 8765, nil, mocks.NewMockBeadsExecutor(t))
 
-	if cs.pool != workerPool {
-		t.Error("GetPool() did not return the expected pool")
-	}
+	require.Equal(t, workerPool, cs.pool, "GetPool() did not return the expected pool")
 }
 
 // TestCoordinatorServer_GetMessageIssue tests the message issue accessor.
@@ -429,9 +399,7 @@ func TestCoordinatorServer_GetMessageIssue(t *testing.T) {
 
 	cs := NewCoordinatorServer(claude.NewClient(), workerPool, nil, "/tmp/test", 8765, nil, mocks.NewMockBeadsExecutor(t))
 
-	if cs.msgIssue != nil {
-		t.Error("GetMessageIssue() should return nil when no issue is set")
-	}
+	require.Nil(t, cs.msgIssue, "GetMessageIssue() should return nil when no issue is set")
 }
 
 // TestCoordinatorServer_Instructions tests that instructions are set correctly.
@@ -441,15 +409,9 @@ func TestCoordinatorServer_Instructions(t *testing.T) {
 
 	cs := NewCoordinatorServer(claude.NewClient(), workerPool, nil, "/tmp/test", 8765, nil, mocks.NewMockBeadsExecutor(t))
 
-	if cs.instructions == "" {
-		t.Error("Instructions should be set")
-	}
-	if cs.info.Name != "perles-orchestrator" {
-		t.Errorf("Server name = %q, want %q", cs.info.Name, "perles-orchestrator")
-	}
-	if cs.info.Version != "1.0.0" {
-		t.Errorf("Server version = %q, want %q", cs.info.Version, "1.0.0")
-	}
+	require.NotEmpty(t, cs.instructions, "Instructions should be set")
+	require.Equal(t, "perles-orchestrator", cs.info.Name, "Server name mismatch")
+	require.Equal(t, "1.0.0", cs.info.Version, "Server version mismatch")
 }
 
 // TestIsValidTaskID tests task ID validation.
@@ -489,9 +451,7 @@ func TestIsValidTaskID(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := isValidTaskID(tt.taskID)
-			if got != tt.want {
-				t.Errorf("IsValidTaskID(%q) = %v, want %v", tt.taskID, got, tt.want)
-			}
+			require.Equal(t, tt.want, got, "IsValidTaskID(%q) = %v, want %v", tt.taskID, got, tt.want)
 		})
 	}
 }
@@ -517,9 +477,7 @@ func TestCoordinatorServer_AssignTaskInvalidTaskID(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			args := `{"worker_id": "worker-1", "task_id": "` + tt.taskID + `"}`
 			_, err := handler(context.Background(), json.RawMessage(args))
-			if err == nil {
-				t.Errorf("Expected error for invalid task_id %q", tt.taskID)
-			}
+			require.Error(t, err, "Expected error for invalid task_id %q", tt.taskID)
 		})
 	}
 }
@@ -533,13 +491,9 @@ func TestCoordinatorServer_ListWorkers_NoWorkers(t *testing.T) {
 	handler := cs.handlers["list_workers"]
 
 	result, err := handler(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
+	require.NoError(t, err, "Unexpected error")
 
-	if result.Content[0].Text != "No active workers." {
-		t.Errorf("Expected 'No active workers.', got %q", result.Content[0].Text)
-	}
+	require.Equal(t, "No active workers.", result.Content[0].Text, "Expected 'No active workers.'")
 }
 
 // TestCoordinatorServer_ListWorkers_WithWorkers verifies list_workers returns worker info JSON.
@@ -555,13 +509,9 @@ func TestCoordinatorServer_ListWorkers_WithWorkers(t *testing.T) {
 	handler := cs.handlers["list_workers"]
 
 	result, err := handler(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
+	require.NoError(t, err, "Unexpected error")
 
-	if result.Content[0].Text == "" {
-		t.Error("Expected non-empty result")
-	}
+	require.NotEmpty(t, result.Content[0].Text, "Expected non-empty result")
 }
 
 // TestPrepareHandoff_PostsMessage verifies tool posts message with correct type and content.
@@ -577,34 +527,20 @@ func TestPrepareHandoff_PostsMessage(t *testing.T) {
 	args := `{"summary": "` + summary + `"}`
 
 	result, err := handler(context.Background(), json.RawMessage(args))
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
+	require.NoError(t, err, "Unexpected error")
 
-	if result.Content[0].Text != "Handoff message posted. Refresh will proceed." {
-		t.Errorf("Unexpected result: %q", result.Content[0].Text)
-	}
+	require.Equal(t, "Handoff message posted. Refresh will proceed.", result.Content[0].Text, "Unexpected result")
 
 	// Verify message was posted to the issue
 	entries := msgIssue.Entries()
-	if len(entries) != 1 {
-		t.Fatalf("Expected 1 message, got %d", len(entries))
-	}
+	require.Len(t, entries, 1, "Expected 1 message")
 
 	entry := entries[0]
-	if entry.Type != message.MessageHandoff {
-		t.Errorf("Message type = %q, want %q", entry.Type, message.MessageHandoff)
-	}
-	if entry.From != message.ActorCoordinator {
-		t.Errorf("From = %q, want %q", entry.From, message.ActorCoordinator)
-	}
-	if entry.To != message.ActorAll {
-		t.Errorf("To = %q, want %q", entry.To, message.ActorAll)
-	}
+	require.Equal(t, message.MessageHandoff, entry.Type, "Message type mismatch")
+	require.Equal(t, message.ActorCoordinator, entry.From, "From mismatch")
+	require.Equal(t, message.ActorAll, entry.To, "To mismatch")
 	expectedContent := "[HANDOFF]\n" + summary
-	if entry.Content != expectedContent {
-		t.Errorf("Content = %q, want %q", entry.Content, expectedContent)
-	}
+	require.Equal(t, expectedContent, entry.Content, "Content mismatch")
 }
 
 // TestPrepareHandoff_EmptySummary verifies error returned when summary is empty.
@@ -633,9 +569,7 @@ func TestPrepareHandoff_EmptySummary(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := handler(context.Background(), json.RawMessage(tt.args))
-			if err == nil {
-				t.Error("Expected error for empty summary")
-			}
+			require.Error(t, err, "Expected error for empty summary")
 		})
 	}
 }
@@ -651,9 +585,7 @@ func TestPrepareHandoff_NoMessageIssue(t *testing.T) {
 
 	args := `{"summary": "Test summary"}`
 	_, err := handler(context.Background(), json.RawMessage(args))
-	if err == nil {
-		t.Error("Expected error when message issue is nil")
-	}
+	require.Error(t, err, "Expected error when message issue is nil")
 }
 
 // TestWorkerRole_Values verifies WorkerRole constant values.
@@ -668,9 +600,7 @@ func TestWorkerRole_Values(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(string(tt.role), func(t *testing.T) {
-			if string(tt.role) != tt.expected {
-				t.Errorf("WorkerRole %q != %q", tt.role, tt.expected)
-			}
+			require.Equal(t, tt.expected, string(tt.role), "WorkerRole mismatch")
 		})
 	}
 }
@@ -691,9 +621,7 @@ func TestTaskWorkflowStatus_Values(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(string(tt.status), func(t *testing.T) {
-			if string(tt.status) != tt.expected {
-				t.Errorf("TaskWorkflowStatus %q != %q", tt.status, tt.expected)
-			}
+			require.Equal(t, tt.expected, string(tt.status), "TaskWorkflowStatus mismatch")
 		})
 	}
 }
@@ -710,18 +638,10 @@ func TestWorkerAssignment_Fields(t *testing.T) {
 		ReviewerID:    "",
 	}
 
-	if wa.TaskID != "perles-abc.1" {
-		t.Errorf("TaskID = %q, want %q", wa.TaskID, "perles-abc.1")
-	}
-	if wa.Role != RoleImplementer {
-		t.Errorf("Role = %q, want %q", wa.Role, RoleImplementer)
-	}
-	if wa.Phase != events.PhaseImplementing {
-		t.Errorf("Phase = %q, want %q", wa.Phase, events.PhaseImplementing)
-	}
-	if !wa.AssignedAt.Equal(now) {
-		t.Errorf("AssignedAt = %v, want %v", wa.AssignedAt, now)
-	}
+	require.Equal(t, "perles-abc.1", wa.TaskID, "TaskID mismatch")
+	require.Equal(t, RoleImplementer, wa.Role, "Role mismatch")
+	require.Equal(t, events.PhaseImplementing, wa.Phase, "Phase mismatch")
+	require.True(t, wa.AssignedAt.Equal(now), "AssignedAt mismatch")
 }
 
 // TestWorkerAssignment_ReviewerFields verifies reviewer-specific fields.
@@ -736,12 +656,8 @@ func TestWorkerAssignment_ReviewerFields(t *testing.T) {
 		ReviewerID:    "",
 	}
 
-	if wa.Role != RoleReviewer {
-		t.Errorf("Role = %q, want %q", wa.Role, RoleReviewer)
-	}
-	if wa.ImplementerID != "worker-1" {
-		t.Errorf("ImplementerID = %q, want %q", wa.ImplementerID, "worker-1")
-	}
+	require.Equal(t, RoleReviewer, wa.Role, "Role mismatch")
+	require.Equal(t, "worker-1", wa.ImplementerID, "ImplementerID mismatch")
 }
 
 // TestTaskAssignment_Fields verifies TaskAssignment struct can be created and fields are accessible.
@@ -757,24 +673,12 @@ func TestTaskAssignment_Fields(t *testing.T) {
 		ReviewStartedAt: reviewTime,
 	}
 
-	if ta.TaskID != "perles-abc.1" {
-		t.Errorf("TaskID = %q, want %q", ta.TaskID, "perles-abc.1")
-	}
-	if ta.Implementer != "worker-1" {
-		t.Errorf("Implementer = %q, want %q", ta.Implementer, "worker-1")
-	}
-	if ta.Reviewer != "worker-2" {
-		t.Errorf("Reviewer = %q, want %q", ta.Reviewer, "worker-2")
-	}
-	if ta.Status != TaskInReview {
-		t.Errorf("Status = %q, want %q", ta.Status, TaskInReview)
-	}
-	if !ta.StartedAt.Equal(startTime) {
-		t.Errorf("StartedAt = %v, want %v", ta.StartedAt, startTime)
-	}
-	if !ta.ReviewStartedAt.Equal(reviewTime) {
-		t.Errorf("ReviewStartedAt = %v, want %v", ta.ReviewStartedAt, reviewTime)
-	}
+	require.Equal(t, "perles-abc.1", ta.TaskID, "TaskID mismatch")
+	require.Equal(t, "worker-1", ta.Implementer, "Implementer mismatch")
+	require.Equal(t, "worker-2", ta.Reviewer, "Reviewer mismatch")
+	require.Equal(t, TaskInReview, ta.Status, "Status mismatch")
+	require.True(t, ta.StartedAt.Equal(startTime), "StartedAt mismatch")
+	require.True(t, ta.ReviewStartedAt.Equal(reviewTime), "ReviewStartedAt mismatch")
 }
 
 // TestCoordinatorServer_MapsInitialized verifies workerAssignments and taskAssignments maps are initialized.
@@ -784,31 +688,19 @@ func TestCoordinatorServer_MapsInitialized(t *testing.T) {
 
 	cs := NewCoordinatorServer(claude.NewClient(), workerPool, nil, "/tmp/test", 8765, nil, mocks.NewMockBeadsExecutor(t))
 
-	if cs.workerAssignments == nil {
-		t.Error("workerAssignments map is nil, should be initialized")
-	}
-	if cs.taskAssignments == nil {
-		t.Error("taskAssignments map is nil, should be initialized")
-	}
+	require.NotNil(t, cs.workerAssignments, "workerAssignments map is nil, should be initialized")
+	require.NotNil(t, cs.taskAssignments, "taskAssignments map is nil, should be initialized")
 
 	// Verify maps are empty but usable
-	if len(cs.workerAssignments) != 0 {
-		t.Errorf("workerAssignments should be empty, has %d entries", len(cs.workerAssignments))
-	}
-	if len(cs.taskAssignments) != 0 {
-		t.Errorf("taskAssignments should be empty, has %d entries", len(cs.taskAssignments))
-	}
+	require.Empty(t, cs.workerAssignments, "workerAssignments should be empty")
+	require.Empty(t, cs.taskAssignments, "taskAssignments should be empty")
 
 	// Verify we can write to and read from the maps
 	cs.workerAssignments["worker-1"] = &WorkerAssignment{TaskID: "test-task"}
-	if cs.workerAssignments["worker-1"].TaskID != "test-task" {
-		t.Error("Failed to write/read workerAssignments")
-	}
+	require.Equal(t, "test-task", cs.workerAssignments["worker-1"].TaskID, "Failed to write/read workerAssignments")
 
 	cs.taskAssignments["test-task"] = &TaskAssignment{Implementer: "worker-1"}
-	if cs.taskAssignments["test-task"].Implementer != "worker-1" {
-		t.Error("Failed to write/read taskAssignments")
-	}
+	require.Equal(t, "worker-1", cs.taskAssignments["test-task"].Implementer, "Failed to write/read taskAssignments")
 }
 
 // TestValidateTaskAssignment_TaskAlreadyAssigned verifies error when task already has an implementer.
@@ -826,12 +718,8 @@ func TestValidateTaskAssignment_TaskAlreadyAssigned(t *testing.T) {
 	}
 
 	err := cs.validateTaskAssignment("worker-2", "perles-abc.1")
-	if err == nil {
-		t.Error("Expected error when task already assigned")
-	}
-	if err.Error() != "task perles-abc.1 already assigned to worker-1" {
-		t.Errorf("Unexpected error message: %v", err)
-	}
+	require.Error(t, err, "Expected error when task already assigned")
+	require.Equal(t, "task perles-abc.1 already assigned to worker-1", err.Error(), "Unexpected error message")
 }
 
 // TestValidateTaskAssignment_WorkerAlreadyHasTask verifies error when worker already has an assignment.
@@ -849,12 +737,8 @@ func TestValidateTaskAssignment_WorkerAlreadyHasTask(t *testing.T) {
 	}
 
 	err := cs.validateTaskAssignment("worker-1", "perles-abc.1")
-	if err == nil {
-		t.Error("Expected error when worker already has task")
-	}
-	if err.Error() != "worker worker-1 already assigned to task perles-xyz.1" {
-		t.Errorf("Unexpected error message: %v", err)
-	}
+	require.Error(t, err, "Expected error when worker already has task")
+	require.Equal(t, "worker worker-1 already assigned to task perles-xyz.1", err.Error(), "Unexpected error message")
 }
 
 // TestValidateTaskAssignment_WorkerNotFound verifies error when worker doesn't exist.
@@ -865,12 +749,8 @@ func TestValidateTaskAssignment_WorkerNotFound(t *testing.T) {
 	cs := NewCoordinatorServer(claude.NewClient(), workerPool, nil, "/tmp/test", 8765, nil, mocks.NewMockBeadsExecutor(t))
 
 	err := cs.validateTaskAssignment("nonexistent-worker", "perles-abc.1")
-	if err == nil {
-		t.Error("Expected error when worker not found")
-	}
-	if err.Error() != "worker nonexistent-worker not found" {
-		t.Errorf("Unexpected error message: %v", err)
-	}
+	require.Error(t, err, "Expected error when worker not found")
+	require.Equal(t, "worker nonexistent-worker not found", err.Error(), "Unexpected error message")
 }
 
 // TestValidateTaskAssignment_WorkerNotReady verifies error when worker is not in Ready status.
@@ -884,13 +764,9 @@ func TestValidateTaskAssignment_WorkerNotReady(t *testing.T) {
 	_ = workerPool.AddTestWorker("worker-1", pool.WorkerWorking)
 
 	err := cs.validateTaskAssignment("worker-1", "perles-abc.1")
-	if err == nil {
-		t.Error("Expected error when worker not ready")
-	}
+	require.Error(t, err, "Expected error when worker not ready")
 	expectedMsg := "worker worker-1 is not ready (status: working)"
-	if err.Error() != expectedMsg {
-		t.Errorf("Expected error %q, got %q", expectedMsg, err.Error())
-	}
+	require.Equal(t, expectedMsg, err.Error(), "Error message mismatch")
 }
 
 // TestValidateTaskAssignment_Success verifies no error when all conditions are met.
@@ -904,9 +780,7 @@ func TestValidateTaskAssignment_Success(t *testing.T) {
 	_ = workerPool.AddTestWorker("worker-1", pool.WorkerReady)
 
 	err := cs.validateTaskAssignment("worker-1", "perles-abc.1")
-	if err != nil {
-		t.Errorf("Expected no error, got: %v", err)
-	}
+	require.NoError(t, err, "Expected no error")
 }
 
 // TestValidateReviewAssignment_SameAsImplementer verifies error when reviewer == implementer.
@@ -917,12 +791,8 @@ func TestValidateReviewAssignment_SameAsImplementer(t *testing.T) {
 	cs := NewCoordinatorServer(claude.NewClient(), workerPool, nil, "/tmp/test", 8765, nil, mocks.NewMockBeadsExecutor(t))
 
 	err := cs.validateReviewAssignment("worker-1", "perles-abc.1", "worker-1")
-	if err == nil {
-		t.Error("Expected error when reviewer is same as implementer")
-	}
-	if err.Error() != "reviewer cannot be the same as implementer" {
-		t.Errorf("Unexpected error message: %v", err)
-	}
+	require.Error(t, err, "Expected error when reviewer is same as implementer")
+	require.Equal(t, "reviewer cannot be the same as implementer", err.Error(), "Unexpected error message")
 }
 
 // TestValidateReviewAssignment_TaskNotFound verifies error when task doesn't exist.
@@ -933,12 +803,8 @@ func TestValidateReviewAssignment_TaskNotFound(t *testing.T) {
 	cs := NewCoordinatorServer(claude.NewClient(), workerPool, nil, "/tmp/test", 8765, nil, mocks.NewMockBeadsExecutor(t))
 
 	err := cs.validateReviewAssignment("worker-2", "perles-abc.1", "worker-1")
-	if err == nil {
-		t.Error("Expected error when task not found")
-	}
-	if err.Error() != "task perles-abc.1 not found or implementer mismatch" {
-		t.Errorf("Unexpected error message: %v", err)
-	}
+	require.Error(t, err, "Expected error when task not found")
+	require.Equal(t, "task perles-abc.1 not found or implementer mismatch", err.Error(), "Unexpected error message")
 }
 
 // TestValidateReviewAssignment_ImplementerMismatch verifies error when implementer doesn't match.
@@ -955,12 +821,8 @@ func TestValidateReviewAssignment_ImplementerMismatch(t *testing.T) {
 	}
 
 	err := cs.validateReviewAssignment("worker-2", "perles-abc.1", "worker-1")
-	if err == nil {
-		t.Error("Expected error when implementer mismatch")
-	}
-	if err.Error() != "task perles-abc.1 not found or implementer mismatch" {
-		t.Errorf("Unexpected error message: %v", err)
-	}
+	require.Error(t, err, "Expected error when implementer mismatch")
+	require.Equal(t, "task perles-abc.1 not found or implementer mismatch", err.Error(), "Unexpected error message")
 }
 
 // TestValidateReviewAssignment_NotAwaitingReview verifies error when implementer not in AwaitingReview phase.
@@ -984,13 +846,9 @@ func TestValidateReviewAssignment_NotAwaitingReview(t *testing.T) {
 	}
 
 	err := cs.validateReviewAssignment("worker-2", "perles-abc.1", "worker-1")
-	if err == nil {
-		t.Error("Expected error when implementer not awaiting review")
-	}
+	require.Error(t, err, "Expected error when implementer not awaiting review")
 	expectedMsg := "implementer worker-1 is not awaiting review (phase: implementing)"
-	if err.Error() != expectedMsg {
-		t.Errorf("Expected error %q, got %q", expectedMsg, err.Error())
-	}
+	require.Equal(t, expectedMsg, err.Error(), "Error message mismatch")
 }
 
 // TestValidateReviewAssignment_AlreadyHasReviewer verifies error when task already has a reviewer.
@@ -1015,12 +873,8 @@ func TestValidateReviewAssignment_AlreadyHasReviewer(t *testing.T) {
 	}
 
 	err := cs.validateReviewAssignment("worker-2", "perles-abc.1", "worker-1")
-	if err == nil {
-		t.Error("Expected error when task already has reviewer")
-	}
-	if err.Error() != "task perles-abc.1 already has reviewer worker-3" {
-		t.Errorf("Unexpected error message: %v", err)
-	}
+	require.Error(t, err, "Expected error when task already has reviewer")
+	require.Equal(t, "task perles-abc.1 already has reviewer worker-3", err.Error(), "Unexpected error message")
 }
 
 // TestValidateReviewAssignment_ReviewerNotReady verifies error when reviewer is not Ready.
@@ -1043,12 +897,8 @@ func TestValidateReviewAssignment_ReviewerNotReady(t *testing.T) {
 
 	// Reviewer doesn't exist in pool
 	err := cs.validateReviewAssignment("worker-2", "perles-abc.1", "worker-1")
-	if err == nil {
-		t.Error("Expected error when reviewer not found")
-	}
-	if err.Error() != "reviewer worker-2 is not ready" {
-		t.Errorf("Unexpected error message: %v", err)
-	}
+	require.Error(t, err, "Expected error when reviewer not found")
+	require.Equal(t, "reviewer worker-2 is not ready", err.Error(), "Unexpected error message")
 }
 
 // TestValidateReviewAssignment_Success verifies no error when all conditions are met.
@@ -1073,9 +923,7 @@ func TestValidateReviewAssignment_Success(t *testing.T) {
 	_ = workerPool.AddTestWorker("worker-2", pool.WorkerReady)
 
 	err := cs.validateReviewAssignment("worker-2", "perles-abc.1", "worker-1")
-	if err != nil {
-		t.Errorf("Expected no error, got: %v", err)
-	}
+	require.NoError(t, err, "Expected no error")
 }
 
 // TestDetectOrphanedTasks_NoOrphans verifies empty result when no orphans.
@@ -1097,9 +945,7 @@ func TestDetectOrphanedTasks_NoOrphans(t *testing.T) {
 	}
 
 	orphans := cs.detectOrphanedTasks()
-	if len(orphans) != 0 {
-		t.Errorf("Expected no orphans, got %d: %v", len(orphans), orphans)
-	}
+	require.Empty(t, orphans, "Expected no orphans")
 }
 
 // TestDetectOrphanedTasks_RetiredImplementer verifies orphan detected when implementer is retired.
@@ -1119,12 +965,8 @@ func TestDetectOrphanedTasks_RetiredImplementer(t *testing.T) {
 	}
 
 	orphans := cs.detectOrphanedTasks()
-	if len(orphans) != 1 {
-		t.Errorf("Expected 1 orphan, got %d: %v", len(orphans), orphans)
-	}
-	if orphans[0] != "perles-abc.1" {
-		t.Errorf("Expected orphan perles-abc.1, got %s", orphans[0])
-	}
+	require.Len(t, orphans, 1, "Expected 1 orphan")
+	require.Equal(t, "perles-abc.1", orphans[0], "Expected orphan perles-abc.1")
 }
 
 // TestDetectOrphanedTasks_MissingImplementer verifies orphan detected when implementer is missing from pool.
@@ -1141,9 +983,7 @@ func TestDetectOrphanedTasks_MissingImplementer(t *testing.T) {
 	}
 
 	orphans := cs.detectOrphanedTasks()
-	if len(orphans) != 1 {
-		t.Errorf("Expected 1 orphan, got %d: %v", len(orphans), orphans)
-	}
+	require.Len(t, orphans, 1, "Expected 1 orphan")
 }
 
 // TestDetectOrphanedTasks_RetiredReviewer verifies orphan detected when reviewer is retired.
@@ -1165,9 +1005,7 @@ func TestDetectOrphanedTasks_RetiredReviewer(t *testing.T) {
 	}
 
 	orphans := cs.detectOrphanedTasks()
-	if len(orphans) != 1 {
-		t.Errorf("Expected 1 orphan, got %d: %v", len(orphans), orphans)
-	}
+	require.Len(t, orphans, 1, "Expected 1 orphan")
 }
 
 // TestCheckStuckWorkers_NoStuck verifies empty result when no stuck workers.
@@ -1184,9 +1022,7 @@ func TestCheckStuckWorkers_NoStuck(t *testing.T) {
 	}
 
 	stuck := cs.checkStuckWorkers()
-	if len(stuck) != 0 {
-		t.Errorf("Expected no stuck workers, got %d: %v", len(stuck), stuck)
-	}
+	require.Empty(t, stuck, "Expected no stuck workers")
 }
 
 // TestCheckStuckWorkers_ExceededDuration verifies stuck worker detected when exceeding MaxTaskDuration.
@@ -1203,12 +1039,8 @@ func TestCheckStuckWorkers_ExceededDuration(t *testing.T) {
 	}
 
 	stuck := cs.checkStuckWorkers()
-	if len(stuck) != 1 {
-		t.Errorf("Expected 1 stuck worker, got %d: %v", len(stuck), stuck)
-	}
-	if stuck[0] != "worker-1" {
-		t.Errorf("Expected stuck worker worker-1, got %s", stuck[0])
-	}
+	require.Len(t, stuck, 1, "Expected 1 stuck worker")
+	require.Equal(t, "worker-1", stuck[0], "Expected stuck worker worker-1")
 }
 
 // TestCheckStuckWorkers_NoTask verifies workers without tasks are not considered stuck.
@@ -1225,17 +1057,13 @@ func TestCheckStuckWorkers_NoTask(t *testing.T) {
 	}
 
 	stuck := cs.checkStuckWorkers()
-	if len(stuck) != 0 {
-		t.Errorf("Expected no stuck workers (idle worker), got %d: %v", len(stuck), stuck)
-	}
+	require.Empty(t, stuck, "Expected no stuck workers (idle worker)")
 }
 
 // TestMaxTaskDuration verifies the constant value.
 func TestMaxTaskDuration(t *testing.T) {
 	expected := 30 * time.Minute
-	if MaxTaskDuration != expected {
-		t.Errorf("MaxTaskDuration = %v, want %v", MaxTaskDuration, expected)
-	}
+	require.Equal(t, expected, MaxTaskDuration, "MaxTaskDuration mismatch")
 }
 
 // TestQueryWorkerState_NoWorkers verifies query_worker_state returns empty when no workers exist.
@@ -1247,25 +1075,16 @@ func TestQueryWorkerState_NoWorkers(t *testing.T) {
 	handler := cs.handlers["query_worker_state"]
 
 	result, err := handler(context.Background(), json.RawMessage(`{}`))
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
+	require.NoError(t, err, "Unexpected error")
 
 	// Parse response
 	var response workerStateResponse
-	if err := json.Unmarshal([]byte(result.Content[0].Text), &response); err != nil {
-		t.Fatalf("Failed to parse response: %v", err)
-	}
+	err = json.Unmarshal([]byte(result.Content[0].Text), &response)
+	require.NoError(t, err, "Failed to parse response")
 
-	if len(response.Workers) != 0 {
-		t.Errorf("Expected 0 workers, got %d", len(response.Workers))
-	}
-	if len(response.TaskAssignments) != 0 {
-		t.Errorf("Expected 0 task assignments, got %d", len(response.TaskAssignments))
-	}
-	if len(response.ReadyWorkers) != 0 {
-		t.Errorf("Expected 0 ready workers, got %d", len(response.ReadyWorkers))
-	}
+	require.Empty(t, response.Workers, "Expected 0 workers")
+	require.Empty(t, response.TaskAssignments, "Expected 0 task assignments")
+	require.Empty(t, response.ReadyWorkers, "Expected 0 ready workers")
 }
 
 // TestQueryWorkerState_WithWorkerAndAssignment verifies query_worker_state returns worker with phase and role.
@@ -1292,42 +1111,25 @@ func TestQueryWorkerState_WithWorkerAndAssignment(t *testing.T) {
 
 	handler := cs.handlers["query_worker_state"]
 	result, err := handler(context.Background(), json.RawMessage(`{}`))
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
+	require.NoError(t, err, "Unexpected error")
 
 	// Parse response
 	var response workerStateResponse
-	if err := json.Unmarshal([]byte(result.Content[0].Text), &response); err != nil {
-		t.Fatalf("Failed to parse response: %v", err)
-	}
+	err = json.Unmarshal([]byte(result.Content[0].Text), &response)
+	require.NoError(t, err, "Failed to parse response")
 
-	if len(response.Workers) != 1 {
-		t.Fatalf("Expected 1 worker, got %d", len(response.Workers))
-	}
+	require.Len(t, response.Workers, 1, "Expected 1 worker")
 
 	worker := response.Workers[0]
-	if worker.WorkerID != "worker-1" {
-		t.Errorf("WorkerID = %q, want %q", worker.WorkerID, "worker-1")
-	}
-	if worker.Phase != "implementing" {
-		t.Errorf("Phase = %q, want %q", worker.Phase, "implementing")
-	}
-	if worker.Role != "implementer" {
-		t.Errorf("Role = %q, want %q", worker.Role, "implementer")
-	}
-	if worker.TaskID != "perles-abc.1" {
-		t.Errorf("TaskID = %q, want %q", worker.TaskID, "perles-abc.1")
-	}
+	require.Equal(t, "worker-1", worker.WorkerID, "WorkerID mismatch")
+	require.Equal(t, "implementing", worker.Phase, "Phase mismatch")
+	require.Equal(t, "implementer", worker.Role, "Role mismatch")
+	require.Equal(t, "perles-abc.1", worker.TaskID, "TaskID mismatch")
 
 	// Check task assignments
-	if len(response.TaskAssignments) != 1 {
-		t.Fatalf("Expected 1 task assignment, got %d", len(response.TaskAssignments))
-	}
+	require.Len(t, response.TaskAssignments, 1, "Expected 1 task assignment")
 	ta := response.TaskAssignments["perles-abc.1"]
-	if ta.Implementer != "worker-1" {
-		t.Errorf("TaskAssignment.Implementer = %q, want %q", ta.Implementer, "worker-1")
-	}
+	require.Equal(t, "worker-1", ta.Implementer, "TaskAssignment.Implementer mismatch")
 }
 
 // TestQueryWorkerState_FilterByWorkerID verifies query_worker_state filters by worker_id.
@@ -1343,21 +1145,16 @@ func TestQueryWorkerState_FilterByWorkerID(t *testing.T) {
 
 	handler := cs.handlers["query_worker_state"]
 	result, err := handler(context.Background(), json.RawMessage(`{"worker_id": "worker-1"}`))
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
+	require.NoError(t, err, "Unexpected error")
 
 	// Parse response
 	var response workerStateResponse
-	if err := json.Unmarshal([]byte(result.Content[0].Text), &response); err != nil {
-		t.Fatalf("Failed to parse response: %v", err)
-	}
+	err = json.Unmarshal([]byte(result.Content[0].Text), &response)
+	require.NoError(t, err, "Failed to parse response")
 
-	if len(response.Workers) != 1 {
-		t.Errorf("Expected 1 worker (filtered), got %d", len(response.Workers))
-	}
-	if len(response.Workers) > 0 && response.Workers[0].WorkerID != "worker-1" {
-		t.Errorf("Expected worker-1, got %q", response.Workers[0].WorkerID)
+	require.Len(t, response.Workers, 1, "Expected 1 worker (filtered)")
+	if len(response.Workers) > 0 {
+		require.Equal(t, "worker-1", response.Workers[0].WorkerID, "Expected worker-1")
 	}
 }
 
@@ -1385,21 +1182,16 @@ func TestQueryWorkerState_FilterByTaskID(t *testing.T) {
 
 	handler := cs.handlers["query_worker_state"]
 	result, err := handler(context.Background(), json.RawMessage(`{"task_id": "perles-abc.1"}`))
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
+	require.NoError(t, err, "Unexpected error")
 
 	// Parse response
 	var response workerStateResponse
-	if err := json.Unmarshal([]byte(result.Content[0].Text), &response); err != nil {
-		t.Fatalf("Failed to parse response: %v", err)
-	}
+	err = json.Unmarshal([]byte(result.Content[0].Text), &response)
+	require.NoError(t, err, "Failed to parse response")
 
-	if len(response.Workers) != 1 {
-		t.Errorf("Expected 1 worker (filtered by task), got %d", len(response.Workers))
-	}
-	if len(response.Workers) > 0 && response.Workers[0].TaskID != "perles-abc.1" {
-		t.Errorf("Expected task perles-abc.1, got %q", response.Workers[0].TaskID)
+	require.Len(t, response.Workers, 1, "Expected 1 worker (filtered by task)")
+	if len(response.Workers) > 0 {
+		require.Equal(t, "perles-abc.1", response.Workers[0].TaskID, "Expected task perles-abc.1")
 	}
 }
 
@@ -1415,21 +1207,16 @@ func TestQueryWorkerState_ReturnsReadyWorkers(t *testing.T) {
 
 	handler := cs.handlers["query_worker_state"]
 	result, err := handler(context.Background(), json.RawMessage(`{}`))
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
+	require.NoError(t, err, "Unexpected error")
 
 	// Parse response
 	var response workerStateResponse
-	if err := json.Unmarshal([]byte(result.Content[0].Text), &response); err != nil {
-		t.Fatalf("Failed to parse response: %v", err)
-	}
+	err = json.Unmarshal([]byte(result.Content[0].Text), &response)
+	require.NoError(t, err, "Failed to parse response")
 
-	if len(response.ReadyWorkers) != 1 {
-		t.Errorf("Expected 1 ready worker, got %d", len(response.ReadyWorkers))
-	}
-	if len(response.ReadyWorkers) > 0 && response.ReadyWorkers[0] != "worker-1" {
-		t.Errorf("Expected ready worker worker-1, got %q", response.ReadyWorkers[0])
+	require.Len(t, response.ReadyWorkers, 1, "Expected 1 ready worker")
+	if len(response.ReadyWorkers) > 0 {
+		require.Equal(t, "worker-1", response.ReadyWorkers[0], "Expected ready worker worker-1")
 	}
 }
 
@@ -1443,12 +1230,8 @@ func TestAssignTaskReview_SelfReviewRejected(t *testing.T) {
 
 	args := `{"reviewer_id": "worker-1", "task_id": "perles-abc.1", "implementer_id": "worker-1", "summary": "test"}`
 	_, err := handler(context.Background(), json.RawMessage(args))
-	if err == nil {
-		t.Error("Expected error for self-review")
-	}
-	if !contains(err.Error(), "reviewer cannot be the same as implementer") {
-		t.Errorf("Unexpected error message: %v", err)
-	}
+	require.Error(t, err, "Expected error for self-review")
+	require.Contains(t, err.Error(), "reviewer cannot be the same as implementer", "Unexpected error message")
 }
 
 // TestAssignTaskReview_TaskNotAwaitingReview verifies assign_task_review rejects if task not awaiting review.
@@ -1474,9 +1257,7 @@ func TestAssignTaskReview_TaskNotAwaitingReview(t *testing.T) {
 	handler := cs.handlers["assign_task_review"]
 	args := `{"reviewer_id": "worker-2", "task_id": "perles-abc.1", "implementer_id": "worker-1", "summary": "test"}`
 	_, err := handler(context.Background(), json.RawMessage(args))
-	if err == nil {
-		t.Error("Expected error when task not awaiting review")
-	}
+	require.Error(t, err, "Expected error when task not awaiting review")
 }
 
 // TestAssignTaskReview_ValidationRequired verifies required field validation.
@@ -1501,9 +1282,7 @@ func TestAssignTaskReview_ValidationRequired(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := handler(context.Background(), json.RawMessage(tt.args))
-			if err == nil {
-				t.Errorf("Expected error for %s", tt.name)
-			}
+			require.Error(t, err, "Expected error for %s", tt.name)
 		})
 	}
 }
@@ -1531,12 +1310,8 @@ func TestAssignReviewFeedback_TaskNotDenied(t *testing.T) {
 	handler := cs.handlers["assign_review_feedback"]
 	args := `{"implementer_id": "worker-1", "task_id": "perles-abc.1", "feedback": "fix bugs"}`
 	_, err := handler(context.Background(), json.RawMessage(args))
-	if err == nil {
-		t.Error("Expected error when task not denied")
-	}
-	if !contains(err.Error(), "not in denied status") {
-		t.Errorf("Unexpected error message: %v", err)
-	}
+	require.Error(t, err, "Expected error when task not denied")
+	require.Contains(t, err.Error(), "not in denied status", "Unexpected error message")
 }
 
 // TestAssignReviewFeedback_ValidationRequired verifies required field validation.
@@ -1561,9 +1336,7 @@ func TestAssignReviewFeedback_ValidationRequired(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := handler(context.Background(), json.RawMessage(tt.args))
-			if err == nil {
-				t.Errorf("Expected error for %s", tt.name)
-			}
+			require.Error(t, err, "Expected error for %s", tt.name)
 		})
 	}
 }
@@ -1585,12 +1358,8 @@ func TestApproveCommit_TaskNotApproved(t *testing.T) {
 	handler := cs.handlers["approve_commit"]
 	args := `{"implementer_id": "worker-1", "task_id": "perles-abc.1"}`
 	_, err := handler(context.Background(), json.RawMessage(args))
-	if err == nil {
-		t.Error("Expected error when task not approved")
-	}
-	if !contains(err.Error(), "not in approved status") {
-		t.Errorf("Unexpected error message: %v", err)
-	}
+	require.Error(t, err, "Expected error when task not approved")
+	require.Contains(t, err.Error(), "not in approved status", "Unexpected error message")
 }
 
 // TestApproveCommit_ValidationRequired verifies required field validation.
@@ -1615,9 +1384,7 @@ func TestApproveCommit_ValidationRequired(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := handler(context.Background(), json.RawMessage(tt.args))
-			if err == nil {
-				t.Errorf("Expected error for %s", tt.name)
-			}
+			require.Error(t, err, "Expected error for %s", tt.name)
 		})
 	}
 }
@@ -1639,12 +1406,8 @@ func TestApproveCommit_ImplementerMismatch(t *testing.T) {
 	handler := cs.handlers["approve_commit"]
 	args := `{"implementer_id": "worker-2", "task_id": "perles-abc.1"}` // Wrong implementer
 	_, err := handler(context.Background(), json.RawMessage(args))
-	if err == nil {
-		t.Error("Expected error for wrong implementer")
-	}
-	if !contains(err.Error(), "not the implementer") {
-		t.Errorf("Unexpected error message: %v", err)
-	}
+	require.Error(t, err, "Expected error for wrong implementer")
+	require.Contains(t, err.Error(), "not the implementer", "Unexpected error message")
 }
 
 // Helper function
@@ -1676,12 +1439,8 @@ func TestAssignTask_ValidatesAssignment(t *testing.T) {
 	// No worker exists - should fail validation
 	args := `{"worker_id": "worker-1", "task_id": "perles-abc.1"}`
 	_, err := handler(context.Background(), json.RawMessage(args))
-	if err == nil {
-		t.Error("Expected error when worker not found (validation)")
-	}
-	if !contains(err.Error(), "validation failed") {
-		t.Errorf("Expected validation error, got: %v", err)
-	}
+	require.Error(t, err, "Expected error when worker not found (validation)")
+	require.Contains(t, err.Error(), "validation failed", "Expected validation error")
 }
 
 // TestAssignTask_RejectsWhenTaskAlreadyAssigned verifies assign_task rejects duplicate task assignment.
@@ -1704,12 +1463,8 @@ func TestAssignTask_RejectsWhenTaskAlreadyAssigned(t *testing.T) {
 	handler := cs.handlers["assign_task"]
 	args := `{"worker_id": "worker-2", "task_id": "perles-abc.1"}`
 	_, err := handler(context.Background(), json.RawMessage(args))
-	if err == nil {
-		t.Error("Expected error when task already assigned")
-	}
-	if !contains(err.Error(), "already assigned") {
-		t.Errorf("Expected 'already assigned' error, got: %v", err)
-	}
+	require.Error(t, err, "Expected error when task already assigned")
+	require.Contains(t, err.Error(), "already assigned", "Expected 'already assigned' error")
 }
 
 // TestAssignTask_RejectsWhenWorkerAlreadyHasTask verifies assign_task rejects if worker busy.
@@ -1730,12 +1485,8 @@ func TestAssignTask_RejectsWhenWorkerAlreadyHasTask(t *testing.T) {
 	handler := cs.handlers["assign_task"]
 	args := `{"worker_id": "worker-1", "task_id": "perles-abc.1"}`
 	_, err := handler(context.Background(), json.RawMessage(args))
-	if err == nil {
-		t.Error("Expected error when worker already has task")
-	}
-	if !contains(err.Error(), "already assigned") {
-		t.Errorf("Expected 'already assigned' error, got: %v", err)
-	}
+	require.Error(t, err, "Expected error when worker already has task")
+	require.Contains(t, err.Error(), "already assigned", "Expected 'already assigned' error")
 }
 
 // TestListWorkers_IncludesPhaseAndRole verifies list_workers returns phase and role.
@@ -1755,9 +1506,7 @@ func TestListWorkers_IncludesPhaseAndRole(t *testing.T) {
 
 	handler := cs.handlers["list_workers"]
 	result, err := handler(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
+	require.NoError(t, err, "Unexpected error")
 
 	// Parse response
 	type workerInfo struct {
@@ -1766,21 +1515,14 @@ func TestListWorkers_IncludesPhaseAndRole(t *testing.T) {
 		Role     string `json:"role,omitempty"`
 	}
 	var infos []workerInfo
-	if err := json.Unmarshal([]byte(result.Content[0].Text), &infos); err != nil {
-		t.Fatalf("Failed to parse response: %v", err)
-	}
+	err = json.Unmarshal([]byte(result.Content[0].Text), &infos)
+	require.NoError(t, err, "Failed to parse response")
 
-	if len(infos) != 1 {
-		t.Fatalf("Expected 1 worker, got %d", len(infos))
-	}
+	require.Len(t, infos, 1, "Expected 1 worker")
 
 	info := infos[0]
-	if info.Phase != "implementing" {
-		t.Errorf("Phase = %q, want %q", info.Phase, "implementing")
-	}
-	if info.Role != "implementer" {
-		t.Errorf("Role = %q, want %q", info.Role, "implementer")
-	}
+	require.Equal(t, "implementing", info.Phase, "Phase mismatch")
+	require.Equal(t, "implementer", info.Role, "Role mismatch")
 }
 
 // TestListWorkers_ShowsIdlePhaseForNoAssignment verifies workers without assignments show idle phase.
@@ -1795,9 +1537,7 @@ func TestListWorkers_ShowsIdlePhaseForNoAssignment(t *testing.T) {
 
 	handler := cs.handlers["list_workers"]
 	result, err := handler(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
+	require.NoError(t, err, "Unexpected error")
 
 	// Parse response
 	type workerInfo struct {
@@ -1806,21 +1546,14 @@ func TestListWorkers_ShowsIdlePhaseForNoAssignment(t *testing.T) {
 		Role     string `json:"role,omitempty"`
 	}
 	var infos []workerInfo
-	if err := json.Unmarshal([]byte(result.Content[0].Text), &infos); err != nil {
-		t.Fatalf("Failed to parse response: %v", err)
-	}
+	err = json.Unmarshal([]byte(result.Content[0].Text), &infos)
+	require.NoError(t, err, "Failed to parse response")
 
-	if len(infos) != 1 {
-		t.Fatalf("Expected 1 worker, got %d", len(infos))
-	}
+	require.Len(t, infos, 1, "Expected 1 worker")
 
 	info := infos[0]
-	if info.Phase != "idle" {
-		t.Errorf("Phase = %q, want %q", info.Phase, "idle")
-	}
-	if info.Role != "" {
-		t.Errorf("Role = %q, want empty for idle worker", info.Role)
-	}
+	require.Equal(t, "idle", info.Phase, "Phase mismatch")
+	require.Empty(t, info.Role, "Role should be empty for idle worker")
 }
 
 // TestListWorkers_ShowsReviewerRole verifies reviewer workers show correct role.
@@ -1841,9 +1574,7 @@ func TestListWorkers_ShowsReviewerRole(t *testing.T) {
 
 	handler := cs.handlers["list_workers"]
 	result, err := handler(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
+	require.NoError(t, err, "Unexpected error")
 
 	// Parse response
 	type workerInfo struct {
@@ -1852,21 +1583,14 @@ func TestListWorkers_ShowsReviewerRole(t *testing.T) {
 		Role     string `json:"role,omitempty"`
 	}
 	var infos []workerInfo
-	if err := json.Unmarshal([]byte(result.Content[0].Text), &infos); err != nil {
-		t.Fatalf("Failed to parse response: %v", err)
-	}
+	err = json.Unmarshal([]byte(result.Content[0].Text), &infos)
+	require.NoError(t, err, "Failed to parse response")
 
-	if len(infos) != 1 {
-		t.Fatalf("Expected 1 worker, got %d", len(infos))
-	}
+	require.Len(t, infos, 1, "Expected 1 worker")
 
 	info := infos[0]
-	if info.Phase != "reviewing" {
-		t.Errorf("Phase = %q, want %q", info.Phase, "reviewing")
-	}
-	if info.Role != "reviewer" {
-		t.Errorf("Role = %q, want %q", info.Role, "reviewer")
-	}
+	require.Equal(t, "reviewing", info.Phase, "Phase mismatch")
+	require.Equal(t, "reviewer", info.Role, "Role mismatch")
 }
 
 // TestReplaceWorker_CleansUpWorkerAssignments verifies replace_worker removes assignment.
@@ -1890,9 +1614,8 @@ func TestReplaceWorker_CleansUpWorkerAssignments(t *testing.T) {
 	}
 
 	// Verify assignment exists before replace
-	if _, ok := cs.workerAssignments["worker-1"]; !ok {
-		t.Fatal("Worker assignment should exist before replace")
-	}
+	_, ok := cs.workerAssignments["worker-1"]
+	require.True(t, ok, "Worker assignment should exist before replace")
 
 	handler := cs.handlers["replace_worker"]
 	_, err := handler(context.Background(), json.RawMessage(`{"worker_id": "worker-1"}`))
@@ -1908,39 +1631,29 @@ func TestReplaceWorker_CleansUpWorkerAssignments(t *testing.T) {
 	_, stillExists := cs.workerAssignments["worker-1"]
 	cs.assignmentsMu.RUnlock()
 
-	if stillExists {
-		t.Error("Worker assignment should be cleaned up after replace")
-	}
+	require.False(t, stillExists, "Worker assignment should be cleaned up after replace")
 
 	// Task assignment should still exist (for orphan detection)
 	cs.assignmentsMu.RLock()
 	_, taskExists := cs.taskAssignments["perles-abc.1"]
 	cs.assignmentsMu.RUnlock()
 
-	if !taskExists {
-		t.Error("Task assignment should still exist after worker replaced (for orphan detection)")
-	}
+	require.True(t, taskExists, "Task assignment should still exist after worker replaced (for orphan detection)")
 }
 
 // TestTaskAssignmentPrompt_WithSummary verifies TaskAssignmentPrompt includes summary when provided.
 func TestTaskAssignmentPrompt_WithSummary(t *testing.T) {
 	prompt := TaskAssignmentPrompt("perles-abc.1", "Test Task", "Focus on error handling.")
 
-	if !containsInternal(prompt, "Coordinator Instructions:") {
-		t.Error("Prompt should contain 'Coordinator Instructions:' section when summary provided")
-	}
-	if !containsInternal(prompt, "Focus on error handling.") {
-		t.Error("Prompt should contain the summary content")
-	}
+	require.True(t, containsInternal(prompt, "Coordinator Instructions:"), "Prompt should contain 'Coordinator Instructions:' section when summary provided")
+	require.True(t, containsInternal(prompt, "Focus on error handling."), "Prompt should contain the summary content")
 }
 
 // TestTaskAssignmentPrompt_WithoutSummary verifies TaskAssignmentPrompt excludes summary section when empty.
 func TestTaskAssignmentPrompt_WithoutSummary(t *testing.T) {
 	prompt := TaskAssignmentPrompt("perles-abc.1", "Test Task", "")
 
-	if containsInternal(prompt, "Coordinator Instructions:") {
-		t.Error("Prompt should NOT contain 'Coordinator Instructions:' section when summary is empty")
-	}
+	require.False(t, containsInternal(prompt, "Coordinator Instructions:"), "Prompt should NOT contain 'Coordinator Instructions:' section when summary is empty")
 }
 
 // TestTaskAssignmentPrompt_AllSections verifies TaskAssignmentPrompt includes all sections when provided.
@@ -1962,9 +1675,7 @@ func TestTaskAssignmentPrompt_AllSections(t *testing.T) {
 	}
 
 	for _, section := range sections {
-		if !containsInternal(prompt, section) {
-			t.Errorf("Prompt should contain %q", section)
-		}
+		require.True(t, containsInternal(prompt, section), "Prompt should contain %q", section)
 	}
 }
 
@@ -1976,9 +1687,7 @@ func TestAssignTaskArgs_SummaryField(t *testing.T) {
 		Summary:  "Key instructions for the worker",
 	}
 
-	if args.Summary != "Key instructions for the worker" {
-		t.Errorf("Summary = %q, want %q", args.Summary, "Key instructions for the worker")
-	}
+	require.Equal(t, "Key instructions for the worker", args.Summary, "Summary mismatch")
 }
 
 // TestAssignTaskArgs_SummaryOmitempty verifies summary is optional.
@@ -1986,32 +1695,22 @@ func TestAssignTaskArgs_SummaryOmitempty(t *testing.T) {
 	// Test that JSON with no summary field unmarshals correctly
 	jsonStr := `{"worker_id": "worker-1", "task_id": "perles-abc.1"}`
 	var args assignTaskArgs
-	if err := json.Unmarshal([]byte(jsonStr), &args); err != nil {
-		t.Fatalf("Failed to unmarshal: %v", err)
-	}
+	err := json.Unmarshal([]byte(jsonStr), &args)
+	require.NoError(t, err, "Failed to unmarshal")
 
-	if args.WorkerID != "worker-1" {
-		t.Errorf("WorkerID = %q, want %q", args.WorkerID, "worker-1")
-	}
-	if args.TaskID != "perles-abc.1" {
-		t.Errorf("TaskID = %q, want %q", args.TaskID, "perles-abc.1")
-	}
-	if args.Summary != "" {
-		t.Errorf("Summary = %q, want empty string", args.Summary)
-	}
+	require.Equal(t, "worker-1", args.WorkerID, "WorkerID mismatch")
+	require.Equal(t, "perles-abc.1", args.TaskID, "TaskID mismatch")
+	require.Empty(t, args.Summary, "Summary should be empty")
 }
 
 // TestAssignTaskArgs_SummaryInJSON verifies summary is included when provided in JSON.
 func TestAssignTaskArgs_SummaryInJSON(t *testing.T) {
 	jsonStr := `{"worker_id": "worker-1", "task_id": "perles-abc.1", "summary": "Focus on the FetchData method"}`
 	var args assignTaskArgs
-	if err := json.Unmarshal([]byte(jsonStr), &args); err != nil {
-		t.Fatalf("Failed to unmarshal: %v", err)
-	}
+	err := json.Unmarshal([]byte(jsonStr), &args)
+	require.NoError(t, err, "Failed to unmarshal")
 
-	if args.Summary != "Focus on the FetchData method" {
-		t.Errorf("Summary = %q, want %q", args.Summary, "Focus on the FetchData method")
-	}
+	require.Equal(t, "Focus on the FetchData method", args.Summary, "Summary mismatch")
 }
 
 // TestCoordinatorServer_AssignTaskSchemaIncludesSummary verifies the tool schema includes summary parameter.
@@ -2022,32 +1721,20 @@ func TestCoordinatorServer_AssignTaskSchemaIncludesSummary(t *testing.T) {
 	cs := NewCoordinatorServer(claude.NewClient(), workerPool, nil, "/tmp/test", 8765, nil, mocks.NewMockBeadsExecutor(t))
 
 	tool, ok := cs.tools["assign_task"]
-	if !ok {
-		t.Fatal("assign_task tool not registered")
-	}
+	require.True(t, ok, "assign_task tool not registered")
 
-	if tool.InputSchema == nil {
-		t.Fatal("assign_task InputSchema is nil")
-	}
+	require.NotNil(t, tool.InputSchema, "assign_task InputSchema is nil")
 
 	summaryProp, ok := tool.InputSchema.Properties["summary"]
-	if !ok {
-		t.Fatal("assign_task schema should include 'summary' property")
-	}
+	require.True(t, ok, "assign_task schema should include 'summary' property")
 
-	if summaryProp.Type != "string" {
-		t.Errorf("summary property type = %q, want %q", summaryProp.Type, "string")
-	}
+	require.Equal(t, "string", summaryProp.Type, "summary property type mismatch")
 
-	if summaryProp.Description == "" {
-		t.Error("summary property should have a description")
-	}
+	require.NotEmpty(t, summaryProp.Description, "summary property should have a description")
 
 	// Verify summary is NOT in required list (it's optional)
 	for _, req := range tool.InputSchema.Required {
-		if req == "summary" {
-			t.Error("summary should NOT be in Required list (it's optional)")
-		}
+		require.NotEqual(t, "summary", req, "summary should NOT be in Required list (it's optional)")
 	}
 }
 
@@ -2084,9 +1771,7 @@ func TestIntegration_AssignListReplaceFlow(t *testing.T) {
 	// List workers - should show implementing phase
 	listHandler := cs.handlers["list_workers"]
 	result, err := listHandler(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("list_workers error: %v", err)
-	}
+	require.NoError(t, err, "list_workers error")
 
 	type workerInfo struct {
 		WorkerID string `json:"worker_id"`
@@ -2094,40 +1779,27 @@ func TestIntegration_AssignListReplaceFlow(t *testing.T) {
 		Role     string `json:"role,omitempty"`
 	}
 	var infos []workerInfo
-	if err := json.Unmarshal([]byte(result.Content[0].Text), &infos); err != nil {
-		t.Fatalf("Failed to parse list_workers response: %v", err)
-	}
+	err = json.Unmarshal([]byte(result.Content[0].Text), &infos)
+	require.NoError(t, err, "Failed to parse list_workers response")
 
-	if len(infos) != 1 || infos[0].Phase != "implementing" {
-		t.Errorf("Expected implementing phase, got %v", infos)
-	}
+	require.Len(t, infos, 1, "Expected 1 worker")
+	require.Equal(t, "implementing", infos[0].Phase, "Expected implementing phase")
 
 	// Query worker state - should show same info
 	queryHandler := cs.handlers["query_worker_state"]
 	result, err = queryHandler(context.Background(), json.RawMessage(`{}`))
-	if err != nil {
-		t.Fatalf("query_worker_state error: %v", err)
-	}
+	require.NoError(t, err, "query_worker_state error")
 
 	var stateResponse workerStateResponse
-	if err := json.Unmarshal([]byte(result.Content[0].Text), &stateResponse); err != nil {
-		t.Fatalf("Failed to parse query_worker_state response: %v", err)
-	}
+	err = json.Unmarshal([]byte(result.Content[0].Text), &stateResponse)
+	require.NoError(t, err, "Failed to parse query_worker_state response")
 
 	// Both list_workers and query_worker_state should report same phase
-	if len(stateResponse.Workers) != 1 {
-		t.Fatalf("Expected 1 worker in state response, got %d", len(stateResponse.Workers))
-	}
-	if stateResponse.Workers[0].Phase != "implementing" {
-		t.Errorf("query_worker_state phase = %q, want %q", stateResponse.Workers[0].Phase, "implementing")
-	}
+	require.Len(t, stateResponse.Workers, 1, "Expected 1 worker in state response")
+	require.Equal(t, "implementing", stateResponse.Workers[0].Phase, "query_worker_state phase mismatch")
 
 	// Task assignments should be tracked
-	if len(stateResponse.TaskAssignments) != 1 {
-		t.Fatalf("Expected 1 task assignment, got %d", len(stateResponse.TaskAssignments))
-	}
+	require.Len(t, stateResponse.TaskAssignments, 1, "Expected 1 task assignment")
 	ta := stateResponse.TaskAssignments["perles-abc.1"]
-	if ta.Implementer != "worker-1" {
-		t.Errorf("TaskAssignment implementer = %q, want %q", ta.Implementer, "worker-1")
-	}
+	require.Equal(t, "worker-1", ta.Implementer, "TaskAssignment implementer mismatch")
 }

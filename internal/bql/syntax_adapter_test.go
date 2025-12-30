@@ -24,9 +24,7 @@ func TestBQLSyntaxLexer_Tokenize(t *testing.T) {
 			input:   "",
 			wantLen: 0,
 			validate: func(t *testing.T, tokens []vimtextarea.SyntaxToken) {
-				if tokens != nil {
-					t.Errorf("expected nil, got %v", tokens)
-				}
+				require.Nil(t, tokens, "expected nil for empty string")
 			},
 		},
 		{
@@ -35,13 +33,11 @@ func TestBQLSyntaxLexer_Tokenize(t *testing.T) {
 			wantLen: 2, // "status" (field) and "=" (operator); "open" is plain text (value after operator)
 			validate: func(t *testing.T, tokens []vimtextarea.SyntaxToken) {
 				// First token: "status" at position 0-6
-				if tokens[0].Start != 0 || tokens[0].End != 6 {
-					t.Errorf("token 0: expected Start=0, End=6, got Start=%d, End=%d", tokens[0].Start, tokens[0].End)
-				}
+				require.Equal(t, 0, tokens[0].Start, "token 0 Start")
+				require.Equal(t, 6, tokens[0].End, "token 0 End")
 				// Second token: "=" at position 7-8
-				if tokens[1].Start != 7 || tokens[1].End != 8 {
-					t.Errorf("token 1: expected Start=7, End=8, got Start=%d, End=%d", tokens[1].Start, tokens[1].End)
-				}
+				require.Equal(t, 7, tokens[1].Start, "token 1 Start")
+				require.Equal(t, 8, tokens[1].End, "token 1 End")
 			},
 		},
 		{
@@ -57,9 +53,7 @@ func TestBQLSyntaxLexer_Tokenize(t *testing.T) {
 						break
 					}
 				}
-				if !found {
-					t.Errorf("keyword 'and' not found at expected position 14-17")
-				}
+				require.True(t, found, "keyword 'and' not found at expected position 14-17")
 			},
 		},
 		{
@@ -69,9 +63,8 @@ func TestBQLSyntaxLexer_Tokenize(t *testing.T) {
 			validate: func(t *testing.T, tokens []vimtextarea.SyntaxToken) {
 				// String token should include quotes: position 8-13
 				stringTok := tokens[2]
-				if stringTok.Start != 8 || stringTok.End != 13 {
-					t.Errorf("string token: expected Start=8, End=13, got Start=%d, End=%d", stringTok.Start, stringTok.End)
-				}
+				require.Equal(t, 8, stringTok.Start, "string token Start")
+				require.Equal(t, 13, stringTok.End, "string token End")
 			},
 		},
 		{
@@ -80,17 +73,14 @@ func TestBQLSyntaxLexer_Tokenize(t *testing.T) {
 			wantLen: 3, // "a", "=", "1" (number is always styled)
 			validate: func(t *testing.T, tokens []vimtextarea.SyntaxToken) {
 				// "a" at 0-1
-				if tokens[0].Start != 0 || tokens[0].End != 1 {
-					t.Errorf("token 0 'a': expected Start=0, End=1, got Start=%d, End=%d", tokens[0].Start, tokens[0].End)
-				}
+				require.Equal(t, 0, tokens[0].Start, "token 0 'a' Start")
+				require.Equal(t, 1, tokens[0].End, "token 0 'a' End")
 				// "=" at 2-3
-				if tokens[1].Start != 2 || tokens[1].End != 3 {
-					t.Errorf("token 1 '=': expected Start=2, End=3, got Start=%d, End=%d", tokens[1].Start, tokens[1].End)
-				}
+				require.Equal(t, 2, tokens[1].Start, "token 1 '=' Start")
+				require.Equal(t, 3, tokens[1].End, "token 1 '=' End")
 				// "1" at 4-5
-				if tokens[2].Start != 4 || tokens[2].End != 5 {
-					t.Errorf("token 2 '1': expected Start=4, End=5, got Start=%d, End=%d", tokens[2].Start, tokens[2].End)
-				}
+				require.Equal(t, 4, tokens[2].Start, "token 2 '1' Start")
+				require.Equal(t, 5, tokens[2].End, "token 2 '1' End")
 			},
 		},
 		{
@@ -99,14 +89,11 @@ func TestBQLSyntaxLexer_Tokenize(t *testing.T) {
 			wantLen: 2, // "assignee" (field), "=" (operator); "john" is plain text
 			validate: func(t *testing.T, tokens []vimtextarea.SyntaxToken) {
 				// "assignee" at 0-8
-				if tokens[0].Start != 0 || tokens[0].End != 8 {
-					t.Errorf("field token: expected Start=0, End=8, got Start=%d, End=%d", tokens[0].Start, tokens[0].End)
-				}
+				require.Equal(t, 0, tokens[0].Start, "field token Start")
+				require.Equal(t, 8, tokens[0].End, "field token End")
 				// Verify we don't have a token for "john" (position 11-15)
 				for _, tok := range tokens {
-					if tok.Start == 11 {
-						t.Errorf("unexpected token at position 11 - 'john' should be plain text")
-					}
+					require.NotEqual(t, 11, tok.Start, "unexpected token at position 11 - 'john' should be plain text")
 				}
 			},
 		},
@@ -123,14 +110,11 @@ func TestBQLSyntaxLexer_Tokenize(t *testing.T) {
 						break
 					}
 				}
-				if !found {
-					t.Errorf("keyword 'in' not found at expected position 7-9")
-				}
+				require.True(t, found, "keyword 'in' not found at expected position 7-9")
 				// Values "open" and "closed" should NOT be tokenized (plain text)
 				for _, tok := range tokens {
-					if tok.Start == 11 || tok.Start == 17 {
-						t.Errorf("unexpected token at position %d - values in IN clause should be plain", tok.Start)
-					}
+					require.False(t, tok.Start == 11 || tok.Start == 17,
+						"unexpected token at position %d - values in IN clause should be plain", tok.Start)
 				}
 			},
 		},
@@ -139,12 +123,10 @@ func TestBQLSyntaxLexer_Tokenize(t *testing.T) {
 			input:   "status =",
 			wantLen: 2, // "status" and "="
 			validate: func(t *testing.T, tokens []vimtextarea.SyntaxToken) {
-				if tokens[0].Start != 0 || tokens[0].End != 6 {
-					t.Errorf("token 0: expected Start=0, End=6, got Start=%d, End=%d", tokens[0].Start, tokens[0].End)
-				}
-				if tokens[1].Start != 7 || tokens[1].End != 8 {
-					t.Errorf("token 1: expected Start=7, End=8, got Start=%d, End=%d", tokens[1].Start, tokens[1].End)
-				}
+				require.Equal(t, 0, tokens[0].Start, "token 0 Start")
+				require.Equal(t, 6, tokens[0].End, "token 0 End")
+				require.Equal(t, 7, tokens[1].Start, "token 1 Start")
+				require.Equal(t, 8, tokens[1].End, "token 1 End")
 			},
 		},
 		{
@@ -152,9 +134,7 @@ func TestBQLSyntaxLexer_Tokenize(t *testing.T) {
 			input:   "   ",
 			wantLen: 0,
 			validate: func(t *testing.T, tokens []vimtextarea.SyntaxToken) {
-				if len(tokens) != 0 {
-					t.Errorf("expected empty slice for whitespace, got %d tokens", len(tokens))
-				}
+				require.Empty(t, tokens, "expected empty slice for whitespace")
 			},
 		},
 		{
@@ -163,17 +143,14 @@ func TestBQLSyntaxLexer_Tokenize(t *testing.T) {
 			wantLen: 4, // "order", "by", "priority" (field), "desc"
 			validate: func(t *testing.T, tokens []vimtextarea.SyntaxToken) {
 				// "order" at 0-5
-				if tokens[0].Start != 0 || tokens[0].End != 5 {
-					t.Errorf("'order': expected Start=0, End=5, got Start=%d, End=%d", tokens[0].Start, tokens[0].End)
-				}
+				require.Equal(t, 0, tokens[0].Start, "'order' Start")
+				require.Equal(t, 5, tokens[0].End, "'order' End")
 				// "by" at 6-8
-				if tokens[1].Start != 6 || tokens[1].End != 8 {
-					t.Errorf("'by': expected Start=6, End=8, got Start=%d, End=%d", tokens[1].Start, tokens[1].End)
-				}
+				require.Equal(t, 6, tokens[1].Start, "'by' Start")
+				require.Equal(t, 8, tokens[1].End, "'by' End")
 				// "desc" at 18-22
-				if tokens[3].Start != 18 || tokens[3].End != 22 {
-					t.Errorf("'desc': expected Start=18, End=22, got Start=%d, End=%d", tokens[3].Start, tokens[3].End)
-				}
+				require.Equal(t, 18, tokens[3].Start, "'desc' Start")
+				require.Equal(t, 22, tokens[3].End, "'desc' End")
 			},
 		},
 		{
@@ -183,9 +160,8 @@ func TestBQLSyntaxLexer_Tokenize(t *testing.T) {
 			validate: func(t *testing.T, tokens []vimtextarea.SyntaxToken) {
 				// "true" at position 9-13 should be styled
 				trueTok := tokens[2]
-				if trueTok.Start != 9 || trueTok.End != 13 {
-					t.Errorf("'true': expected Start=9, End=13, got Start=%d, End=%d", trueTok.Start, trueTok.End)
-				}
+				require.Equal(t, 9, trueTok.Start, "'true' Start")
+				require.Equal(t, 13, trueTok.End, "'true' End")
 			},
 		},
 		{
@@ -195,9 +171,8 @@ func TestBQLSyntaxLexer_Tokenize(t *testing.T) {
 			validate: func(t *testing.T, tokens []vimtextarea.SyntaxToken) {
 				// "5" at position 11-12
 				numTok := tokens[2]
-				if numTok.Start != 11 || numTok.End != 12 {
-					t.Errorf("'5': expected Start=11, End=12, got Start=%d, End=%d", numTok.Start, numTok.End)
-				}
+				require.Equal(t, 11, numTok.Start, "'5' Start")
+				require.Equal(t, 12, numTok.End, "'5' End")
 			},
 		},
 		{
@@ -206,9 +181,8 @@ func TestBQLSyntaxLexer_Tokenize(t *testing.T) {
 			wantLen: 3, // "expand", "depth", "*"
 			validate: func(t *testing.T, tokens []vimtextarea.SyntaxToken) {
 				// "*" at position 13-14
-				if tokens[2].Start != 13 || tokens[2].End != 14 {
-					t.Errorf("'*': expected Start=13, End=14, got Start=%d, End=%d", tokens[2].Start, tokens[2].End)
-				}
+				require.Equal(t, 13, tokens[2].Start, "'*' Start")
+				require.Equal(t, 14, tokens[2].End, "'*' End")
 			},
 		},
 	}
@@ -218,11 +192,8 @@ func TestBQLSyntaxLexer_Tokenize(t *testing.T) {
 			tokens := lexer.Tokenize(tt.input)
 
 			// Check token count
-			if tt.wantLen > 0 && len(tokens) != tt.wantLen {
-				t.Errorf("token count: expected %d, got %d", tt.wantLen, len(tokens))
-				for i, tok := range tokens {
-					t.Logf("  token[%d]: Start=%d, End=%d, text=%q", i, tok.Start, tok.End, tt.input[tok.Start:tok.End])
-				}
+			if tt.wantLen > 0 {
+				require.Len(t, tokens, tt.wantLen, "token count mismatch")
 			}
 
 			// Run custom validation
@@ -241,10 +212,9 @@ func TestBQLSyntaxLexer_TokensAreSorted(t *testing.T) {
 
 	// Verify tokens are sorted by Start position (ascending)
 	for i := 1; i < len(tokens); i++ {
-		if tokens[i].Start < tokens[i-1].Start {
-			t.Errorf("tokens not sorted: token[%d].Start=%d < token[%d].Start=%d",
-				i, tokens[i].Start, i-1, tokens[i-1].Start)
-		}
+		require.GreaterOrEqual(t, tokens[i].Start, tokens[i-1].Start,
+			"tokens not sorted: token[%d].Start=%d < token[%d].Start=%d",
+			i, tokens[i].Start, i-1, tokens[i-1].Start)
 	}
 }
 
@@ -256,10 +226,9 @@ func TestBQLSyntaxLexer_TokensNonOverlapping(t *testing.T) {
 
 	// Verify tokens don't overlap
 	for i := 1; i < len(tokens); i++ {
-		if tokens[i].Start < tokens[i-1].End {
-			t.Errorf("tokens overlap: token[%d] ends at %d, token[%d] starts at %d",
-				i-1, tokens[i-1].End, i, tokens[i].Start)
-		}
+		require.GreaterOrEqual(t, tokens[i].Start, tokens[i-1].End,
+			"tokens overlap: token[%d] ends at %d, token[%d] starts at %d",
+			i-1, tokens[i-1].End, i, tokens[i].Start)
 	}
 }
 
@@ -274,10 +243,8 @@ func TestBQLSyntaxLexer_StringWithSingleQuotes(t *testing.T) {
 
 	// String token with single quotes at position 8-14
 	stringTok := tokens[2]
-	if stringTok.Start != 8 || stringTok.End != 14 {
-		t.Errorf("string token: expected Start=8, End=14, got Start=%d, End=%d",
-			stringTok.Start, stringTok.End)
-	}
+	require.Equal(t, 8, stringTok.Start, "string token Start")
+	require.Equal(t, 14, stringTok.End, "string token End")
 }
 
 func TestBQLSyntaxLexer_UnterminatedString(t *testing.T) {
@@ -287,15 +254,12 @@ func TestBQLSyntaxLexer_UnterminatedString(t *testing.T) {
 	tokens := lexer.Tokenize(input)
 
 	// Should still produce tokens without panicking
-	if len(tokens) < 2 {
-		t.Errorf("expected at least 2 tokens for partial string, got %d", len(tokens))
-	}
+	require.GreaterOrEqual(t, len(tokens), 2, "expected at least 2 tokens for partial string")
 
 	// Verify no token extends past the input length
 	for i, tok := range tokens {
-		if tok.End > len(input) {
-			t.Errorf("token[%d] End=%d exceeds input length %d", i, tok.End, len(input))
-		}
+		require.LessOrEqual(t, tok.End, len(input),
+			"token[%d] End=%d exceeds input length %d", i, tok.End, len(input))
 	}
 }
 
@@ -309,16 +273,12 @@ func TestBQLSyntaxLexer_NotOperator(t *testing.T) {
 	require.Len(t, tokens, 3)
 
 	// "not" at position 0-3
-	if tokens[0].Start != 0 || tokens[0].End != 3 {
-		t.Errorf("'not': expected Start=0, End=3, got Start=%d, End=%d",
-			tokens[0].Start, tokens[0].End)
-	}
+	require.Equal(t, 0, tokens[0].Start, "'not' Start")
+	require.Equal(t, 3, tokens[0].End, "'not' End")
 
 	// After "not", "status" should be styled as a field (afterOperator was reset)
-	if tokens[1].Start != 4 || tokens[1].End != 10 {
-		t.Errorf("'status': expected Start=4, End=10, got Start=%d, End=%d",
-			tokens[1].Start, tokens[1].End)
-	}
+	require.Equal(t, 4, tokens[1].Start, "'status' Start")
+	require.Equal(t, 10, tokens[1].End, "'status' End")
 }
 
 func TestBQLSyntaxLexer_ContainsOperator(t *testing.T) {
@@ -331,10 +291,8 @@ func TestBQLSyntaxLexer_ContainsOperator(t *testing.T) {
 	require.Len(t, tokens, 2)
 
 	// "~" at position 6-7
-	if tokens[1].Start != 6 || tokens[1].End != 7 {
-		t.Errorf("'~': expected Start=6, End=7, got Start=%d, End=%d",
-			tokens[1].Start, tokens[1].End)
-	}
+	require.Equal(t, 6, tokens[1].Start, "'~' Start")
+	require.Equal(t, 7, tokens[1].End, "'~' End")
 }
 
 func TestBQLSyntaxLexer_NotContainsOperator(t *testing.T) {
@@ -347,8 +305,6 @@ func TestBQLSyntaxLexer_NotContainsOperator(t *testing.T) {
 	require.Len(t, tokens, 2)
 
 	// "!~" at position 6-8
-	if tokens[1].Start != 6 || tokens[1].End != 8 {
-		t.Errorf("'!~': expected Start=6, End=8, got Start=%d, End=%d",
-			tokens[1].Start, tokens[1].End)
-	}
+	require.Equal(t, 6, tokens[1].Start, "'!~' Start")
+	require.Equal(t, 8, tokens[1].End, "'!~' End")
 }
