@@ -32,7 +32,7 @@ func (m Model) renderCoordinatorPane(width, height int, fullscreen bool) string 
 	vp := m.coordinatorPane.viewports[viewportKey]
 
 	// Build title and metrics based on fullscreen mode
-	var leftTitle, metricsDisplay string
+	var leftTitle, metricsDisplay, bottomLeft string
 	var hasNewContent bool
 	var borderColor lipgloss.AdaptiveColor
 
@@ -52,6 +52,11 @@ func (m Model) renderCoordinatorPane(width, height int, fullscreen bool) string 
 		borderColor = styles.BorderDefaultColor
 	}
 
+	// Build bottom-left queue indicator
+	if m.coordinatorPane.queueCount > 0 {
+		bottomLeft = QueuedCountStyle.Render(fmt.Sprintf("[%d queued]", m.coordinatorPane.queueCount))
+	}
+
 	// Use panes.ScrollablePane helper for viewport setup, padding, and auto-scroll
 	result := panes.ScrollablePane(width, height, panes.ScrollableConfig{
 		Viewport:       &vp,
@@ -59,6 +64,7 @@ func (m Model) renderCoordinatorPane(width, height int, fullscreen bool) string 
 		HasNewContent:  hasNewContent,
 		MetricsDisplay: metricsDisplay,
 		LeftTitle:      leftTitle,
+		BottomLeft:     bottomLeft,
 		TitleColor:     CoordinatorColor,
 		BorderColor:    borderColor,
 	}, m.renderCoordinatorContent)

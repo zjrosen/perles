@@ -807,3 +807,237 @@ func TestWorkerPool_TaskIDPreservedThroughProcessCompletion(t *testing.T) {
 	require.Equal(t, "task-lifecycle", worker.GetTaskID(), "Task ID should be preserved after process completion")
 	require.Equal(t, WorkerReady, worker.GetStatus())
 }
+
+// TestWorkerPool_SetTurnCompleteCallback tests callback is stored on pool
+func TestWorkerPool_SetTurnCompleteCallback(t *testing.T) {
+	pool := NewWorkerPool(Config{})
+	defer pool.Close()
+
+	pool.SetTurnCompleteCallback(func(workerID string) {
+		// Callback is set
+	})
+
+	// Verify callback is stored (we can check indirectly via AddTestWorker propagation)
+	worker := pool.AddTestWorker("w1", WorkerReady)
+	require.NotNil(t, worker)
+
+	// The callback should be set on the worker
+	// Verified via behavior in TestWorkerPool_CallbackOnAddTestWorker
+}
+
+// TestWorkerPool_CallbackOnNewWorkers tests callback is propagated to newly spawned workers
+func TestWorkerPool_CallbackOnNewWorkers(t *testing.T) {
+	mockClient := mocks.NewMockHeadlessClient(t)
+	proc := newTestProcess()
+
+	mockClient.EXPECT().Spawn(mock.Anything, mock.Anything).Return(proc, nil)
+
+	pool := NewWorkerPool(Config{
+		Client:     mockClient,
+		MaxWorkers: 4,
+	})
+	defer pool.Close()
+
+	// Set callback before spawning worker
+	callbackInvoked := false
+	callbackWorkerID := ""
+	pool.SetTurnCompleteCallback(func(workerID string) {
+		callbackInvoked = true
+		callbackWorkerID = workerID
+	})
+
+	ctx := context.Background()
+	eventsCh := pool.Broker().Subscribe(ctx)
+
+	// Spawn a worker
+	workerID, err := pool.SpawnWorker(client.Config{
+		WorkDir: "/test",
+		Prompt:  "test prompt",
+	})
+	require.NoError(t, err)
+
+	// Wait for spawn event
+	select {
+	case event := <-eventsCh:
+		require.Equal(t, events.WorkerSpawned, event.Payload.Type)
+	case <-time.After(time.Second):
+		require.FailNow(t, "timeout waiting for spawn event")
+	}
+
+	// Complete process to trigger callback
+	proc.Complete()
+
+	// Wait for status change event (callback should have been invoked before this)
+	select {
+	case event := <-eventsCh:
+		require.Equal(t, events.WorkerStatusChange, event.Payload.Type)
+		require.Equal(t, WorkerReady, event.Payload.Status)
+	case <-time.After(time.Second):
+		require.FailNow(t, "timeout waiting for status change event")
+	}
+
+	// Verify callback was invoked
+	require.True(t, callbackInvoked, "callback should be invoked when spawned worker becomes Ready")
+	require.Equal(t, workerID, callbackWorkerID, "callback should receive correct worker ID")
+}
+
+// TestWorkerPool_CallbackOnAddTestWorker tests callback is propagated to test workers
+func TestWorkerPool_CallbackOnAddTestWorker(t *testing.T) {
+	pool := NewWorkerPool(Config{})
+	defer pool.Close()
+
+	// Set callback first
+	callbackInvoked := false
+	pool.SetTurnCompleteCallback(func(workerID string) {
+		callbackInvoked = true
+	})
+
+	// Add test worker with callback propagated
+	worker := pool.AddTestWorker("w1", WorkerWorking)
+	require.NotNil(t, worker)
+
+	// Create broker for testing
+	broker := pubsub.NewBroker[events.WorkerEvent]()
+	defer broker.Close()
+
+	// Create and complete a mock process to trigger callback
+	proc := newTestProcess()
+
+	// Start worker processing
+	ctx := context.Background()
+	done := make(chan bool)
+	go func() {
+		worker.start(ctx, proc, broker)
+		done <- true
+	}()
+
+	// Wait a bit for worker to start
+	time.Sleep(50 * time.Millisecond)
+
+	// Complete process
+	proc.Complete()
+
+	// Wait for worker to finish
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		require.Fail(t, "timeout waiting for worker to finish")
+	}
+
+	// Verify callback was invoked
+	require.True(t, callbackInvoked, "callback should be invoked on test worker")
+}
+
+// TestWorkerPool_CallbackBeforeStatusEvent_Integration tests callback timing with real pool
+func TestWorkerPool_CallbackBeforeStatusEvent_Integration(t *testing.T) {
+	mockClient := mocks.NewMockHeadlessClient(t)
+	proc := newTestProcess()
+
+	mockClient.EXPECT().Spawn(mock.Anything, mock.Anything).Return(proc, nil)
+
+	pool := NewWorkerPool(Config{
+		Client:     mockClient,
+		MaxWorkers: 4,
+	})
+	defer pool.Close()
+
+	// Track order of callback and event reception
+	var orderMu sync.Mutex
+	order := []string{}
+
+	pool.SetTurnCompleteCallback(func(workerID string) {
+		orderMu.Lock()
+		order = append(order, "callback")
+		orderMu.Unlock()
+	})
+
+	ctx := context.Background()
+	eventsCh := pool.Broker().Subscribe(ctx)
+
+	// Spawn a worker
+	_, err := pool.SpawnWorker(client.Config{
+		WorkDir: "/test",
+		Prompt:  "test",
+	})
+	require.NoError(t, err)
+
+	// Wait for spawn event
+	select {
+	case <-eventsCh:
+	case <-time.After(time.Second):
+		require.FailNow(t, "timeout waiting for spawn event")
+	}
+
+	// Complete process to trigger callback and event
+	proc.Complete()
+
+	// Wait for status change event
+	select {
+	case event := <-eventsCh:
+		orderMu.Lock()
+		order = append(order, "event")
+		orderMu.Unlock()
+		require.Equal(t, events.WorkerStatusChange, event.Payload.Type)
+	case <-time.After(time.Second):
+		require.FailNow(t, "timeout waiting for status change event")
+	}
+
+	// Verify order: callback before event
+	require.Equal(t, []string{"callback", "event"}, order,
+		"callback should be invoked before status change event is received")
+}
+
+// TestWorkerPool_CallbackNotInvokedOnRetirement tests callback NOT invoked when worker retires
+func TestWorkerPool_CallbackNotInvokedOnRetirement(t *testing.T) {
+	mockClient := mocks.NewMockHeadlessClient(t)
+	proc := newTestProcess()
+
+	mockClient.EXPECT().Spawn(mock.Anything, mock.Anything).Return(proc, nil)
+
+	pool := NewWorkerPool(Config{
+		Client:     mockClient,
+		MaxWorkers: 4,
+	})
+	defer pool.Close()
+
+	callbackInvoked := false
+	pool.SetTurnCompleteCallback(func(workerID string) {
+		callbackInvoked = true
+	})
+
+	ctx := context.Background()
+	eventsCh := pool.Broker().Subscribe(ctx)
+
+	// Spawn a worker
+	workerID, err := pool.SpawnWorker(client.Config{
+		WorkDir: "/test",
+		Prompt:  "test",
+	})
+	require.NoError(t, err)
+
+	// Wait for spawn event
+	select {
+	case <-eventsCh:
+	case <-time.After(time.Second):
+		require.FailNow(t, "timeout waiting for spawn event")
+	}
+
+	// Cancel process (results in Retired, not Ready)
+	proc.Cancel()
+
+	// Wait for status change event
+	select {
+	case event := <-eventsCh:
+		require.Equal(t, events.WorkerStatusChange, event.Payload.Type)
+		require.Equal(t, WorkerRetired, event.Payload.Status)
+	case <-time.After(time.Second):
+		require.FailNow(t, "timeout waiting for status change event")
+	}
+
+	// Verify callback was NOT invoked
+	require.False(t, callbackInvoked, "callback should NOT be invoked when worker is retired")
+
+	// Verify worker is retired
+	worker := pool.GetWorker(workerID)
+	require.Equal(t, WorkerRetired, worker.GetStatus())
+}

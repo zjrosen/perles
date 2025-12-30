@@ -120,3 +120,86 @@ func TestWorkerEvent_WithoutRawJSON(t *testing.T) {
 	require.Equal(t, event.WorkerID, decoded.WorkerID)
 	require.Nil(t, decoded.RawJSON)
 }
+
+func TestWorkerQueueChanged_EventType(t *testing.T) {
+	// Verify WorkerQueueChanged event type is defined correctly
+	require.Equal(t, WorkerEventType("queue_changed"), WorkerQueueChanged)
+
+	// Verify it's distinct from other event types
+	eventTypes := []WorkerEventType{
+		WorkerSpawned,
+		WorkerOutput,
+		WorkerStatusChange,
+		WorkerTokenUsage,
+		WorkerIncoming,
+		WorkerError,
+		WorkerQueueChanged,
+	}
+
+	seen := make(map[WorkerEventType]bool)
+	for _, et := range eventTypes {
+		require.False(t, seen[et], "Duplicate event type: %s", et)
+		seen[et] = true
+	}
+
+	require.Len(t, eventTypes, 7, "Expected exactly 7 event types")
+}
+
+func TestWorkerEvent_QueueCount(t *testing.T) {
+	// Verify QueueCount field is populated correctly for queue_changed events
+	event := WorkerEvent{
+		Type:       WorkerQueueChanged,
+		WorkerID:   "worker-1",
+		QueueCount: 5,
+	}
+
+	require.Equal(t, WorkerQueueChanged, event.Type)
+	require.Equal(t, "worker-1", event.WorkerID)
+	require.Equal(t, 5, event.QueueCount)
+}
+
+func TestWorkerEvent_QueueCount_Serialization(t *testing.T) {
+	// Verify QueueCount serializes correctly when non-zero
+	event := WorkerEvent{
+		Type:       WorkerQueueChanged,
+		WorkerID:   "worker-1",
+		QueueCount: 3,
+	}
+
+	// Serialize to JSON
+	data, err := json.Marshal(event)
+	require.NoError(t, err)
+
+	// Verify queue_count is present
+	var unmarshaled map[string]interface{}
+	err = json.Unmarshal(data, &unmarshaled)
+	require.NoError(t, err)
+	require.Contains(t, unmarshaled, "queue_count")
+	require.Equal(t, float64(3), unmarshaled["queue_count"]) // JSON numbers are float64
+
+	// Deserialize back to struct
+	var decoded WorkerEvent
+	err = json.Unmarshal(data, &decoded)
+	require.NoError(t, err)
+	require.Equal(t, event.WorkerID, decoded.WorkerID)
+	require.Equal(t, event.QueueCount, decoded.QueueCount)
+}
+
+func TestWorkerEvent_QueueCount_OmittedWhenZero(t *testing.T) {
+	// Verify QueueCount is omitted when zero (omitempty)
+	event := WorkerEvent{
+		Type:       WorkerStatusChange,
+		WorkerID:   "worker-1",
+		QueueCount: 0, // Zero value
+	}
+
+	// Serialize to JSON
+	data, err := json.Marshal(event)
+	require.NoError(t, err)
+
+	// Verify queue_count is not present (omitempty)
+	var unmarshaled map[string]interface{}
+	err = json.Unmarshal(data, &unmarshaled)
+	require.NoError(t, err)
+	require.NotContains(t, unmarshaled, "queue_count")
+}

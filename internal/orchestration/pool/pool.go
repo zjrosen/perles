@@ -56,6 +56,14 @@ type WorkerPool struct {
 	closed         atomic.Bool
 	workerCounter  atomic.Int64
 	wg             sync.WaitGroup
+
+	// onTurnComplete is propagated to workers and called when they transition to Ready.
+	// This callback is invoked BEFORE the WorkerStatusChange event is published.
+	onTurnComplete func(workerID string)
+
+	// onWorkerRetired is propagated to workers and called when they transition to Retired.
+	// This callback is invoked BEFORE the WorkerStatusChange event is published.
+	onWorkerRetired func(workerID string)
 }
 
 // NewWorkerPool creates a new worker pool with the given configuration.
@@ -132,6 +140,8 @@ func (p *WorkerPool) SpawnWorkerWithID(workerID string, cfg client.Config) (stri
 
 	// Create worker in Ready state
 	worker := newWorker(workerID, p.bufferCapacity)
+	worker.onTurnComplete = p.onTurnComplete   // Propagate callback to new worker
+	worker.onWorkerRetired = p.onWorkerRetired // Propagate retirement callback to new worker
 	p.workers[workerID] = worker
 	p.mu.Unlock()
 
@@ -407,6 +417,30 @@ func (p *WorkerPool) AddTestWorker(id string, status WorkerStatus) *Worker {
 
 	worker := newWorker(id, 100)
 	worker.Status = status
+	worker.onTurnComplete = p.onTurnComplete   // Propagate callback to test workers
+	worker.onWorkerRetired = p.onWorkerRetired // Propagate retirement callback to test workers
 	p.workers[id] = worker
 	return worker
+}
+
+// SetTurnCompleteCallback sets the callback that will be invoked when any worker
+// transitions to Ready state. The callback is invoked synchronously BEFORE the
+// WorkerStatusChange event is published, ensuring the worker is never externally
+// visible as Ready with pending work. This callback is propagated to all newly
+// spawned workers.
+func (p *WorkerPool) SetTurnCompleteCallback(cb func(workerID string)) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.onTurnComplete = cb
+}
+
+// SetWorkerRetiredCallback sets the callback that will be invoked when any worker
+// transitions to Retired state. The callback is invoked synchronously BEFORE the
+// WorkerStatusChange event is published, allowing cleanup (such as draining queued
+// messages) before the worker appears Retired to external callers. This callback
+// is propagated to all newly spawned workers.
+func (p *WorkerPool) SetWorkerRetiredCallback(cb func(workerID string)) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.onWorkerRetired = cb
 }

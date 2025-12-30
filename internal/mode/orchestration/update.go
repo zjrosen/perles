@@ -12,7 +12,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/zjrosen/perles/internal/log"
-	"github.com/zjrosen/perles/internal/orchestration/client"
 	"github.com/zjrosen/perles/internal/orchestration/coordinator"
 	"github.com/zjrosen/perles/internal/orchestration/events"
 	"github.com/zjrosen/perles/internal/orchestration/mcp"
@@ -123,6 +122,19 @@ type CoordinatorErrorMsg struct {
 type WorkerErrorMsg struct {
 	WorkerID string
 	Error    error
+}
+
+// UserMessageQueuedMsg indicates a user message was queued for a busy worker.
+// This allows the TUI to show feedback to the user.
+type UserMessageQueuedMsg struct {
+	WorkerID      string
+	QueuePosition int
+}
+
+// CoordinatorMessageQueuedMsg indicates a user message was queued for the busy coordinator.
+// This allows the TUI to show feedback to the user.
+type CoordinatorMessageQueuedMsg struct {
+	QueuePosition int
 }
 
 // Update handles messages and returns updated model and commands.
@@ -442,6 +454,22 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		log.Debug(log.CatOrch, "Worker error", "subsystem", "update", "workerID", msg.WorkerID, "error", msg.Error)
 		return m, nil
 
+	// Handle user message queued feedback (for workers)
+	case UserMessageQueuedMsg:
+		// Add a system message to the worker pane showing the message was queued
+		queuedFeedback := fmt.Sprintf("Message queued (position %d) - worker is busy", msg.QueuePosition)
+		m = m.AddWorkerMessageWithRole(msg.WorkerID, "system", queuedFeedback)
+		log.Debug(log.CatOrch, "User message queued feedback shown", "subsystem", "update", "workerID", msg.WorkerID, "position", msg.QueuePosition)
+		return m, nil
+
+	// Handle coordinator message queued feedback
+	case CoordinatorMessageQueuedMsg:
+		// Add a system message to the coordinator pane showing the message was queued
+		queuedFeedback := fmt.Sprintf("Message queued (position %d) - coordinator is busy", msg.QueuePosition)
+		m = m.AddChatMessage("system", queuedFeedback)
+		log.Debug(log.CatOrch, "Coordinator message queued feedback shown", "subsystem", "update", "position", msg.QueuePosition)
+		return m, nil
+
 	// Handle workflow picker selection
 	case commandpalette.SelectMsg:
 		return m.handleWorkflowSelected(msg.Item)
@@ -545,6 +573,16 @@ func (m Model) handleCoordinatorEvent(event pubsub.Event[events.CoordinatorEvent
 
 	case events.CoordinatorReady:
 		m.coordinatorWorking = false
+		// Note: Do NOT reset queue count here. The queue may still have messages
+		// that will be drained by drainQueue() which emits CoordinatorMessageQueued
+		// with the remaining count. CoordinatorMessageQueued is the source of truth.
+
+	case events.CoordinatorMessageQueued:
+		// Update queue count for display
+		m.coordinatorPane.queueCount = payload.QueueCount
+		log.Debug(log.CatOrch, "Coordinator queue count updated",
+			"subsystem", "update",
+			"queueCount", payload.QueueCount)
 	}
 
 	cmds = append(cmds, m.coordListener.Listen())
@@ -593,6 +631,13 @@ func (m Model) handleWorkerEvent(event pubsub.Event[events.WorkerEvent]) (Model,
 			"workerID", payload.WorkerID,
 			"messageLen", len(payload.Message))
 		m = m.AddWorkerMessageWithRole(payload.WorkerID, "coordinator", payload.Message)
+
+	case events.WorkerQueueChanged:
+		log.Debug(log.CatOrch, "Worker queue changed",
+			"subsystem", "update",
+			"workerID", payload.WorkerID,
+			"queueCount", payload.QueueCount)
+		m = m.SetQueueCount(payload.WorkerID, payload.QueueCount)
 
 	case events.WorkerError:
 		log.Debug(log.CatOrch, "Worker error", "subsystem", "update", "workerID", payload.WorkerID, "error", payload.Error)
@@ -707,14 +752,14 @@ func (m Model) handleInitializerEvent(event pubsub.Event[InitializerEvent]) (Mod
 
 						if len(readyMessageWorkerIds) > 0 {
 							nudge = fmt.Sprintf("[%s] have started up and are now ready", strings.Join(readyMessageWorkerIds, ", "))
-							if err := m.coord.SendUserMessage(nudge); err != nil {
+							if _, err := m.coord.SendUserMessage(nudge); err != nil {
 								log.Debug(log.CatOrch, "Failed to nudge coordinator", "subsystem", "update", "error", err)
 							}
 						}
 
 						if len(newMessageWorkerIds) > 0 {
 							nudge = fmt.Sprintf("[%s sent messages] Use read_message_log to check for new messages.", strings.Join(newMessageWorkerIds, ", "))
-							if err := m.coord.SendUserMessage(nudge); err != nil {
+							if _, err := m.coord.SendUserMessage(nudge); err != nil {
 								log.Debug(log.CatOrch, "Failed to nudge coordinator", "subsystem", "update", "error", err)
 							}
 						}
@@ -741,6 +786,7 @@ func (m Model) handleInitializerEvent(event pubsub.Event[InitializerEvent]) (Mod
 		m.messageLog = res.MessageLog
 		m.mcpServer = res.MCPServer
 		m.mcpPort = res.MCPPort
+		m.mcpCoordServer = res.MCPCoordServer
 		m.coord = res.Coordinator
 		m.session = res.Session
 
@@ -843,25 +889,40 @@ func (m Model) handleUserInput(content, target string) (Model, tea.Cmd) {
 }
 
 // handleUserInputToCoordinator sends user input to the coordinator.
+// Uses the coordinator's queue system to handle busy state.
 func (m Model) handleUserInputToCoordinator(content string) (Model, tea.Cmd) {
 	if m.coord == nil {
 		m = m.SetError("Coordinator not started")
 		return m, nil
 	}
 
+	// Capture coordinator for closure
+	coord := m.coord
+
 	// Send to coordinator - it will emit an event that adds the message to chat
 	return m, func() tea.Msg {
-		if err := m.coord.SendUserMessage(content); err != nil {
+		result, err := coord.SendUserMessage(content)
+		if err != nil {
 			return CoordinatorErrorMsg{Error: err}
 		}
+
+		if result.Queued {
+			log.Debug(log.CatOrch, "User message queued for coordinator",
+				"subsystem", "update", "position", result.QueuePosition)
+			return CoordinatorMessageQueuedMsg{
+				QueuePosition: result.QueuePosition,
+			}
+		}
+
 		return nil
 	}
 }
 
 // handleUserInputToWorker sends user input directly to a worker.
+// Uses the CoordinatorServer's queue system to handle busy workers.
 func (m Model) handleUserInputToWorker(content, workerID string) (Model, tea.Cmd) {
-	if m.pool == nil {
-		m = m.SetError("Worker pool not available")
+	if m.mcpCoordServer == nil {
+		m = m.SetError("MCP coordinator server not available")
 		return m, nil
 	}
 
@@ -869,42 +930,23 @@ func (m Model) handleUserInputToWorker(content, workerID string) (Model, tea.Cmd
 	m = m.AddWorkerMessageWithRole(workerID, "user", content)
 	log.Debug(log.CatOrch, "Sending message to worker", "subsystem", "update", "workerID", workerID)
 
-	// Get worker from pool and validate before spawning goroutine
-	worker := m.pool.GetWorker(workerID)
-	if worker == nil {
-		return m, func() tea.Msg {
-			return WorkerErrorMsg{WorkerID: workerID, Error: fmt.Errorf("worker not found: %s", workerID)}
-		}
-	}
-
-	sessionID := worker.GetSessionID()
-	if sessionID == "" {
-		return m, func() tea.Msg {
-			return WorkerErrorMsg{WorkerID: workerID, Error: fmt.Errorf("worker %s has no session ID yet", workerID)}
-		}
-	}
-
-	// Build spawn config using shared helper
-	cfg, err := m.buildWorkerSpawnConfig(workerID, sessionID, content)
-	if err != nil {
-		return m, func() tea.Msg {
-			return WorkerErrorMsg{WorkerID: workerID, Error: err}
-		}
-	}
-
-	// Capture pool for closure - client is accessed via pool.Client()
-	workerPool := m.pool
+	// Capture server for closure
+	mcpServer := m.mcpCoordServer
 
 	return m, func() tea.Msg {
-		// Resume the worker's session with the user message
-		proc, err := workerPool.Client().Spawn(context.Background(), cfg)
+		// Use CoordinatorServer's queue-aware method to send the message
+		result, err := mcpServer.SendUserMessageToWorker(context.Background(), workerID, content)
 		if err != nil {
-			return WorkerErrorMsg{WorkerID: workerID, Error: fmt.Errorf("failed to send message: %w", err)}
+			return WorkerErrorMsg{WorkerID: workerID, Error: err}
 		}
 
-		// Resume the worker in the pool so events are processed
-		if err := workerPool.ResumeWorker(workerID, proc); err != nil {
-			return WorkerErrorMsg{WorkerID: workerID, Error: fmt.Errorf("failed to resume worker: %w", err)}
+		if result.Queued {
+			log.Debug(log.CatOrch, "User message queued for worker",
+				"subsystem", "update", "workerID", workerID, "position", result.QueuePosition)
+			return UserMessageQueuedMsg{
+				WorkerID:      workerID,
+				QueuePosition: result.QueuePosition,
+			}
 		}
 
 		log.Debug(log.CatOrch, "Message sent to worker", "subsystem", "update", "workerID", workerID)
@@ -913,22 +955,28 @@ func (m Model) handleUserInputToWorker(content, workerID string) (Model, tea.Cmd
 }
 
 // handleUserInputBroadcast sends user input to the coordinator and all active workers.
+// Uses the CoordinatorServer's queue system to handle busy workers.
 func (m Model) handleUserInputBroadcast(content string) (Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	// Send to coordinator (the coordinator will emit an event that adds the message to chat)
 	if m.coord != nil {
+		coord := m.coord
 		coordCmd := func() tea.Msg {
-			if err := m.coord.SendUserMessage("[BROADCAST]\n" + content); err != nil {
+			result, err := coord.SendUserMessage("[BROADCAST]\n" + content)
+			if err != nil {
 				return CoordinatorErrorMsg{Error: err}
+			}
+			if result.Queued {
+				return CoordinatorMessageQueuedMsg{QueuePosition: result.QueuePosition}
 			}
 			return nil
 		}
 		cmds = append(cmds, coordCmd)
 	}
 
-	// Send to all active workers
-	if m.pool != nil {
+	// Send to all active workers using the queue system
+	if m.mcpCoordServer != nil {
 		for _, workerID := range m.workerPane.workerIDs {
 			status := m.workerPane.workerStatus[workerID]
 			// Only send to ready or working workers (not retired)
@@ -936,39 +984,31 @@ func (m Model) handleUserInputBroadcast(content string) (Model, tea.Cmd) {
 				continue
 			}
 
-			// Get worker and validate
-			worker := m.pool.GetWorker(workerID)
-			if worker == nil {
-				continue // Skip if worker not found
-			}
-			sessionID := worker.GetSessionID()
-			if sessionID == "" {
-				continue // Skip if no session yet
-			}
-
-			// Add message to worker pane
+			// Add message to worker pane (optimistic update)
 			m = m.AddWorkerMessageWithRole(workerID, "user", "[BROADCAST] "+content)
 
-			// Build spawn config using shared helper
-			cfg, err := m.buildWorkerSpawnConfig(workerID, sessionID, fmt.Sprintf("[BROADCAST FROM USER]\n%s", content))
-			if err != nil {
-				log.Debug(log.CatOrch, "Failed to build worker config for broadcast", "subsystem", "update", "workerID", workerID, "error", err)
-				continue
-			}
-
-			// Capture for closure - client accessed via pool.Client()
+			// Capture for closure
 			wid := workerID
-			workerPool := m.pool
-			spawnCfg := cfg
+			mcpServer := m.mcpCoordServer
+			broadcastContent := fmt.Sprintf("[BROADCAST FROM USER]\n%s", content)
 
 			workerCmd := func() tea.Msg {
-				proc, err := workerPool.Client().Spawn(context.Background(), spawnCfg)
+				// Use CoordinatorServer's queue-aware method to send the message
+				result, err := mcpServer.SendUserMessageToWorker(context.Background(), wid, broadcastContent)
 				if err != nil {
-					return WorkerErrorMsg{WorkerID: wid, Error: err}
+					// Non-fatal errors for broadcast - log and continue
+					log.Debug(log.CatOrch, "Broadcast to worker failed",
+						"subsystem", "update", "workerID", wid, "error", err)
+					return nil
 				}
 
-				if err := workerPool.ResumeWorker(wid, proc); err != nil {
-					return WorkerErrorMsg{WorkerID: wid, Error: err}
+				if result.Queued {
+					log.Debug(log.CatOrch, "Broadcast message queued for worker",
+						"subsystem", "update", "workerID", wid, "position", result.QueuePosition)
+					return UserMessageQueuedMsg{
+						WorkerID:      wid,
+						QueuePosition: result.QueuePosition,
+					}
 				}
 
 				return nil
@@ -979,32 +1019,6 @@ func (m Model) handleUserInputBroadcast(content string) (Model, tea.Cmd) {
 
 	log.Debug(log.CatOrch, "Broadcast message sent", "subsystem", "update", "targets", len(cmds))
 	return m, tea.Batch(cmds...)
-}
-
-// generateWorkerMCPConfig returns the appropriate MCP config format based on client type.
-func (m Model) generateWorkerMCPConfig(workerID string) (string, error) {
-	if client.ClientType(m.clientType) == client.ClientAmp {
-		return mcp.GenerateWorkerConfigAmp(m.mcpPort, workerID)
-	}
-	return mcp.GenerateWorkerConfigHTTP(m.mcpPort, workerID)
-}
-
-// buildWorkerSpawnConfig creates a client.Config for resuming a worker session.
-// This consolidates the common config-building logic used when sending messages to workers.
-func (m Model) buildWorkerSpawnConfig(workerID, sessionID, prompt string) (client.Config, error) {
-	mcpConfig, err := m.generateWorkerMCPConfig(workerID)
-	if err != nil {
-		return client.Config{}, fmt.Errorf("failed to generate MCP config: %w", err)
-	}
-
-	return client.Config{
-		WorkDir:         m.workDir,
-		SessionID:       sessionID,
-		Prompt:          prompt,
-		MCPConfig:       mcpConfig,
-		SkipPermissions: true,
-		DisallowedTools: []string{"AskUserQuestion"},
-	}, nil
 }
 
 // handlePauseToggle toggles the paused state.
@@ -1076,7 +1090,7 @@ The more detailed your handoff, the smoother the transition will be. Think of th
 
 When you're ready, call: ` + "`prepare_handoff`" + ` with your summary.`
 
-		err := coord.SendUserMessage(handoffMessage)
+		_, err := coord.SendUserMessage(handoffMessage)
 		if err != nil {
 			return CoordinatorErrorMsg{Error: fmt.Errorf("failed to request handoff: %w", err)}
 		}

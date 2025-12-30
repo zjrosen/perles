@@ -5,12 +5,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/zjrosen/perles/internal/log"
 	"github.com/zjrosen/perles/internal/orchestration/claude"
 	"github.com/zjrosen/perles/internal/orchestration/client"
 	"github.com/zjrosen/perles/internal/orchestration/events"
 	"github.com/zjrosen/perles/internal/orchestration/mcp"
 	"github.com/zjrosen/perles/internal/orchestration/metrics"
+	"github.com/zjrosen/perles/internal/orchestration/queue"
 )
 
 // generateMCPConfig returns the appropriate MCP config format based on client type.
@@ -99,16 +102,69 @@ func (c *Coordinator) Start() error {
 	return nil
 }
 
+// SendUserMessageResult contains the result of sending a user message to the coordinator.
+type SendUserMessageResult struct {
+	// Queued is true if the message was queued for later delivery (coordinator was busy).
+	Queued bool
+	// QueuePosition is the position in the queue (1-indexed) if Queued is true.
+	QueuePosition int
+}
+
 // SendUserMessage forwards a message from the user to the coordinator.
-// Returns an error if the coordinator is not running.
-func (c *Coordinator) SendUserMessage(content string) error {
+// If the coordinator is busy (working), the message is queued for later delivery.
+// Returns a result indicating whether the message was sent or queued.
+func (c *Coordinator) SendUserMessage(content string) (*SendUserMessageResult, error) {
+	// Acquire queue mutex for atomic check+enqueue/deliver operation.
+	// This ensures the working check and subsequent enqueue/deliver are atomic,
+	// preventing race conditions where coordinator finishes between check and enqueue.
+	c.queueMu.Lock()
+	defer c.queueMu.Unlock()
+
+	// Check status first (can read atomic without main mutex)
+	if c.Status() != StatusRunning {
+		return nil, fmt.Errorf("coordinator not running (status: %s)", c.Status())
+	}
+
+	// Check if coordinator is busy - queue message if so
+	if c.working {
+		msg := queue.QueuedMessage{
+			ID:         uuid.New().String(),
+			Content:    content,
+			From:       "USER",
+			EnqueuedAt: time.Now(),
+		}
+		if err := c.messageQueue.Enqueue(msg); err != nil {
+			return nil, fmt.Errorf("queue full: %w", err)
+		}
+
+		queueLen := c.messageQueue.Len()
+		log.Debug(log.CatOrch, "User message queued for busy coordinator",
+			"subsystem", "coord", "queueLen", queueLen)
+
+		// Emit event for TUI to show queued message
+		c.emitCoordinatorEvent(events.CoordinatorMessageQueued, events.CoordinatorEvent{
+			QueueCount: queueLen,
+		})
+
+		return &SendUserMessageResult{
+			Queued:        true,
+			QueuePosition: queueLen,
+		}, nil
+	}
+
+	// Coordinator is ready - deliver immediately
+	if err := c.deliverMessageLocked(content); err != nil {
+		return nil, err
+	}
+
+	return &SendUserMessageResult{Queued: false}, nil
+}
+
+// deliverMessageLocked sends a message to the coordinator Claude process.
+// IMPORTANT: Caller must hold queueMu lock before calling this method.
+func (c *Coordinator) deliverMessageLocked(content string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
-	// Check status and process under lock to prevent race conditions
-	if c.Status() != StatusRunning {
-		return fmt.Errorf("coordinator not running (status: %s)", c.Status())
-	}
 
 	if c.process == nil {
 		return fmt.Errorf("coordinator process not available")
@@ -120,6 +176,9 @@ func (c *Coordinator) SendUserMessage(content string) error {
 		Content: content,
 	})
 
+	// Mark coordinator as working BEFORE releasing lock
+	c.working = true
+
 	// Coordinator is now working (processing user message)
 	c.emitCoordinatorEvent(events.CoordinatorWorking, events.CoordinatorEvent{})
 
@@ -129,6 +188,7 @@ func (c *Coordinator) SendUserMessage(content string) error {
 	// Generate MCP config for coordinator tools
 	mcpConfig, err := c.generateMCPConfig()
 	if err != nil {
+		c.working = false
 		c.emitCoordinatorEvent(events.CoordinatorError, events.CoordinatorEvent{
 			Error: fmt.Errorf("generating MCP config: %w", err),
 		})
@@ -151,6 +211,7 @@ func (c *Coordinator) SendUserMessage(content string) error {
 
 	newProcess, err := c.client.Spawn(c.ctx, cfg)
 	if err != nil {
+		c.working = false
 		c.emitCoordinatorEvent(events.CoordinatorError, events.CoordinatorEvent{
 			Error: fmt.Errorf("resuming coordinator: %w", err),
 		})
@@ -164,6 +225,42 @@ func (c *Coordinator) SendUserMessage(content string) error {
 	go c.processEvents()
 
 	return nil
+}
+
+// drainQueue delivers the next queued message if any.
+// Called when coordinator becomes ready after processing.
+// IMPORTANT: This method acquires its own locks.
+func (c *Coordinator) drainQueue() {
+	c.queueMu.Lock()
+	defer c.queueMu.Unlock()
+
+	// Mark as not working
+	c.working = false
+
+	// Check if there are queued messages
+	msg, ok := c.messageQueue.Dequeue()
+	if !ok {
+		return // No messages queued
+	}
+
+	// Get remaining queue count after dequeue
+	remainingCount := c.messageQueue.Len()
+
+	log.Debug(log.CatOrch, "Draining queued message to coordinator",
+		"subsystem", "coord", "from", msg.From, "queueRemaining", remainingCount)
+
+	// Emit event with updated queue count so UI shows remaining messages
+	// This is critical for showing [N queued] label until queue is fully drained
+	c.emitCoordinatorEvent(events.CoordinatorMessageQueued, events.CoordinatorEvent{
+		QueueCount: remainingCount,
+	})
+
+	// Deliver the queued message
+	if err := c.deliverMessageLocked(msg.Content); err != nil {
+		log.Debug(log.CatOrch, "Failed to deliver queued message",
+			"subsystem", "coord", "error", err)
+		// Message is lost on error - could add retry logic if needed
+	}
 }
 
 // Pause pauses the coordinator workflow.
@@ -461,6 +558,9 @@ func (c *Coordinator) processEvents() {
 					"cost", event.TotalCostUSD,
 					"durationMs", event.DurationMs)
 				c.emitCoordinatorEvent(events.CoordinatorReady, events.CoordinatorEvent{})
+
+				// Drain any queued messages now that coordinator is ready
+				c.drainQueue()
 
 			case event.IsToolResult():
 				// Tool results may indicate worker actions

@@ -53,6 +53,9 @@ func TestCoordinatorServer_SendToWorker_Deduplication(t *testing.T) {
 	require.NotNil(t, worker)
 	require.NotEmpty(t, worker.GetSessionID(), "worker should have session ID")
 
+	// Transition worker to Ready so messages are delivered immediately (not queued)
+	worker.SetStatusForTesting(pool.WorkerReady)
+
 	// Reset spawn count so we only count calls from handleSendToWorker
 	mockClient.Reset()
 
@@ -112,6 +115,11 @@ func TestCoordinatorServer_SendToWorker_DifferentMessages(t *testing.T) {
 	// Wait for session ID
 	time.Sleep(50 * time.Millisecond)
 
+	// Transition worker to Ready so messages are delivered immediately (not queued)
+	worker := workerPool.GetWorker(workerID)
+	require.NotNil(t, worker)
+	worker.SetStatusForTesting(pool.WorkerReady)
+
 	// Reset spawn count
 	mockClient.Reset()
 
@@ -125,6 +133,13 @@ func TestCoordinatorServer_SendToWorker_DifferentMessages(t *testing.T) {
 	result1, err := cs.handleSendToWorker(ctx, json.RawMessage(args1))
 	require.NoError(t, err)
 	require.NotNil(t, result1)
+
+	// After first send, pool.ResumeWorker starts an async goroutine that sets status to Working.
+	// Wait briefly to ensure that goroutine has run before we reset status.
+	time.Sleep(10 * time.Millisecond)
+
+	// Reset to Ready so second message is delivered immediately, not queued.
+	worker.SetStatusForTesting(pool.WorkerReady)
 
 	// Send different message - should NOT be deduplicated
 	args2 := `{"worker_id": "` + workerID + `", "message": "second message"}`
@@ -179,6 +194,15 @@ func TestCoordinatorServer_SendToWorker_DifferentWorkers(t *testing.T) {
 
 	// Wait for session IDs
 	time.Sleep(50 * time.Millisecond)
+
+	// Transition workers to Ready so messages are delivered immediately (not queued)
+	worker1 := workerPool.GetWorker(workerID1)
+	require.NotNil(t, worker1)
+	worker1.SetStatusForTesting(pool.WorkerReady)
+
+	worker2 := workerPool.GetWorker(workerID2)
+	require.NotNil(t, worker2)
+	worker2.SetStatusForTesting(pool.WorkerReady)
 
 	// Reset spawn count
 	mockClient.Reset()
@@ -235,6 +259,11 @@ func TestCoordinatorServer_SendToWorker_Deduplication_Concurrent(t *testing.T) {
 
 	// Wait for session ID
 	time.Sleep(50 * time.Millisecond)
+
+	// Transition worker to Ready so messages are delivered immediately (not queued)
+	worker := workerPool.GetWorker(workerID)
+	require.NotNil(t, worker)
+	worker.SetStatusForTesting(pool.WorkerReady)
 
 	// Reset spawn count
 	mockClient.Reset()

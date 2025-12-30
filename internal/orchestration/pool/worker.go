@@ -40,6 +40,16 @@ type Worker struct {
 	metrics       *metrics.TokenMetrics // Current token metrics
 	totalCostUSD  float64               // Accumulated cost across all turns
 	mu            sync.RWMutex
+
+	// onTurnComplete is called synchronously when worker transitions to Ready.
+	// This callback is invoked BEFORE the WorkerStatusChange event is published,
+	// ensuring the worker is never externally visible as Ready with pending work.
+	onTurnComplete func(workerID string)
+
+	// onWorkerRetired is called synchronously when worker transitions to Retired.
+	// This callback is invoked BEFORE the WorkerStatusChange event is published,
+	// allowing the coordinator to drain any queued messages for the worker.
+	onWorkerRetired func(workerID string)
 }
 
 // newWorker creates a new worker with the given ID.
@@ -82,11 +92,17 @@ func (w *Worker) CompleteTask() {
 }
 
 // Retire permanently shuts down the worker.
+// Invokes the onWorkerRetired callback (if set) to allow cleanup before retirement.
 func (w *Worker) Retire() {
 	w.mu.Lock()
-	defer w.mu.Unlock()
-
+	callback := w.onWorkerRetired
 	w.Status = WorkerRetired
+	w.mu.Unlock()
+
+	// Invoke retirement callback if set (allows coordinator to drain queued messages)
+	if callback != nil {
+		callback(w.ID)
+	}
 }
 
 // GetStatus returns the current status thread-safely.
@@ -201,13 +217,20 @@ func (w *Worker) Duration() time.Duration {
 }
 
 // Cancel stops the worker's Claude process and retires the worker.
+// Invokes the onWorkerRetired callback (if set) to allow cleanup before retirement.
 func (w *Worker) Cancel() error {
 	w.mu.Lock()
 	proc := w.Process
+	callback := w.onWorkerRetired
 	// Set status before unlock to prevent race with event loop
 	w.Status = WorkerRetired
 	w.TaskID = ""
 	w.mu.Unlock()
+
+	// Invoke retirement callback if set (allows coordinator to drain queued messages)
+	if callback != nil {
+		callback(w.ID)
+	}
 
 	if proc != nil {
 		return proc.Cancel()
@@ -427,7 +450,19 @@ func (w *Worker) handleProcessComplete(proc client.HeadlessProcess, broker *pubs
 	w.Status = finalStatus
 	currentStatus := w.Status
 	taskID := w.TaskID
+	turnCompleteCallback := w.onTurnComplete
+	retiredCallback := w.onWorkerRetired
 	w.mu.Unlock()
+
+	// CRITICAL: Invoke callbacks synchronously BEFORE publishing status event.
+	// This ensures the worker is never externally visible as "Ready" with pending
+	// queued messages, and allows cleanup (draining queued messages) before
+	// the worker appears Retired to external callers.
+	if finalStatus == WorkerReady && turnCompleteCallback != nil {
+		turnCompleteCallback(w.ID)
+	} else if finalStatus == WorkerRetired && retiredCallback != nil {
+		retiredCallback(w.ID)
+	}
 
 	broker.Publish(pubsub.UpdatedEvent, events.WorkerEvent{
 		WorkerID: w.ID,

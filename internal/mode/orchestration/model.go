@@ -23,6 +23,7 @@ import (
 	"github.com/zjrosen/perles/internal/orchestration/client"
 	"github.com/zjrosen/perles/internal/orchestration/coordinator"
 	"github.com/zjrosen/perles/internal/orchestration/events"
+	"github.com/zjrosen/perles/internal/orchestration/mcp"
 	"github.com/zjrosen/perles/internal/orchestration/message"
 	"github.com/zjrosen/perles/internal/orchestration/metrics"
 	"github.com/zjrosen/perles/internal/orchestration/pool"
@@ -108,8 +109,9 @@ type Model struct {
 	coord              *coordinator.Coordinator
 	pool               *pool.WorkerPool
 	messageLog         *message.Issue
-	mcpServer          *http.Server // HTTP MCP server for in-process tool handling
-	mcpPort            int          // Dynamic port for MCP server
+	mcpServer          *http.Server           // HTTP MCP server for in-process tool handling
+	mcpPort            int                    // Dynamic port for MCP server
+	mcpCoordServer     *mcp.CoordinatorServer // MCP coordinator server for direct worker messaging
 	workDir            string
 	services           mode.Services
 	coordinatorMetrics *metrics.TokenMetrics // Token usage and cost data for coordinator
@@ -163,6 +165,7 @@ type CoordinatorPane struct {
 	viewports     map[string]viewport.Model // Use map so changes persist in View (maps are reference types)
 	contentDirty  bool
 	hasNewContent bool // True when new content arrived while scrolled up
+	queueCount    int  // Number of messages queued for coordinator (for UI display)
 }
 
 // MessagePane shows the message log from the .msg issue.
@@ -175,15 +178,16 @@ type MessagePane struct {
 
 // WorkerPane shows output from one worker at a time.
 type WorkerPane struct {
-	workerIndex    int      // Currently displayed worker
-	workerIDs      []string // Worker IDs in display order (active workers only)
-	workerStatus   map[string]events.WorkerStatus
-	workerMessages map[string][]ChatMessage         // Structured messages per worker (like coordinator)
-	workerMetrics  map[string]*metrics.TokenMetrics // Token usage and cost per worker
-	viewports      map[string]viewport.Model        // Viewport per worker for scrolling
-	contentDirty   map[string]bool                  // Dirty flag per worker
-	hasNewContent  map[string]bool                  // True when new content arrived while scrolled up (per worker)
-	retiredOrder   []string                         // Order in which workers retired (oldest first)
+	workerIndex       int      // Currently displayed worker
+	workerIDs         []string // Worker IDs in display order (active workers only)
+	workerStatus      map[string]events.WorkerStatus
+	workerMessages    map[string][]ChatMessage         // Structured messages per worker (like coordinator)
+	workerMetrics     map[string]*metrics.TokenMetrics // Token usage and cost per worker
+	workerQueueCounts map[string]int                   // Queue count per worker (for UI display)
+	viewports         map[string]viewport.Model        // Viewport per worker for scrolling
+	contentDirty      map[string]bool                  // Dirty flag per worker
+	hasNewContent     map[string]bool                  // True when new content arrived while scrolled up (per worker)
+	retiredOrder      []string                         // Order in which workers retired (oldest first)
 }
 
 // Config holds configuration for creating an orchestration Model.
@@ -254,13 +258,14 @@ func newMessagePane() MessagePane {
 
 func newWorkerPane() WorkerPane {
 	return WorkerPane{
-		workerIDs:      make([]string, 0),
-		workerStatus:   make(map[string]events.WorkerStatus),
-		workerMessages: make(map[string][]ChatMessage),
-		workerMetrics:  make(map[string]*metrics.TokenMetrics),
-		viewports:      make(map[string]viewport.Model),
-		contentDirty:   make(map[string]bool),
-		hasNewContent:  make(map[string]bool),
+		workerIDs:         make([]string, 0),
+		workerStatus:      make(map[string]events.WorkerStatus),
+		workerMessages:    make(map[string][]ChatMessage),
+		workerMetrics:     make(map[string]*metrics.TokenMetrics),
+		workerQueueCounts: make(map[string]int),
+		viewports:         make(map[string]viewport.Model),
+		contentDirty:      make(map[string]bool),
+		hasNewContent:     make(map[string]bool),
 	}
 }
 
@@ -514,6 +519,13 @@ func (m Model) AddWorkerMessageWithRole(workerID, role, content string) Model {
 		m.workerPane.hasNewContent[workerID] = true
 	}
 
+	return m
+}
+
+// SetQueueCount updates the queue count for a worker.
+// Used by the UI to display pending queued messages.
+func (m Model) SetQueueCount(workerID string, count int) Model {
+	m.workerPane.workerQueueCounts[workerID] = count
 	return m
 }
 

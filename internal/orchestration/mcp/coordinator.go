@@ -8,12 +8,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/zjrosen/perles/internal/beads"
 	"github.com/zjrosen/perles/internal/log"
 	"github.com/zjrosen/perles/internal/orchestration/client"
 	"github.com/zjrosen/perles/internal/orchestration/events"
 	"github.com/zjrosen/perles/internal/orchestration/message"
 	"github.com/zjrosen/perles/internal/orchestration/pool"
+	"github.com/zjrosen/perles/internal/orchestration/queue"
+	"github.com/zjrosen/perles/internal/pubsub"
 )
 
 // taskIDPattern validates bd task IDs to prevent command injection.
@@ -87,6 +91,16 @@ type CoordinatorServer struct {
 
 	// dedup tracks recent messages to prevent duplicate sends to workers
 	dedup *MessageDeduplicator
+
+	// Per-worker message queues for handling messages when workers are busy
+	messageQueues map[string]*queue.MessageQueue // workerID -> queue
+	queueMu       sync.RWMutex                   // protects messageQueues map
+
+	// Queue event debouncing to prevent event storms on bulk enqueue operations
+	// Events are batched and emitted after 100ms of inactivity (mandatory per cross-review consensus)
+	queueEventDebouncer *time.Timer
+	queueEventMu        sync.Mutex
+	pendingQueueEvents  map[string]int // workerID -> latest queue count
 }
 
 // NewCoordinatorServer creates a new coordinator MCP server.
@@ -105,18 +119,26 @@ func NewCoordinatorServer(
 	beadsExec beads.BeadsExecutor,
 ) *CoordinatorServer {
 	cs := &CoordinatorServer{
-		Server:            NewServer("perles-orchestrator", "1.0.0", WithInstructions(coordinatorInstructions)),
-		client:            aiClient,
-		pool:              workerPool,
-		msgIssue:          msgIssue,
-		workDir:           workDir,
-		port:              port,
-		extensions:        extensions,
-		beadsExecutor:     beadsExec,
-		workerAssignments: make(map[string]*WorkerAssignment),
-		taskAssignments:   make(map[string]*TaskAssignment),
-		dedup:             NewMessageDeduplicator(DefaultDeduplicationWindow),
+		Server:             NewServer("perles-orchestrator", "1.0.0", WithInstructions(coordinatorInstructions)),
+		client:             aiClient,
+		pool:               workerPool,
+		msgIssue:           msgIssue,
+		workDir:            workDir,
+		port:               port,
+		extensions:         extensions,
+		beadsExecutor:      beadsExec,
+		workerAssignments:  make(map[string]*WorkerAssignment),
+		taskAssignments:    make(map[string]*TaskAssignment),
+		dedup:              NewMessageDeduplicator(DefaultDeduplicationWindow),
+		messageQueues:      make(map[string]*queue.MessageQueue),
+		pendingQueueEvents: make(map[string]int),
 	}
+
+	// Register turn-complete callback to handle queued message delivery
+	cs.pool.SetTurnCompleteCallback(cs.handleTurnComplete)
+
+	// Register worker-retired callback to drain queued messages on retirement
+	cs.pool.SetWorkerRetiredCallback(cs.drainQueueForRetiredWorker)
 
 	cs.registerTools()
 	return cs
@@ -612,6 +634,9 @@ func (cs *CoordinatorServer) handleReplaceWorker(ctx context.Context, rawArgs js
 	delete(cs.workerAssignments, args.WorkerID)
 	cs.assignmentsMu.Unlock()
 
+	// Drain any queued messages before the worker is retired
+	cs.drainQueueForRetiredWorker(args.WorkerID)
+
 	// Retire the old worker
 	if err := cs.pool.RetireWorker(args.WorkerID); err != nil {
 		return nil, fmt.Errorf("failed to retire worker: %w", err)
@@ -633,6 +658,8 @@ func (cs *CoordinatorServer) handleReplaceWorker(ctx context.Context, rawArgs js
 }
 
 // handleSendToWorker sends a message to a worker by resuming its session.
+// If the worker is busy (WorkerWorking), the message is queued for later delivery.
+// The queue mutex is held across the status check and enqueue/deliver operation to ensure atomicity.
 func (cs *CoordinatorServer) handleSendToWorker(ctx context.Context, rawArgs json.RawMessage) (*ToolCallResult, error) {
 	var args sendToWorkerArgs
 	if err := json.Unmarshal(rawArgs, &args); err != nil {
@@ -652,6 +679,12 @@ func (cs *CoordinatorServer) handleSendToWorker(ctx context.Context, rawArgs jso
 		return SuccessResult(fmt.Sprintf("Message sent to %s", args.WorkerID)), nil
 	}
 
+	// Acquire queue mutex for atomic check+enqueue/deliver operation.
+	// This ensures the worker status check and subsequent enqueue/deliver are atomic,
+	// preventing race conditions where worker transitions to Ready between check and enqueue.
+	cs.queueMu.Lock()
+	defer cs.queueMu.Unlock()
+
 	worker := cs.pool.GetWorker(args.WorkerID)
 	if worker == nil {
 		return nil, fmt.Errorf("worker not found: %s", args.WorkerID)
@@ -661,6 +694,34 @@ func (cs *CoordinatorServer) handleSendToWorker(ctx context.Context, rawArgs jso
 	if sessionID == "" {
 		return nil, fmt.Errorf("worker %s has no session ID yet (may still be starting)", args.WorkerID)
 	}
+
+	// Check worker status to decide whether to queue or deliver immediately
+	status := worker.GetStatus()
+
+	if status == pool.WorkerWorking {
+		// Worker is busy - enqueue message for later delivery
+		q := cs.getOrCreateQueueLocked(args.WorkerID)
+		msg := queue.QueuedMessage{
+			ID:         uuid.New().String(),
+			Content:    args.Message,
+			From:       "COORDINATOR",
+			EnqueuedAt: time.Now(),
+		}
+		if err := q.Enqueue(msg); err != nil {
+			return nil, fmt.Errorf("queue full for worker %s: %w", args.WorkerID, err)
+		}
+
+		queueLen := q.Len()
+		log.Debug(log.CatMCP, "Message queued for busy worker",
+			"workerID", args.WorkerID, "queueLen", queueLen)
+
+		// Emit debounced queue changed event
+		cs.emitQueueChanged(args.WorkerID, queueLen)
+
+		return SuccessResult(fmt.Sprintf("Message queued for %s", args.WorkerID)), nil
+	}
+
+	// Worker is ready - deliver immediately
 
 	// Regenerate MCP config for the worker so it has access to tools when resumed
 	mcpConfig, err := cs.generateWorkerMCPConfig(args.WorkerID)
@@ -1763,4 +1824,317 @@ func (cs *CoordinatorServer) SetTaskAssignment(taskID string, assignment *TaskAs
 	cs.assignmentsMu.Lock()
 	defer cs.assignmentsMu.Unlock()
 	cs.taskAssignments[taskID] = assignment
+}
+
+// handleTurnComplete is called when a worker completes its turn and transitions to Ready.
+// This callback is invoked synchronously BEFORE the WorkerStatusChange event is published,
+// ensuring the worker is never externally visible as Ready with pending queued messages.
+//
+// The callback sequence is:
+// 1. Worker determines finalStatus = WorkerReady
+// 2. handleTurnComplete is invoked synchronously
+// 3. handleTurnComplete holds queueMu and dequeues + delivers if pending
+// 4. handleTurnComplete returns
+// 5. WorkerStatusChange event is published
+//
+// This ensures the invariant: worker is never externally visible as Ready with pending messages.
+func (cs *CoordinatorServer) handleTurnComplete(workerID string) {
+	// Acquire queue mutex for atomic check and dequeue
+	cs.queueMu.Lock()
+	defer cs.queueMu.Unlock()
+
+	// Check if queue exists and has pending messages
+	q, exists := cs.messageQueues[workerID]
+	if !exists || q.Len() == 0 {
+		log.Debug(log.CatMCP, "Worker turn complete, no pending messages", "workerID", workerID)
+		return
+	}
+
+	// Dequeue next message (only one per turn completion)
+	msg, ok := q.Dequeue()
+	if !ok {
+		// Queue was empty (shouldn't happen after Len check, but be safe)
+		log.Debug(log.CatMCP, "Worker turn complete, queue empty after check", "workerID", workerID)
+		return
+	}
+
+	queueLen := q.Len()
+	log.Debug(log.CatMCP, "Dequeuing message for ready worker",
+		"workerID", workerID, "messageID", msg.ID, "remainingInQueue", queueLen)
+
+	// Emit debounced queue changed event (queue length decreased by 1)
+	cs.emitQueueChanged(workerID, queueLen)
+
+	// Deliver immediately - worker IS ready (callback means turn just completed)
+	// No need to re-check status - the callback is invoked synchronously
+	// before the status event is published
+	if err := cs.deliverMessageLocked(workerID, msg.Content); err != nil {
+		// Log error but don't re-queue - matches fire-and-forget model
+		log.Error(log.CatMCP, "Failed to deliver dequeued message",
+			"workerID", workerID, "messageID", msg.ID, "error", err)
+		return
+	}
+
+	log.Debug(log.CatMCP, "Successfully delivered dequeued message",
+		"workerID", workerID, "messageID", msg.ID)
+}
+
+// deliverMessageLocked delivers a message to a worker.
+// IMPORTANT: Caller must hold queueMu lock before calling this method.
+// This is used by handleTurnComplete to deliver dequeued messages.
+func (cs *CoordinatorServer) deliverMessageLocked(workerID string, content string) error {
+	worker := cs.pool.GetWorker(workerID)
+	if worker == nil {
+		return fmt.Errorf("worker %s not found", workerID)
+	}
+
+	// Fetch session ID at dequeue time (not enqueue time) to handle worker replacement
+	sessionID := worker.GetSessionID()
+	if sessionID == "" {
+		return fmt.Errorf("worker %s has no session ID", workerID)
+	}
+
+	// Generate MCP config for the worker
+	mcpConfig, err := cs.generateWorkerMCPConfig(workerID)
+	if err != nil {
+		return fmt.Errorf("failed to generate MCP config: %w", err)
+	}
+
+	// Resume the worker's session with the dequeued message
+	proc, err := cs.client.Spawn(context.Background(), client.Config{
+		WorkDir:         cs.workDir,
+		SessionID:       sessionID,
+		Prompt:          fmt.Sprintf("[MESSAGE FROM COORDINATOR]\n%s", content),
+		MCPConfig:       mcpConfig,
+		SkipPermissions: true,
+		DisallowedTools: []string{"AskUserQuestion"},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to spawn process: %w", err)
+	}
+
+	// Emit an event for the incoming message so it shows in the worker pane
+	cs.pool.EmitIncomingMessage(workerID, worker.TaskID, content)
+
+	// Resume the worker in the pool so events are processed
+	if err := cs.pool.ResumeWorker(workerID, proc); err != nil {
+		return fmt.Errorf("failed to resume worker: %w", err)
+	}
+
+	return nil
+}
+
+// getOrCreateQueueLocked returns the message queue for a worker, creating one if it doesn't exist.
+// IMPORTANT: Caller must hold queueMu lock before calling this method.
+// This is used for atomic check+enqueue/deliver operations where the lock must be held
+// across both the status check and the queue operation.
+func (cs *CoordinatorServer) getOrCreateQueueLocked(workerID string) *queue.MessageQueue {
+	if q, exists := cs.messageQueues[workerID]; exists {
+		return q
+	}
+
+	q := queue.NewMessageQueue(queue.DefaultMaxSize)
+	cs.messageQueues[workerID] = q
+	return q
+}
+
+// drainQueueForRetiredWorker drains and removes the queue for a retired worker.
+// Any pending messages are logged and discarded (fire-and-forget model).
+// This should be called when a worker retires or is replaced to prevent orphaned messages.
+func (cs *CoordinatorServer) drainQueueForRetiredWorker(workerID string) {
+	cs.queueMu.Lock()
+	defer cs.queueMu.Unlock()
+
+	q, exists := cs.messageQueues[workerID]
+	if !exists {
+		return
+	}
+
+	// Drain and log dropped messages
+	dropped := q.Drain()
+	if len(dropped) > 0 {
+		log.Warn(log.CatMCP, "Dropping queued messages for retired worker",
+			"workerID", workerID,
+			"count", len(dropped))
+
+		// Log individual message IDs for debugging
+		for _, msg := range dropped {
+			log.Debug(log.CatMCP, "Dropped queued message",
+				"workerID", workerID,
+				"messageID", msg.ID,
+				"enqueuedAt", msg.EnqueuedAt)
+		}
+	}
+
+	// Remove the queue entry from the map to prevent memory leak
+	delete(cs.messageQueues, workerID)
+
+	// Emit queue changed event with count 0
+	cs.emitQueueChanged(workerID, 0)
+}
+
+// QueueEventDebounceInterval is the debounce interval for queue change events.
+// Events are batched and emitted after this duration of inactivity.
+// This is mandatory per cross-review consensus to prevent event storms on bulk enqueue.
+const QueueEventDebounceInterval = 100 * time.Millisecond
+
+// SendUserMessageResult contains the result of sending a user message to a worker.
+type SendUserMessageResult struct {
+	// Queued is true if the message was queued for later delivery (worker was busy).
+	Queued bool
+	// QueuePosition is the position in the queue (1-indexed) if Queued is true.
+	QueuePosition int
+}
+
+// SendUserMessageToWorker sends a message from the user to a worker, using the queue system
+// if the worker is busy. This is the TUI entry point for user-to-worker messages.
+//
+// Unlike handleSendToWorker (used by the coordinator agent), this method:
+// - Formats the message as "[MESSAGE FROM USER]" instead of "[MESSAGE FROM COORDINATOR]"
+// - Does not use message deduplication (user messages should always be delivered)
+// - Returns detailed information about whether the message was queued
+//
+// The caller is responsible for adding the message to the worker pane UI before calling
+// this method (optimistic update pattern).
+func (cs *CoordinatorServer) SendUserMessageToWorker(ctx context.Context, workerID, message string) (*SendUserMessageResult, error) {
+	if workerID == "" {
+		return nil, fmt.Errorf("worker_id is required")
+	}
+	if message == "" {
+		return nil, fmt.Errorf("message is required")
+	}
+
+	// Acquire queue mutex for atomic check+enqueue/deliver operation.
+	// This ensures the worker status check and subsequent enqueue/deliver are atomic,
+	// preventing race conditions where worker transitions to Ready between check and enqueue.
+	cs.queueMu.Lock()
+	defer cs.queueMu.Unlock()
+
+	worker := cs.pool.GetWorker(workerID)
+	if worker == nil {
+		return nil, fmt.Errorf("worker not found: %s", workerID)
+	}
+
+	sessionID := worker.GetSessionID()
+	if sessionID == "" {
+		return nil, fmt.Errorf("worker %s has no session ID yet (may still be starting)", workerID)
+	}
+
+	// Check worker status to decide whether to queue or deliver immediately
+	status := worker.GetStatus()
+
+	if status == pool.WorkerWorking {
+		// Worker is busy - enqueue message for later delivery
+		q := cs.getOrCreateQueueLocked(workerID)
+		msg := queue.QueuedMessage{
+			ID:         uuid.New().String(),
+			Content:    message,
+			From:       "USER",
+			EnqueuedAt: time.Now(),
+		}
+		if err := q.Enqueue(msg); err != nil {
+			return nil, fmt.Errorf("queue full for worker %s: %w", workerID, err)
+		}
+
+		queueLen := q.Len()
+		log.Debug(log.CatMCP, "User message queued for busy worker",
+			"workerID", workerID, "queueLen", queueLen)
+
+		// Emit debounced queue changed event
+		cs.emitQueueChanged(workerID, queueLen)
+
+		return &SendUserMessageResult{
+			Queued:        true,
+			QueuePosition: queueLen,
+		}, nil
+	}
+
+	// Worker is ready - deliver immediately
+	if err := cs.deliverUserMessageLocked(ctx, workerID, sessionID, message); err != nil {
+		return nil, err
+	}
+
+	return &SendUserMessageResult{Queued: false}, nil
+}
+
+// deliverUserMessageLocked delivers a user message to a ready worker.
+// IMPORTANT: Caller must hold queueMu lock before calling this method.
+func (cs *CoordinatorServer) deliverUserMessageLocked(ctx context.Context, workerID, sessionID, message string) error {
+	worker := cs.pool.GetWorker(workerID)
+	if worker == nil {
+		return fmt.Errorf("worker %s not found", workerID)
+	}
+
+	// Generate MCP config for the worker
+	mcpConfig, err := cs.generateWorkerMCPConfig(workerID)
+	if err != nil {
+		return fmt.Errorf("failed to generate MCP config: %w", err)
+	}
+
+	// Resume the worker's session with the user message
+	proc, err := cs.client.Spawn(ctx, client.Config{
+		WorkDir:         cs.workDir,
+		SessionID:       sessionID,
+		Prompt:          fmt.Sprintf("[MESSAGE FROM USER]\n%s", message),
+		MCPConfig:       mcpConfig,
+		SkipPermissions: true,
+		DisallowedTools: []string{"AskUserQuestion"},
+	})
+	if err != nil {
+		log.Debug(log.CatMCP, "Failed to send user message to worker", "workerID", workerID, "error", err)
+		return fmt.Errorf("failed to send message: %w", err)
+	}
+
+	// Emit an event for the incoming message so it shows in the worker pane
+	cs.pool.EmitIncomingMessage(workerID, worker.TaskID, message)
+
+	// Resume the worker in the pool so events are processed and visible in the TUI
+	if err := cs.pool.ResumeWorker(workerID, proc); err != nil {
+		log.Debug(log.CatMCP, "Failed to resume worker in pool", "workerID", workerID, "error", err)
+		return fmt.Errorf("failed to resume worker: %w", err)
+	}
+
+	log.Debug(log.CatMCP, "Sent user message to worker", "workerID", workerID)
+	return nil
+}
+
+// emitQueueChanged queues a debounced queue change event.
+// Multiple rapid calls for the same or different workers will be batched
+// and emitted together after QueueEventDebounceInterval of inactivity.
+func (cs *CoordinatorServer) emitQueueChanged(workerID string, queueCount int) {
+	cs.queueEventMu.Lock()
+	defer cs.queueEventMu.Unlock()
+
+	// Store latest count for this worker (overwrites any previous pending event)
+	if cs.pendingQueueEvents == nil {
+		cs.pendingQueueEvents = make(map[string]int)
+	}
+	cs.pendingQueueEvents[workerID] = queueCount
+
+	// Reset debounce timer (100ms as per cross-review consensus)
+	if cs.queueEventDebouncer != nil {
+		cs.queueEventDebouncer.Stop()
+	}
+	cs.queueEventDebouncer = time.AfterFunc(QueueEventDebounceInterval, cs.flushQueueEvents)
+}
+
+// flushQueueEvents emits all pending queue change events.
+// This is called after the debounce interval expires.
+func (cs *CoordinatorServer) flushQueueEvents() {
+	cs.queueEventMu.Lock()
+	pendingEvents := cs.pendingQueueEvents
+	cs.pendingQueueEvents = make(map[string]int)
+	cs.queueEventDebouncer = nil
+	cs.queueEventMu.Unlock()
+
+	// Emit events for all pending workers
+	for workerID, count := range pendingEvents {
+		cs.pool.Broker().Publish(pubsub.UpdatedEvent, pool.WorkerEvent{
+			WorkerID:   workerID,
+			Type:       events.WorkerQueueChanged,
+			QueueCount: count,
+		})
+		log.Debug(log.CatMCP, "Emitted queue changed event",
+			"workerID", workerID, "queueCount", count)
+	}
 }

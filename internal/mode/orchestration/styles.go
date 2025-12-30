@@ -29,3 +29,8 @@ var (
 
 // TitleContextStyle is used for muted contextual info in pane titles (port numbers, task IDs, phases).
 var TitleContextStyle = lipgloss.NewStyle().Foreground(styles.TextMutedColor)
+
+// QueuedCountStyle is used for the queue count indicator in worker panes.
+// Uses orange color to draw attention to pending queued messages.
+var QueuedCountStyle = lipgloss.NewStyle().
+	Foreground(lipgloss.AdaptiveColor{Light: "#FFA500", Dark: "#FFB347"})

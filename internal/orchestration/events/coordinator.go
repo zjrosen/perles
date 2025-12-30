@@ -18,6 +18,8 @@ const (
 	CoordinatorReady CoordinatorEventType = "ready"
 	// CoordinatorWorking is emitted when the coordinator starts processing.
 	CoordinatorWorking CoordinatorEventType = "working"
+	// CoordinatorMessageQueued is emitted when a user message is queued because coordinator is busy.
+	CoordinatorMessageQueued CoordinatorEventType = "message_queued"
 )
 
 // CoordinatorEvent represents an event from the coordinator process.
@@ -37,6 +39,8 @@ type CoordinatorEvent struct {
 	// RawJSON contains the raw Claude API JSON response for session logging.
 	// This is only populated for CoordinatorChat events.
 	RawJSON []byte `json:"raw_json,omitempty"`
+	// QueueCount contains the number of messages in queue for message_queued events.
+	QueueCount int
 }
 
 // CoordinatorStatus represents the coordinator's operational state.

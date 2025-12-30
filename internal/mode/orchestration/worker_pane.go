@@ -203,6 +203,12 @@ func (m Model) renderSingleWorkerPane(workerID string, width, height int) string
 		metricsDisplay = workerMetrics.FormatContextDisplay()
 	}
 
+	// Build bottom-left queue indicator
+	var bottomLeft string
+	if queueCount := m.workerPane.workerQueueCounts[workerID]; queueCount > 0 {
+		bottomLeft = QueuedCountStyle.Render(fmt.Sprintf("[%d queued]", queueCount))
+	}
+
 	// Use panes.ScrollablePane helper for viewport setup, padding, and auto-scroll
 	result := panes.ScrollablePane(width, height, panes.ScrollableConfig{
 		Viewport:       &vp,
@@ -210,6 +216,7 @@ func (m Model) renderSingleWorkerPane(workerID string, width, height int) string
 		HasNewContent:  m.workerPane.hasNewContent[workerID],
 		MetricsDisplay: metricsDisplay,
 		LeftTitle:      leftTitle,
+		BottomLeft:     bottomLeft,
 		TitleColor:     WorkerColor,
 		BorderColor:    styles.BorderDefaultColor,
 	}, func(wrapWidth int) string {

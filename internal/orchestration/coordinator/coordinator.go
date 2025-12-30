@@ -32,6 +32,7 @@ import (
 	"github.com/zjrosen/perles/internal/orchestration/message"
 	"github.com/zjrosen/perles/internal/orchestration/metrics"
 	"github.com/zjrosen/perles/internal/orchestration/pool"
+	"github.com/zjrosen/perles/internal/orchestration/queue"
 
 	"github.com/zjrosen/perles/internal/pubsub"
 )
@@ -122,6 +123,12 @@ type Coordinator struct {
 	// Worker events are published directly by pool, accessed via Workers()
 	broker *pubsub.Broker[events.CoordinatorEvent]
 
+	// Message queue for user messages when coordinator is busy
+	// Protected by queueMu for thread-safe access
+	messageQueue *queue.MessageQueue
+	queueMu      sync.Mutex
+	working      bool // True when coordinator is actively processing (between Working and Ready events)
+
 	// Lifecycle
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -160,6 +167,7 @@ func New(cfg Config) (*Coordinator, error) {
 		model:             model,
 		cumulativeMetrics: &metrics.TokenMetrics{},
 		broker:            pubsub.NewBroker[events.CoordinatorEvent](),
+		messageQueue:      queue.NewMessageQueue(queue.DefaultMaxSize),
 		ctx:               ctx,
 		cancel:            cancel,
 	}

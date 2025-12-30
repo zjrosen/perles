@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/bubbles/viewport"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/stretchr/testify/require"
 
 	"github.com/zjrosen/perles/internal/orchestration/events"
@@ -118,4 +119,94 @@ func TestRenderSingleWorkerPane_NilPoolDoesNotCrash(t *testing.T) {
 	require.NotPanics(t, func() {
 		_ = m.renderSingleWorkerPane("worker-1", 80, 20)
 	})
+}
+
+func TestWorkerPane_QueueCountDisplay(t *testing.T) {
+	// Create model with a worker
+	m := New(Config{})
+	m.pool = nil
+
+	// Initialize worker pane state
+	m.workerPane.workerStatus["worker-1"] = pool.WorkerWorking
+	m.workerPane.viewports = make(map[string]viewport.Model)
+	m.workerPane.workerQueueCounts["worker-1"] = 3
+
+	// Render the pane
+	pane := m.renderSingleWorkerPane("worker-1", 80, 20)
+
+	// Should contain the queue count indicator
+	require.Contains(t, pane, "[3 queued]")
+}
+
+func TestWorkerPane_NoQueueDisplay(t *testing.T) {
+	// Create model with a worker
+	m := New(Config{})
+	m.pool = nil
+
+	// Initialize worker pane state with zero queue count
+	m.workerPane.workerStatus["worker-1"] = pool.WorkerReady
+	m.workerPane.viewports = make(map[string]viewport.Model)
+	m.workerPane.workerQueueCounts["worker-1"] = 0
+
+	// Render the pane
+	pane := m.renderSingleWorkerPane("worker-1", 80, 20)
+
+	// Should NOT contain the queue indicator
+	require.NotContains(t, pane, "queued")
+}
+
+func TestWorkerPane_SetQueueCount(t *testing.T) {
+	// Create model
+	m := New(Config{})
+
+	// Initial state should have empty map
+	require.Empty(t, m.workerPane.workerQueueCounts)
+
+	// Set queue count for a worker
+	m = m.SetQueueCount("worker-1", 5)
+
+	// Verify the count is stored
+	require.Equal(t, 5, m.workerPane.workerQueueCounts["worker-1"])
+
+	// Update to a different count
+	m = m.SetQueueCount("worker-1", 2)
+	require.Equal(t, 2, m.workerPane.workerQueueCounts["worker-1"])
+
+	// Set count to zero
+	m = m.SetQueueCount("worker-1", 0)
+	require.Equal(t, 0, m.workerPane.workerQueueCounts["worker-1"])
+}
+
+func TestWorkerPane_QueueCountMultipleWorkers(t *testing.T) {
+	// Create model with multiple workers
+	m := New(Config{})
+	m.pool = nil
+
+	// Initialize worker pane state for two workers
+	m.workerPane.workerStatus["worker-1"] = pool.WorkerWorking
+	m.workerPane.workerStatus["worker-2"] = pool.WorkerWorking
+	m.workerPane.viewports = make(map[string]viewport.Model)
+
+	// Set different queue counts
+	m = m.SetQueueCount("worker-1", 3)
+	m = m.SetQueueCount("worker-2", 7)
+
+	// Verify both counts are stored independently
+	require.Equal(t, 3, m.workerPane.workerQueueCounts["worker-1"])
+	require.Equal(t, 7, m.workerPane.workerQueueCounts["worker-2"])
+}
+
+func TestQueuedCountStyle_OrangeForeground(t *testing.T) {
+	// Verify the QueuedCountStyle has orange foreground color
+	fg := QueuedCountStyle.GetForeground()
+
+	// The style uses AdaptiveColor, cast and check
+	adaptiveColor, ok := fg.(lipgloss.AdaptiveColor)
+	require.True(t, ok, "foreground should be AdaptiveColor")
+
+	// Verify the colors are orange (as specified in task)
+	// Light: "#FFA500" (standard orange)
+	// Dark: "#FFB347" (lighter orange for dark themes)
+	require.Equal(t, "#FFA500", adaptiveColor.Light, "light mode should be orange")
+	require.Equal(t, "#FFB347", adaptiveColor.Dark, "dark mode should be light orange")
 }

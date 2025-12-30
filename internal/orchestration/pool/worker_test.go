@@ -729,3 +729,221 @@ func TestWorker_HandleProcessComplete_Failed(t *testing.T) {
 	// Worker should be Retired
 	require.Equal(t, WorkerRetired, w.GetStatus())
 }
+
+// TestWorker_OnTurnCompleteCallback tests callback is invoked when worker transitions to Ready
+func TestWorker_OnTurnCompleteCallback(t *testing.T) {
+	w := newWorker("worker-1", 10)
+	broker := pubsub.NewBroker[WorkerEvent]()
+	defer broker.Close()
+
+	ctx := context.Background()
+	events := broker.Subscribe(ctx)
+
+	// Set up callback tracking
+	callbackInvoked := false
+	callbackWorkerID := ""
+	w.onTurnComplete = func(workerID string) {
+		callbackInvoked = true
+		callbackWorkerID = workerID
+	}
+
+	// Create mock process
+	proc := newWorkerTestProcess()
+
+	// Start worker
+	done := make(chan bool)
+	go func() {
+		w.start(ctx, proc, broker)
+		done <- true
+	}()
+
+	// Wait for spawn event
+	<-events
+
+	// Complete process successfully
+	proc.Complete()
+
+	// Wait for worker to finish
+	<-done
+
+	// Verify callback was invoked
+	require.True(t, callbackInvoked, "onTurnComplete callback should be invoked")
+	require.Equal(t, "worker-1", callbackWorkerID, "callback should receive correct worker ID")
+	require.Equal(t, WorkerReady, w.GetStatus())
+}
+
+// TestWorker_CallbackBeforeStatusEvent tests callback is invoked BEFORE WorkerStatusChange event
+func TestWorker_CallbackBeforeStatusEvent(t *testing.T) {
+	w := newWorker("worker-1", 10)
+	broker := pubsub.NewBroker[WorkerEvent]()
+	defer broker.Close()
+
+	ctx := context.Background()
+	events := broker.Subscribe(ctx)
+
+	// Track the order of callback and event
+	var orderMu sync.Mutex
+	order := []string{}
+
+	w.onTurnComplete = func(workerID string) {
+		orderMu.Lock()
+		order = append(order, "callback")
+		orderMu.Unlock()
+	}
+
+	// Create mock process
+	proc := newWorkerTestProcess()
+
+	// Start worker
+	done := make(chan bool)
+	go func() {
+		w.start(ctx, proc, broker)
+		done <- true
+	}()
+
+	// Wait for spawn event
+	select {
+	case <-events:
+	case <-time.After(time.Second):
+		require.Fail(t, "timeout waiting for spawn event")
+	}
+
+	// Complete process successfully
+	proc.Complete()
+
+	// Wait for status change event
+	select {
+	case event := <-events:
+		orderMu.Lock()
+		order = append(order, "event")
+		orderMu.Unlock()
+		require.Equal(t, poolevents.WorkerStatusChange, event.Payload.Type)
+		require.Equal(t, WorkerReady, event.Payload.Status)
+	case <-time.After(time.Second):
+		require.Fail(t, "timeout waiting for status event")
+	}
+
+	// Wait for worker to finish
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		require.Fail(t, "timeout waiting for worker to finish")
+	}
+
+	// Verify callback was invoked BEFORE event was published
+	require.Equal(t, []string{"callback", "event"}, order,
+		"callback should be invoked before WorkerStatusChange event is published")
+}
+
+// TestWorker_NoCallbackOnRetired tests callback is NOT invoked when transitioning to Retired
+func TestWorker_NoCallbackOnRetired(t *testing.T) {
+	w := newWorker("worker-1", 10)
+	broker := pubsub.NewBroker[WorkerEvent]()
+	defer broker.Close()
+
+	ctx := context.Background()
+	events := broker.Subscribe(ctx)
+
+	// Set up callback tracking
+	callbackInvoked := false
+	w.onTurnComplete = func(workerID string) {
+		callbackInvoked = true
+	}
+
+	// Create mock process
+	proc := newWorkerTestProcess()
+
+	// Start worker
+	done := make(chan bool)
+	go func() {
+		w.start(ctx, proc, broker)
+		done <- true
+	}()
+
+	// Wait for spawn event
+	<-events
+
+	// Cancel the process (results in Retired status)
+	proc.Cancel()
+
+	// Wait for worker to finish
+	<-done
+
+	// Verify callback was NOT invoked
+	require.False(t, callbackInvoked, "onTurnComplete callback should NOT be invoked on Retired transition")
+	require.Equal(t, WorkerRetired, w.GetStatus())
+}
+
+// TestWorker_NoCallbackOnFailed tests callback is NOT invoked when process fails
+func TestWorker_NoCallbackOnFailed(t *testing.T) {
+	w := newWorker("worker-1", 10)
+	broker := pubsub.NewBroker[WorkerEvent]()
+	defer broker.Close()
+
+	ctx := context.Background()
+	events := broker.Subscribe(ctx)
+
+	// Set up callback tracking
+	callbackInvoked := false
+	w.onTurnComplete = func(workerID string) {
+		callbackInvoked = true
+	}
+
+	// Create mock process
+	proc := newWorkerTestProcess()
+
+	// Start worker
+	done := make(chan bool)
+	go func() {
+		w.start(ctx, proc, broker)
+		done <- true
+	}()
+
+	// Wait for spawn event
+	<-events
+
+	// Fail the process
+	proc.Fail(errors.New("test failure"))
+
+	// Wait for worker to finish
+	<-done
+
+	// Verify callback was NOT invoked
+	require.False(t, callbackInvoked, "onTurnComplete callback should NOT be invoked on Failed transition")
+	require.Equal(t, WorkerRetired, w.GetStatus())
+}
+
+// TestWorker_NilCallbackSafe tests that nil callback doesn't cause panic
+func TestWorker_NilCallbackSafe(t *testing.T) {
+	w := newWorker("worker-1", 10)
+	broker := pubsub.NewBroker[WorkerEvent]()
+	defer broker.Close()
+
+	ctx := context.Background()
+	events := broker.Subscribe(ctx)
+
+	// Explicitly ensure callback is nil
+	w.onTurnComplete = nil
+
+	// Create mock process
+	proc := newWorkerTestProcess()
+
+	// Start worker
+	done := make(chan bool)
+	go func() {
+		w.start(ctx, proc, broker)
+		done <- true
+	}()
+
+	// Wait for spawn event
+	<-events
+
+	// Complete process - should not panic with nil callback
+	proc.Complete()
+
+	// Wait for worker to finish
+	<-done
+
+	// Worker should be Ready
+	require.Equal(t, WorkerReady, w.GetStatus())
+}

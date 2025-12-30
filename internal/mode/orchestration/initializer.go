@@ -67,7 +67,8 @@ type InitializerResources struct {
 	MCPPort           int // Dynamic port the MCP server is listening on
 	Coordinator       *coordinator.Coordinator
 	WorkerServerCache *workerServerCache
-	Session           *session.Session // Session tracking for this orchestration run
+	Session           *session.Session       // Session tracking for this orchestration run
+	MCPCoordServer    *mcp.CoordinatorServer // MCP coordinator server for direct worker messaging
 }
 
 // Initializer manages the orchestration initialization lifecycle as a state machine.
@@ -181,6 +182,7 @@ func (i *Initializer) Resources() InitializerResources {
 		Coordinator:       i.coord,
 		WorkerServerCache: i.workerServers,
 		Session:           i.session,
+		MCPCoordServer:    i.mcpCoordServer,
 	}
 }
 

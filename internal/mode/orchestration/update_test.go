@@ -1413,3 +1413,71 @@ func (m *mockStateCallback) OnReviewVerdict(_, _, _ string) error {
 
 // Ensure mockStateCallback implements the interface
 var _ mcp.WorkerStateCallback = (*mockStateCallback)(nil)
+
+// ========================================================================
+// WorkerQueueChanged Event Tests
+// ========================================================================
+
+func TestModel_HandleQueueChangedEvent(t *testing.T) {
+	// Test that WorkerQueueChanged events update workerPane queue count
+	m := New(Config{})
+	m = m.SetSize(120, 40)
+
+	// Add a worker to the model
+	m = m.UpdateWorker("worker-1", pool.WorkerWorking)
+
+	// Create a mock worker listener using a test broker
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	workerBroker := pubsub.NewBroker[events.WorkerEvent]()
+	m.workerListener = pubsub.NewContinuousListener(ctx, workerBroker)
+
+	// Verify initial state - queue count should be 0
+	require.Equal(t, 0, m.workerPane.workerQueueCounts["worker-1"])
+
+	// Create and handle a WorkerQueueChanged event
+	event := pubsub.Event[events.WorkerEvent]{
+		Payload: events.WorkerEvent{
+			Type:       events.WorkerQueueChanged,
+			WorkerID:   "worker-1",
+			QueueCount: 5,
+		},
+	}
+
+	m, _ = m.handleWorkerEvent(event)
+
+	// Verify queue count was updated
+	require.Equal(t, 5, m.workerPane.workerQueueCounts["worker-1"])
+
+	// Test updating to a different count
+	event.Payload.QueueCount = 2
+	m, _ = m.handleWorkerEvent(event)
+	require.Equal(t, 2, m.workerPane.workerQueueCounts["worker-1"])
+
+	// Test setting count to 0
+	event.Payload.QueueCount = 0
+	m, _ = m.handleWorkerEvent(event)
+	require.Equal(t, 0, m.workerPane.workerQueueCounts["worker-1"])
+}
+
+func TestModel_HandleQueueChangedEvent_NilListener(t *testing.T) {
+	// Test that handleWorkerEvent with nil listener doesn't crash
+	m := New(Config{})
+	m = m.SetSize(120, 40)
+	m.workerListener = nil
+
+	event := pubsub.Event[events.WorkerEvent]{
+		Payload: events.WorkerEvent{
+			Type:       events.WorkerQueueChanged,
+			WorkerID:   "worker-1",
+			QueueCount: 5,
+		},
+	}
+
+	// Should not panic and should return nil command
+	var cmd tea.Cmd
+	require.NotPanics(t, func() {
+		m, cmd = m.handleWorkerEvent(event)
+	})
+	require.Nil(t, cmd)
+}

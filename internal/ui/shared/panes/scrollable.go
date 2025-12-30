@@ -49,6 +49,10 @@ type ScrollableConfig struct {
 	// LeftTitle is the title shown on the left side of the border.
 	LeftTitle string
 
+	// BottomLeft is optional text shown on the bottom-left of the border.
+	// Useful for status indicators like queue counts.
+	BottomLeft string
+
 	// TitleColor is the color for the title text.
 	TitleColor lipgloss.AdaptiveColor
 
@@ -125,6 +129,7 @@ func ScrollablePane(
 		Height:      height,
 		TopLeft:     cfg.LeftTitle,
 		TopRight:    rightTitle,
+		BottomLeft:  cfg.BottomLeft,
 		Focused:     cfg.Focused,
 		TitleColor:  cfg.TitleColor,
 		BorderColor: cfg.BorderColor,

@@ -74,6 +74,8 @@ const (
 	WorkerIncoming WorkerEventType = "incoming"
 	// WorkerError is emitted when a worker encounters an error.
 	WorkerError WorkerEventType = "error"
+	// WorkerQueueChanged is emitted when a worker's message queue changes.
+	WorkerQueueChanged WorkerEventType = "queue_changed"
 )
 
 // WorkerEvent represents an event from a worker process.
@@ -99,4 +101,7 @@ type WorkerEvent struct {
 	// RawJSON contains the raw Claude API JSON response for session logging.
 	// This is only populated for WorkerOutput events.
 	RawJSON []byte `json:"raw_json,omitempty"`
+	// QueueCount contains the number of pending messages in the worker's queue.
+	// This is only populated for WorkerQueueChanged events.
+	QueueCount int `json:"queue_count,omitempty"`
 }

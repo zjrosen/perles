@@ -207,8 +207,9 @@ func TestSendUserMessage_RequiresRunning(t *testing.T) {
 	require.NoError(t, err)
 
 	// Try to send message while pending
-	err = coord.SendUserMessage("hello")
+	result, err := coord.SendUserMessage("hello")
 	require.Error(t, err)
+	require.Nil(t, result)
 	require.Contains(t, err.Error(), "not running")
 }
 
@@ -230,9 +231,164 @@ func TestSendUserMessage_RequiresProcess(t *testing.T) {
 	coord.status.Store(int32(StatusRunning))
 
 	// Should fail due to no process
-	err = coord.SendUserMessage("hello")
+	result, err := coord.SendUserMessage("hello")
 	require.Error(t, err)
+	require.Nil(t, result)
 	require.Contains(t, err.Error(), "process not available")
+}
+
+// ============================================================================
+// Message Queue Tests
+// ============================================================================
+
+func TestSendUserMessage_QueuesWhenWorking(t *testing.T) {
+	workerPool := pool.NewWorkerPool(pool.Config{})
+	defer workerPool.Close()
+
+	msgIssue := message.New()
+
+	coord, err := New(Config{
+		Client:       claude.NewClient(),
+		WorkDir:      "/tmp",
+		Pool:         workerPool,
+		MessageIssue: msgIssue,
+	})
+	require.NoError(t, err)
+
+	// Set to running with working=true (simulating busy state)
+	coord.status.Store(int32(StatusRunning))
+	coord.working = true
+
+	// Send message while working - should be queued
+	result, err := coord.SendUserMessage("hello")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.Queued, "Message should be queued when coordinator is working")
+	require.Equal(t, 1, result.QueuePosition)
+
+	// Verify message is in queue
+	require.Equal(t, 1, coord.messageQueue.Len())
+}
+
+func TestSendUserMessage_MultipleMessagesQueued(t *testing.T) {
+	workerPool := pool.NewWorkerPool(pool.Config{})
+	defer workerPool.Close()
+
+	msgIssue := message.New()
+
+	coord, err := New(Config{
+		Client:       claude.NewClient(),
+		WorkDir:      "/tmp",
+		Pool:         workerPool,
+		MessageIssue: msgIssue,
+	})
+	require.NoError(t, err)
+
+	// Set to running with working=true
+	coord.status.Store(int32(StatusRunning))
+	coord.working = true
+
+	// Queue multiple messages
+	result1, err := coord.SendUserMessage("first")
+	require.NoError(t, err)
+	require.True(t, result1.Queued)
+	require.Equal(t, 1, result1.QueuePosition)
+
+	result2, err := coord.SendUserMessage("second")
+	require.NoError(t, err)
+	require.True(t, result2.Queued)
+	require.Equal(t, 2, result2.QueuePosition)
+
+	result3, err := coord.SendUserMessage("third")
+	require.NoError(t, err)
+	require.True(t, result3.Queued)
+	require.Equal(t, 3, result3.QueuePosition)
+
+	// Verify FIFO order
+	require.Equal(t, 3, coord.messageQueue.Len())
+
+	msg1, ok := coord.messageQueue.Dequeue()
+	require.True(t, ok)
+	require.Equal(t, "first", msg1.Content)
+	require.Equal(t, "USER", msg1.From)
+
+	msg2, ok := coord.messageQueue.Dequeue()
+	require.True(t, ok)
+	require.Equal(t, "second", msg2.Content)
+
+	msg3, ok := coord.messageQueue.Dequeue()
+	require.True(t, ok)
+	require.Equal(t, "third", msg3.Content)
+}
+
+func TestDrainQueue_ClearsWorkingFlag(t *testing.T) {
+	workerPool := pool.NewWorkerPool(pool.Config{})
+	defer workerPool.Close()
+
+	msgIssue := message.New()
+
+	coord, err := New(Config{
+		Client:       claude.NewClient(),
+		WorkDir:      "/tmp",
+		Pool:         workerPool,
+		MessageIssue: msgIssue,
+	})
+	require.NoError(t, err)
+
+	// Set working=true
+	coord.working = true
+
+	// Drain queue (no messages)
+	coord.drainQueue()
+
+	// Working should be false after drain
+	require.False(t, coord.working, "Working flag should be cleared after drainQueue")
+}
+
+func TestDrainQueue_EmptyQueue(t *testing.T) {
+	workerPool := pool.NewWorkerPool(pool.Config{})
+	defer workerPool.Close()
+
+	msgIssue := message.New()
+
+	coord, err := New(Config{
+		Client:       claude.NewClient(),
+		WorkDir:      "/tmp",
+		Pool:         workerPool,
+		MessageIssue: msgIssue,
+	})
+	require.NoError(t, err)
+
+	// Set to running
+	coord.status.Store(int32(StatusRunning))
+	coord.working = true
+
+	// Drain empty queue - should not panic
+	require.NotPanics(t, func() {
+		coord.drainQueue()
+	})
+
+	// Working should be cleared
+	require.False(t, coord.working)
+}
+
+func TestMessageQueue_InitializedOnNew(t *testing.T) {
+	workerPool := pool.NewWorkerPool(pool.Config{})
+	defer workerPool.Close()
+
+	msgIssue := message.New()
+
+	coord, err := New(Config{
+		Client:       claude.NewClient(),
+		WorkDir:      "/tmp",
+		Pool:         workerPool,
+		MessageIssue: msgIssue,
+	})
+	require.NoError(t, err)
+
+	// Queue should be initialized and empty
+	require.NotNil(t, coord.messageQueue)
+	require.Equal(t, 0, coord.messageQueue.Len())
 }
 
 func TestWait_ReturnsImmediately(t *testing.T) {
