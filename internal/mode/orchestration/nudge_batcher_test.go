@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -33,11 +32,11 @@ func TestNudgeBatcher_SingleMessage(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(200 * time.Millisecond):
-		t.Fatal("timeout waiting for nudge")
+		require.FailNow(t, "timeout waiting for nudge")
 	}
 
 	mu.Lock()
-	assert.Equal(t, map[MessageType][]string{WorkerNewMessage: {"WORKER.1"}}, received)
+	require.Equal(t, map[MessageType][]string{WorkerNewMessage: {"WORKER.1"}}, received)
 	mu.Unlock()
 }
 
@@ -62,22 +61,22 @@ func TestNudgeBatcher_MultipleMessagesBatched(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(200 * time.Millisecond):
-		t.Fatal("timeout waiting for nudge")
+		require.FailNow(t, "timeout waiting for nudge")
 	}
 
 	mu.Lock()
 	defer mu.Unlock()
 
 	// Check we have both message types
-	assert.Len(t, received, 2)
+	require.Len(t, received, 2)
 
 	// Check WorkerNewMessage group
-	assert.Len(t, received[WorkerNewMessage], 2)
-	assert.Contains(t, received[WorkerNewMessage], "WORKER.1")
-	assert.Contains(t, received[WorkerNewMessage], "WORKER.3")
+	require.Len(t, received[WorkerNewMessage], 2)
+	require.Contains(t, received[WorkerNewMessage], "WORKER.1")
+	require.Contains(t, received[WorkerNewMessage], "WORKER.3")
 
 	// Check WorkerReady group
-	assert.Equal(t, []string{"WORKER.2"}, received[WorkerReady])
+	require.Equal(t, []string{"WORKER.2"}, received[WorkerReady])
 }
 
 func TestNudgeBatcher_SlidingWindow(t *testing.T) {
@@ -103,7 +102,7 @@ func TestNudgeBatcher_SlidingWindow(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(200 * time.Millisecond):
-		t.Fatal("timeout waiting for nudge")
+		require.FailNow(t, "timeout waiting for nudge")
 	}
 
 	// Give a little extra time to ensure no second call
@@ -111,7 +110,7 @@ func TestNudgeBatcher_SlidingWindow(t *testing.T) {
 
 	mu.Lock()
 	// Only one callback despite 3 adds
-	assert.Equal(t, 1, callCount)
+	require.Equal(t, 1, callCount)
 	mu.Unlock()
 }
 
@@ -136,12 +135,12 @@ func TestNudgeBatcher_DuplicateSenders(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(200 * time.Millisecond):
-		t.Fatal("timeout waiting for nudge")
+		require.FailNow(t, "timeout waiting for nudge")
 	}
 
 	mu.Lock()
 	// Should dedupe to single entry
-	assert.Equal(t, map[MessageType][]string{WorkerNewMessage: {"WORKER.1"}}, received)
+	require.Equal(t, map[MessageType][]string{WorkerNewMessage: {"WORKER.1"}}, received)
 	mu.Unlock()
 }
 
@@ -166,7 +165,7 @@ func TestNudgeBatcher_StopCancelsPending(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 
 	mu.Lock()
-	assert.False(t, called, "callback should not have been called after Stop()")
+	require.False(t, called, "callback should not have been called after Stop()")
 	mu.Unlock()
 }
 
@@ -187,7 +186,7 @@ func TestNudgeBatcher_NoCallbackIfNoMessages(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	mu.Lock()
-	assert.False(t, called, "callback should not have been called without messages")
+	require.False(t, called, "callback should not have been called without messages")
 	mu.Unlock()
 }
 
@@ -230,12 +229,12 @@ func TestNudgeBatcher_ConcurrentAdds(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(300 * time.Millisecond):
-		t.Fatal("timeout waiting for nudge")
+		require.FailNow(t, "timeout waiting for nudge")
 	}
 
 	mu.Lock()
 	// All 5 workers should be in the WorkerNewMessage group
-	assert.Len(t, received[WorkerNewMessage], 5)
+	require.Len(t, received[WorkerNewMessage], 5)
 	mu.Unlock()
 }
 
@@ -260,16 +259,16 @@ func TestNudgeBatcher_MessageTypesTracked(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(200 * time.Millisecond):
-		t.Fatal("timeout waiting for nudge")
+		require.FailNow(t, "timeout waiting for nudge")
 	}
 
 	mu.Lock()
 	defer mu.Unlock()
 
 	// Verify we have both message types with correct workers
-	assert.Len(t, received, 2)
-	assert.Equal(t, []string{"WORKER.1"}, received[WorkerReady])
-	assert.Equal(t, []string{"WORKER.2"}, received[WorkerNewMessage])
+	require.Len(t, received, 2)
+	require.Equal(t, []string{"WORKER.1"}, received[WorkerReady])
+	require.Equal(t, []string{"WORKER.2"}, received[WorkerNewMessage])
 }
 
 func TestNudgeBatcher_LastTypeWins(t *testing.T) {
@@ -293,14 +292,14 @@ func TestNudgeBatcher_LastTypeWins(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(200 * time.Millisecond):
-		t.Fatal("timeout waiting for nudge")
+		require.FailNow(t, "timeout waiting for nudge")
 	}
 
 	mu.Lock()
 	defer mu.Unlock()
 
 	// Should have only one group with one worker (last type wins)
-	assert.Len(t, received, 1)
-	assert.Equal(t, []string{"WORKER.1"}, received[WorkerNewMessage])
-	assert.Nil(t, received[WorkerReady])
+	require.Len(t, received, 1)
+	require.Equal(t, []string{"WORKER.1"}, received[WorkerNewMessage])
+	require.Nil(t, received[WorkerReady])
 }

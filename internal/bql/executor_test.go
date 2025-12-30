@@ -6,8 +6,10 @@ import (
 	"time"
 
 	"github.com/zjrosen/perles/internal/beads"
+	"github.com/zjrosen/perles/internal/mocks"
 	"github.com/zjrosen/perles/internal/testutil"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -23,11 +25,27 @@ func setupDB(t *testing.T, configure func(*testutil.Builder) *testutil.Builder) 
 	return db
 }
 
+// newTestExecutor creates an executor with mock caches for testing.
+// Uses testing.TB interface to work with both *testing.T and *testing.B.
+func newTestExecutor(tb testing.TB, db *sql.DB) *Executor {
+	bqlCache := mocks.NewMockCacheManager[string, []beads.Issue](tb)
+	bqlCache.On("Get", mock.Anything, mock.Anything).Return(nil, false).Maybe()
+	bqlCache.On("GetWithRefresh", mock.Anything, mock.Anything, mock.Anything).Return(nil, false).Maybe()
+	bqlCache.On("Set", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return().Maybe()
+
+	depGraphCache := mocks.NewMockCacheManager[string, *DependencyGraph](tb)
+	depGraphCache.On("Get", mock.Anything, mock.Anything).Return(nil, false).Maybe()
+	depGraphCache.On("GetWithRefresh", mock.Anything, mock.Anything, mock.Anything).Return(nil, false).Maybe()
+	depGraphCache.On("Set", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return().Maybe()
+
+	return NewExecutor(db, bqlCache, depGraphCache)
+}
+
 func TestExecutor_TypeFilter(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Query for bugs only
 	issues, err := executor.Execute("type = bug")
@@ -43,7 +61,7 @@ func TestExecutor_StatusFilter(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	issues, err := executor.Execute("status = open")
 	require.NoError(t, err)
@@ -58,7 +76,7 @@ func TestExecutor_PriorityFilter(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// P0 issues only
 	issues, err := executor.Execute("priority = P0")
@@ -74,7 +92,7 @@ func TestExecutor_PriorityComparison(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Priority less than P2 (so P0 and P1)
 	issues, err := executor.Execute("priority < P2")
@@ -91,7 +109,7 @@ func TestExecutor_BlockedFilter(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Blocked issues
 	issues, err := executor.Execute("blocked = true")
@@ -105,7 +123,7 @@ func TestExecutor_ReadyFilter(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Ready issues (open/in_progress and not blocked)
 	issues, err := executor.Execute("ready = true")
@@ -125,7 +143,7 @@ func TestExecutor_LabelFilter(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Issues with urgent label (exact match)
 	issues, err := executor.Execute("label = urgent")
@@ -141,7 +159,7 @@ func TestExecutor_LabelContains(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Issues with labels containing "urg" (should match "urgent")
 	issues, err := executor.Execute("label ~ urg")
@@ -157,7 +175,7 @@ func TestExecutor_LabelNotContains(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Issues with labels NOT containing "urg" (excludes "urgent")
 	issues, err := executor.Execute("label !~ urg and status = open")
@@ -173,7 +191,7 @@ func TestExecutor_TitleContains(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Title contains "bug"
 	issues, err := executor.Execute("title ~ bug")
@@ -187,7 +205,7 @@ func TestExecutor_OrderBy(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Order by priority ascending
 	issues, err := executor.Execute("status = open order by priority asc")
@@ -205,7 +223,7 @@ func TestExecutor_ComplexQuery(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Complex: type = bug and priority = P0
 	issues, err := executor.Execute("type = bug and priority = P0")
@@ -222,7 +240,7 @@ func TestExecutor_OrQuery(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// type = bug or type = feature
 	issues, err := executor.Execute("type = bug or type = feature")
@@ -238,7 +256,7 @@ func TestExecutor_InExpression(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// type in (bug, task)
 	issues, err := executor.Execute("type in (bug, task)")
@@ -254,7 +272,7 @@ func TestExecutor_EmptyResult(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// No P4 priority issues exist
 	issues, err := executor.Execute("priority = P4")
@@ -267,7 +285,7 @@ func TestExecutor_InvalidQuery(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Invalid field
 	_, err := executor.Execute("foo = bar")
@@ -279,7 +297,7 @@ func TestExecutor_ParseError(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Invalid syntax
 	_, err := executor.Execute("type = = bug")
@@ -291,7 +309,7 @@ func TestExecutor_LoadsLabels(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Get test-1 which has labels
 	issues, err := executor.Execute("id = test-1")
@@ -306,7 +324,7 @@ func TestExecutor_LoadsBlockedBy(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Get test-3 which is blocked by test-1
 	issues, err := executor.Execute("id = test-3")
@@ -320,7 +338,7 @@ func TestExecutor_LoadsBlocks(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Get test-1 which blocks test-3
 	issues, err := executor.Execute("id = test-1")
@@ -334,7 +352,7 @@ func TestExecutor_LoadsChildrenForEpicWithChildren(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Get test-6 (epic) which has test-2 as child via parent-child dependency
 	issues, err := executor.Execute("id = test-6")
@@ -348,7 +366,7 @@ func TestExecutor_LoadsRelated(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithDiscoveredFromTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Get origin-1 which has discovered-1 as a related issue (discovered FROM origin-1)
 	issues, err := executor.Execute("id = origin-1")
@@ -371,7 +389,7 @@ func TestExecutor_ExpandUpWithDiscoveredFrom(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithDiscoveredFromTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Get discovered-1 with expand up - should include origin-1 (the issue it was discovered from)
 	issues, err := executor.Execute("id = discovered-1 expand up")
@@ -392,7 +410,7 @@ func TestExecutor_ExpandDownWithDiscoveredFrom(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithDiscoveredFromTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Get origin-1 with expand down - should include discovered-1 (discovered from origin-1)
 	issues, err := executor.Execute("id = origin-1 expand down")
@@ -444,7 +462,7 @@ func TestExecutor_OrderByOnly(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Just order by, no filter (should return all non-deleted)
 	issues, err := executor.Execute("order by priority asc")
@@ -459,7 +477,7 @@ func TestExecutor_AssigneePopulated(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Get test-1 which has assignee "alice"
 	issues, err := executor.Execute("id = test-1")
@@ -473,7 +491,7 @@ func TestExecutor_AssigneeNullIsEmptyString(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Get test-2 which has NULL assignee
 	issues, err := executor.Execute("id = test-2")
@@ -487,7 +505,7 @@ func TestExecutor_MultipleIssuesWithDifferentAssignees(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Get multiple issues and verify each has correct assignee
 	issues, err := executor.Execute("id in (test-1, test-2, test-3)")
@@ -510,7 +528,7 @@ func TestExecutor_ExpandDown(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Get epic with direct children and blocked issues (expand down = children + blocks)
 	issues, err := executor.Execute("id = epic-1 expand down")
@@ -534,7 +552,7 @@ func TestExecutor_ExpandDownDepth2(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Get epic with children and grandchildren (depth 2)
 	issues, err := executor.Execute("id = epic-1 expand down depth 2")
@@ -558,7 +576,7 @@ func TestExecutor_ExpandDownUnlimited(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Get epic with all descendants
 	issues, err := executor.Execute("id = epic-1 expand down depth *")
@@ -582,7 +600,7 @@ func TestExecutor_ExpandUp(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Get blocked-1 with its blockers (expand up = parent + blockers)
 	issues, err := executor.Execute("id = blocked-1 expand up")
@@ -604,7 +622,7 @@ func TestExecutor_ExpandDownWithBlocks(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Get blocker-1 with issues it blocks (expand down includes blocks)
 	issues, err := executor.Execute("id = blocker-1 expand down")
@@ -626,7 +644,7 @@ func TestExecutor_ExpandUpWithParent(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Get task-1 with its parent (expand up = parent + blockers)
 	issues, err := executor.Execute("id = task-1 expand up")
@@ -648,7 +666,7 @@ func TestExecutor_ExpandAll(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Get task-1 with all relationships
 	issues, err := executor.Execute("id = task-1 expand all")
@@ -671,7 +689,7 @@ func TestExecutor_ExpandNoDuplicates(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Multiple iterations should not produce duplicates
 	issues, err := executor.Execute("id = epic-1 expand down depth *")
@@ -699,7 +717,7 @@ func TestExecutor_ExpandCircularDeps(t *testing.T) {
 	_, err = db.Exec(`INSERT INTO dependencies (issue_id, depends_on_id, type) VALUES ('circular-a', 'circular-b', 'blocks')`)
 	require.NoError(t, err)
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Unlimited depth with circular deps should terminate (expand all tests bidirectional)
 	issues, err := executor.Execute("id = circular-a expand all depth *")
@@ -721,7 +739,7 @@ func TestExecutor_ExpandEmptyBaseResult(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Query with no results + expand should return empty
 	issues, err := executor.Execute("id = nonexistent expand down")
@@ -733,7 +751,7 @@ func TestExecutor_ExpandWithOrderBy(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Expand should work with order by (order applies to base query)
 	issues, err := executor.Execute("id = epic-1 expand down order by id asc")
@@ -761,7 +779,7 @@ func TestExecutor_ExpandNoRelationships(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// standalone has no relationships - expand should return only the matched issue
 	issues, err := executor.Execute("id = standalone expand down")
@@ -775,7 +793,7 @@ func TestExecutor_ExpandNoRelationshipsWithUnlimitedDepth(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// standalone has no relationships - even with depth * should return just the issue
 	issues, err := executor.Execute("id = standalone expand all depth *")
@@ -795,7 +813,7 @@ func TestExecutor_ExpandSelfReferentialNoDuplicates(t *testing.T) {
 	_, err = db.Exec(`INSERT INTO dependencies (issue_id, depends_on_id, type) VALUES ('self-ref', 'self-ref', 'blocks')`)
 	require.NoError(t, err)
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Expand should not duplicate the self-referential issue
 	issues, err := executor.Execute("id = self-ref expand all depth *")
@@ -826,7 +844,7 @@ func TestExecutor_ExpandMultipleMatchesOverlappingDeps(t *testing.T) {
 		WithDependency("unique-b", "epic-b", "parent-child").
 		Build()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Query both epics with expand down - shared-child should appear only once
 	issues2, err := executor.Execute("type = epic expand down")
@@ -855,7 +873,7 @@ func TestExecutor_ExpandWithoutFilter(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Expand without filter - should expand all issues
 	issues, err := executor.Execute("expand down")
@@ -878,7 +896,7 @@ func TestExecutor_ExpandWithoutFilterOrderBy(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Expand without filter + order by
 	issues, err := executor.Execute("expand down order by id asc")
@@ -910,7 +928,7 @@ func TestExecutor_ExpandDepth10Boundary(t *testing.T) {
 	}
 	builder.Build()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Depth 10 should return exactly 11 issues (root + 10 levels)
 	issues, err := executor.Execute("id = da expand down depth 10")
@@ -941,7 +959,7 @@ func TestExecutor_ExpandMixedTermination(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// depth * on a 5-level hierarchy should return all 5, not 100
 	issues, err := executor.Execute("id = level-0 expand down depth *")
@@ -966,7 +984,7 @@ func TestExecutor_ExpandCircularDepsStandalone(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Unlimited depth with circular deps should terminate
 	issues, err := executor.Execute("id = circular-a expand all depth *")
@@ -1009,7 +1027,7 @@ func TestExecutor_IDIn_NonExistent(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Query for non-existent IDs should return empty slice, no error
 	issues, err := executor.Execute(`id in ("nonexistent-1", "nonexistent-2")`)
@@ -1021,7 +1039,7 @@ func TestExecutor_IDIn_Mixed(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Query with mix of existing and non-existent IDs returns only existing
 	issues, err := executor.Execute(`id in ("test-1", "nonexistent", "test-3")`)
@@ -1052,7 +1070,7 @@ func TestExecutor_ClosedAtPopulated(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	issues, err := executor.Execute("id = closed-1")
 	require.NoError(t, err)
@@ -1067,7 +1085,7 @@ func TestExecutor_ClosedAtNullForOpenIssue(t *testing.T) {
 	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Get test-1 which is open
 	issues, err := executor.Execute("id = test-1")
@@ -1092,7 +1110,7 @@ func TestExecutor_ExpandLargeFanout(t *testing.T) {
 	}
 	builder.Build()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Measure performance - should complete in <1 second
 	start := time.Now()
@@ -1116,7 +1134,7 @@ func TestExecutor_ExcludesTombstoneStatus(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Query all issues - tombstone should be excluded
 	issues, err := executor.Execute("order by id asc")
@@ -1136,7 +1154,7 @@ func TestExecutor_ExcludesDeletedAtIssues(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Query all issues - soft-deleted should be excluded
 	issues, err := executor.Execute("order by id asc")
@@ -1156,7 +1174,7 @@ func TestExecutor_ExcludesDeletedStatusWithDeletedAt(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Query all issues - deleted should be excluded (both status and deleted_at check)
 	issues, err := executor.Execute("order by id asc")
@@ -1178,7 +1196,7 @@ func TestExecutor_ExcludesMultipleSoftDeleteStates(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Query all issues
 	issues, err := executor.Execute("order by id asc")
@@ -1204,7 +1222,7 @@ func TestExecutor_FetchByIDsExcludesTombstone(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Expand down should not include tombstone task
 	issues, err := executor.Execute("id = epic-1 expand down")
@@ -1230,7 +1248,7 @@ func TestExecutor_FetchByIDsExcludesDeletedAt(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	// Expand down should not include soft-deleted task
 	issues, err := executor.Execute("id = epic-1 expand down")
@@ -1254,7 +1272,7 @@ func TestExecutor_SenderPopulated(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	issues, err := executor.Execute("id = issue-1")
 	require.NoError(t, err)
@@ -1270,7 +1288,7 @@ func TestExecutor_SenderEmptyByDefault(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	issues, err := executor.Execute("id = issue-1")
 	require.NoError(t, err)
@@ -1286,7 +1304,7 @@ func TestExecutor_EphemeralTrue(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	issues, err := executor.Execute("id = issue-1")
 	require.NoError(t, err)
@@ -1302,7 +1320,7 @@ func TestExecutor_EphemeralFalseByDefault(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	issues, err := executor.Execute("id = issue-1")
 	require.NoError(t, err)
@@ -1321,7 +1339,7 @@ func TestExecutor_SenderAndEphemeralTogether(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	issues, err := executor.Execute("id = issue-1")
 	require.NoError(t, err)
@@ -1340,7 +1358,7 @@ func TestExecutor_MultipleIssuesWithDifferentSenderAndEphemeral(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	issues, err := executor.Execute("order by id asc")
 	require.NoError(t, err)
@@ -1377,7 +1395,7 @@ func TestExecutor_PinnedTrue(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	issues, err := executor.Execute("id = issue-1")
 	require.NoError(t, err)
@@ -1394,7 +1412,7 @@ func TestExecutor_PinnedFalse(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	issues, err := executor.Execute("id = issue-1")
 	require.NoError(t, err)
@@ -1411,7 +1429,7 @@ func TestExecutor_PinnedNilByDefault(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	issues, err := executor.Execute("id = issue-1")
 	require.NoError(t, err)
@@ -1429,7 +1447,7 @@ func TestExecutor_MultipleIssuesWithDifferentPinned(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	issues, err := executor.Execute("order by id asc")
 	require.NoError(t, err)
@@ -1464,7 +1482,7 @@ func TestExecutor_QueryByPinnedTrue(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	issues, err := executor.Execute("pinned = true")
 	require.NoError(t, err)
@@ -1487,7 +1505,7 @@ func TestExecutor_QueryByPinnedFalse(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	issues, err := executor.Execute("pinned = false")
 	require.NoError(t, err)
@@ -1508,7 +1526,7 @@ func TestExecutor_IsTemplateTrue(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	issues, err := executor.Execute("id = issue-1")
 	require.NoError(t, err)
@@ -1525,7 +1543,7 @@ func TestExecutor_IsTemplateFalse(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	issues, err := executor.Execute("id = issue-1")
 	require.NoError(t, err)
@@ -1542,7 +1560,7 @@ func TestExecutor_IsTemplateNilByDefault(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	issues, err := executor.Execute("id = issue-1")
 	require.NoError(t, err)
@@ -1560,7 +1578,7 @@ func TestExecutor_MultipleIssuesWithDifferentIsTemplate(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	issues, err := executor.Execute("order by id asc")
 	require.NoError(t, err)
@@ -1595,7 +1613,7 @@ func TestExecutor_QueryByIsTemplateTrue(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	issues, err := executor.Execute("is_template = true")
 	require.NoError(t, err)
@@ -1618,7 +1636,7 @@ func TestExecutor_QueryByIsTemplateFalse(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	issues, err := executor.Execute("is_template = false")
 	require.NoError(t, err)
@@ -1639,7 +1657,7 @@ func TestExecutor_CreatedByPopulated(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	issues, err := executor.Execute("id = issue-1")
 	require.NoError(t, err)
@@ -1655,11 +1673,1089 @@ func TestExecutor_CreatedByEmptyByDefault(t *testing.T) {
 	})
 	defer func() { _ = db.Close() }()
 
-	executor := NewExecutor(db)
+	executor := newTestExecutor(t, db)
 
 	issues, err := executor.Execute("id = issue-1")
 	require.NoError(t, err)
 
 	require.Len(t, issues, 1)
 	require.Equal(t, "", issues[0].CreatedBy, "default created_by should be empty string")
+}
+
+// =============================================================================
+// Agent Field Tests
+// =============================================================================
+
+func TestExecutor_AgentFieldsPopulated(t *testing.T) {
+	db := setupDB(t, func(b *testutil.Builder) *testutil.Builder {
+		return b.
+			WithIssue("agent-1",
+				testutil.Title("Agent issue"),
+				testutil.HookBead("task-123"),
+				testutil.RoleBead("role-def-1"),
+				testutil.AgentState("running"),
+				testutil.RoleType("polecat"),
+				testutil.Rig("rig-alpha"),
+			)
+	})
+	defer func() { _ = db.Close() }()
+
+	executor := newTestExecutor(t, db)
+
+	issues, err := executor.Execute("id = agent-1")
+	require.NoError(t, err)
+
+	require.Len(t, issues, 1)
+	issue := issues[0]
+	require.Equal(t, "task-123", issue.HookBead)
+	require.Equal(t, "role-def-1", issue.RoleBead)
+	require.Equal(t, "running", issue.AgentState)
+	require.Equal(t, "polecat", issue.RoleType)
+	require.Equal(t, "rig-alpha", issue.Rig)
+}
+
+func TestExecutor_AgentFieldsEmptyByDefault(t *testing.T) {
+	db := setupDB(t, func(b *testutil.Builder) *testutil.Builder {
+		return b.
+			WithIssue("issue-1", testutil.Title("Regular issue"))
+	})
+	defer func() { _ = db.Close() }()
+
+	executor := newTestExecutor(t, db)
+
+	issues, err := executor.Execute("id = issue-1")
+	require.NoError(t, err)
+
+	require.Len(t, issues, 1)
+	issue := issues[0]
+	require.Equal(t, "", issue.HookBead, "default hook_bead should be empty")
+	require.Equal(t, "", issue.RoleBead, "default role_bead should be empty")
+	require.Equal(t, "", issue.AgentState, "default agent_state should be empty")
+	require.Equal(t, "", issue.RoleType, "default role_type should be empty")
+	require.Equal(t, "", issue.Rig, "default rig should be empty")
+	require.True(t, issue.LastActivity.IsZero(), "default last_activity should be zero time")
+}
+
+func TestExecutor_QueryByAgentState(t *testing.T) {
+	db := setupDB(t, func(b *testutil.Builder) *testutil.Builder {
+		return b.
+			WithIssue("agent-running", testutil.Title("Running agent"), testutil.AgentState("running")).
+			WithIssue("agent-idle", testutil.Title("Idle agent"), testutil.AgentState("idle")).
+			WithIssue("regular-issue", testutil.Title("Regular issue"))
+	})
+	defer func() { _ = db.Close() }()
+
+	executor := newTestExecutor(t, db)
+
+	issues, err := executor.Execute("agent_state = running")
+	require.NoError(t, err)
+
+	require.Len(t, issues, 1)
+	require.Equal(t, "agent-running", issues[0].ID)
+}
+
+func TestExecutor_QueryByRoleType(t *testing.T) {
+	db := setupDB(t, func(b *testutil.Builder) *testutil.Builder {
+		return b.
+			WithIssue("polecat-agent", testutil.Title("Polecat agent"), testutil.RoleType("polecat")).
+			WithIssue("crew-agent", testutil.Title("Crew agent"), testutil.RoleType("crew")).
+			WithIssue("regular-issue", testutil.Title("Regular issue"))
+	})
+	defer func() { _ = db.Close() }()
+
+	executor := newTestExecutor(t, db)
+
+	issues, err := executor.Execute("role_type = polecat")
+	require.NoError(t, err)
+
+	require.Len(t, issues, 1)
+	require.Equal(t, "polecat-agent", issues[0].ID)
+}
+
+func TestExecutor_QueryByRig(t *testing.T) {
+	db := setupDB(t, func(b *testutil.Builder) *testutil.Builder {
+		return b.
+			WithIssue("alpha-agent", testutil.Title("Alpha rig agent"), testutil.Rig("rig-alpha")).
+			WithIssue("beta-agent", testutil.Title("Beta rig agent"), testutil.Rig("rig-beta")).
+			WithIssue("town-agent", testutil.Title("Town agent")) // empty rig
+	})
+	defer func() { _ = db.Close() }()
+
+	executor := newTestExecutor(t, db)
+
+	issues, err := executor.Execute("rig = rig-alpha")
+	require.NoError(t, err)
+
+	require.Len(t, issues, 1)
+	require.Equal(t, "alpha-agent", issues[0].ID)
+}
+
+// =============================================================================
+// Benchmark Helper Functions
+// =============================================================================
+
+// setupLargeHierarchy creates a hierarchical issue tree for benchmarking.
+// It creates a tree with the specified total count of issues across the given depth.
+// The structure fans out at each level to reach the target count.
+//
+// Parameters:
+//   - t: *testing.T for regular tests
+//   - count: total number of issues to create
+//   - depth: maximum depth of the hierarchy (1 = flat, 2 = one level of children, etc.)
+//
+// Returns the database with the hierarchy created. Root issue is "root".
+func setupLargeHierarchy(t *testing.T, count, depth int) *sql.DB {
+	t.Helper()
+	return setupLargeHierarchyInternal(t, count, depth)
+}
+
+// setupLargeHierarchyB is the benchmark version of setupLargeHierarchy.
+func setupLargeHierarchyB(b *testing.B, count, depth int) *sql.DB {
+	b.Helper()
+	return setupLargeHierarchyInternal(b, count, depth)
+}
+
+// setupLargeHierarchyInternal is the shared implementation for creating hierarchies.
+func setupLargeHierarchyInternal(tb testing.TB, count, depth int) *sql.DB {
+	tb.Helper()
+
+	// Create db directly without testutil to avoid *testing.T requirement
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		tb.Fatalf("failed to open db: %v", err)
+	}
+	if _, err := db.Exec(testutil.Schema); err != nil {
+		tb.Fatalf("failed to create schema: %v", err)
+	}
+
+	if count <= 0 || depth <= 0 {
+		return db
+	}
+
+	// Calculate fan-out per level to achieve approximately 'count' total issues
+	// For a balanced tree: count ≈ 1 + fanout + fanout^2 + ... + fanout^(depth-1)
+	// Simplified: use fixed fanout based on count and depth
+	fanout := 1
+	if depth > 1 {
+		// Estimate fanout: count ≈ fanout^depth, so fanout ≈ count^(1/depth)
+		for f := 2; ; f++ {
+			total := 1
+			power := 1
+			for d := 1; d < depth; d++ {
+				power *= f
+				total += power
+			}
+			if total >= count {
+				fanout = f
+				break
+			}
+			if f > 100 {
+				fanout = f
+				break
+			}
+		}
+	}
+
+	// Insert root issue
+	now := time.Now()
+	_, err = db.Exec(`INSERT INTO issues (id, title, status, priority, issue_type, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`, "root", "Root Epic", "open", 2, "epic", now, now)
+	if err != nil {
+		tb.Fatalf("failed to insert root: %v", err)
+	}
+
+	issueCount := 1
+	currentLevel := []string{"root"}
+
+	// Build tree level by level
+	for d := 1; d < depth && issueCount < count; d++ {
+		nextLevel := []string{}
+		for _, parentID := range currentLevel {
+			for f := 0; f < fanout && issueCount < count; f++ {
+				childID := parentID + "-" + string(rune('a'+f))
+				_, err = db.Exec(`INSERT INTO issues (id, title, status, priority, issue_type, created_at, updated_at)
+					VALUES (?, ?, ?, ?, ?, ?, ?)`,
+					childID, "Issue "+childID, "open", d%5, "task", now, now)
+				if err != nil {
+					tb.Fatalf("failed to insert issue %s: %v", childID, err)
+				}
+				_, err = db.Exec(`INSERT INTO dependencies (issue_id, depends_on_id, type) VALUES (?, ?, ?)`,
+					childID, parentID, "parent-child")
+				if err != nil {
+					tb.Fatalf("failed to insert dependency for %s: %v", childID, err)
+				}
+				nextLevel = append(nextLevel, childID)
+				issueCount++
+			}
+		}
+		currentLevel = nextLevel
+	}
+
+	return db
+}
+
+// setupRealisticData creates a realistic kanban-style dataset for benchmarking.
+// It creates issues distributed across different statuses similar to a real project:
+//   - ~10% blocked
+//   - ~20% ready (open, not blocked)
+//   - ~30% in_progress
+//   - ~40% closed
+//
+// Issues have realistic dependencies, labels, and relationships.
+//
+// Parameters:
+//   - t: *testing.T for regular tests
+//   - count: total number of issues to create
+//
+// Returns the database with the realistic data created.
+func setupRealisticData(t *testing.T, count int) *sql.DB {
+	t.Helper()
+	return setupRealisticDataInternal(t, count)
+}
+
+// setupRealisticDataB is the benchmark version of setupRealisticData.
+func setupRealisticDataB(b *testing.B, count int) *sql.DB {
+	b.Helper()
+	return setupRealisticDataInternal(b, count)
+}
+
+// setupRealisticDataInternal is the shared implementation for creating realistic data.
+func setupRealisticDataInternal(tb testing.TB, count int) *sql.DB {
+	tb.Helper()
+
+	// Create db directly without testutil to avoid *testing.T requirement
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		tb.Fatalf("failed to open db: %v", err)
+	}
+	if _, err := db.Exec(testutil.Schema); err != nil {
+		tb.Fatalf("failed to create schema: %v", err)
+	}
+
+	if count <= 0 {
+		return db
+	}
+
+	// Distribution: 10% blocked, 20% ready, 30% in_progress, 40% closed
+	blockedCount := count / 10
+	readyCount := count / 5
+	inProgressCount := (count * 3) / 10
+	closedCount := count - blockedCount - readyCount - inProgressCount
+
+	now := time.Now()
+	issueNum := 0
+	blockerIDs := []string{}
+
+	// Create closed issues first (40%)
+	for i := 0; i < closedCount; i++ {
+		id := "closed-" + formatNum(issueNum)
+		insertBenchmarkIssue(tb, db, id, "Closed Issue "+formatNum(issueNum), "closed",
+			issueNum%5, issueTypes[issueNum%len(issueTypes)], now)
+		insertBenchmarkLabels(tb, db, id, labels[issueNum%len(labels)])
+		issueNum++
+	}
+
+	// Create in_progress issues (30%)
+	for i := 0; i < inProgressCount; i++ {
+		id := "progress-" + formatNum(issueNum)
+		insertBenchmarkIssue(tb, db, id, "In Progress Issue "+formatNum(issueNum), "in_progress",
+			issueNum%5, issueTypes[issueNum%len(issueTypes)], now)
+		insertBenchmarkLabels(tb, db, id, labels[issueNum%len(labels)])
+		issueNum++
+	}
+
+	// Create ready issues (20%) - these will be blockers for blocked issues
+	for i := 0; i < readyCount; i++ {
+		id := "ready-" + formatNum(issueNum)
+		insertBenchmarkIssue(tb, db, id, "Ready Issue "+formatNum(issueNum), "open",
+			issueNum%5, issueTypes[issueNum%len(issueTypes)], now)
+		insertBenchmarkLabels(tb, db, id, labels[issueNum%len(labels)])
+		blockerIDs = append(blockerIDs, id)
+		issueNum++
+	}
+
+	// Create blocked issues (10%) - blocked by ready issues
+	for i := 0; i < blockedCount; i++ {
+		id := "blocked-" + formatNum(issueNum)
+		insertBenchmarkIssue(tb, db, id, "Blocked Issue "+formatNum(issueNum), "open",
+			issueNum%5, issueTypes[issueNum%len(issueTypes)], now)
+		insertBenchmarkLabels(tb, db, id, labels[issueNum%len(labels)])
+		// Block by a ready issue
+		if len(blockerIDs) > 0 {
+			blockerID := blockerIDs[i%len(blockerIDs)]
+			_, err := db.Exec(`INSERT INTO dependencies (issue_id, depends_on_id, type) VALUES (?, ?, ?)`,
+				id, blockerID, "blocks")
+			if err != nil {
+				tb.Fatalf("failed to insert dependency: %v", err)
+			}
+			_, err = db.Exec(`INSERT INTO blocked_issues_cache (issue_id) VALUES (?)`, id)
+			if err != nil {
+				tb.Fatalf("failed to insert blocked cache: %v", err)
+			}
+		}
+		issueNum++
+	}
+
+	return db
+}
+
+// insertBenchmarkIssue inserts an issue directly for benchmark tests.
+func insertBenchmarkIssue(tb testing.TB, db *sql.DB, id, title, status string, priority int, issueType string, now time.Time) {
+	var closedAt interface{}
+	if status == "closed" {
+		closedAt = now
+	}
+	_, err := db.Exec(`INSERT INTO issues (id, title, status, priority, issue_type, created_at, updated_at, closed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, title, status, priority, issueType, now, now, closedAt)
+	if err != nil {
+		tb.Fatalf("failed to insert issue %s: %v", id, err)
+	}
+}
+
+// insertBenchmarkLabels inserts labels directly for benchmark tests.
+func insertBenchmarkLabels(tb testing.TB, db *sql.DB, issueID string, labels []string) {
+	for _, label := range labels {
+		_, err := db.Exec(`INSERT INTO labels (issue_id, label) VALUES (?, ?)`, issueID, label)
+		if err != nil {
+			tb.Fatalf("failed to insert label for %s: %v", issueID, err)
+		}
+	}
+}
+
+// formatNum formats a number with leading zeros for consistent sorting.
+func formatNum(n int) string {
+	return string(rune('0'+n/100)) + string(rune('0'+(n%100)/10)) + string(rune('0'+n%10))
+}
+
+// issueTypes for realistic data distribution
+var issueTypes = []string{"bug", "feature", "task", "chore"}
+
+// labels for realistic data distribution
+var labels = [][]string{
+	{"urgent", "backend"},
+	{"frontend"},
+	{"urgent", "security"},
+	{"documentation"},
+	{"refactor"},
+	{"performance"},
+	{"api"},
+	{"ui", "ux"},
+}
+
+// =============================================================================
+// Benchmark Tests
+// =============================================================================
+
+// BenchmarkExecute_ExpandDownDepthUnlimited measures the performance of expanding
+// a deep hierarchy with unlimited depth. This is one of the most expensive operations
+// in the BQL executor and is a primary optimization target.
+//
+// Baseline measurements (Apple M3 Max, 2025-12-29):
+//   - 100 issues, depth 5: ~7.2 ms/op, 558 KB/op, 7397 allocs/op
+//
+// Final results after all optimizations (Apple M3 Max, 2025-12-29):
+//   - 100 issues, depth 5: ~1.18 ms/op, 584 KB/op, 9052 allocs/op
+//   - Improvement: 6.1x faster (graph-based expand replaces O(D×N) SQL with O(2) queries)
+//   - Note: Memory per-op slightly higher due to graph structure, but total query
+//     count dramatically reduced from hundreds of SQL queries to just 2
+func BenchmarkExecute_ExpandDownDepthUnlimited(b *testing.B) {
+	db := setupLargeHierarchyB(b, 100, 5)
+	defer func() { _ = db.Close() }()
+
+	executor := newTestExecutor(b, db)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := executor.Execute("id = root expand down depth *")
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkExecute_KanbanBoard measures the performance of loading a typical
+// kanban board with 4 columns (blocked, ready, in_progress, closed).
+// This simulates the common UI pattern of loading multiple column queries.
+//
+// Baseline measurements (Apple M3 Max, 2025-12-29):
+//   - 500 issues, 4 columns: ~55 ms/op, 2.3 MB/op, 38765 allocs/op
+//
+// Final results after all optimizations (Apple M3 Max, 2025-12-29):
+//   - 500 issues, 4 columns: ~5.3 ms/op, 2.65 MB/op, 39793 allocs/op
+//   - Improvement: 10.4x faster (batch dependency loading reduces subqueries)
+//   - With caching enabled: ~1.17 µs/op on cache hit (4700x faster)
+func BenchmarkExecute_KanbanBoard(b *testing.B) {
+	db := setupRealisticDataB(b, 500)
+	defer func() { _ = db.Close() }()
+
+	executor := newTestExecutor(b, db)
+	queries := []string{
+		"blocked = true order by priority",
+		"ready = true order by priority",
+		"status = in_progress order by updated",
+		"status = closed order by updated",
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _, q := range queries {
+			_, err := executor.Execute(q)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+}
+
+// BenchmarkExecute_BaseQueryWithDependencies measures the performance of a
+// base query that returns issues with dependencies loaded. This tests the
+// correlated subquery performance for loading dependency information.
+//
+// Baseline measurements (Apple M3 Max, 2025-12-29):
+//   - 50 result rows with dependencies: ~3.2 ms/op, 185 KB/op, 3392 allocs/op
+//
+// Final results after all optimizations (Apple M3 Max, 2025-12-29):
+//   - 50 result rows with dependencies: ~0.65 ms/op, 258 KB/op, 5578 allocs/op
+//   - Improvement: 4.9x faster (batch IN-clause queries replace correlated subqueries)
+func BenchmarkExecute_BaseQueryWithDependencies(b *testing.B) {
+	// Create 50 issues with various dependencies
+	db := setupBaseQueryBenchmarkDataB(b)
+	defer func() { _ = db.Close() }()
+
+	executor := newTestExecutor(b, db)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := executor.Execute("status = open order by priority")
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// setupBaseQueryBenchmarkDataB creates 50 issues with interconnected dependencies for benchmarking.
+func setupBaseQueryBenchmarkDataB(b *testing.B) *sql.DB {
+	b.Helper()
+
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		b.Fatalf("failed to open db: %v", err)
+	}
+	if _, err := db.Exec(testutil.Schema); err != nil {
+		b.Fatalf("failed to create schema: %v", err)
+	}
+
+	now := time.Now()
+
+	// Create 50 issues with interconnected dependencies
+	for i := 0; i < 50; i++ {
+		id := "issue-" + formatNum(i)
+		insertBenchmarkIssue(b, db, id, "Issue "+formatNum(i), "open",
+			i%5, issueTypes[i%len(issueTypes)], now)
+		insertBenchmarkLabels(b, db, id, labels[i%len(labels)])
+	}
+
+	// Add blocking dependencies (each issue blocked by previous)
+	for i := 1; i < 50; i++ {
+		_, err := db.Exec(`INSERT INTO dependencies (issue_id, depends_on_id, type) VALUES (?, ?, ?)`,
+			"issue-"+formatNum(i), "issue-"+formatNum(i-1), "blocks")
+		if err != nil {
+			b.Fatalf("failed to insert dependency: %v", err)
+		}
+	}
+
+	// Add parent-child dependencies (create 5 epics with 9 children each)
+	for epic := 0; epic < 5; epic++ {
+		epicID := "issue-" + formatNum(epic*10)
+		for child := 1; child < 10; child++ {
+			childID := "issue-" + formatNum(epic*10+child)
+			_, err := db.Exec(`INSERT INTO dependencies (issue_id, depends_on_id, type) VALUES (?, ?, ?)`,
+				childID, epicID, "parent-child")
+			if err != nil {
+				b.Fatalf("failed to insert dependency: %v", err)
+			}
+		}
+	}
+
+	return db
+}
+
+// =============================================================================
+// Helper Function Unit Tests
+// =============================================================================
+
+func TestSetupLargeHierarchy_CreatesCorrectStructure(t *testing.T) {
+	db := setupLargeHierarchy(t, 100, 5)
+	defer func() { _ = db.Close() }()
+
+	// Verify root exists
+	var rootCount int
+	err := db.QueryRow(`SELECT COUNT(*) FROM issues WHERE id = 'root'`).Scan(&rootCount)
+	require.NoError(t, err)
+	require.Equal(t, 1, rootCount, "root issue should exist")
+
+	// Verify total issue count is close to target
+	var totalCount int
+	err = db.QueryRow(`SELECT COUNT(*) FROM issues`).Scan(&totalCount)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, totalCount, 50, "should have at least 50 issues")
+	require.LessOrEqual(t, totalCount, 150, "should have at most 150 issues")
+
+	// Verify parent-child relationships exist
+	var depCount int
+	err = db.QueryRow(`SELECT COUNT(*) FROM dependencies WHERE type = 'parent-child'`).Scan(&depCount)
+	require.NoError(t, err)
+	require.Greater(t, depCount, 0, "should have parent-child dependencies")
+
+	// Verify hierarchy depth by checking that root has children
+	var childCount int
+	err = db.QueryRow(`SELECT COUNT(*) FROM dependencies WHERE depends_on_id = 'root'`).Scan(&childCount)
+	require.NoError(t, err)
+	require.Greater(t, childCount, 0, "root should have children")
+}
+
+func TestSetupLargeHierarchy_HandlesEdgeCases(t *testing.T) {
+	// Test with zero count
+	db := setupLargeHierarchy(t, 0, 5)
+	defer func() { _ = db.Close() }()
+	var count int
+	err := db.QueryRow(`SELECT COUNT(*) FROM issues`).Scan(&count)
+	require.NoError(t, err)
+	require.Equal(t, 0, count, "zero count should create no issues")
+
+	// Test with zero depth
+	db2 := setupLargeHierarchy(t, 100, 0)
+	defer func() { _ = db2.Close() }()
+	err = db2.QueryRow(`SELECT COUNT(*) FROM issues`).Scan(&count)
+	require.NoError(t, err)
+	require.Equal(t, 0, count, "zero depth should create no issues")
+}
+
+func TestSetupRealisticData_CreatesExpectedDistribution(t *testing.T) {
+	db := setupRealisticData(t, 100)
+	defer func() { _ = db.Close() }()
+
+	// Verify total count
+	var totalCount int
+	err := db.QueryRow(`SELECT COUNT(*) FROM issues`).Scan(&totalCount)
+	require.NoError(t, err)
+	require.Equal(t, 100, totalCount, "should have exactly 100 issues")
+
+	// Verify status distribution (allowing for rounding)
+	var closedCount int
+	err = db.QueryRow(`SELECT COUNT(*) FROM issues WHERE status = 'closed'`).Scan(&closedCount)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, closedCount, 35, "should have ~40% closed")
+	require.LessOrEqual(t, closedCount, 45, "should have ~40% closed")
+
+	var inProgressCount int
+	err = db.QueryRow(`SELECT COUNT(*) FROM issues WHERE status = 'in_progress'`).Scan(&inProgressCount)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, inProgressCount, 25, "should have ~30% in_progress")
+	require.LessOrEqual(t, inProgressCount, 35, "should have ~30% in_progress")
+
+	var openCount int
+	err = db.QueryRow(`SELECT COUNT(*) FROM issues WHERE status = 'open'`).Scan(&openCount)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, openCount, 25, "should have ~30% open (ready + blocked)")
+	require.LessOrEqual(t, openCount, 35, "should have ~30% open (ready + blocked)")
+
+	// Verify blocked issues have dependencies
+	var blockedWithDeps int
+	err = db.QueryRow(`
+		SELECT COUNT(DISTINCT bc.issue_id)
+		FROM blocked_issues_cache bc
+		JOIN dependencies d ON d.issue_id = bc.issue_id
+	`).Scan(&blockedWithDeps)
+	require.NoError(t, err)
+	require.Greater(t, blockedWithDeps, 0, "blocked issues should have dependencies")
+}
+
+func TestSetupRealisticData_HandlesEdgeCases(t *testing.T) {
+	// Test with zero count
+	db := setupRealisticData(t, 0)
+	defer func() { _ = db.Close() }()
+	var count int
+	err := db.QueryRow(`SELECT COUNT(*) FROM issues`).Scan(&count)
+	require.NoError(t, err)
+	require.Equal(t, 0, count, "zero count should create no issues")
+
+	// Test with small count
+	db2 := setupRealisticData(t, 10)
+	defer func() { _ = db2.Close() }()
+	err = db2.QueryRow(`SELECT COUNT(*) FROM issues`).Scan(&count)
+	require.NoError(t, err)
+	require.Equal(t, 10, count, "small count should work")
+}
+
+// =============================================================================
+// Graph-Based Expand Unit Tests
+// =============================================================================
+
+func TestLoadDependencyGraph_ReturnsCorrectAdjacencyLists(t *testing.T) {
+	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
+	defer func() { _ = db.Close() }()
+
+	executor := newTestExecutor(t, db)
+	graph, err := executor.loadDependencyGraph()
+	require.NoError(t, err)
+	require.NotNil(t, graph)
+
+	// Verify forward edges exist (child -> parent direction)
+	// task-1 depends on epic-1 (parent-child)
+	require.NotEmpty(t, graph.Forward["task-1"], "task-1 should have forward edges")
+	foundParent := false
+	for _, edge := range graph.Forward["task-1"] {
+		if edge.TargetID == "epic-1" && edge.Type == "parent-child" {
+			foundParent = true
+			break
+		}
+	}
+	require.True(t, foundParent, "task-1 should have edge to epic-1")
+
+	// Verify reverse edges exist (parent -> children direction)
+	require.NotEmpty(t, graph.Reverse["epic-1"], "epic-1 should have reverse edges")
+	childCount := 0
+	for _, edge := range graph.Reverse["epic-1"] {
+		if edge.Type == "parent-child" {
+			childCount++
+		}
+	}
+	require.Equal(t, 2, childCount, "epic-1 should have 2 children (task-1 and task-2)")
+}
+
+func TestLoadDependencyGraph_ExcludesDeletedIssues(t *testing.T) {
+	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
+	defer func() { _ = db.Close() }()
+
+	// Add a deleted issue with a dependency
+	_, err := db.Exec(`INSERT INTO issues (id, title, status, priority, issue_type) VALUES ('deleted-1', 'Deleted', 'deleted', 1, 'task')`)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO dependencies (issue_id, depends_on_id, type) VALUES ('deleted-1', 'epic-1', 'parent-child')`)
+	require.NoError(t, err)
+
+	executor := newTestExecutor(t, db)
+	graph, err := executor.loadDependencyGraph()
+	require.NoError(t, err)
+
+	// Verify deleted issue is not in the graph
+	require.Empty(t, graph.Forward["deleted-1"], "deleted issue should not have forward edges")
+
+	// Verify epic-1's reverse edges don't include deleted issue
+	for _, edge := range graph.Reverse["epic-1"] {
+		require.NotEqual(t, "deleted-1", edge.TargetID, "deleted issue should not be in reverse edges")
+	}
+}
+
+func TestTraverseGraph_BFSRespectsDepthLimit(t *testing.T) {
+	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
+	defer func() { _ = db.Close() }()
+
+	executor := newTestExecutor(t, db)
+	graph, err := executor.loadDependencyGraph()
+	require.NoError(t, err)
+
+	// Traverse down from epic-1 with depth 1 (should only get children, not grandchildren)
+	allIDs := executor.traverseGraph(graph, []string{"epic-1"}, ExpandDown, 1)
+	idSet := make(map[string]bool)
+	for _, id := range allIDs {
+		idSet[id] = true
+	}
+
+	require.True(t, idSet["epic-1"], "should include starting node")
+	require.True(t, idSet["task-1"], "should include child at depth 1")
+	require.True(t, idSet["task-2"], "should include child at depth 1")
+	require.False(t, idSet["subtask-1"], "should NOT include grandchild at depth 1")
+}
+
+func TestTraverseGraph_DFSHandlesUnlimitedDepth(t *testing.T) {
+	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
+	defer func() { _ = db.Close() }()
+
+	executor := newTestExecutor(t, db)
+	graph, err := executor.loadDependencyGraph()
+	require.NoError(t, err)
+
+	// Traverse down from epic-1 with unlimited depth (should get all descendants)
+	allIDs := executor.traverseGraph(graph, []string{"epic-1"}, ExpandDown, int(DepthUnlimited))
+	idSet := make(map[string]bool)
+	for _, id := range allIDs {
+		idSet[id] = true
+	}
+
+	require.True(t, idSet["epic-1"], "should include starting node")
+	require.True(t, idSet["task-1"], "should include child")
+	require.True(t, idSet["task-2"], "should include child")
+	require.True(t, idSet["subtask-1"], "should include grandchild with unlimited depth")
+}
+
+func TestTraverseGraph_HandlesCyclesWithoutInfiniteLoop(t *testing.T) {
+	db := setupDB(t, nil)
+	defer func() { _ = db.Close() }()
+
+	// Create circular dependency: A blocks B, B blocks A
+	now := time.Now()
+	_, err := db.Exec(`INSERT INTO issues (id, title, status, priority, issue_type, created_at, updated_at) VALUES ('circular-a', 'Circular A', 'open', 1, 'task', ?, ?)`, now, now)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO issues (id, title, status, priority, issue_type, created_at, updated_at) VALUES ('circular-b', 'Circular B', 'open', 1, 'task', ?, ?)`, now, now)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO dependencies (issue_id, depends_on_id, type) VALUES ('circular-b', 'circular-a', 'blocks')`)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO dependencies (issue_id, depends_on_id, type) VALUES ('circular-a', 'circular-b', 'blocks')`)
+	require.NoError(t, err)
+
+	executor := newTestExecutor(t, db)
+	graph, err := executor.loadDependencyGraph()
+	require.NoError(t, err)
+
+	// Should complete without infinite loop
+	allIDs := executor.traverseGraph(graph, []string{"circular-a"}, ExpandAll, int(DepthUnlimited))
+
+	require.Len(t, allIDs, 2, "should return both issues without infinite loop")
+	idSet := make(map[string]bool)
+	for _, id := range allIDs {
+		idSet[id] = true
+	}
+	require.True(t, idSet["circular-a"])
+	require.True(t, idSet["circular-b"])
+}
+
+func TestFetchIssuesByIDs_ReturnsCorrectIssuesInBatch(t *testing.T) {
+	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
+	defer func() { _ = db.Close() }()
+
+	executor := newTestExecutor(t, db)
+	issues, err := executor.fetchIssuesByIDs([]string{"task-1", "task-2", "subtask-1"})
+	require.NoError(t, err)
+
+	require.Len(t, issues, 3)
+	idSet := make(map[string]bool)
+	for _, issue := range issues {
+		idSet[issue.ID] = true
+	}
+	require.True(t, idSet["task-1"])
+	require.True(t, idSet["task-2"])
+	require.True(t, idSet["subtask-1"])
+}
+
+func TestFetchIssuesByIDs_ExcludesDeletedIssues(t *testing.T) {
+	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
+	defer func() { _ = db.Close() }()
+
+	// Add a deleted issue
+	_, err := db.Exec(`INSERT INTO issues (id, title, status, priority, issue_type) VALUES ('deleted-1', 'Deleted', 'deleted', 1, 'task')`)
+	require.NoError(t, err)
+
+	executor := newTestExecutor(t, db)
+	issues, err := executor.fetchIssuesByIDs([]string{"task-1", "deleted-1"})
+	require.NoError(t, err)
+
+	// Should only return task-1, not the deleted issue
+	require.Len(t, issues, 1)
+	require.Equal(t, "task-1", issues[0].ID)
+}
+
+func TestFetchIssuesByIDs_EmptyInput(t *testing.T) {
+	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
+	defer func() { _ = db.Close() }()
+
+	executor := newTestExecutor(t, db)
+	issues, err := executor.fetchIssuesByIDs([]string{})
+	require.NoError(t, err)
+	require.Nil(t, issues)
+}
+
+func TestTraverseGraph_EmptyGraph(t *testing.T) {
+	db := setupDB(t, nil) // Empty database
+	defer func() { _ = db.Close() }()
+
+	// Add a single issue with no dependencies
+	now := time.Now()
+	_, err := db.Exec(`INSERT INTO issues (id, title, status, priority, issue_type, created_at, updated_at) VALUES ('lonely', 'Lonely', 'open', 1, 'task', ?, ?)`, now, now)
+	require.NoError(t, err)
+
+	executor := newTestExecutor(t, db)
+	graph, err := executor.loadDependencyGraph()
+	require.NoError(t, err)
+
+	// Graph should be empty
+	require.Empty(t, graph.Forward)
+	require.Empty(t, graph.Reverse)
+
+	// Traversal should return only the starting node
+	allIDs := executor.traverseGraph(graph, []string{"lonely"}, ExpandDown, int(DepthUnlimited))
+	require.Len(t, allIDs, 1)
+	require.Equal(t, "lonely", allIDs[0])
+}
+
+func TestTraverseGraph_SingleNodeWithNoEdges(t *testing.T) {
+	db := setupDB(t, (*testutil.Builder).WithHierarchyTestData)
+	defer func() { _ = db.Close() }()
+
+	executor := newTestExecutor(t, db)
+	graph, err := executor.loadDependencyGraph()
+	require.NoError(t, err)
+
+	// standalone has no dependencies
+	allIDs := executor.traverseGraph(graph, []string{"standalone"}, ExpandAll, int(DepthUnlimited))
+	require.Len(t, allIDs, 1)
+	require.Equal(t, "standalone", allIDs[0])
+}
+
+// =============================================================================
+// Batch Loading Tests (for perles-ezi8.3)
+// =============================================================================
+
+func TestLoadDependenciesForIssues_GroupsByTypeCorrectly(t *testing.T) {
+	// Setup data with multiple dependency types
+	db := setupDB(t, func(b *testutil.Builder) *testutil.Builder {
+		return b.
+			// Parent-child: epic -> task
+			WithIssue("epic-1", testutil.Title("Epic"), testutil.IssueType("epic")).
+			WithIssue("task-1", testutil.Title("Task 1"), testutil.IssueType("task")).
+			// Blocks: blocker blocks blocked
+			WithIssue("blocker", testutil.Title("Blocker"), testutil.IssueType("bug")).
+			WithIssue("blocked", testutil.Title("Blocked"), testutil.IssueType("task")).
+			// Discovered-from: discovered <- origin
+			WithIssue("origin", testutil.Title("Origin"), testutil.IssueType("feature")).
+			WithIssue("discovered", testutil.Title("Discovered"), testutil.IssueType("bug")).
+			WithDependency("task-1", "epic-1", "parent-child").
+			WithDependency("blocked", "blocker", "blocks").
+			WithDependency("discovered", "origin", "discovered-from")
+	})
+	defer func() { _ = db.Close() }()
+
+	executor := newTestExecutor(t, db)
+	deps, err := executor.loadDependenciesForIssues([]string{"epic-1", "task-1", "blocker", "blocked", "origin", "discovered"})
+	require.NoError(t, err)
+
+	// Check parent-child grouping
+	require.Equal(t, "epic-1", deps["task-1"].ParentID, "task-1 should have epic-1 as parent")
+	require.Contains(t, deps["epic-1"].Children, "task-1", "epic-1 should have task-1 as child")
+
+	// Check blocks grouping
+	require.Contains(t, deps["blocked"].BlockedBy, "blocker", "blocked should have blocker in BlockedBy")
+	require.Contains(t, deps["blocker"].Blocks, "blocked", "blocker should have blocked in Blocks")
+
+	// Check discovered-from grouping
+	require.Contains(t, deps["discovered"].DiscoveredFrom, "origin", "discovered should have origin in DiscoveredFrom")
+	require.Contains(t, deps["origin"].Discovered, "discovered", "origin should have discovered in Discovered")
+}
+
+func TestLoadDependenciesForIssues_HandlesBothDirections(t *testing.T) {
+	// Test both directions of issue_id and depends_on_id mapping
+	db := setupDB(t, func(b *testutil.Builder) *testutil.Builder {
+		return b.
+			WithIssue("parent", testutil.Title("Parent"), testutil.IssueType("epic")).
+			WithIssue("child", testutil.Title("Child"), testutil.IssueType("task")).
+			WithDependency("child", "parent", "parent-child")
+	})
+	defer func() { _ = db.Close() }()
+
+	executor := newTestExecutor(t, db)
+
+	// When querying for parent only
+	depsParent, err := executor.loadDependenciesForIssues([]string{"parent"})
+	require.NoError(t, err)
+	require.Contains(t, depsParent["parent"].Children, "child", "parent should see child even when child not in query set")
+
+	// When querying for child only
+	depsChild, err := executor.loadDependenciesForIssues([]string{"child"})
+	require.NoError(t, err)
+	require.Equal(t, "parent", depsChild["child"].ParentID, "child should see parent even when parent not in query set")
+
+	// When querying for both
+	depsBoth, err := executor.loadDependenciesForIssues([]string{"parent", "child"})
+	require.NoError(t, err)
+	require.Contains(t, depsBoth["parent"].Children, "child")
+	require.Equal(t, "parent", depsBoth["child"].ParentID)
+}
+
+func TestLoadLabelsForIssues_ReturnsCorrectLabelSets(t *testing.T) {
+	db := setupDB(t, func(b *testutil.Builder) *testutil.Builder {
+		return b.
+			WithIssue("issue-1", testutil.Title("Issue 1"), testutil.Labels("urgent", "backend", "security")).
+			WithIssue("issue-2", testutil.Title("Issue 2"), testutil.Labels("frontend")).
+			WithIssue("issue-3", testutil.Title("Issue 3")) // No labels
+	})
+	defer func() { _ = db.Close() }()
+
+	executor := newTestExecutor(t, db)
+	labels, err := executor.loadLabelsForIssues([]string{"issue-1", "issue-2", "issue-3"})
+	require.NoError(t, err)
+
+	// Check issue-1 has all 3 labels
+	require.Len(t, labels["issue-1"], 3)
+	require.Contains(t, labels["issue-1"], "urgent")
+	require.Contains(t, labels["issue-1"], "backend")
+	require.Contains(t, labels["issue-1"], "security")
+
+	// Check issue-2 has 1 label
+	require.Len(t, labels["issue-2"], 1)
+	require.Contains(t, labels["issue-2"], "frontend")
+
+	// Check issue-3 has no labels (not in map or empty)
+	require.Empty(t, labels["issue-3"])
+}
+
+func TestLoadCommentCountsForIssues_ReturnsCorrectCounts(t *testing.T) {
+	db := setupDB(t, func(b *testutil.Builder) *testutil.Builder {
+		return b.
+			WithIssue("issue-1", testutil.Title("Issue 1"),
+				testutil.Comments(
+					testutil.Comment("alice", "First comment"),
+					testutil.Comment("bob", "Second comment"),
+					testutil.Comment("charlie", "Third comment"),
+				)).
+			WithIssue("issue-2", testutil.Title("Issue 2"),
+									testutil.Comments(testutil.Comment("alice", "Single comment"))).
+			WithIssue("issue-3", testutil.Title("Issue 3")) // No comments
+	})
+	defer func() { _ = db.Close() }()
+
+	executor := newTestExecutor(t, db)
+	counts, err := executor.loadCommentCountsForIssues([]string{"issue-1", "issue-2", "issue-3"})
+	require.NoError(t, err)
+
+	require.Equal(t, 3, counts["issue-1"], "issue-1 should have 3 comments")
+	require.Equal(t, 1, counts["issue-2"], "issue-2 should have 1 comment")
+	require.Equal(t, 0, counts["issue-3"], "issue-3 should have 0 comments")
+}
+
+func TestBatchLoading_EmptyIDList(t *testing.T) {
+	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
+	defer func() { _ = db.Close() }()
+
+	executor := newTestExecutor(t, db)
+
+	// All batch loading functions should return empty maps for empty input
+	deps, err := executor.loadDependenciesForIssues([]string{})
+	require.NoError(t, err)
+	require.Empty(t, deps)
+
+	labels, err := executor.loadLabelsForIssues([]string{})
+	require.NoError(t, err)
+	require.Empty(t, labels)
+
+	counts, err := executor.loadCommentCountsForIssues([]string{})
+	require.NoError(t, err)
+	require.Empty(t, counts)
+}
+
+func TestBatchLoading_SingleID(t *testing.T) {
+	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
+	defer func() { _ = db.Close() }()
+
+	executor := newTestExecutor(t, db)
+
+	// test-1 has labels: urgent, auth
+	labels, err := executor.loadLabelsForIssues([]string{"test-1"})
+	require.NoError(t, err)
+	require.Len(t, labels["test-1"], 2)
+	require.Contains(t, labels["test-1"], "urgent")
+	require.Contains(t, labels["test-1"], "auth")
+
+	// test-1 blocks test-3
+	deps, err := executor.loadDependenciesForIssues([]string{"test-1"})
+	require.NoError(t, err)
+	require.Contains(t, deps["test-1"].Blocks, "test-3")
+}
+
+func TestBatchLoading_IssuesWithNoDependencies(t *testing.T) {
+	db := setupDB(t, func(b *testutil.Builder) *testutil.Builder {
+		return b.
+			WithIssue("standalone-1", testutil.Title("Standalone 1")).
+			WithIssue("standalone-2", testutil.Title("Standalone 2"))
+	})
+	defer func() { _ = db.Close() }()
+
+	executor := newTestExecutor(t, db)
+
+	deps, err := executor.loadDependenciesForIssues([]string{"standalone-1", "standalone-2"})
+	require.NoError(t, err)
+
+	// Both issues should have empty or no dependencies
+	require.Empty(t, deps["standalone-1"].ParentID)
+	require.Empty(t, deps["standalone-1"].Children)
+	require.Empty(t, deps["standalone-1"].BlockedBy)
+	require.Empty(t, deps["standalone-1"].Blocks)
+}
+
+func TestBatchLoading_IssuesWithNoLabels(t *testing.T) {
+	db := setupDB(t, func(b *testutil.Builder) *testutil.Builder {
+		return b.
+			WithIssue("no-labels", testutil.Title("No Labels Issue"))
+	})
+	defer func() { _ = db.Close() }()
+
+	executor := newTestExecutor(t, db)
+
+	labels, err := executor.loadLabelsForIssues([]string{"no-labels"})
+	require.NoError(t, err)
+	require.Empty(t, labels["no-labels"])
+}
+
+func TestBatchLoading_IssuesWithNoComments(t *testing.T) {
+	db := setupDB(t, func(b *testutil.Builder) *testutil.Builder {
+		return b.
+			WithIssue("no-comments", testutil.Title("No Comments Issue"))
+	})
+	defer func() { _ = db.Close() }()
+
+	executor := newTestExecutor(t, db)
+
+	counts, err := executor.loadCommentCountsForIssues([]string{"no-comments"})
+	require.NoError(t, err)
+	require.Equal(t, 0, counts["no-comments"])
+}
+
+func TestBatchLoading_IntegrationFullQueryEquivalence(t *testing.T) {
+	// This test verifies that batch loading produces identical results to
+	// what was expected from the old correlated subquery approach
+	db := setupDB(t, (*testutil.Builder).WithStandardTestData)
+	defer func() { _ = db.Close() }()
+
+	executor := newTestExecutor(t, db)
+
+	// Get test-1 which has known data: labels (urgent, auth), blocks (test-3)
+	issues, err := executor.Execute("id = test-1")
+	require.NoError(t, err)
+	require.Len(t, issues, 1)
+
+	issue := issues[0]
+	require.Equal(t, "test-1", issue.ID)
+	require.Contains(t, issue.Labels, "urgent")
+	require.Contains(t, issue.Labels, "auth")
+	require.Contains(t, issue.Blocks, "test-3")
+
+	// Get test-3 which is blocked by test-1
+	issues, err = executor.Execute("id = test-3")
+	require.NoError(t, err)
+	require.Len(t, issues, 1)
+
+	issue = issues[0]
+	require.Equal(t, "test-3", issue.ID)
+	require.Contains(t, issue.BlockedBy, "test-1")
+
+	// Get test-6 (epic) which has test-2 as child
+	issues, err = executor.Execute("id = test-6")
+	require.NoError(t, err)
+	require.Len(t, issues, 1)
+
+	issue = issues[0]
+	require.Equal(t, "test-6", issue.ID)
+	require.Contains(t, issue.Children, "test-2")
+
+	// Get test-2 which has test-6 as parent
+	issues, err = executor.Execute("id = test-2")
+	require.NoError(t, err)
+	require.Len(t, issues, 1)
+
+	issue = issues[0]
+	require.Equal(t, "test-2", issue.ID)
+	require.Equal(t, "test-6", issue.ParentID)
 }

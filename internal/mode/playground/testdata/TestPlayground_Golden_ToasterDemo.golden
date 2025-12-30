@@ -1,0 +1,28 @@
+╭────────────────────────────╮  ╭─ modal ──────────────────────────────────────────────────────────╮
+│ Components                 │  │ Press keys to trigger different modal types:                     │
+│ ────────────────────────── │  │                                                                  │
+│   vimtextarea              │  │   c Confirmation modal (primary)                                 │
+│ ● modal                    │  │   d Danger modal (destructive)                                   │
+│   formmodal                │  │   i Input modal (with text field)                                │
+│   panes                    │  │                                                                  │
+│   scrollpane               │  │                                                                  │
+│   colorpicker              │  │                                                                  │
+│   picker                   │  │                                                                  │
+│   toaster                  │  │                                                                  │
+│   logoverlay               │  │                                                                  │
+│   markdown                 │  │                                                                  │
+│   chainart                 │  │                                                                  │
+│   issuebadge               │  │                                                                  │
+│   Theme Tokens             │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+╰────────────────────────────╯  ╰──────────────────────────────────────────────────────────────────╯
+Tab: Switch panes  │  Ctrl+R: Reset  │  Ctrl+C: Quit                                                

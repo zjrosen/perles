@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/zjrosen/perles/internal/mocks"
 	"github.com/zjrosen/perles/internal/orchestration/client"
 	"github.com/zjrosen/perles/internal/orchestration/mock"
 	"github.com/zjrosen/perles/internal/orchestration/pool"
@@ -57,7 +57,7 @@ func TestCoordinatorServer_SendToWorker_Deduplication(t *testing.T) {
 	mockClient.Reset()
 
 	// Create coordinator server with the mock client and pool
-	cs := NewCoordinatorServer(mockClient, workerPool, nil, "/tmp/test", 8765, nil)
+	cs := NewCoordinatorServer(mockClient, workerPool, nil, "/tmp/test", 8765, nil, mocks.NewMockBeadsExecutor(t))
 
 	ctx := context.Background()
 	messageArgs := `{"worker_id": "` + workerID + `", "message": "test message content"}`
@@ -66,18 +66,18 @@ func TestCoordinatorServer_SendToWorker_Deduplication(t *testing.T) {
 	result1, err := cs.handleSendToWorker(ctx, json.RawMessage(messageArgs))
 	require.NoError(t, err)
 	require.NotNil(t, result1)
-	assert.True(t, strings.Contains(result1.Content[0].Text, "Message sent"),
+	require.True(t, strings.Contains(result1.Content[0].Text, "Message sent"),
 		"First send should succeed with 'Message sent' response")
 
 	// Immediate duplicate should also return success (idempotent)
 	result2, err := cs.handleSendToWorker(ctx, json.RawMessage(messageArgs))
 	require.NoError(t, err)
 	require.NotNil(t, result2)
-	assert.True(t, strings.Contains(result2.Content[0].Text, "Message sent"),
+	require.True(t, strings.Contains(result2.Content[0].Text, "Message sent"),
 		"Duplicate send should still return success (idempotent)")
 
 	// CRITICAL: Verify mock Spawn was only called once
-	assert.Equal(t, 1, mockClient.SpawnCount(),
+	require.Equal(t, 1, mockClient.SpawnCount(),
 		"Spawn should only be called once despite duplicate send_to_worker calls")
 }
 
@@ -116,7 +116,7 @@ func TestCoordinatorServer_SendToWorker_DifferentMessages(t *testing.T) {
 	mockClient.Reset()
 
 	// Create coordinator server
-	cs := NewCoordinatorServer(mockClient, workerPool, nil, "/tmp/test", 8765, nil)
+	cs := NewCoordinatorServer(mockClient, workerPool, nil, "/tmp/test", 8765, nil, mocks.NewMockBeadsExecutor(t))
 
 	ctx := context.Background()
 
@@ -133,7 +133,7 @@ func TestCoordinatorServer_SendToWorker_DifferentMessages(t *testing.T) {
 	require.NotNil(t, result2)
 
 	// Both messages should trigger spawns (different content = different hash)
-	assert.Equal(t, 2, mockClient.SpawnCount(),
+	require.Equal(t, 2, mockClient.SpawnCount(),
 		"Different messages should both trigger Spawn calls")
 }
 
@@ -184,7 +184,7 @@ func TestCoordinatorServer_SendToWorker_DifferentWorkers(t *testing.T) {
 	mockClient.Reset()
 
 	// Create coordinator server
-	cs := NewCoordinatorServer(mockClient, workerPool, nil, "/tmp/test", 8765, nil)
+	cs := NewCoordinatorServer(mockClient, workerPool, nil, "/tmp/test", 8765, nil, mocks.NewMockBeadsExecutor(t))
 
 	ctx := context.Background()
 	sameMessage := "identical message content"
@@ -202,7 +202,7 @@ func TestCoordinatorServer_SendToWorker_DifferentWorkers(t *testing.T) {
 	require.NotNil(t, result2)
 
 	// Both should trigger spawns (different worker = different hash key)
-	assert.Equal(t, 2, mockClient.SpawnCount(),
+	require.Equal(t, 2, mockClient.SpawnCount(),
 		"Same message to different workers should both trigger Spawn calls")
 }
 
@@ -240,7 +240,7 @@ func TestCoordinatorServer_SendToWorker_Deduplication_Concurrent(t *testing.T) {
 	mockClient.Reset()
 
 	// Create coordinator server
-	cs := NewCoordinatorServer(mockClient, workerPool, nil, "/tmp/test", 8765, nil)
+	cs := NewCoordinatorServer(mockClient, workerPool, nil, "/tmp/test", 8765, nil, mocks.NewMockBeadsExecutor(t))
 
 	ctx := context.Background()
 	messageArgs := `{"worker_id": "` + workerID + `", "message": "concurrent test message"}`
@@ -266,11 +266,11 @@ func TestCoordinatorServer_SendToWorker_Deduplication_Concurrent(t *testing.T) {
 
 	// Check for errors
 	for err := range errors {
-		t.Errorf("Unexpected error from concurrent send: %v", err)
+		require.NoError(t, err, "Unexpected error from concurrent send")
 	}
 
 	// CRITICAL: Despite 10 concurrent sends of identical message,
 	// only ONE should have triggered an actual Spawn
-	assert.Equal(t, 1, mockClient.SpawnCount(),
+	require.Equal(t, 1, mockClient.SpawnCount(),
 		"Concurrent duplicate sends should only result in one Spawn call")
 }

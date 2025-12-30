@@ -1,4 +1,4 @@
-.PHONY: all build run install test test-v test-update clean lint mocks mocks-clean
+.PHONY: all build run install test test-v test-update clean lint mocks mocks-clean playground
 
 # Version from git (tag or commit hash)
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -14,6 +14,10 @@ build:
 # Build and run the binary
 run: build
 	./perles
+
+# Builds and starts the playground
+playground: build
+	./perles playground
 
 # Build and run the binary with the debug flag
 debug: build
@@ -38,21 +42,23 @@ test-update:
 		./internal/ui/coleditor/... \
 		./internal/ui/commandpalette/... \
 		./internal/ui/details/... \
-		./internal/ui/forms/bqlinput/... \
 		./internal/ui/modals/help/... \
 		./internal/ui/modals/labeleditor/... \
 		./internal/ui/nobeads/... \
 		./internal/ui/outdated/... \
 		./internal/ui/shared/colorpicker/... \
+		./internal/ui/shared/issuebadge/... \
 		./internal/ui/shared/logoverlay/... \
 		./internal/ui/shared/modal/... \
 		./internal/ui/shared/overlay/... \
 		./internal/ui/shared/picker/... \
 		./internal/ui/shared/toaster/... \
+		./internal/ui/shared/vimtextarea/... \
 		./internal/ui/styles/... \
 		./internal/ui/tree/... \
 		./internal/mode/search/... \
 		./internal/mode/orchestration/... \
+		./internal/mode/playground/... \
 		-update
 
 # Run linter (requires golangci-lint)

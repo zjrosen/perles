@@ -66,11 +66,12 @@ const (
 	TokenPriorityBacklog  ColorToken = "priority.backlog"
 
 	// Issue type
-	TokenTypeTask    ColorToken = "type.task"
-	TokenTypeChore   ColorToken = "type.chore"
-	TokenTypeEpic    ColorToken = "type.epic"
-	TokenTypeBug     ColorToken = "type.bug"
-	TokenTypeFeature ColorToken = "type.feature"
+	TokenTypeTask     ColorToken = "type.task"
+	TokenTypeChore    ColorToken = "type.chore"
+	TokenTypeEpic     ColorToken = "type.epic"
+	TokenTypeBug      ColorToken = "type.bug"
+	TokenTypeFeature  ColorToken = "type.feature"
+	TokenTypeMolecule ColorToken = "type.molecule"
 
 	// BQL syntax highlighting
 	TokenBQLKeyword  ColorToken = "bql.keyword" //nolint:gosec // UI color token, not credentials
@@ -152,6 +153,7 @@ func AllTokens() []ColorToken {
 		TokenTypeEpic,
 		TokenTypeBug,
 		TokenTypeFeature,
+		TokenTypeMolecule,
 
 		// BQL syntax highlighting
 		TokenBQLKeyword,

@@ -326,6 +326,39 @@ func (p *WorkerPool) AssignTaskToWorker(workerID, taskID string) error {
 	return nil
 }
 
+// SetWorkerPhase updates a worker's phase without affecting the task ID.
+// This allows the coordinator to sync workflow phase transitions to the pool
+// for TUI display while preserving the task association.
+// Returns an error if the worker doesn't exist.
+func (p *WorkerPool) SetWorkerPhase(workerID string, phase events.WorkerPhase) error {
+	p.mu.RLock()
+	worker := p.workers[workerID]
+	p.mu.RUnlock()
+
+	if worker == nil {
+		return fmt.Errorf("worker not found: %s", workerID)
+	}
+
+	worker.SetPhase(phase)
+	return nil
+}
+
+// SetWorkerTaskID updates a worker's task ID.
+// This allows the coordinator to set task ID on a worker (e.g., when assigning a reviewer).
+// Returns an error if the worker doesn't exist.
+func (p *WorkerPool) SetWorkerTaskID(workerID string, taskID string) error {
+	p.mu.RLock()
+	worker := p.workers[workerID]
+	p.mu.RUnlock()
+
+	if worker == nil {
+		return fmt.Errorf("worker not found: %s", workerID)
+	}
+
+	worker.SetTaskID(taskID)
+	return nil
+}
+
 // RetireWorker retires a worker and removes it from the active pool.
 // Returns an error if the worker doesn't exist.
 func (p *WorkerPool) RetireWorker(workerID string) error {
@@ -363,4 +396,17 @@ func (p *WorkerPool) ReadyWorkers() []*Worker {
 		}
 	}
 	return ready
+}
+
+// AddTestWorker adds a worker directly to the pool for testing purposes.
+// This bypasses the normal spawn process and should only be used in tests.
+// The worker is created in WorkerWorking status with the given ID.
+func (p *WorkerPool) AddTestWorker(id string, status WorkerStatus) *Worker {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	worker := newWorker(id, 100)
+	worker.Status = status
+	p.workers[id] = worker
+	return worker
 }

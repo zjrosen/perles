@@ -9,27 +9,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRenderFormSection(t *testing.T) {
+func TestFormSection(t *testing.T) {
 	// Use a consistent focus color for tests
 	focusColor := lipgloss.Color("#54A0FF")
 
 	tests := []struct {
 		name           string
-		content        []string
-		title          string
-		hint           string
-		width          int
-		focused        bool
+		config         FormSectionConfig
 		wantContains   []string
 		wantNotContain []string
 	}{
 		{
-			name:    "basic section with title",
-			content: []string{"  Content line"},
-			title:   "Name",
-			hint:    "",
-			width:   30,
-			focused: false,
+			name: "basic section with title",
+			config: FormSectionConfig{
+				Content:            []string{"  Content line"},
+				Width:              30,
+				TopLeft:            "Name",
+				Focused:            false,
+				FocusedBorderColor: focusColor,
+			},
 			wantContains: []string{
 				"╭─ Name",
 				"│",
@@ -38,12 +36,15 @@ func TestRenderFormSection(t *testing.T) {
 			},
 		},
 		{
-			name:    "section with title and hint",
-			content: []string{"  Input here"},
-			title:   "Query",
-			hint:    "required",
-			width:   40,
-			focused: false,
+			name: "section with title and hint",
+			config: FormSectionConfig{
+				Content:            []string{"  Input here"},
+				Width:              40,
+				TopLeft:            "Query",
+				TopLeftHint:        "required",
+				Focused:            false,
+				FocusedBorderColor: focusColor,
+			},
 			wantContains: []string{
 				"╭─ Query",
 				"(required)",
@@ -53,12 +54,13 @@ func TestRenderFormSection(t *testing.T) {
 			},
 		},
 		{
-			name:    "empty title renders plain border",
-			content: []string{"Content"},
-			title:   "",
-			hint:    "",
-			width:   20,
-			focused: false,
+			name: "empty title renders plain border",
+			config: FormSectionConfig{
+				Content:            []string{"Content"},
+				Width:              20,
+				Focused:            false,
+				FocusedBorderColor: focusColor,
+			},
 			wantContains: []string{
 				"╭",
 				"─",
@@ -73,12 +75,14 @@ func TestRenderFormSection(t *testing.T) {
 			},
 		},
 		{
-			name:    "multiple content lines",
-			content: []string{"Line 1", "Line 2", "Line 3"},
-			title:   "Items",
-			hint:    "",
-			width:   25,
-			focused: false,
+			name: "multiple content lines",
+			config: FormSectionConfig{
+				Content:            []string{"Line 1", "Line 2", "Line 3"},
+				Width:              25,
+				TopLeft:            "Items",
+				Focused:            false,
+				FocusedBorderColor: focusColor,
+			},
 			wantContains: []string{
 				"Line 1",
 				"Line 2",
@@ -86,12 +90,14 @@ func TestRenderFormSection(t *testing.T) {
 			},
 		},
 		{
-			name:    "focused section",
-			content: []string{"Focused content"},
-			title:   "Focus",
-			hint:    "",
-			width:   30,
-			focused: true,
+			name: "focused section",
+			config: FormSectionConfig{
+				Content:            []string{"Focused content"},
+				Width:              30,
+				TopLeft:            "Focus",
+				Focused:            true,
+				FocusedBorderColor: focusColor,
+			},
 			wantContains: []string{
 				"╭─ Focus",
 				"│",
@@ -100,12 +106,14 @@ func TestRenderFormSection(t *testing.T) {
 			},
 		},
 		{
-			name:    "narrow width handles gracefully",
-			content: []string{"X"},
-			title:   "T",
-			hint:    "",
-			width:   5,
-			focused: false,
+			name: "narrow width handles gracefully",
+			config: FormSectionConfig{
+				Content:            []string{"X"},
+				Width:              5,
+				TopLeft:            "T",
+				Focused:            false,
+				FocusedBorderColor: focusColor,
+			},
 			wantContains: []string{
 				"╭",
 				"╮",
@@ -116,12 +124,13 @@ func TestRenderFormSection(t *testing.T) {
 			},
 		},
 		{
-			name:    "minimum width",
-			content: []string{"A"},
-			title:   "",
-			hint:    "",
-			width:   3,
-			focused: false,
+			name: "minimum width",
+			config: FormSectionConfig{
+				Content:            []string{"A"},
+				Width:              3,
+				Focused:            false,
+				FocusedBorderColor: focusColor,
+			},
 			wantContains: []string{
 				"╭",
 				"╮",
@@ -130,33 +139,91 @@ func TestRenderFormSection(t *testing.T) {
 				"╯",
 			},
 		},
+		{
+			name: "bottom left indicator",
+			config: FormSectionConfig{
+				Content:            []string{"Query text"},
+				Width:              40,
+				TopLeft:            "BQL Query",
+				BottomLeft:         "[NORMAL]",
+				Focused:            true,
+				FocusedBorderColor: focusColor,
+			},
+			wantContains: []string{
+				"╭─ BQL Query",
+				"Query text",
+				"╰─ [NORMAL]",
+			},
+		},
+		{
+			name: "top right title",
+			config: FormSectionConfig{
+				Content:            []string{"Content"},
+				Width:              40,
+				TopLeft:            "Left",
+				TopRight:           "Right",
+				Focused:            false,
+				FocusedBorderColor: focusColor,
+			},
+			wantContains: []string{
+				"Left",
+				"Right",
+				"Content",
+			},
+		},
+		{
+			name: "bottom right title",
+			config: FormSectionConfig{
+				Content:            []string{"Content"},
+				Width:              40,
+				TopLeft:            "Title",
+				BottomRight:        "Status",
+				Focused:            false,
+				FocusedBorderColor: focusColor,
+			},
+			wantContains: []string{
+				"╭─ Title",
+				"Content",
+				"Status",
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := RenderFormSection(tt.content, tt.title, tt.hint, tt.width, tt.focused, focusColor)
+			result := FormSection(tt.config)
 
 			for _, want := range tt.wantContains {
-				require.Contains(t, result, want, "RenderFormSection() missing expected content")
+				require.Contains(t, result, want, "FormSection() missing expected content")
 			}
 
 			for _, notWant := range tt.wantNotContain {
-				require.NotContains(t, result, notWant, "RenderFormSection() contains unexpected content")
+				require.NotContains(t, result, notWant, "FormSection() contains unexpected content")
 			}
 		})
 	}
 }
 
-func TestRenderFormSection_FocusChangesColor(t *testing.T) {
+func TestFormSection_FocusChangesColor(t *testing.T) {
 	// Force ANSI color output in test environment
 	lipgloss.SetColorProfile(termenv.ANSI256)
 
-	content := []string{"Content"}
-	title := "Test"
 	focusColor := lipgloss.Color("#54A0FF")
 
-	unfocused := RenderFormSection(content, title, "", 30, false, focusColor)
-	focused := RenderFormSection(content, title, "", 30, true, focusColor)
+	unfocused := FormSection(FormSectionConfig{
+		Content:            []string{"Content"},
+		Width:              30,
+		TopLeft:            "Test",
+		Focused:            false,
+		FocusedBorderColor: focusColor,
+	})
+	focused := FormSection(FormSectionConfig{
+		Content:            []string{"Content"},
+		Width:              30,
+		TopLeft:            "Test",
+		Focused:            true,
+		FocusedBorderColor: focusColor,
+	})
 
 	// Both should contain the same structural elements
 	for _, want := range []string{"╭", "╮", "│", "╰", "╯", "Content", "Test"} {
@@ -168,10 +235,15 @@ func TestRenderFormSection_FocusChangesColor(t *testing.T) {
 	require.NotEqual(t, unfocused, focused, "Focused and unfocused sections should have different ANSI codes")
 }
 
-func TestRenderFormSection_ContentPadding(t *testing.T) {
+func TestFormSection_ContentPadding(t *testing.T) {
 	// Content shorter than inner width should be padded
-	content := []string{"Short"}
-	result := RenderFormSection(content, "Title", "", 30, false, BorderHighlightFocusColor)
+	result := FormSection(FormSectionConfig{
+		Content:            []string{"Short"},
+		Width:              30,
+		TopLeft:            "Title",
+		Focused:            false,
+		FocusedBorderColor: BorderHighlightFocusColor,
+	})
 
 	// The result should maintain proper alignment
 	lines := strings.Split(result, "\n")
@@ -188,26 +260,45 @@ func TestRenderFormSection_ContentPadding(t *testing.T) {
 	}
 }
 
-func TestRenderFormSection_HintFormatting(t *testing.T) {
-	result := RenderFormSection([]string{"Content"}, "Title", "hint text", 40, false, BorderHighlightFocusColor)
+func TestFormSection_HintFormatting(t *testing.T) {
+	result := FormSection(FormSectionConfig{
+		Content:            []string{"Content"},
+		Width:              40,
+		TopLeft:            "Title",
+		TopLeftHint:        "hint text",
+		Focused:            false,
+		FocusedBorderColor: BorderHighlightFocusColor,
+	})
 
 	// Hint should be wrapped in parentheses
 	require.Contains(t, result, "(hint text)", "Hint should be formatted with parentheses")
 }
 
-func TestRenderFormSection_EmptyContent(t *testing.T) {
+func TestFormSection_EmptyContent(t *testing.T) {
 	// Empty content slice should still render borders
-	result := RenderFormSection([]string{}, "Title", "", 30, false, BorderHighlightFocusColor)
+	result := FormSection(FormSectionConfig{
+		Content:            []string{},
+		Width:              30,
+		TopLeft:            "Title",
+		Focused:            false,
+		FocusedBorderColor: BorderHighlightFocusColor,
+	})
 
 	// Should have top and bottom borders
 	require.Contains(t, result, "╭", "Empty content should have top border")
 	require.Contains(t, result, "╰", "Empty content should have bottom border")
 }
 
-func TestRenderFormSection_LongTitle(t *testing.T) {
+func TestFormSection_LongTitle(t *testing.T) {
 	// Title longer than available space
 	longTitle := "This is a very long title that exceeds the available width"
-	result := RenderFormSection([]string{"Content"}, longTitle, "", 30, false, BorderHighlightFocusColor)
+	result := FormSection(FormSectionConfig{
+		Content:            []string{"Content"},
+		Width:              30,
+		TopLeft:            longTitle,
+		Focused:            false,
+		FocusedBorderColor: BorderHighlightFocusColor,
+	})
 
 	// Should still produce valid output with borders
 	require.Contains(t, result, "╭", "Long title should still produce valid top border")

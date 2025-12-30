@@ -7,6 +7,7 @@ import (
 	"github.com/zjrosen/perles/internal/beads"
 	"github.com/zjrosen/perles/internal/log"
 	"github.com/zjrosen/perles/internal/mode/shared"
+	"github.com/zjrosen/perles/internal/ui/shared/issuebadge"
 	"github.com/zjrosen/perles/internal/ui/styles"
 
 	"github.com/charmbracelet/lipgloss"
@@ -347,18 +348,8 @@ func (m *Model) renderNode(node *TreeNode, isLast bool, isSelected bool) string 
 	}
 	sb.WriteString(prefix)
 
-	// Type and priority badges
-	typeText := styles.GetTypeIndicator(node.Issue.Type)
-	typeStyle := styles.GetTypeStyle(node.Issue.Type)
-	priorityText := fmt.Sprintf("[P%d]", node.Issue.Priority)
-	priorityStyle := styles.GetPriorityStyle(node.Issue.Priority)
-
-	sb.WriteString(typeStyle.Render(typeText))
-	sb.WriteString(priorityStyle.Render(priorityText))
-
-	// Issue ID in brackets (no space after priority)
-	idStyle := lipgloss.NewStyle().Foreground(styles.TextSecondaryColor)
-	sb.WriteString(idStyle.Render("[" + node.Issue.ID + "]"))
+	// Use shared issuebadge component for type/priority/id
+	sb.WriteString(issuebadge.RenderBadge(node.Issue))
 	sb.WriteString(" ")
 
 	// Status indicator

@@ -101,3 +101,23 @@ func TestGetComments_NonExistentIssue(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, comments, "non-existent issue should return empty slice")
 }
+
+func TestClient_Close(t *testing.T) {
+	db := setupDB(t, nil)
+	client := newTestClient(db)
+
+	// Close should succeed
+	err := client.Close()
+	require.NoError(t, err, "Close should succeed")
+}
+
+func TestClient_DB(t *testing.T) {
+	db := setupDB(t, nil)
+	defer func() { _ = db.Close() }()
+	client := newTestClient(db)
+
+	// DB should return the underlying database
+	returnedDB := client.DB()
+	require.NotNil(t, returnedDB, "DB should return non-nil database")
+	require.Same(t, db, returnedDB, "DB should return the same database instance")
+}

@@ -28,6 +28,8 @@ func WorkerSystemPrompt(workerID string) string {
 - mcp__perles-worker__check_messages: Check for new messages addressed to you
 - mcp__perles-worker__post_message: Send a message to the coordinator (REQUIRED when task complete)
 - mcp__perles-worker__signal_ready: Signal that you are ready for task assignment (call on startup)
+- mcp__perles-worker__report_implementation_complete: Signal implementation is done (for state-driven workflow)
+- mcp__perles-worker__report_review_verdict: Report code review verdict: APPROVED or DENIED (for reviewers)
 
 **HOW TO REPORT COMPLETION:**
 1. Call: mcp__perles-worker__post_message(to="COORDINATOR", content="Task completed! [brief summary]")
@@ -40,25 +42,96 @@ func WorkerSystemPrompt(workerID string) string {
 }
 
 // TaskAssignmentPrompt generates the prompt sent to a worker when assigning a task.
-func TaskAssignmentPrompt(taskID, title, description, acceptance string) string {
+// The summary parameter is optional and provides additional instructions/context from the coordinator.
+func TaskAssignmentPrompt(taskID, title, summary string) string {
 	prompt := fmt.Sprintf(`[TASK ASSIGNMENT]
+
+**Goal** Complete the task assigned to you with the highest possible quality effort.
 
 Task ID: %s
 Title: %s
 
-Description:
-%s`, taskID, title, description)
+**IMPORTANT: Before starting, if your tasks parent epic references a proposal document, you must read the full context of the proposal to understand the work.**
+Your instructions are in the task description which you can read using the bd tool with "bd show <task-id>" read the full description this is your work and contains
+import acceptance criteria to adhere to.`, taskID, title)
 
-	if acceptance != "" {
+	if summary != "" {
 		prompt += fmt.Sprintf(`
 
-Acceptance Criteria:
-%s`, acceptance)
+Coordinator Instructions:
+%s`, summary)
 	}
 
 	prompt += `
 
-Work on this task thoroughly. When complete, report via post_message to COORDINATOR.`
+**CRITICAL*: Work on this task thoroughly. When complete, Before committing your changes, use report_implementation_complete to signal you're done.
+Example: report_implementation_complete(summary="Implemented feature X with tests")`
+
+	return prompt
+}
+
+// ReviewAssignmentPrompt generates the prompt sent to a reviewer when assigning a code review.
+func ReviewAssignmentPrompt(taskID, implementerID, summary string) string {
+	return fmt.Sprintf(`[REVIEW ASSIGNMENT]
+
+You are being assigned to **review** the work completed by %s on task **%s**.
+
+## What was implemented:
+%s
+
+## Your Review Process
+
+### Step 1: Gather Context
+- Read the task description using: bd show %s
+- Examine the changes made by the implementer
+- Check that acceptance criteria are met
+
+### Step 2: Verify the Implementation
+- Check for correctness and completeness
+- Look for edge cases and error handling
+- Verify tests exist and pass (if applicable)
+- Check code style and conventions
+
+### Step 3: Report Your Verdict
+Use the report_review_verdict tool to submit your verdict:
+- **APPROVED**: The implementation is complete and correct
+- **DENIED**: Changes are required (include specific feedback in comments)
+
+Example: report_review_verdict(verdict="APPROVED", comments="Code looks good, tests pass")`, implementerID, taskID, summary, taskID)
+}
+
+// ReviewFeedbackPrompt generates the prompt sent to an implementer when their code was denied.
+func ReviewFeedbackPrompt(taskID, feedback string) string {
+	return fmt.Sprintf(`[REVIEW FEEDBACK]
+
+Your implementation of task **%s** was **DENIED** during code review.
+
+## Required Changes:
+%s
+
+Please address the feedback above and make the necessary changes.
+
+When you have addressed all feedback, report via post_message to COORDINATOR that you are ready for re-review.`, taskID, feedback)
+}
+
+// CommitApprovalPrompt generates the prompt sent to an implementer when their code is approved.
+func CommitApprovalPrompt(taskID, commitMessage string) string {
+	prompt := fmt.Sprintf(`[COMMIT APPROVED]
+
+Your implementation of task **%s** has been **APPROVED** by the reviewer.
+
+Please create a git commit for your changes.`, taskID)
+
+	if commitMessage != "" {
+		prompt += fmt.Sprintf(`
+
+Suggested commit message:
+%s`, commitMessage)
+	}
+
+	prompt += `
+
+After committing, report via post_message to COORDINATOR with the commit hash.`
 
 	return prompt
 }

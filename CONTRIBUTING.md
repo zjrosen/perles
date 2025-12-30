@@ -43,7 +43,6 @@ perles/
 │   ├── watcher/        # File watcher for auto-refresh
 │   └── ui/             # UI components
 │       ├── board/      # Kanban board and column components
-│       ├── bqlinput/   # BQL input with syntax highlighting
 │       ├── coleditor/  # Column editor modal
 │       ├── colorpicker/# Color picker for columns
 │       ├── details/    # Issue detail view

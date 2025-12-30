@@ -559,7 +559,28 @@ func (m Model) renderMetadataColumn() string {
 		sb.WriteString("\n")
 	}
 
-	// CeratedBy (if set)
+	// MolType (if set)
+	if issue.MolType != "" {
+		sb.WriteString(indent)
+		sb.WriteString(labelStyle.Render("Mol Type"))
+		sb.WriteString(valueStyle.Render(issue.MolType))
+		sb.WriteString("\n")
+	}
+
+	// MolType (if set)
+	if issue.RoleType != "" {
+		sb.WriteString(indent)
+		sb.WriteString(labelStyle.Render("Role Type"))
+		sb.WriteString(valueStyle.Render(issue.RoleType))
+		sb.WriteString("\n")
+	}
+
+	if issue.MolType != "" || issue.RoleType != "" {
+		sb.WriteString(indentedDivider)
+		sb.WriteString("\n")
+	}
+
+	// CreatedBy (if set)
 	if issue.CreatedBy != "" {
 		sb.WriteString(indent)
 		sb.WriteString(labelStyle.Render("Creator"))
@@ -835,6 +856,8 @@ func getTypeStyle(t beads.IssueType) lipgloss.Style {
 		return styles.TypeEpicStyle
 	case beads.TypeChore:
 		return styles.TypeChoreStyle
+	case beads.TypeMolecule:
+		return styles.TypeMoleculeStyle
 	default:
 		return lipgloss.NewStyle()
 	}
@@ -915,6 +938,8 @@ func formatType(t beads.IssueType) string {
 		return "Epic"
 	case beads.TypeChore:
 		return "Chore"
+	case beads.TypeMolecule:
+		return "Molecule"
 	default:
 		return string(t)
 	}

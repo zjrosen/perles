@@ -3,6 +3,8 @@ package metrics
 import (
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestContextUsage(t *testing.T) {
@@ -57,9 +59,7 @@ func TestContextUsage(t *testing.T) {
 				ContextWindow: tt.contextWindow,
 			}
 			got := m.ContextUsage()
-			if got != tt.want {
-				t.Errorf("ContextUsage() = %v, want %v", got, tt.want)
-			}
+			require.Equal(t, tt.want, got, "ContextUsage()")
 		})
 	}
 }
@@ -110,9 +110,7 @@ func TestFormatContextDisplay(t *testing.T) {
 				ContextWindow: tt.contextWindow,
 			}
 			got := m.FormatContextDisplay()
-			if got != tt.want {
-				t.Errorf("FormatContextDisplay() = %v, want %v", got, tt.want)
-			}
+			require.Equal(t, tt.want, got, "FormatContextDisplay()")
 		})
 	}
 }
@@ -151,9 +149,7 @@ func TestFormatCostDisplay(t *testing.T) {
 				TotalCostUSD: tt.totalCostUSD,
 			}
 			got := m.FormatCostDisplay()
-			if got != tt.want {
-				t.Errorf("FormatCostDisplay() = %v, want %v", got, tt.want)
-			}
+			require.Equal(t, tt.want, got, "FormatCostDisplay()")
 		})
 	}
 }
@@ -174,19 +170,8 @@ func TestTokenMetrics_FullStruct(t *testing.T) {
 	}
 
 	// Verify all calculations
-	if got := m.ContextUsage(); got != 13.5 {
-		t.Errorf("ContextUsage() = %v, want 13.5", got)
-	}
-
-	if got := m.FormatContextDisplay(); got != "27k/200k" {
-		t.Errorf("FormatContextDisplay() = %v, want 27k/200k", got)
-	}
-
-	if got := m.FormatCostDisplay(); got != "$0.0892" {
-		t.Errorf("FormatCostDisplay() = %v, want $0.0892", got)
-	}
-
-	if m.LastUpdatedAt != now {
-		t.Errorf("LastUpdatedAt = %v, want %v", m.LastUpdatedAt, now)
-	}
+	require.Equal(t, 13.5, m.ContextUsage(), "ContextUsage()")
+	require.Equal(t, "27k/200k", m.FormatContextDisplay(), "FormatContextDisplay()")
+	require.Equal(t, "$0.0892", m.FormatCostDisplay(), "FormatCostDisplay()")
+	require.Equal(t, now, m.LastUpdatedAt, "LastUpdatedAt")
 }

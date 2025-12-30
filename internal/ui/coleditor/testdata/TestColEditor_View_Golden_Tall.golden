@@ -40,14 +40,18 @@ id          string                                                         │
 assignee    string                                                         │                                                       
 sender      string                                                         │                                                       
 created_by  string                                                         │                                                       
+agent_state idle, running, stuck, stopped                                  │                                                       
+role_type   polecat, crew, witness, etc.                                   │                                                       
+rig         string                                                         │                                                       
+mol_type    string                                                         │                                                       
 created     date (today, yesterday, -7d)                                   │                                                       
 updated     date (today, yesterday, -7d)                                   │                                                       
                                                                            │                                                       
 Examples                                                                   │                                                       
-status = open                                                              │                                                       
-status = open and ready = true                                             │                                                       
-type = bug and priority <= p1                                              │                                                       
-type in (bug, task) and status != closed                                   │                                                       
+status = open                                                                                                                      
+status = open and ready = true                                                                                                     
+type = bug and priority <= p1                                                                                                      
+type in (bug, task) and status != closed                                                                                           
 title ~ "auth" or label ~ "security"                                                                                               
 created >= -7d order by priority                                                                                                   
 not blocked and priority = p0                                                                                                      

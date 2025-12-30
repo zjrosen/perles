@@ -34,6 +34,8 @@ bd show <epic-id> --json
 5. **Proposal-first** - Workers must review the proposal before starting implementation
 6. **No work without approval** - Writer must wait for reviewer approval before committing
 7. **Close epic when done** - Mark the epic as closed after all tasks complete
+8. **Structured tools for state changes** - Use MCP tools (`assign_task`, `assign_task_review`, etc.) for workflow state transitions
+9. **Query before assign** - Always check worker state before making assignments to prevent duplicates
 
 ## Workflow Pattern
 
@@ -55,200 +57,135 @@ For each task in sequence (from first to last) NEVER parallelize only work on a 
 
 #### Step 1: Assign Implementation Worker
 
-**Goal** Mark a task as in progress and assign to a fresh worker to work on the task coordinate the work and review.
+**Goal** Assign a task to a fresh worker using structured tools for deterministic state tracking.
 
-**Critical** Mark the task as in progress before assigning: `bd update <task-id> --status in_progress`
+**Process:**
 
-Send task to a fresh worker with the follow exact prompt instructions:
+1. **Query worker state** to find an available worker and verify task isn't already assigned:
+   ```
+   query_worker_state(task_id="<task-id>")
+   ```
+   - Check `ready_workers` list for available workers
+   - Verify task not in `task_assignments` (prevents duplicate assignment)
 
-**Prompt**
-```
-**Goal** Complete the task assigned to you with the highest possible quality effort. 
+2. **Assign task** using the structured tool:
+   ```
+   assign_task(worker_id="<worker-id>", task_id="<task-id>", summary="<optional task instructions>")
+   ```
+   - This automatically:
+     - Marks task as `in_progress` in BD
+     - Sets worker phase to `Implementing`
+     - Tracks the assignment for state queries
+     - Sends task details to worker
 
-You are being assigned task **<task-id>**: <task-title>
+3. **Optionally send supplementary context** via `send_to_worker` if needed:
+   ```
+   send_to_worker(worker_id, "Additional context: <details>")
+   ```
 
-**IMPORTANT: Before starting, if your tasks parent epic references a proposal document, you must read the full context of the proposal to understand the work.**
-Your instructions are in the task description which you can read using the bd tool with `bd show <task-id>` read the full description this is your work!.
+**Note:** The worker will receive instructions to call `report_implementation_complete` when done, which transitions them to `AwaitingReview` phase.
 
-**CRITICAL*: Before committing your changes ask the coorindator to review your changes. The cooridnator will review and then
-let you know if changes are needed or if you can proceed to commit. If changes are needed, you must make the changes and then 
-ask for another review.
-```
+#### Step 2: Wait for Implementation Completion
 
-#### Step 2: Wait for Completion
+Monitor message log for worker completion signal. The worker will call `report_implementation_complete(summary)` when done, which:
+- Transitions worker phase from `Implementing` to `AwaitingReview`
+- Posts a message to coordinator with implementation summary
+- Updates the internal state tracking
 
-Monitor message log for worker completion message.
+When you receive this notification via message log, proceed to assign a reviewer.
 
 #### Step 3: Assign Review Worker
 
-Send to a **different** worker:
-- Instructions to review the proposal first
-- What was implemented
-- Specific acceptance criteria to verify
-- Code quality checks
-- Request for explicit verdict: "APPROVED" or "CHANGES NEEDED"
+**Goal** Assign a reviewer using the structured `assign_task_review` tool for deterministic state tracking.
 
-**Example review prompt:**
-```
-You are being assigned to **review** the work completed by worker-X on task **<task-id>**.
+**Process:**
 
-## What worker-X did:
-[Summary of changes]
+1. **Query worker state** to verify implementer is awaiting review and find available reviewer:
+   ```
+   query_worker_state(worker_id="<implementer-id>")
+   ```
+   - Verify implementer phase is `awaiting_review`
+   - Check `ready_workers` for available reviewer (must be different from implementer)
 
-## Your Review Process
+2. **Assign review** using the structured tool:
+   ```
+   assign_task_review(
+       reviewer_id="<reviewer-id>",
+       task_id="<task-id>",
+       implementer_id="<implementer-id>",
+       summary="<brief summary of what was implemented>"
+   )
+   ```
+   - This automatically:
+     - Validates reviewer ≠ implementer
+     - Sets reviewer phase to `Reviewing`
+     - Sends review instructions to reviewer
+     - Tracks the review assignment
+     - Adds BD comment: "Review assigned to worker-X"
 
-### Step 1: Gather Context
+**Note:** The reviewer will call `report_review_verdict(verdict, comments)` when done, which handles the state transition and notifies the coordinator.
 
-```bash
-# Get task details and acceptance criteria
-bd show <task-id> --json
+**What the reviewer receives:**
 
-# Get changed files
-git diff HEAD --name-only
-
-# Get diff
-git diff HEAD
-```
-
-### Step 2: Review All Dimensions
-
-Perform a focused review covering:
-
-#### A. Correctness
-- Logic errors and edge cases
-- Error handling
-- Nil checks and control flow
-
-#### B. Tests
-- Run tests: `go test ./...` (or relevant package)
-- Verify ALL pass
-- Check test coverage for new code
-
-#### C. Dead Code
-- Any unused functions/variables?
-- Test-only helpers that shouldn't exist?
-- Unnecessary complexity?
-
-#### D. Acceptance Criteria
-- Each criterion from task description
-- Verify with evidence from code
-
-### Step 4: Issue Verdict
-
-**After review, you MUST:**
-1. Add comment to task with verdict
-2. Update assignee back to coding-agent
-
-## Response Formats
-
-### APPROVAL
-
-```bash
-# Step 1: Add approval comment
-bd comment <task-id> --author code-reviewer "APPROVED: <summary>. All tests pass. Code is correct and meets acceptance criteria."
-
-# Step 2: Update assignee
-bd update <task-id> --assignee coding-agent
-```
-
-Then respond:
-
-```
-## APPROVED
-
-**Task:** <task-id>
-**Files:** <count> files, <lines> lines changed
-
-### Review Summary
-- **Correctness:** Pass - <brief note>
-- **Tests:** Pass - All tests pass
-- **Dead Code:** Pass - No issues
-- **Acceptance:** <X>/<X> criteria met
-
-### Verification
-- Tests run: `<command>`
-- Result: ALL PASSING
-
-### Actions Taken
-- Comment added to task
-- Assignee updated to coding-agent
-
-**The coding-agent may now commit this code.**
-```
-
-### DENIED
-
-```bash
-# Step 1: Add denial comment
-bd comment <task-id> --author code-reviewer "DENIED: <issues found>. Required: <fixes needed>."
-
-# Step 2: Update assignee
-bd update <task-id> --assignee coding-agent
-```
-
-Then respond:
-
-```
-## DENIED
-
-**Task:** <task-id>
-**Files:** <count> files, <lines> lines changed
-
-### Issues Found
-
-1. **<Category>** - <file:line>
-   - Problem: <description>
-   - Fix: <suggestion>
-
-### Verification
-- Tests run: `<command>`
-- Result: <PASS/FAIL details>
-
-### Required Changes
-1. <specific change>
-2. <specific change>
-
-### Actions Taken
-- Comment added to task
-- Assignee updated to coding-agent
-
-**Address the issues and resubmit for review.**
-```
-
-## Critical Rules
-
-1. **Always verify assignee first** - Don't review if not `code-reviewer`
-2. **Always run tests** - Never trust claims without verification
-3. **Always add comment + update assignee** - Both actions are mandatory
-4. **Be concise** - This is a simple review, not a dissertation
-5. **Focus on what matters** - Correctness and tests are primary; style is secondary
-
-## Quality Checklist
-
-Before APPROVAL:
-- [ ] All acceptance criteria met
-- [ ] Code compiles
-- [ ] All tests pass (verified)
-- [ ] No dead code
-- [ ] No obvious errors
-- [ ] Changes are focused and minimal
-```
+The `assign_task_review` tool sends a comprehensive review prompt to the reviewer including:
+- Task details and acceptance criteria (fetched from BD)
+- Summary of what was implemented
+- Instructions to review all dimensions (correctness, tests, dead code, acceptance)
+- Instructions to use `report_review_verdict("APPROVED", comments)` or `report_review_verdict("DENIED", comments)`
 
 #### Step 4: Handle Review Results
 
-**If APPROVED:**
-1. Tell writer worker to commit changes with specific commit message
-2. Wait for commit confirmation
-3. Mark task complete in bd: `bd close <task-id>`
-4. Update todo list
-5. Cycle out both workers (writer and reviewer)
-6. Move to next task
+The reviewer will call `report_review_verdict(verdict, comments)` which:
+- Updates task status to `approved` or `denied`
+- Transitions reviewer phase back to `Idle` (ready for next assignment)
+- Adds BD comment with the verdict
+- Posts message to coordinator
 
-**If CHANGES NEEDED:**
-1. Tell writer worker what to fix
-2. Writer fixes issues
-3. Get another review from a different worker
-4. Repeat until approved
+**If APPROVED:**
+
+1. **Approve commit** using the structured tool:
+   ```
+   approve_commit(
+       implementer_id="<implementer-id>",
+       task_id="<task-id>",
+       commit_message="<suggested commit message>"  // optional
+   )
+   ```
+   - This automatically:
+     - Validates task is in `approved` status
+     - Sets implementer phase to `Committing`
+     - Sends commit instructions to implementer
+     - Adds BD comment: "Commit approved"
+
+2. **Wait for commit confirmation** from implementer
+
+3. **Mark task complete**: `mark_task_complete(task_id="<task-id>")`
+
+4. **Cycle out workers** (see Step 5)
+
+5. **Move to next task**
+
+**If DENIED:**
+
+1. **Send review feedback** using the structured tool:
+   ```
+   assign_review_feedback(
+       implementer_id="<implementer-id>",
+       task_id="<task-id>",
+       feedback="<specific feedback about required changes>"
+   )
+   ```
+   - This automatically:
+     - Validates task is in `denied` status
+     - Sets implementer phase to `AddressingFeedback`
+     - Sends feedback message to implementer
+     - Adds BD comment with feedback
+
+2. **Wait for implementer to fix** - they will call `report_implementation_complete` again when ready
+
+3. **Assign another review** (return to Step 3) - use a fresh reviewer
+
+4. **Repeat until approved**
 
 #### Step 5: Worker Cycling
 
@@ -317,13 +254,33 @@ Task 5: worker-9 implements → worker-10 reviews → both retire
 
 ## Communication Patterns
 
-### Coordinator → Worker Messages
+### Coordinator → Worker: Structured Tools (State Transitions)
 
-Use `send_to_worker(worker_id, message)` for:
-- Task assignment with full context
-- Review assignment
-- Fix requests
-- Commit instructions
+Use structured MCP tools for all state-changing operations:
+
+| Operation | Tool | Purpose |
+|-----------|------|---------|
+| Assign implementation | `assign_task(worker_id, task_id)` | Start task with deterministic tracking |
+| Assign review | `assign_task_review(reviewer_id, task_id, implementer_id, summary)` | Assign reviewer with validation |
+| Send denial feedback | `assign_review_feedback(implementer_id, task_id, feedback)` | Send fixes needed after denial |
+| Approve commit | `approve_commit(implementer_id, task_id, commit_message)` | Authorize implementer to commit |
+
+### Coordinator → Worker: Free-Form Messages (Supplementary)
+
+Use `send_to_worker(worker_id, message)` **only** for:
+- Clarifications or additional context after task assignment
+- Nudges or reminders
+- Custom instructions not covered by structured tools
+- **NOT** for state-changing operations (use structured tools instead)
+
+### Worker → Coordinator: Structured Tools (State Transitions)
+
+Workers use these MCP tools to signal workflow state changes:
+
+| Operation | Tool | Purpose |
+|-----------|------|---------|
+| Implementation done | `report_implementation_complete(summary)` | Transition to `AwaitingReview` phase |
+| Review verdict | `report_review_verdict(verdict, comments)` | Report APPROVED/DENIED, transition to `Idle` |
 
 ### Coordinator → User Messages
 
@@ -382,16 +339,21 @@ worker-2: reviewing → approved (PROCESSED)
 ❌ Don't tell a worker to commit multiple times
 ❌ Don't assign multiple reviewers for the same task
 
-#### State Transition Examples
+#### State Transition Examples (Worker Phases)
 
-Valid state transitions to track:
-- `worker-X: idle → assigned task Y`
-- `worker-X: working on task Y → completed task Y`
-- `worker-X: reviewing task Y → approved task Y`
-- `worker-X: reviewing task Y → denied task Y`
-- `worker-X: approved → committed task Y`
-- `worker-X: retired → replaced by worker-Z`
-- `worker-Z: spawned → ready`
+Valid phase transitions tracked by structured tools:
+
+| From Phase | To Phase | Trigger | Tool |
+|------------|----------|---------|------|
+| `Idle` | `Implementing` | Task assigned | `assign_task` |
+| `Implementing` | `AwaitingReview` | Worker signals done | `report_implementation_complete` |
+| `AwaitingReview` | `Reviewing` | Reviewer assigned | `assign_task_review` |
+| `Reviewing` | `Idle` | Verdict delivered | `report_review_verdict` |
+| `AwaitingReview` | `Committing` | Commit approved | `approve_commit` |
+| `AwaitingReview` | `AddressingFeedback` | Denial feedback sent | `assign_review_feedback` |
+| `AddressingFeedback` | `AwaitingReview` | Worker signals fixes done | `report_implementation_complete` |
+
+**Note:** The structured tools automatically track these transitions. Use `query_worker_state()` to check current state before making assignments.
 
 Each transition should only be processed ONCE.
 
@@ -495,38 +457,67 @@ Coordinator: Validates epic exists, shows 7 tasks
 Coordinator: Presents execution plan → User approves
 
 [Task 1: perles-abc1.1]
-Coordinator: Assigns to worker-1 (with proposal review)
-Worker-1: Completes implementation (sends message)
-Coordinator: Reads message log → Assigns review to worker-2
-Worker-1: Sends duplicate "complete" message
-Coordinator: "Already processed: worker-1 completion. No action needed."
-Worker-2: Reviews → APPROVED (sends message)
-Coordinator: Reads message log → Tells worker-1 to commit
-Worker-2: Sends duplicate "APPROVED" message
-Coordinator: "Already processed: worker-2 approval. No action needed."
-Worker-1: Commits (sends message)
-Coordinator: Reads message log → Marks task complete (bd close perles-abc1.1)
-Coordinator: Replaces worker-1 and worker-2
-Worker-5: Sends "ready" message (new worker spawned)
-Coordinator: "worker-5 ready" (notes but doesn't assign yet)
-Worker-6: Sends "ready" message (new worker spawned)
-Coordinator: "worker-6 ready" (notes but doesn't assign yet)
+# Query state before assignment
+Coordinator: query_worker_state(task_id="perles-abc1.1")
+# Response: task not assigned, worker-1 in ready_workers
+
+# Assign implementation
+Coordinator: assign_task(worker_id="worker-1", task_id="perles-abc1.1")
+# worker-1 phase transitions: Idle → Implementing
+
+# Wait for implementation completion
+Worker-1: report_implementation_complete(summary="Added validation logic for user input")
+# worker-1 phase transitions: Implementing → AwaitingReview
+# Coordinator receives message via message log
+
+# Query state before review assignment
+Coordinator: query_worker_state(worker_id="worker-1")
+# Response: worker-1 phase is "awaiting_review", worker-2 in ready_workers
+
+# Assign review
+Coordinator: assign_task_review(
+    reviewer_id="worker-2",
+    task_id="perles-abc1.1",
+    implementer_id="worker-1",
+    summary="Added validation logic for user input"
+)
+# worker-2 phase transitions: Idle → Reviewing
+
+# Wait for review verdict
+Worker-2: report_review_verdict(verdict="APPROVED", comments="All tests pass, code is correct")
+# worker-2 phase transitions: Reviewing → Idle
+# Task status: approved
+
+# Approve commit
+Coordinator: approve_commit(
+    implementer_id="worker-1",
+    task_id="perles-abc1.1",
+    commit_message="feat(validation): add user input validation"
+)
+# worker-1 phase transitions: AwaitingReview → Committing
+
+# Wait for commit confirmation, then mark task complete
+Coordinator: mark_task_complete(task_id="perles-abc1.1")
+
+# Cycle workers
+Coordinator: replace_worker(worker-1, "Completed perles-abc1.1")
+Coordinator: replace_worker(worker-2, "Reviewed perles-abc1.1")
 
 [Task 2: perles-abc1.2]
-Coordinator: Assigns to worker-3 (with proposal review)
-Worker-3: Completes implementation
-Coordinator: Assigns review to worker-4
-Worker-4: Reviews → APPROVED
-Coordinator: Tells worker-3 to commit
-Worker-3: Commits
-Coordinator: Marks task complete
-Coordinator: Replaces worker-3 and worker-4
+# Same pattern with worker-3 (implement) and worker-4 (review)
+Coordinator: query_worker_state(task_id="perles-abc1.2")
+Coordinator: assign_task(worker_id="worker-3", task_id="perles-abc1.2")
+Worker-3: report_implementation_complete(summary="...")
+Coordinator: assign_task_review(reviewer_id="worker-4", ...)
+Worker-4: report_review_verdict(verdict="APPROVED", comments="...")
+Coordinator: approve_commit(implementer_id="worker-3", ...)
+Coordinator: mark_task_complete(task_id="perles-abc1.2"), replace workers
 
 [Continue pattern for remaining tasks...]
 
 [Epic Completion]
-Coordinator: Verifies all 7 tasks are closed
-Coordinator: Closes epic (bd close perles-abc1 --reason "All tasks completed")
+Coordinator: Verifies all 7 tasks are closed via bd show perles-abc1 --json
+Coordinator: bd close perles-abc1 --reason "All tasks completed"
 Coordinator: "Epic perles-abc1 is now complete. All 7 tasks implemented and reviewed."
 ```
 
@@ -540,6 +531,9 @@ Coordinator: "Epic perles-abc1 is now complete. All 7 tasks implemented and revi
 - ✅ Clean git history with atomic commits
 - ✅ No context pollution across tasks
 - ✅ Epic closed after all tasks complete
+- ✅ **Structured tools used for all state transitions** (assign_task, assign_task_review, etc.)
+- ✅ **Query-before-assign pattern followed** (query_worker_state before assignments)
+- ✅ **Worker tools used for completion signals** (report_implementation_complete, report_review_verdict)
 
 ## Anti-Patterns to Avoid
 
@@ -554,6 +548,8 @@ Coordinator: "Epic perles-abc1 is now complete. All 7 tasks implemented and revi
 ❌ **Re-assigning already assigned work** - Check if you've already assigned a reviewer/committer
 ❌ **Assigning work to replacement workers immediately** - Let them sit idle as backups
 ❌ **Saying "No response requested" without explanation** - Always explain why you're not taking action
+❌ **Using send_to_worker for state changes** - Use structured tools (assign_task, assign_task_review, etc.) instead
+❌ **Skipping query_worker_state** - Always check state before making assignments
 
 ## Adaptation for Different Scenarios
 
@@ -568,21 +564,48 @@ Coordinator: "Epic perles-abc1 is now complete. All 7 tasks implemented and revi
 
 ## Tools Reference
 
-### MCP Tools Used
+### Coordinator MCP Tools
 
-- `assign_task(worker_id, task_id)` - For bd-tracked tasks
-- `send_to_worker(worker_id, message)` - For custom instructions
-- `replace_worker(worker_id, reason)` - Cycle out used workers
-- `list_workers()` - Check pool state
-- `read_message_log(limit)` - Monitor worker messages
-- `mark_task_complete(task_id)` - Close tasks in bd
+#### State-Changing Tools (Use for Workflow Transitions)
+
+| Tool | Parameters | Purpose |
+|------|------------|---------|
+| `assign_task` | `worker_id`, `task_id`, `summary` (optional) | Assign implementation task to worker |
+| `assign_task_review` | `reviewer_id`, `task_id`, `implementer_id`, `summary` | Assign reviewer (validates ≠ implementer) |
+| `assign_review_feedback` | `implementer_id`, `task_id`, `feedback` | Send denial feedback to implementer |
+| `approve_commit` | `implementer_id`, `task_id`, `commit_message` (optional) | Authorize worker to commit |
+
+#### Query and Management Tools
+
+| Tool | Parameters | Purpose |
+|------|------------|---------|
+| `query_worker_state` | `worker_id` (optional), `task_id` (optional) | Get worker phases, roles, and ready workers |
+| `list_workers` | none | List all workers with status and phase info |
+| `replace_worker` | `worker_id`, `reason` | Cycle out worker and spawn replacement |
+| `read_message_log` | `limit` (optional) | Monitor worker messages |
+
+#### Supplementary Communication
+
+| Tool | Parameters | Purpose |
+|------|------------|---------|
+| `send_to_worker` | `worker_id`, `message` | Send clarifications or additional context (NOT for state changes) |
+
+### Worker MCP Tools
+
+| Tool | Parameters | Purpose |
+|------|------------|---------|
+| `report_implementation_complete` | `summary` | Signal implementation done, transition to `AwaitingReview` |
+| `report_review_verdict` | `verdict` (APPROVED/DENIED), `comments` | Report review result, transition to `Idle` |
+| `signal_ready` | none | Signal ready for task assignment (on startup) |
+| `post_message` | `to`, `content` | Send message to coordinator or workers |
+| `check_messages` | none | Check for new messages |
 
 ### BD Commands
 
 - `bd show <task-id> --json` - Get task details
 - `bd ready --json` - Find unblocked tasks
-- `bd update <task-id> --status in_progress` - Mark as task as in progress
-- `bd close <task-id>` - Mark complete
+- `bd update <task-id> --status in_progress` - Mark task as in progress (usually done automatically by `assign_task`)
+- `bd close <epic-id>` - Close epic (use `mark_task_complete` MCP tool for tasks)
 
 ### Git Commands
 
@@ -591,4 +614,92 @@ Coordinator: "Epic perles-abc1 is now complete. All 7 tasks implemented and revi
 
 ---
 
-**This workflow has proven effective for coordinating multi-worker task execution with quality gates and fresh context per task.**
+## Query-Before-Assign Pattern
+
+**CRITICAL:** Always query worker state before making assignments to prevent duplicates and ensure valid state.
+
+### Why This Matters
+
+Without state checks:
+- Same task might be assigned to multiple workers
+- Reviewer might be assigned when implementer isn't ready
+- Self-review might accidentally occur (reviewer == implementer)
+- Task might be assigned to worker already working on something else
+
+### Pattern
+
+```
+# Before any assignment, query current state
+query_worker_state(task_id="<task-id>")
+
+# Check the response:
+# - ready_workers: list of workers available for assignment
+# - task_assignments: map showing who's working on what
+# - workers: list with phase/role for each worker
+
+# Only proceed if:
+# 1. Task is not already assigned (not in task_assignments)
+# 2. Target worker is in ready_workers (or appropriate phase)
+# 3. For review: implementer is in AwaitingReview phase
+```
+
+### Examples
+
+**Before assigning implementation:**
+```
+query_worker_state(task_id="perles-abc.1")
+# Response shows task not in task_assignments
+# worker-3 in ready_workers
+assign_task(worker_id="worker-3", task_id="perles-abc.1")
+```
+
+**Before assigning review:**
+```
+query_worker_state(worker_id="worker-3")
+# Response shows worker-3 phase is "awaiting_review"
+# worker-4 in ready_workers (and worker-4 ≠ worker-3)
+assign_task_review(reviewer_id="worker-4", task_id="perles-abc.1", implementer_id="worker-3", summary="...")
+```
+
+---
+
+## Hybrid Approach: Structured Tools + send_to_worker
+
+This workflow uses a **hybrid approach** for communication:
+
+### Use Structured Tools For:
+
+✅ **All state-changing operations**
+- Task assignment → `assign_task`
+- Review assignment → `assign_task_review`
+- Denial feedback → `assign_review_feedback`
+- Commit approval → `approve_commit`
+
+✅ **State queries**
+- Check availability → `query_worker_state`
+
+### Use send_to_worker For:
+
+✅ **Supplementary communication only**
+- Additional context after task assignment
+- Clarifications about requirements
+- Nudges or reminders
+- Custom instructions not in structured tool prompts
+
+### Rule: "Structured tools for state changes, send_to_worker for details"
+
+**Good:**
+```
+assign_task(worker_id="worker-1", task_id="perles-abc.1")
+send_to_worker(worker_id="worker-1", "Note: Pay special attention to error handling in the validation logic")
+```
+
+**Bad:**
+```
+# Don't use send_to_worker for task assignment!
+send_to_worker(worker_id="worker-1", "You are being assigned task perles-abc.1...")  # ❌ NO STATE TRACKING
+```
+
+---
+
+**This workflow has proven effective for coordinating multi-worker task execution with quality gates, deterministic state tracking, and fresh context per task.**

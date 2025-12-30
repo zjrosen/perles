@@ -1,0 +1,28 @@
+╭────────────────────────────╮  ╭─ colorpicker ────────────────────────────────────────────────────╮
+│ Components                 │  │                                                                  │
+│ ────────────────────────── │  │╭────────────────────────────────────────────────────────────────╮│
+│   vimtextarea              │  │ │ Select Color                                                   │
+│   modal                    │  ││                                                                 │
+│   formmodal                │  │                                                                  │
+│   panes                    │  ││────────────────────────────────────────────────────────────────││
+│   scrollpane               │  │ │>   Red             Lime            Crimson         White       │
+│ ● colorpicker              │  ││                                                                 │
+│   picker                   │  │ │    Green           Cyan            Tomato          Gray 1      │
+│   toaster                  │  ││                                                                 │
+│   logoverlay               │  │ │    Blue            Magenta         Gold            Gray 2      │
+│   markdown                 │  ││                                                                 │
+│   chainart                 │  │ │    Purple          Indigo          Olive           Gray 3      │
+│   issuebadge               │  ││                                                                 │
+│   Theme Tokens             │  │ │    Yellow          Rose            Aqua            Gray 4      │
+│                            │  ││                                                                 │
+│                            │  │ │    Orange          Amber           Navy            Gray 5      │
+│                            │  ││                                                                 │
+│                            │  │ │    Teal            Emerald         Plum            Gray 6      │
+│                            │  ││                                                                 │
+│                            │  │ │    Gray            Sky             Salmon          Gray 7      │
+│                            │  ││                                                                 │
+│                            │  │ │    Pink            Fuchsia         Khaki           Gray 8      │
+│                            │  ││                                                                 │
+│                            │  │ │    Coral           Violet          Mint            Black       │
+╰────────────────────────────╯  ╰──────────────────────────────────────────────────────────────────╯
+Tab: Switch panes  │  Ctrl+R: Reset  │  Ctrl+C: Quit                                                

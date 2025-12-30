@@ -1,0 +1,28 @@
+╭────────────────────────────╮  ╭─ picker ─────────────────────────────────────────────────────────╮
+│ Components                 │  │ ╭─────────────────────────╮                                      │
+│ ────────────────────────── │  │ │ Select an Option        │                                      │
+│   vimtextarea              │  │ │─────────────────────────│                                      │
+│   modal                    │  │ │>Option 1                │                                      │
+│   formmodal                │  │ │ Option 2                │                                      │
+│   panes                    │  │ │ Option 3                │                                      │
+│   scrollpane               │  │ │ Option 4                │                                      │
+│   colorpicker              │  │ │ Option 5                │                                      │
+│ ● picker                   │  │ ╰─────────────────────────╯                                      │
+│   toaster                  │  │                                                                  │
+│   logoverlay               │  │                                                                  │
+│   markdown                 │  │                                                                  │
+│   chainart                 │  │                                                                  │
+│   issuebadge               │  │                                                                  │
+│   Theme Tokens             │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+╰────────────────────────────╯  ╰──────────────────────────────────────────────────────────────────╯
+Tab: Switch panes  │  Ctrl+R: Reset  │  Ctrl+C: Quit                                                

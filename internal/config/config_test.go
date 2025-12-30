@@ -502,3 +502,26 @@ func TestWorkflowConfig_IsEnabled_False(t *testing.T) {
 	wf := WorkflowConfig{Name: "Test", Enabled: &enabled}
 	require.False(t, wf.IsEnabled())
 }
+
+// Tests for VimMode UI config
+
+func TestDefaults_VimModeDisabled(t *testing.T) {
+	cfg := Defaults()
+	require.False(t, cfg.UI.VimMode, "VimMode should be disabled by default")
+}
+
+func TestUIConfig_VimModeExplicit(t *testing.T) {
+	// Test that VimMode can be explicitly set to true
+	cfg := UIConfig{
+		ShowCounts:    true,
+		ShowStatusBar: true,
+		VimMode:       true,
+	}
+	require.True(t, cfg.VimMode)
+}
+
+func TestUIConfig_VimModeZeroValue(t *testing.T) {
+	// Test that zero value UIConfig has VimMode as false
+	cfg := UIConfig{}
+	require.False(t, cfg.VimMode)
+}

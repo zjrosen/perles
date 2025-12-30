@@ -23,66 +23,6 @@ func (_m *MockHeadlessClient) EXPECT() *MockHeadlessClient_Expecter {
 	return &MockHeadlessClient_Expecter{mock: &_m.Mock}
 }
 
-// Resume provides a mock function with given fields: ctx, sessionRef, cfg
-func (_m *MockHeadlessClient) Resume(ctx context.Context, sessionRef string, cfg client.Config) (client.HeadlessProcess, error) {
-	ret := _m.Called(ctx, sessionRef, cfg)
-
-	if len(ret) == 0 {
-		panic("no return value specified for Resume")
-	}
-
-	var r0 client.HeadlessProcess
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, client.Config) (client.HeadlessProcess, error)); ok {
-		return rf(ctx, sessionRef, cfg)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, string, client.Config) client.HeadlessProcess); ok {
-		r0 = rf(ctx, sessionRef, cfg)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(client.HeadlessProcess)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, string, client.Config) error); ok {
-		r1 = rf(ctx, sessionRef, cfg)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockHeadlessClient_Resume_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Resume'
-type MockHeadlessClient_Resume_Call struct {
-	*mock.Call
-}
-
-// Resume is a helper method to define mock.On call
-//   - ctx context.Context
-//   - sessionRef string
-//   - cfg client.Config
-func (_e *MockHeadlessClient_Expecter) Resume(ctx interface{}, sessionRef interface{}, cfg interface{}) *MockHeadlessClient_Resume_Call {
-	return &MockHeadlessClient_Resume_Call{Call: _e.mock.On("Resume", ctx, sessionRef, cfg)}
-}
-
-func (_c *MockHeadlessClient_Resume_Call) Run(run func(ctx context.Context, sessionRef string, cfg client.Config)) *MockHeadlessClient_Resume_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(client.Config))
-	})
-	return _c
-}
-
-func (_c *MockHeadlessClient_Resume_Call) Return(_a0 client.HeadlessProcess, _a1 error) *MockHeadlessClient_Resume_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockHeadlessClient_Resume_Call) RunAndReturn(run func(context.Context, string, client.Config) (client.HeadlessProcess, error)) *MockHeadlessClient_Resume_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // Spawn provides a mock function with given fields: ctx, cfg
 func (_m *MockHeadlessClient) Spawn(ctx context.Context, cfg client.Config) (client.HeadlessProcess, error) {
 	ret := _m.Called(ctx, cfg)

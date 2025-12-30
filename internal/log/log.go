@@ -55,6 +55,7 @@ const (
 	CatOrch    Category = "orch"    // Orchestration: coordinator, pool, amp, claude processes
 	CatMCP     Category = "mcp"     // MCP server and protocol communication
 	CatTree    Category = "tree"    // Tree view operations
+	CatCache   Category = "cache"   // cache operations
 )
 
 // Logger provides structured logging.

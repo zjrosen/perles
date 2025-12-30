@@ -83,11 +83,12 @@ var DefaultPreset = Preset{
 		TokenPriorityBacklog:  "#666666",
 
 		// Issue type
-		TokenTypeTask:    "#54A0FF",
-		TokenTypeChore:   "#777777",
-		TokenTypeEpic:    "#7D56F4",
-		TokenTypeBug:     "#FF8787",
-		TokenTypeFeature: "#73F59F",
+		TokenTypeTask:     "#54A0FF",
+		TokenTypeChore:    "#777777",
+		TokenTypeEpic:     "#7D56F4",
+		TokenTypeBug:      "#FF8787",
+		TokenTypeFeature:  "#73F59F",
+		TokenTypeMolecule: "#FF731A",
 
 		// BQL syntax highlighting (Catppuccin Mocha inspired)
 		TokenBQLKeyword:  "#CBA6F7",
@@ -169,11 +170,12 @@ var CatppuccinMochaPreset = Preset{
 		TokenPriorityBacklog:  "#6C7086", // overlay0
 
 		// Issue type
-		TokenTypeTask:    "#89B4FA", // blue
-		TokenTypeChore:   "#6C7086", // overlay0
-		TokenTypeEpic:    "#CBA6F7", // mauve
-		TokenTypeBug:     "#F38BA8", // red
-		TokenTypeFeature: "#A6E3A1", // green
+		TokenTypeTask:     "#89B4FA", // blue
+		TokenTypeChore:    "#6C7086", // overlay0
+		TokenTypeEpic:     "#CBA6F7", // mauve
+		TokenTypeBug:      "#F38BA8", // red
+		TokenTypeFeature:  "#A6E3A1", // green
+		TokenTypeMolecule: "#6C7086", // overlay0
 
 		// BQL syntax highlighting
 		TokenBQLKeyword:  "#CBA6F7", // mauve
@@ -255,11 +257,12 @@ var CatppuccinLattePreset = Preset{
 		TokenPriorityBacklog:  "#9CA0B0", // overlay0
 
 		// Issue type
-		TokenTypeTask:    "#1E66F5", // blue
-		TokenTypeChore:   "#9CA0B0", // overlay0
-		TokenTypeEpic:    "#8839EF", // mauve
-		TokenTypeBug:     "#D20F39", // red
-		TokenTypeFeature: "#40A02B", // green
+		TokenTypeTask:     "#1E66F5", // blue
+		TokenTypeChore:    "#9CA0B0", // overlay0
+		TokenTypeEpic:     "#8839EF", // mauve
+		TokenTypeBug:      "#D20F39", // red
+		TokenTypeFeature:  "#40A02B", // green
+		TokenTypeMolecule: "#9CA0B0", // overlay0
 
 		// BQL syntax highlighting
 		TokenBQLKeyword:  "#8839EF", // mauve
@@ -341,11 +344,12 @@ var DraculaPreset = Preset{
 		TokenPriorityBacklog:  "#44475A", // current line
 
 		// Issue type
-		TokenTypeTask:    "#8BE9FD", // cyan
-		TokenTypeChore:   "#6272A4", // comment
-		TokenTypeEpic:    "#BD93F9", // purple
-		TokenTypeBug:     "#FF5555", // red
-		TokenTypeFeature: "#50FA7B", // green
+		TokenTypeTask:     "#8BE9FD", // cyan
+		TokenTypeChore:    "#6272A4", // comment
+		TokenTypeEpic:     "#BD93F9", // purple
+		TokenTypeBug:      "#FF5555", // red
+		TokenTypeFeature:  "#50FA7B", // green
+		TokenTypeMolecule: "#6272A4", // comment
 
 		// BQL syntax highlighting
 		TokenBQLKeyword:  "#FF79C6", // pink
@@ -431,11 +435,12 @@ var NordPreset = Preset{
 		TokenPriorityBacklog:  "#434C5E", // polar night 3
 
 		// Issue type
-		TokenTypeTask:    "#88C0D0", // frost 2
-		TokenTypeChore:   "#4C566A", // polar night 4
-		TokenTypeEpic:    "#B48EAD", // aurora purple
-		TokenTypeBug:     "#BF616A", // aurora red
-		TokenTypeFeature: "#A3BE8C", // aurora green
+		TokenTypeTask:     "#88C0D0", // frost 2
+		TokenTypeChore:    "#4C566A", // polar night 4
+		TokenTypeEpic:     "#B48EAD", // aurora purple
+		TokenTypeBug:      "#BF616A", // aurora red
+		TokenTypeFeature:  "#A3BE8C", // aurora green
+		TokenTypeMolecule: "#4C566A", // polar night 4
 
 		// BQL syntax highlighting
 		TokenBQLKeyword:  "#81A1C1", // frost 3
@@ -518,11 +523,12 @@ var HighContrastPreset = Preset{
 		TokenPriorityBacklog:  "#808080", // gray
 
 		// Issue type - distinct colors
-		TokenTypeTask:    "#00FFFF", // cyan
-		TokenTypeChore:   "#808080", // gray
-		TokenTypeEpic:    "#FF00FF", // magenta
-		TokenTypeBug:     "#FF0000", // red
-		TokenTypeFeature: "#00FF00", // green
+		TokenTypeTask:     "#00FFFF", // cyan
+		TokenTypeChore:    "#808080", // gray
+		TokenTypeEpic:     "#FF00FF", // magenta
+		TokenTypeBug:      "#FF0000", // red
+		TokenTypeFeature:  "#00FF00", // green
+		TokenTypeMolecule: "#808080", // gray
 
 		// BQL syntax highlighting - high contrast
 		TokenBQLKeyword:  "#FF00FF", // magenta

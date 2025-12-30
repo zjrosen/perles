@@ -333,7 +333,13 @@ func (m Model) renderInputSection(index int, label string, width int) string {
 	isFocused := m.focusedInput == index
 
 	inputView := m.inputs[index].View()
-	return styles.RenderFormSection([]string{inputView}, label, "", width, isFocused, styles.BorderHighlightFocusColor)
+	return styles.FormSection(styles.FormSectionConfig{
+		Content:            []string{inputView},
+		Width:              width,
+		TopLeft:            label,
+		Focused:            isFocused,
+		FocusedBorderColor: styles.BorderHighlightFocusColor,
+	})
 }
 
 // renderButtons renders Save and Cancel buttons styled like coleditor.

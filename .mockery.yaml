@@ -2,17 +2,21 @@ with-expecter: true
 dir: internal/mocks
 outpkg: mocks
 packages:
-  perles/internal/beads:
+  github.com/zjrosen/perles/internal/beads:
     interfaces:
       BeadsClient:
-  perles/internal/bql:
+      BeadsExecutor:
+  github.com/zjrosen/perles/internal/bql:
     interfaces:
       BQLExecutor:
-  perles/internal/mode/shared:
+  github.com/zjrosen/perles/internal/cachemanager:
+    interfaces:
+      CacheManager:
+  github.com/zjrosen/perles/internal/mode/shared:
     interfaces:
       Clock:
       Clipboard:
-  perles/internal/orchestration/client:
+  github.com/zjrosen/perles/internal/orchestration/client:
     interfaces:
       HeadlessClient:
       HeadlessProcess:

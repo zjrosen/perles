@@ -123,7 +123,7 @@ func TestProcess_SendEvent(t *testing.T) {
 		require.Equal(t, "init", event.SubType)
 		require.Equal(t, "sess-abc", event.SessionID)
 	case <-time.After(100 * time.Millisecond):
-		t.Fatal("timeout waiting for event")
+		require.Fail(t, "timeout waiting for event")
 	}
 }
 
@@ -178,7 +178,7 @@ func TestProcess_SendInitEvent(t *testing.T) {
 		require.Equal(t, "sess-xyz", event.SessionID)
 		require.Equal(t, "/workspace", event.WorkDir)
 	case <-time.After(100 * time.Millisecond):
-		t.Fatal("timeout waiting for init event")
+		require.Fail(t, "timeout waiting for init event")
 	}
 }
 
@@ -193,7 +193,7 @@ func TestProcess_SendTextEvent(t *testing.T) {
 		require.NotNil(t, event.Message)
 		require.Equal(t, "Hello, world!", event.Message.GetText())
 	case <-time.After(100 * time.Millisecond):
-		t.Fatal("timeout waiting for text event")
+		require.Fail(t, "timeout waiting for text event")
 	}
 }
 
@@ -210,7 +210,7 @@ func TestProcess_SendToolResultEvent(t *testing.T) {
 		require.Equal(t, "Bash", event.Tool.Name)
 		require.Equal(t, "command output", event.Tool.GetOutput())
 	case <-time.After(100 * time.Millisecond):
-		t.Fatal("timeout waiting for tool result event")
+		require.Fail(t, "timeout waiting for tool result event")
 	}
 }
 
@@ -219,7 +219,7 @@ func TestProcess_Done(t *testing.T) {
 
 	select {
 	case <-p.Done():
-		t.Fatal("should not be done")
+		require.Fail(t, "should not be done")
 	default:
 	}
 
@@ -228,7 +228,7 @@ func TestProcess_Done(t *testing.T) {
 	select {
 	case <-p.Done():
 	case <-time.After(100 * time.Millisecond):
-		t.Fatal("should be done")
+		require.Fail(t, "should be done")
 	}
 }
 

@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -27,9 +26,11 @@ import (
 	"github.com/zjrosen/perles/internal/orchestration/message"
 	"github.com/zjrosen/perles/internal/orchestration/metrics"
 	"github.com/zjrosen/perles/internal/orchestration/pool"
+	"github.com/zjrosen/perles/internal/orchestration/session"
 	"github.com/zjrosen/perles/internal/orchestration/workflow"
 	"github.com/zjrosen/perles/internal/ui/commandpalette"
 	"github.com/zjrosen/perles/internal/ui/shared/modal"
+	"github.com/zjrosen/perles/internal/ui/shared/vimtextarea"
 	"github.com/zjrosen/perles/internal/ui/styles"
 
 	"github.com/zjrosen/perles/internal/pubsub"
@@ -84,7 +85,8 @@ type Model struct {
 	workerPane      WorkerPane
 
 	// User input
-	input textarea.Model
+	input   vimtextarea.Model
+	vimMode vimtextarea.Mode // Track current vim mode for display
 
 	// Error display (modal overlay)
 	errorModal *modal.Model
@@ -112,6 +114,7 @@ type Model struct {
 	services           mode.Services
 	coordinatorMetrics *metrics.TokenMetrics // Token usage and cost data for coordinator
 	coordinatorWorking bool                  // True when coordinator is processing, false when waiting for input
+	session            *session.Session      // Session tracking for this orchestration run
 
 	// AI client configuration
 	clientType  string // "claude" (default) or "amp"
@@ -195,20 +198,25 @@ type Config struct {
 	AmpMode  string // free, rush, smart (default)
 	// Workflow templates
 	WorkflowRegistry *workflow.Registry // Pre-loaded workflow registry (optional)
+	// UI settings
+	VimMode bool // Enable vim keybindings in text input areas
 }
 
 // New creates a new orchestration mode model with the given configuration.
 func New(cfg Config) Model {
-	ta := textarea.New()
-	ta.Prompt = "" // We render our own prompt in the view
-	ta.Placeholder = "Type message to coordinator..."
-	ta.CharLimit = 1000
-	ta.ShowLineNumbers = false
-	ta.SetHeight(2) // Allow wrapping within 2 lines
-	ta.Focus()      // Focus input by default
+	defaultMode := vimtextarea.ModeInsert // Start in Insert mode for immediate typing
+	ta := vimtextarea.New(vimtextarea.Config{
+		VimEnabled:  cfg.VimMode,
+		DefaultMode: defaultMode,
+		Placeholder: "Type message to coordinator...",
+		CharLimit:   0,
+		MaxHeight:   2, // Allow wrapping within 2 lines
+	})
+	ta.Focus() // Focus input by default
 
 	return Model{
 		input:                 ta,
+		vimMode:               defaultMode, // Initialize mode tracking
 		coordinatorPane:       newCoordinatorPane(),
 		messagePane:           newMessagePane(),
 		workerPane:            newWorkerPane(),
@@ -258,10 +266,7 @@ func newWorkerPane() WorkerPane {
 
 // Init returns initial commands for the mode.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
-		textarea.Blink,
-		func() tea.Msg { return StartCoordinatorMsg{} },
-	)
+	return func() tea.Msg { return StartCoordinatorMsg{} }
 }
 
 // SetSize handles terminal resize.
@@ -270,14 +275,14 @@ func (m Model) SetSize(width, height int) Model {
 	m.width = width
 	m.height = height
 
-	// Input takes full width (accounting for borders and prompt)
-	// Only set width if the textarea has been initialized (non-zero CharLimit indicates initialized)
-	if m.input.CharLimit > 0 {
-		m.input.SetWidth(width - 8)
-	}
+	// Input takes full width (accounting for borders and padding)
+	// Height is set to max allowed (4 lines) so content can grow
+	// Actual visible height is controlled by calculateInputHeight()
+	m.input.SetSize(width-4, 4)
 
 	// Calculate pane dimensions (matches view.go layout)
-	contentHeight := max(height-4, 5) // Reserve 4 lines for input bar
+	inputHeight := m.calculateInputHeight()
+	contentHeight := max(height-inputHeight, 5)
 	leftWidth := width * leftPanePercent / 100
 	middleWidth := width * middlePanePercent / 100
 	rightWidth := width - leftWidth - middleWidth
@@ -579,11 +584,11 @@ func (m Model) CycleMessageTarget() Model {
 	// Update input placeholder based on target
 	switch m.messageTarget {
 	case "COORDINATOR":
-		m.input.Placeholder = "Type message to coordinator..."
+		m.input.SetPlaceholder("Type message to coordinator...")
 	case "BROADCAST":
-		m.input.Placeholder = "Type message to everyone..."
+		m.input.SetPlaceholder("Type message to everyone...")
 	default:
-		m.input.Placeholder = "Type message to " + strings.ToUpper(m.messageTarget) + "..."
+		m.input.SetPlaceholder("Type message to " + strings.ToUpper(m.messageTarget) + "...")
 	}
 
 	return m

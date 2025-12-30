@@ -18,8 +18,10 @@ import (
 	"github.com/zjrosen/perles/internal/orchestration/mcp"
 	"github.com/zjrosen/perles/internal/orchestration/message"
 	"github.com/zjrosen/perles/internal/orchestration/pool"
+	"github.com/zjrosen/perles/internal/orchestration/session"
 	"github.com/zjrosen/perles/internal/ui/commandpalette"
 	"github.com/zjrosen/perles/internal/ui/shared/modal"
+	"github.com/zjrosen/perles/internal/ui/shared/vimtextarea"
 
 	"github.com/zjrosen/perles/internal/pubsub"
 )
@@ -248,22 +250,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Normal mode: input is focused, most keys go to input
-		switch {
-		case key.Matches(msg, keys.Enter):
-			content := strings.TrimSpace(m.input.Value())
-			if content != "" {
-				target := m.messageTarget
-				m.input.Reset()
-				return m, func() tea.Msg {
-					return UserInputMsg{Content: content, Target: target}
-				}
-			}
-			return m, nil
-
-		case key.Matches(msg, keys.Quit), msg.Type == tea.KeyCtrlC:
+		// When vim is disabled, or we are in normal mode, ESC should show quit confirmation directly
+		if (!m.input.VimEnabled() || m.input.InNormalMode()) && msg.Type == tea.KeyEsc {
 			return m.showQuitConfirmation(), nil
+		}
 
+		// When vim is disabled, or we are in normal mode, ctrl+c should show quit confirmation directly
+		if (!m.input.VimEnabled() || m.input.InNormalMode()) && msg.Type == tea.KeyCtrlC {
+			return m.showQuitConfirmation(), nil
+		}
+
+		switch {
 		case key.Matches(msg, keys.Pause):
 			return m, func() tea.Msg { return PauseMsg{} }
 
@@ -279,7 +276,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Forward other keys to text input
+		// Forward all other keys to vimtextarea (including ESC which switches to Normal when vim enabled)
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
 		return m, cmd
@@ -386,6 +383,16 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m.handleMessageEvent(msg)
 
 	case CoordinatorStoppedMsg:
+		// Close session with appropriate status
+		if m.session != nil {
+			status := m.determineSessionStatus()
+			if err := m.session.Close(status); err != nil {
+				log.Debug(log.CatOrch, "Session close error", "subsystem", "update", "error", err)
+			} else {
+				log.Debug(log.CatOrch, "Session closed", "subsystem", "update", "status", status)
+			}
+		}
+
 		// Shutdown HTTP MCP server
 		if m.mcpServer != nil {
 			go func() {
@@ -394,6 +401,23 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				}
 			}()
 		}
+		return m, nil
+
+	// Handle vimtextarea submit (Shift+Enter)
+	case vimtextarea.SubmitMsg:
+		content := strings.TrimSpace(msg.Content)
+		if content != "" {
+			target := m.messageTarget
+			m.input.Reset()
+			return m, func() tea.Msg {
+				return UserInputMsg{Content: content, Target: target}
+			}
+		}
+		return m, nil
+
+	// Handle vimtextarea mode change
+	case vimtextarea.ModeChangeMsg:
+		m.vimMode = msg.Mode
 		return m, nil
 
 	// Wire UserInputMsg to target (coordinator or worker)
@@ -718,6 +742,7 @@ func (m Model) handleInitializerEvent(event pubsub.Event[InitializerEvent]) (Mod
 		m.mcpServer = res.MCPServer
 		m.mcpPort = res.MCPPort
 		m.coord = res.Coordinator
+		m.session = res.Session
 
 		// Set up pub/sub subscriptions if not already set up
 		// (they may have been set up earlier when coordinator became available)
@@ -1076,16 +1101,20 @@ func (m Model) updateStatusFromCoordinator(status coordinator.Status) Model {
 // Workers connect via HTTP to /worker/{workerID} and all share the coordinator's
 // message issue instance, solving the in-memory cache isolation problem.
 type workerServerCache struct {
-	msgIssue *message.Issue
-	servers  map[string]*mcp.WorkerServer
-	mu       sync.RWMutex
+	msgIssue      *message.Issue
+	stateCallback mcp.WorkerStateCallback
+	servers       map[string]*mcp.WorkerServer
+	mu            sync.RWMutex
 }
 
 // newWorkerServerCache creates a new worker server cache.
-func newWorkerServerCache(msgIssue *message.Issue) *workerServerCache {
+// The stateCallback allows workers to update coordinator state when they report
+// implementation complete or review verdicts.
+func newWorkerServerCache(msgIssue *message.Issue, stateCallback mcp.WorkerStateCallback) *workerServerCache {
 	return &workerServerCache{
-		msgIssue: msgIssue,
-		servers:  make(map[string]*mcp.WorkerServer),
+		msgIssue:      msgIssue,
+		stateCallback: stateCallback,
+		servers:       make(map[string]*mcp.WorkerServer),
 	}
 }
 
@@ -1121,7 +1150,38 @@ func (c *workerServerCache) getOrCreate(workerID string) *mcp.WorkerServer {
 	}
 
 	ws = mcp.NewWorkerServer(workerID, c.msgIssue)
+	// Set the state callback so workers can update coordinator state
+	if c.stateCallback != nil {
+		ws.SetStateCallback(c.stateCallback)
+	}
 	c.servers[workerID] = ws
 	log.Debug(log.CatOrch, "Created worker server", "subsystem", "update", "workerID", workerID)
 	return ws
+}
+
+// determineSessionStatus maps the current model state to a session status.
+// Returns the appropriate session.Status based on:
+//   - InitTimedOut phase -> StatusTimedOut
+//   - InitFailed phase -> StatusFailed
+//   - Error modal present -> StatusFailed
+//   - Default (normal completion) -> StatusCompleted
+func (m Model) determineSessionStatus() session.Status {
+	// Check if initialization timed out
+	initPhase := m.getInitPhase()
+	if initPhase == InitTimedOut {
+		return session.StatusTimedOut
+	}
+
+	// Check if initialization failed
+	if initPhase == InitFailed {
+		return session.StatusFailed
+	}
+
+	// Check if there's an error modal showing (indicates error state)
+	if m.errorModal != nil {
+		return session.StatusFailed
+	}
+
+	// Default to completed (normal shutdown, user interrupt, etc.)
+	return session.StatusCompleted
 }

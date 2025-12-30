@@ -21,15 +21,16 @@ import (
 	"github.com/zjrosen/perles/internal/mode"
 	"github.com/zjrosen/perles/internal/mode/shared"
 	"github.com/zjrosen/perles/internal/ui/details"
-	"github.com/zjrosen/perles/internal/ui/forms/bqlinput"
 	"github.com/zjrosen/perles/internal/ui/modals/help"
 	"github.com/zjrosen/perles/internal/ui/modals/labeleditor"
 	"github.com/zjrosen/perles/internal/ui/shared/colorpicker"
 	"github.com/zjrosen/perles/internal/ui/shared/formmodal"
+	"github.com/zjrosen/perles/internal/ui/shared/issuebadge"
 	"github.com/zjrosen/perles/internal/ui/shared/modal"
 	"github.com/zjrosen/perles/internal/ui/shared/panes"
 	"github.com/zjrosen/perles/internal/ui/shared/picker"
 	"github.com/zjrosen/perles/internal/ui/shared/toaster"
+	"github.com/zjrosen/perles/internal/ui/shared/vimtextarea"
 	"github.com/zjrosen/perles/internal/ui/styles"
 	"github.com/zjrosen/perles/internal/ui/tree"
 )
@@ -67,7 +68,7 @@ type Model struct {
 	subMode mode.SubMode
 
 	// List sub-mode (BQL search with flat results)
-	input         bqlinput.Model
+	input         vimtextarea.Model
 	results       []beads.Issue
 	resultsList   list.Model
 	selectedIdx   int
@@ -450,8 +451,13 @@ func treeModeToIndex(mode string) int {
 
 // New creates a new search mode controller.
 func New(services mode.Services) Model {
-	input := bqlinput.New()
-	input.SetPlaceholder("Enter BQL query ex: status in (open,in_progress) and label not in (backlog) order by priority,created desc")
+	input := vimtextarea.New(vimtextarea.Config{
+		VimEnabled:  services.Config.UI.VimMode,
+		DefaultMode: vimtextarea.ModeNormal,
+		Placeholder: "Enter BQL query ex: status in (open,in_progress) and label not in (backlog) order by priority,created desc",
+		MaxHeight:   3,
+	})
+	input.SetLexer(bql.NewSyntaxLexer())
 	input.Focus()
 
 	// Configure results list with custom delegate
@@ -520,9 +526,10 @@ func (m Model) SetSize(width, height int) Model {
 	leftWidth := width / 2
 	rightWidth := width - leftWidth - 1 // -1 for divider
 
-	// Update input width
+	// Update input size (vimtextarea uses SetSize for width/height)
 	inputWidth := max(leftWidth-4, 1) // Padding
-	m.input.SetWidth(inputWidth)
+	inputHeight := 3                  // Max lines for input
+	m.input.SetSize(inputWidth, inputHeight)
 
 	// Update results list
 	listHeight := max(height-5, 1) // Input row + header + status + borders
@@ -899,13 +906,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	// IMPORTANT: We use msg.String() for some keys here because key.Matches() would
 	// intercept keys that should type into the input (e.g., j/k/h/l)
 	if m.focus == FocusSearch {
+		// When vim is enabled and in insert mode, ESC should switch to normal mode (handled by vimtextarea)
+		// Only exit search when vim is disabled or already in normal mode
+		if (!m.input.VimEnabled() || m.input.InNormalMode()) && key.Matches(msg, keys.Search.Blur) {
+			m.input.Blur()
+			return m, func() tea.Msg { return ExitToKanbanMsg{} }
+		}
+
 		switch {
 		case key.Matches(msg, keys.Common.Quit):
 			return m, tea.Quit
-		case key.Matches(msg, keys.Search.Blur):
-			// Exit search mode back to kanban
-			m.input.Blur()
-			return m, func() tea.Msg { return ExitToKanbanMsg{} }
 		case msg.String() == "tab" || msg.String() == "ctrl+n":
 			// Exit search input, move to results
 			m.input.Blur()
@@ -1822,10 +1832,10 @@ func (m Model) renderLeftPanel(width int) string {
 func (m Model) renderListLeftPanel(width int) string {
 	var sb strings.Builder
 
-	// Calculate heights dynamically based on input content
-	inputContentHeight := m.input.Height()  // lines of wrapped text
-	inputHeight := inputContentHeight + 2   // add 2 for borders
-	resultsHeight := m.height - inputHeight // fills remaining space
+	// Calculate heights dynamically based on input content (capped at max height of 3)
+	inputContentHeight := min(m.input.TotalDisplayLines(), 3) // lines of wrapped text, max 3
+	inputHeight := inputContentHeight + 2                     // add 2 for borders
+	resultsHeight := m.height - inputHeight                   // fills remaining space
 
 	// BQL Search input with titled border
 	inputContent := m.input.View()
@@ -1834,6 +1844,7 @@ func (m Model) renderListLeftPanel(width int) string {
 		Width:              width,
 		Height:             inputHeight,
 		TopLeft:            "BQL Search",
+		BottomLeft:         m.input.ModeIndicator(), // Vim mode indicator (styled by component)
 		Focused:            m.focus == FocusSearch,
 		TitleColor:         styles.OverlayTitleColor,
 		FocusedBorderColor: styles.BorderHighlightFocusColor,
@@ -1865,10 +1876,10 @@ func (m Model) renderListLeftPanel(width int) string {
 		resultsContent = emptyStyle.Render("Enter a BQL query to search")
 	}
 
-	// Results title with count if we have results
-	resultsTitle := "Results"
+	// Results count in top right (only shown if > 0)
+	var resultsCount string
 	if len(m.results) > 0 {
-		resultsTitle = fmt.Sprintf("Results (%d)", len(m.results))
+		resultsCount = fmt.Sprintf("Count: %d", len(m.results))
 	}
 
 	// Results with titled border
@@ -1876,7 +1887,7 @@ func (m Model) renderListLeftPanel(width int) string {
 		Content:            resultsContent,
 		Width:              width,
 		Height:             resultsHeight,
-		TopLeft:            resultsTitle,
+		TopRight:           resultsCount,
 		Focused:            m.focus == FocusResults,
 		TitleColor:         styles.OverlayTitleColor,
 		FocusedBorderColor: styles.BorderHighlightFocusColor,
@@ -2273,22 +2284,11 @@ func (d issueDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 		prefix = styles.SelectionIndicatorStyle.Render(">")
 	}
 
-	typeText := styles.GetTypeIndicator(issue.Type)
-	typeStyle := styles.GetTypeStyle(issue.Type)
-
-	priorityText := fmt.Sprintf("[P%d]", issue.Priority)
-	priorityStyle := styles.GetPriorityStyle(issue.Priority)
-
-	idStyle := lipgloss.NewStyle().Foreground(styles.TextSecondaryColor)
-	idText := fmt.Sprintf("[%s]", issue.ID)
+	// Use shared issuebadge component for type/priority/id
+	badge := issuebadge.RenderBadge(issue)
 
 	// Build left prefix (before title)
-	leftPrefix := fmt.Sprintf("%s%s%s%s ",
-		prefix,
-		typeStyle.Render(typeText),
-		priorityStyle.Render(priorityText),
-		idStyle.Render(idText),
-	)
+	leftPrefix := prefix + badge + " "
 
 	// Build right metadata: comment indicator + timestamp (comments first for alignment)
 	metaStyle := lipgloss.NewStyle().Foreground(styles.TextSecondaryColor)

@@ -15,6 +15,25 @@ const (
 	WorkerRetired
 )
 
+// WorkerPhase represents what workflow step a worker is in.
+// This is orthogonal to WorkerStatus - a worker can be "Working" in various phases.
+type WorkerPhase string
+
+const (
+	// PhaseIdle means the worker is ready for assignment.
+	PhaseIdle WorkerPhase = "idle"
+	// PhaseImplementing means the worker is actively coding a task.
+	PhaseImplementing WorkerPhase = "implementing"
+	// PhaseAwaitingReview means implementation is done, waiting for a reviewer.
+	PhaseAwaitingReview WorkerPhase = "awaiting_review"
+	// PhaseReviewing means the worker is reviewing another worker's code.
+	PhaseReviewing WorkerPhase = "reviewing"
+	// PhaseAddressingFeedback means the worker is fixing issues from a review denial.
+	PhaseAddressingFeedback WorkerPhase = "addressing_feedback"
+	// PhaseCommitting means the worker is creating a git commit.
+	PhaseCommitting WorkerPhase = "committing"
+)
+
 func (s WorkerStatus) String() string {
 	switch s {
 	case WorkerReady:
@@ -69,10 +88,15 @@ type WorkerEvent struct {
 	Output string
 	// Status contains the worker's status for status change events.
 	Status WorkerStatus
+	// Phase contains the worker's workflow phase for status change events.
+	Phase WorkerPhase
 	// Metrics contains token usage and cost data for token usage events.
 	Metrics *metrics.TokenMetrics
 	// Message contains the incoming message text for incoming events.
 	Message string
 	// Error contains the error for error events.
 	Error error
+	// RawJSON contains the raw Claude API JSON response for session logging.
+	// This is only populated for WorkerOutput events.
+	RawJSON []byte `json:"raw_json,omitempty"`
 }

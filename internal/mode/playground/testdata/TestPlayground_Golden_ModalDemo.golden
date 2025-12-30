@@ -1,0 +1,28 @@
+╭────────────────────────────╮  ╭─ scrollpane ─────────────────────────────────────────────────────╮
+│ Components                 │  │ ╭─ Scrollable Content ─────────────────────────────── ↑0% ─╮     │
+│ ────────────────────────── │  │ │Line  1: Sample scrollable content demonstrating viewport.│     │
+│   vimtextarea              │  │ │Line  2: Sample scrollable content demonstrating viewport.│     │
+│   modal                    │  │ │Line  3: Sample scrollable content demonstrating viewport.│     │
+│   formmodal                │  │ │Line  4: Sample scrollable content demonstrating viewport.│     │
+│   panes                    │  │ │Line  5: Sample scrollable content demonstrating viewport.│     │
+│ ● scrollpane               │  │ │Line  6: Sample scrollable content demonstrating viewport.│     │
+│   colorpicker              │  │ │Line  7: Sample scrollable content demonstrating viewport.│     │
+│   picker                   │  │ │Line  8: Sample scrollable content demonstrating viewport.│     │
+│   toaster                  │  │ │Line  9: Sample scrollable content demonstrating viewport.│     │
+│   logoverlay               │  │ │Line 10: Sample scrollable content demonstrating viewport.│     │
+│   markdown                 │  │ │Line 11: Sample scrollable content demonstrating viewport.│     │
+│   chainart                 │  │ │Line 12: Sample scrollable content demonstrating viewport.│     │
+│   issuebadge               │  │ │Line 13: Sample scrollable content demonstrating viewport.│     │
+│   Theme Tokens             │  │ │Line 14: Sample scrollable content demonstrating viewport.│     │
+│                            │  │ │Line 15: Sample scrollable content demonstrating viewport.│     │
+│                            │  │ │Line 16: Sample scrollable content demonstrating viewport.│     │
+│                            │  │ │Line 17: Sample scrollable content demonstrating viewport.│     │
+│                            │  │ │Line 18: Sample scrollable content demonstrating viewport.│     │
+│                            │  │ ╰──────────────────────────────────────────────────────────╯     │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+╰────────────────────────────╯  ╰──────────────────────────────────────────────────────────────────╯
+Tab: Switch panes  │  Ctrl+R: Reset  │  Ctrl+C: Quit                                                

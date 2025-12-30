@@ -43,6 +43,10 @@ func BQLFields() []BQLField {
 		{Name: "assignee", Values: "string"},
 		{Name: "sender", Values: "string"},
 		{Name: "created_by", Values: "string"},
+		{Name: "agent_state", Values: "idle, running, stuck, stopped"},
+		{Name: "role_type", Values: "polecat, crew, witness, etc."},
+		{Name: "rig", Values: "string"},
+		{Name: "mol_type", Values: "string"},
 		{Name: "created", Values: "date (today, yesterday, -7d)"},
 		{Name: "updated", Values: "date (today, yesterday, -7d)"},
 	}

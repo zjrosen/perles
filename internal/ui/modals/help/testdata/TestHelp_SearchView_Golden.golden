@@ -28,6 +28,10 @@
        │  assignee    string                                                                │       
        │  sender      string                                                                │       
        │  created_by  string                                                                │       
+       │  agent_state idle, running, stuck, stopped                                         │       
+       │  role_type   polecat, crew, witness, etc.                                          │       
+       │  rig         string                                                                │       
+       │  mol_type    string                                                                │       
        │  created     today, -7d                                                            │       
        │  updated     today, -7d                                                            │       
        │                                                                                    │       

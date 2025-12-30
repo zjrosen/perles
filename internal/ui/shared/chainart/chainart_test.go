@@ -3,6 +3,8 @@ package chainart
 import (
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestBuildChainArt(t *testing.T) {
@@ -10,14 +12,10 @@ func TestBuildChainArt(t *testing.T) {
 
 	// Should contain 6 lines (broken link height)
 	lines := strings.Split(art, "\n")
-	if len(lines) != 6 {
-		t.Errorf("expected 6 lines, got %d", len(lines))
-	}
+	require.Equal(t, 6, len(lines), "expected 6 lines")
 
 	// Should contain broken link characters
-	if !strings.Contains(art, "\\│/") {
-		t.Error("expected broken link crack characters")
-	}
+	require.True(t, strings.Contains(art, "\\│/"), "expected broken link crack characters")
 }
 
 func TestBuildIntactChainArt(t *testing.T) {
@@ -25,30 +23,18 @@ func TestBuildIntactChainArt(t *testing.T) {
 
 	// Should contain 4 lines (all links same height)
 	lines := strings.Split(art, "\n")
-	if len(lines) != 4 {
-		t.Errorf("expected 4 lines, got %d", len(lines))
-	}
+	require.Equal(t, 4, len(lines), "expected 4 lines")
 
 	// Should NOT contain broken link characters
-	if strings.Contains(art, "\\│/") {
-		t.Error("intact chain should not have broken link crack characters")
-	}
-	if strings.Contains(art, "/│\\") {
-		t.Error("intact chain should not have broken link crack characters")
-	}
+	require.False(t, strings.Contains(art, "\\│/"), "intact chain should not have broken link crack characters")
+	require.False(t, strings.Contains(art, "/│\\"), "intact chain should not have broken link crack characters")
 
 	// Should contain standard link box characters
-	if !strings.Contains(art, "╔═══════╗") {
-		t.Error("expected standard link box top")
-	}
-	if !strings.Contains(art, "╚═══════╝") {
-		t.Error("expected standard link box bottom")
-	}
+	require.True(t, strings.Contains(art, "╔═══════╗"), "expected standard link box top")
+	require.True(t, strings.Contains(art, "╚═══════╝"), "expected standard link box bottom")
 
 	// Should contain connectors
-	if !strings.Contains(art, "═══") {
-		t.Error("expected connector characters")
-	}
+	require.True(t, strings.Contains(art, "═══"), "expected connector characters")
 }
 
 func TestBuildIntactChainArt_FiveLinkStructure(t *testing.T) {
@@ -58,12 +44,8 @@ func TestBuildIntactChainArt_FiveLinkStructure(t *testing.T) {
 	topCornerCount := strings.Count(art, "╔═══════╗")
 	bottomCornerCount := strings.Count(art, "╚═══════╝")
 
-	if topCornerCount != 5 {
-		t.Errorf("expected 5 link tops (╔═══════╗), got %d", topCornerCount)
-	}
-	if bottomCornerCount != 5 {
-		t.Errorf("expected 5 link bottoms (╚═══════╝), got %d", bottomCornerCount)
-	}
+	require.Equal(t, 5, topCornerCount, "expected 5 link tops (╔═══════╗)")
+	require.Equal(t, 5, bottomCornerCount, "expected 5 link bottoms (╚═══════╝)")
 }
 
 func TestBuildIntactChainArt_HasConnectors(t *testing.T) {
@@ -78,9 +60,7 @@ func TestBuildIntactChainArt_HasConnectors(t *testing.T) {
 			connectorCount := strings.Count(line, "═══")
 			// Connectors appear between links, but "═══" also appears in box tops/bottoms
 			// On middle lines, we expect connector pieces
-			if connectorCount < 4 {
-				t.Errorf("line %d expected at least 4 connector segments, got %d", i, connectorCount)
-			}
+			require.GreaterOrEqual(t, connectorCount, 4, "line %d expected at least 4 connector segments", i)
 		}
 	}
 }
@@ -90,18 +70,14 @@ func TestBuildIntactChainArt_ConsistentLineWidths(t *testing.T) {
 	lines := strings.Split(art, "\n")
 
 	// All lines should have consistent visual width for proper alignment
-	if len(lines) < 4 {
-		t.Fatalf("expected at least 4 lines, got %d", len(lines))
-	}
+	require.GreaterOrEqual(t, len(lines), 4, "expected at least 4 lines")
 
 	// The first and last lines (top/bottom of boxes) should be similar width
 	// This ensures proper visual alignment
 	firstLineLen := len([]rune(lines[0]))
 	lastLineLen := len([]rune(lines[3]))
 
-	if firstLineLen != lastLineLen {
-		t.Errorf("first line width (%d) != last line width (%d), alignment issue", firstLineLen, lastLineLen)
-	}
+	require.Equal(t, firstLineLen, lastLineLen, "first line width != last line width, alignment issue")
 }
 
 func TestBuildProgressChainArt_NoFailure_AllPending(t *testing.T) {
@@ -109,15 +85,11 @@ func TestBuildProgressChainArt_NoFailure_AllPending(t *testing.T) {
 	lines := strings.Split(art, "\n")
 
 	// Should be 4 lines (intact chain - no failure)
-	if len(lines) != 4 {
-		t.Errorf("expected 4 lines for intact chain, got %d", len(lines))
-	}
+	require.Equal(t, 4, len(lines), "expected 4 lines for intact chain")
 
 	// Should have 5 link tops
 	topCount := strings.Count(art, "╔═══════╗")
-	if topCount != 5 {
-		t.Errorf("expected 5 link tops, got %d", topCount)
-	}
+	require.Equal(t, 5, topCount, "expected 5 link tops")
 }
 
 func TestBuildProgressChainArt_NoFailure_AllComplete(t *testing.T) {
@@ -125,15 +97,11 @@ func TestBuildProgressChainArt_NoFailure_AllComplete(t *testing.T) {
 	lines := strings.Split(art, "\n")
 
 	// Should be 4 lines (intact chain)
-	if len(lines) != 4 {
-		t.Errorf("expected 4 lines for intact chain, got %d", len(lines))
-	}
+	require.Equal(t, 4, len(lines), "expected 4 lines for intact chain")
 
 	// Should have 5 link tops
 	topCount := strings.Count(art, "╔═══════╗")
-	if topCount != 5 {
-		t.Errorf("expected 5 link tops, got %d", topCount)
-	}
+	require.Equal(t, 5, topCount, "expected 5 link tops")
 }
 
 func TestBuildProgressChainArt_FailedAtFirstPhase(t *testing.T) {
@@ -141,20 +109,14 @@ func TestBuildProgressChainArt_FailedAtFirstPhase(t *testing.T) {
 	lines := strings.Split(art, "\n")
 
 	// Should be 6 lines (has broken link which is taller)
-	if len(lines) != 6 {
-		t.Errorf("expected 6 lines with broken link, got %d", len(lines))
-	}
+	require.Equal(t, 6, len(lines), "expected 6 lines with broken link")
 
 	// Should contain broken link characters
-	if !strings.Contains(art, "\\│/") {
-		t.Error("expected broken link crack characters")
-	}
+	require.True(t, strings.Contains(art, "\\│/"), "expected broken link crack characters")
 
 	// Should have 4 regular link tops (broken link has different structure)
 	topCount := strings.Count(art, "╔═══════╗")
-	if topCount != 4 {
-		t.Errorf("expected 4 regular link tops (1 broken), got %d", topCount)
-	}
+	require.Equal(t, 4, topCount, "expected 4 regular link tops (1 broken)")
 }
 
 func TestBuildProgressChainArt_FailedAtMiddlePhase(t *testing.T) {
@@ -162,14 +124,10 @@ func TestBuildProgressChainArt_FailedAtMiddlePhase(t *testing.T) {
 	lines := strings.Split(art, "\n")
 
 	// Should be 6 lines (has broken link)
-	if len(lines) != 6 {
-		t.Errorf("expected 6 lines with broken link, got %d", len(lines))
-	}
+	require.Equal(t, 6, len(lines), "expected 6 lines with broken link")
 
 	// Should contain broken link characters
-	if !strings.Contains(art, "\\│/") {
-		t.Error("expected broken link crack characters")
-	}
+	require.True(t, strings.Contains(art, "\\│/"), "expected broken link crack characters")
 }
 
 func TestBuildProgressChainArt_FailedAtLastPhase(t *testing.T) {
@@ -177,12 +135,8 @@ func TestBuildProgressChainArt_FailedAtLastPhase(t *testing.T) {
 	lines := strings.Split(art, "\n")
 
 	// Should be 6 lines (has broken link)
-	if len(lines) != 6 {
-		t.Errorf("expected 6 lines with broken link, got %d", len(lines))
-	}
+	require.Equal(t, 6, len(lines), "expected 6 lines with broken link")
 
 	// Should contain broken link characters
-	if !strings.Contains(art, "\\│/") {
-		t.Error("expected broken link crack characters")
-	}
+	require.True(t, strings.Contains(art, "\\│/"), "expected broken link crack characters")
 }

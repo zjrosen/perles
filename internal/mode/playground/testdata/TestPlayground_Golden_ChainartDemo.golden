@@ -1,0 +1,28 @@
+╭────────────────────────────╮  ╭─ logoverlay ─────────────────────────────────────────────────────╮
+│ Components                 │  │ L╭────────────────────────────────────────────────────────────╮  │
+│ ────────────────────────── │  │  │ Logs                                           [ESC] Close │  │
+│   vimtextarea              │  │  │────────────────────────────────────────────────────────────│  │
+│   modal                    │  │  │00:00:00 [DEBUG] Log overlay initialized                    │  │
+│   formmodal                │  │  │00:00:00 [INFO] Playground demo started                     │  │
+│   panes                    │  │  │00:00:00 [WARN] This is a sample warning message            │  │
+│   scrollpane               │  │  │00:00:00 [ERROR] Example error for demonstration            │  │
+│   colorpicker              │  │  │00:00:00 [INFO] Use d/i/w/e keys to filter by level         │  │
+│   picker                   │  │ I│                                                            │  │
+│   toaster                  │  │  │                                                            │  │
+│ ● logoverlay               │  │  │                                                            │  │
+│   markdown                 │  │  │                                                            │  │
+│   chainart                 │  │  │                                                            │  │
+│   issuebadge               │  │  │                                                            │  │
+│   Theme Tokens             │  │  │                                                            │  │
+│                            │  │  │                                                            │  │
+│                            │  │  │                                                            │  │
+│                            │  │  │                                                            │  │
+│                            │  │  │                                                            │  │
+│                            │  │  │                                                            │  │
+│                            │  │  │                                                            │  │
+│                            │  │  │────────────────────────────────────────────────────────────│  │
+│                            │  │  │[c] Clear  [d] Debug  [i] Info  [w] Warn  [e] Error         │  │
+│                            │  │  ╰────────────────────────────────────────────────────────────╯  │
+│                            │  │                                                                  │
+╰────────────────────────────╯  ╰──────────────────────────────────────────────────────────────────╯
+Tab: Switch panes  │  Ctrl+R: Reset  │  Ctrl+C: Quit                                                

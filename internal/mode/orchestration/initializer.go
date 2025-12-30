@@ -6,9 +6,12 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"path/filepath"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/zjrosen/perles/internal/beads"
 	"github.com/zjrosen/perles/internal/log"
 	"github.com/zjrosen/perles/internal/orchestration/amp"
 	"github.com/zjrosen/perles/internal/orchestration/client"
@@ -17,6 +20,7 @@ import (
 	"github.com/zjrosen/perles/internal/orchestration/mcp"
 	"github.com/zjrosen/perles/internal/orchestration/message"
 	"github.com/zjrosen/perles/internal/orchestration/pool"
+	"github.com/zjrosen/perles/internal/orchestration/session"
 	"github.com/zjrosen/perles/internal/pubsub"
 )
 
@@ -63,6 +67,7 @@ type InitializerResources struct {
 	MCPPort           int // Dynamic port the MCP server is listening on
 	Coordinator       *coordinator.Coordinator
 	WorkerServerCache *workerServerCache
+	Session           *session.Session // Session tracking for this orchestration run
 }
 
 // Initializer manages the orchestration initialization lifecycle as a state machine.
@@ -91,6 +96,7 @@ type Initializer struct {
 	mcpCoordServer     *mcp.CoordinatorServer
 	coord              *coordinator.Coordinator
 	workerServers      *workerServerCache
+	session            *session.Session // Session tracking
 
 	// Event broker for publishing state changes to TUI
 	broker *pubsub.Broker[InitializerEvent]
@@ -174,6 +180,7 @@ func (i *Initializer) Resources() InitializerResources {
 		MCPPort:           i.mcpPort,
 		Coordinator:       i.coord,
 		WorkerServerCache: i.workerServers,
+		Session:           i.session,
 	}
 }
 
@@ -230,6 +237,7 @@ func (i *Initializer) Retry() error {
 	i.mcpCoordServer = nil
 	i.coord = nil
 	i.workerServers = nil
+	i.session = nil
 	i.mu.Unlock()
 
 	return i.Start()
@@ -264,6 +272,15 @@ func (i *Initializer) run() {
 	if err := i.spawnCoordinator(); err != nil {
 		i.fail(err)
 		return
+	}
+
+	// Attach session to coordinator broker now that coordinator exists
+	// (Pool and Message brokers were attached in createWorkspace(), MCP broker attached after mcpCoordServer creation)
+	i.mu.RLock()
+	sess := i.session
+	i.mu.RUnlock()
+	if sess != nil {
+		sess.AttachCoordinatorBroker(i.ctx, i.coord.Broker())
 	}
 
 	// Phase 3+: Event-driven phases
@@ -359,7 +376,28 @@ func (i *Initializer) createWorkspace() error {
 	i.messageLog = msgLog
 	i.mu.Unlock()
 
-	// 4. Start MCP server with dynamic port
+	// 4. Create session for tracking this orchestration run
+	sessionID := uuid.New().String()
+	sessionDir := filepath.Join(i.cfg.WorkDir, ".perles", "sessions", sessionID)
+	sess, err := session.New(sessionID, sessionDir)
+	if err != nil {
+		return fmt.Errorf("failed to create session: %w", err)
+	}
+	i.mu.Lock()
+	i.session = sess
+	i.mu.Unlock()
+
+	log.Debug(log.CatOrch, "Session created", "subsystem", "init", "sessionID", sessionID, "dir", sessionDir)
+
+	// Attach session to pool.Broker() and msgIssue.Broker() immediately
+	// (they exist at this point).
+	// Broker attachment order:
+	// 1. Pool and Message brokers - attached here in createWorkspace() (they exist now)
+	// 2. MCP broker - attached below after mcpCoordServer is created
+	// 3. Coordinator broker - attached later in run() after spawnCoordinator() completes
+	sess.AttachToBrokers(i.ctx, nil, workerPool.Broker(), msgLog.Broker(), nil)
+
+	// 5. Start MCP server with dynamic port
 	// Create listener on localhost:0 to get a random available port
 	// Using localhost (127.0.0.1) to avoid binding to all interfaces
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -377,8 +415,12 @@ func (i *Initializer) createWorkspace() error {
 	log.Debug(log.CatOrch, "MCP server listening on dynamic port", "subsystem", "init", "port", port)
 
 	// Create coordinator server with the dynamic port
-	mcpCoordServer := mcp.NewCoordinatorServer(aiClient, workerPool, msgLog, i.cfg.WorkDir, port, extensions)
-	workerServers := newWorkerServerCache(msgLog)
+	mcpCoordServer := mcp.NewCoordinatorServer(aiClient, workerPool, msgLog, i.cfg.WorkDir, port, extensions, beads.NewRealExecutor(i.cfg.WorkDir))
+	// Pass the coordinator server as the state callback so workers can update coordinator state
+	workerServers := newWorkerServerCache(msgLog, mcpCoordServer)
+
+	// Attach session to MCP broker now that mcpCoordServer exists
+	sess.AttachMCPBroker(i.ctx, mcpCoordServer.Broker())
 
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", mcpCoordServer.ServeHTTP())

@@ -71,10 +71,11 @@ func (b *Builder) Build() {
 func (b *Builder) insertIssue(issue issueData) {
 	b.t.Helper()
 	_, err := b.db.Exec(
-		`INSERT INTO issues (id, title, description, status, priority, issue_type, assignee, sender, ephemeral, pinned, is_template, created_at, created_by, updated_at, closed_at, deleted_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO issues (id, title, description, status, priority, issue_type, assignee, sender, ephemeral, pinned, is_template, created_at, created_by, updated_at, closed_at, deleted_at, hook_bead, role_bead, agent_state, last_activity, role_type, rig, mol_type)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		issue.id, issue.title, issue.description, issue.status, issue.priority,
 		issue.issueType, issue.assignee, issue.sender, issue.ephemeral, issue.pinned, issue.isTemplate, issue.createdAt, issue.createdBy, issue.updatedAt, issue.closedAt, issue.deletedAt,
+		issue.hookBead, issue.roleBead, issue.agentState, issue.lastActivity, issue.roleType, issue.rig, issue.molType,
 	)
 	require.NoError(b.t, err)
 }

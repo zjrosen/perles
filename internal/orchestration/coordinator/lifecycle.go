@@ -381,6 +381,7 @@ func (c *Coordinator) processEvents() {
 					c.emitCoordinatorEvent(events.CoordinatorChat, events.CoordinatorEvent{
 						Role:    "coordinator",
 						Content: text,
+						RawJSON: event.Raw,
 					})
 				}
 

@@ -34,6 +34,9 @@ type CoordinatorEvent struct {
 	Metrics *metrics.TokenMetrics
 	// Error contains the error for error events.
 	Error error
+	// RawJSON contains the raw Claude API JSON response for session logging.
+	// This is only populated for CoordinatorChat events.
+	RawJSON []byte `json:"raw_json,omitempty"`
 }
 
 // CoordinatorStatus represents the coordinator's operational state.

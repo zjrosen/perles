@@ -1,0 +1,28 @@
+╭────────────────────────────╮  ╭─ panes ──────────────────────────────────────────────────────────╮
+│ Components                 │  │ ╭─ Top Left ─────────────────────────────────── Top Right ─╮     │
+│ ────────────────────────── │  │ │Sample pane content                                       │     │
+│   vimtextarea              │  │ │This demonstrates the BorderedPane component.             │     │
+│   modal                    │  │ │                                                          │     │
+│   formmodal                │  │ │Press 'f' to toggle focus state.                          │     │
+│ ● panes                    │  │ │                                                          │     │
+│   scrollpane               │  │ │                                                          │     │
+│   colorpicker              │  │ │                                                          │     │
+│   picker                   │  │ │                                                          │     │
+│   toaster                  │  │ │                                                          │     │
+│   logoverlay               │  │ │                                                          │     │
+│   markdown                 │  │ ╰─ Bottom Left ───────────────────────────── Bottom Right ─╯     │
+│   chainart                 │  │                                                                  │
+│   issuebadge               │  │                                                                  │
+│   Theme Tokens             │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+╰────────────────────────────╯  ╰──────────────────────────────────────────────────────────────────╯
+Tab: Switch panes  │  Ctrl+R: Reset  │  Ctrl+C: Quit                                                

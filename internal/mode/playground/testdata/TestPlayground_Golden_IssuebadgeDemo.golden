@@ -1,0 +1,28 @@
+╭────────────────────────────╮  ╭─ issuebadge ─────────────────────────────────────────────────────╮
+│ Components                 │  │ Issue Badge Component Demo                                       │
+│ ────────────────────────── │  │ Use j/k to move selection                                        │
+│   vimtextarea              │  │                                                                  │
+│   modal                    │  │                                                                  │
+│   formmodal                │  │ Issue Types (E/T/F/B/C/M):                                       │
+│   panes                    │  │ >[E][P1][demo-e01] Epic: User Authentication System              │
+│   scrollpane               │  │  [T][P2][demo-t02] Task: Implement login form validation         │
+│   colorpicker              │  │  [F][P1][demo-f03] Feature: Add dark mode support                │
+│   picker                   │  │  [B][P0][demo-b04] Bug: Fix memory leak in cache                 │
+│   toaster                  │  │  [C][P3][demo-c05] Chore: Update dependencies                    │
+│   logoverlay               │  │  [M][P2][demo-m06] Molecule: Reusable auth component             │
+│   markdown                 │  │                                                                  │
+│   chainart                 │  │                                                                  │
+│ ● issuebadge               │  │ Priority Levels (P0-P4):                                         │
+│   Theme Tokens             │  │  [B][P0][demo-p0] P0 Critical: Security vulnerability            │
+│                            │  │  [F][P1][demo-p1] P1 High: Core feature request                  │
+│                            │  │  [T][P2][demo-p2] P2 Medium: Standard work item                  │
+│                            │  │  [C][P3][demo-p3] P3 Low: Nice to have improvement               │
+│                            │  │  [T][P4][demo-p4] P4 Backlog: Future consideration               │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │ Title Truncation (MaxWidth=60):                                  │
+│                            │  │  [F][P2][demo-long] This is a very long title that will b...     │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+╰────────────────────────────╯  ╰──────────────────────────────────────────────────────────────────╯
+Tab: Switch panes  │  Ctrl+R: Reset  │  Ctrl+C: Quit                                                

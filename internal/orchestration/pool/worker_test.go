@@ -168,6 +168,77 @@ func TestWorker_SessionIDMethods(t *testing.T) {
 	require.Equal(t, "session-xyz", w.GetSessionID())
 }
 
+func TestWorker_PhaseMethods(t *testing.T) {
+	w := newWorker("worker-1", 10)
+
+	// Worker starts with PhaseIdle
+	require.Equal(t, poolevents.PhaseIdle, w.GetPhase())
+
+	// Set to implementing
+	w.SetPhase(poolevents.PhaseImplementing)
+	require.Equal(t, poolevents.PhaseImplementing, w.GetPhase())
+
+	// Set to awaiting review
+	w.SetPhase(poolevents.PhaseAwaitingReview)
+	require.Equal(t, poolevents.PhaseAwaitingReview, w.GetPhase())
+
+	// Set to reviewing
+	w.SetPhase(poolevents.PhaseReviewing)
+	require.Equal(t, poolevents.PhaseReviewing, w.GetPhase())
+
+	// Set to addressing feedback
+	w.SetPhase(poolevents.PhaseAddressingFeedback)
+	require.Equal(t, poolevents.PhaseAddressingFeedback, w.GetPhase())
+
+	// Set to committing
+	w.SetPhase(poolevents.PhaseCommitting)
+	require.Equal(t, poolevents.PhaseCommitting, w.GetPhase())
+
+	// Set back to idle
+	w.SetPhase(poolevents.PhaseIdle)
+	require.Equal(t, poolevents.PhaseIdle, w.GetPhase())
+}
+
+func TestWorker_Phase_ConcurrentAccess(t *testing.T) {
+	w := newWorker("worker-1", 10)
+
+	var wg sync.WaitGroup
+
+	// Concurrent phase writes
+	phases := []poolevents.WorkerPhase{
+		poolevents.PhaseIdle,
+		poolevents.PhaseImplementing,
+		poolevents.PhaseAwaitingReview,
+		poolevents.PhaseReviewing,
+		poolevents.PhaseAddressingFeedback,
+		poolevents.PhaseCommitting,
+	}
+
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				w.SetPhase(phases[j%len(phases)])
+			}
+		}(i)
+	}
+
+	// Concurrent phase reads
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				_ = w.GetPhase()
+			}
+		}()
+	}
+
+	wg.Wait()
+	// Should not panic - verifies thread safety
+}
+
 func TestWorker_ErrorMethods(t *testing.T) {
 	w := newWorker("worker-1", 10)
 
@@ -226,10 +297,65 @@ func TestWorker_CompleteTask(t *testing.T) {
 	w.AssignTask("task-abc")
 	require.Equal(t, WorkerWorking, w.GetStatus())
 
-	// Complete task - returns to Ready
+	// Complete task - returns to Ready but preserves task ID
 	w.CompleteTask()
-	require.Equal(t, "", w.TaskID)
+	require.Equal(t, "task-abc", w.TaskID) // Task ID preserved for TUI display
 	require.Equal(t, WorkerReady, w.GetStatus())
+}
+
+func TestWorker_SetTaskID(t *testing.T) {
+	w := newWorker("worker-1", 10)
+
+	// Initially no task
+	require.Empty(t, w.GetTaskID())
+
+	// SetTaskID sets the task ID
+	w.SetTaskID("task-xyz")
+	require.Equal(t, "task-xyz", w.GetTaskID())
+
+	// Can change task ID
+	w.SetTaskID("task-abc")
+	require.Equal(t, "task-abc", w.GetTaskID())
+
+	// Can clear task ID
+	w.SetTaskID("")
+	require.Empty(t, w.GetTaskID())
+}
+
+func TestWorker_TaskIDPreservedAcrossPhaseTransitions(t *testing.T) {
+	w := newWorker("worker-1", 10)
+	broker := pubsub.NewBroker[WorkerEvent]()
+	defer broker.Close()
+
+	ctx := context.Background()
+	events := broker.Subscribe(ctx)
+
+	// Create mock process
+	proc := newWorkerTestProcess()
+
+	// Set task ID before starting
+	w.TaskID = "task-lifecycle"
+	w.Phase = poolevents.PhaseImplementing
+
+	// Start worker
+	done := make(chan bool)
+	go func() {
+		w.start(ctx, proc, broker)
+		done <- true
+	}()
+
+	// Wait for spawn event
+	<-events
+
+	// Complete process successfully
+	proc.Complete()
+
+	// Wait for worker to finish
+	<-done
+
+	// Task ID should be preserved after process completion
+	require.Equal(t, WorkerReady, w.GetStatus())
+	require.Equal(t, "task-lifecycle", w.TaskID, "Task ID should be preserved through phase transitions")
 }
 
 func TestWorker_Retire(t *testing.T) {
@@ -359,7 +485,7 @@ func TestWorker_HandleError(t *testing.T) {
 		require.Equal(t, testErr, event.Payload.Error)
 		require.Equal(t, "worker-1", event.Payload.WorkerID)
 	case <-time.After(100 * time.Millisecond):
-		t.Error("Expected error event to be sent")
+		require.Fail(t, "Expected error event to be sent")
 	}
 }
 
@@ -435,7 +561,7 @@ func TestWorker_Start_ContextCancellation(t *testing.T) {
 		require.Equal(t, poolevents.WorkerSpawned, event.Payload.Type)
 		require.Equal(t, WorkerWorking, event.Payload.Status)
 	case <-time.After(time.Second):
-		t.Error("Timeout waiting for spawned event")
+		require.Fail(t, "Timeout waiting for spawned event")
 	}
 
 	// Cancel context
@@ -446,7 +572,7 @@ func TestWorker_Start_ContextCancellation(t *testing.T) {
 	case <-done:
 		// Expected
 	case <-time.After(time.Second):
-		t.Error("Worker did not exit after context cancellation")
+		require.Fail(t, "Worker did not exit after context cancellation")
 	}
 }
 
@@ -474,7 +600,7 @@ func TestWorker_Start_WithMockProcess(t *testing.T) {
 	case event := <-events:
 		require.Equal(t, poolevents.WorkerSpawned, event.Payload.Type)
 	case <-time.After(time.Second):
-		t.Fatal("Timeout waiting for spawned event")
+		require.Fail(t, "Timeout waiting for spawned event")
 	}
 
 	// Send init event
@@ -489,7 +615,7 @@ func TestWorker_Start_WithMockProcess(t *testing.T) {
 		require.Equal(t, poolevents.WorkerOutput, event.Payload.Type)
 		require.Equal(t, "Hello from mock AI", event.Payload.Output)
 	case <-time.After(time.Second):
-		t.Fatal("Timeout waiting for output event")
+		require.Fail(t, "Timeout waiting for output event")
 	}
 
 	// Complete the process
@@ -500,7 +626,7 @@ func TestWorker_Start_WithMockProcess(t *testing.T) {
 	case <-done:
 		// Expected
 	case <-time.After(time.Second):
-		t.Fatal("Worker did not exit after process completion")
+		require.Fail(t, "Worker did not exit after process completion")
 	}
 
 	// Verify worker returned to Ready status

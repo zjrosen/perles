@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+	"github.com/zjrosen/perles/internal/orchestration/events"
 	"github.com/zjrosen/perles/internal/orchestration/message"
 )
 
@@ -107,7 +109,7 @@ func (m *mockMessageStore) Append(from, to, content string, msgType message.Mess
 	return &entry, nil
 }
 
-// TestWorkerServer_RegistersAllTools verifies all 3 worker tools are registered.
+// TestWorkerServer_RegistersAllTools verifies all 5 worker tools are registered.
 func TestWorkerServer_RegistersAllTools(t *testing.T) {
 	ws := NewWorkerServer("WORKER.1", nil)
 
@@ -115,20 +117,18 @@ func TestWorkerServer_RegistersAllTools(t *testing.T) {
 		"check_messages",
 		"post_message",
 		"signal_ready",
+		"report_implementation_complete",
+		"report_review_verdict",
 	}
 
 	for _, toolName := range expectedTools {
-		if _, ok := ws.tools[toolName]; !ok {
-			t.Errorf("Tool %q not registered", toolName)
-		}
-		if _, ok := ws.handlers[toolName]; !ok {
-			t.Errorf("Handler for %q not registered", toolName)
-		}
+		_, ok := ws.tools[toolName]
+		require.True(t, ok, "Tool %q not registered", toolName)
+		_, ok = ws.handlers[toolName]
+		require.True(t, ok, "Handler for %q not registered", toolName)
 	}
 
-	if len(ws.tools) != len(expectedTools) {
-		t.Errorf("Tool count = %d, want %d", len(ws.tools), len(expectedTools))
-	}
+	require.Equal(t, len(expectedTools), len(ws.tools), "Tool count mismatch")
 }
 
 // TestWorkerServer_ToolSchemas verifies tool schemas are valid.
@@ -137,17 +137,11 @@ func TestWorkerServer_ToolSchemas(t *testing.T) {
 
 	for name, tool := range ws.tools {
 		t.Run(name, func(t *testing.T) {
-			if tool.Name == "" {
-				t.Error("Tool name is empty")
-			}
-			if tool.Description == "" {
-				t.Error("Tool description is empty")
-			}
-			if tool.InputSchema == nil {
-				t.Error("Tool inputSchema is nil")
-			}
-			if tool.InputSchema != nil && tool.InputSchema.Type != "object" {
-				t.Errorf("InputSchema.Type = %q, want %q", tool.InputSchema.Type, "object")
+			require.NotEmpty(t, tool.Name, "Tool name is empty")
+			require.NotEmpty(t, tool.Description, "Tool description is empty")
+			require.NotNil(t, tool.InputSchema, "Tool inputSchema is nil")
+			if tool.InputSchema != nil {
+				require.Equal(t, "object", tool.InputSchema.Type, "InputSchema.Type mismatch")
 			}
 		})
 	}
@@ -157,15 +151,9 @@ func TestWorkerServer_ToolSchemas(t *testing.T) {
 func TestWorkerServer_Instructions(t *testing.T) {
 	ws := NewWorkerServer("WORKER.1", nil)
 
-	if ws.instructions == "" {
-		t.Error("Instructions should be set")
-	}
-	if ws.info.Name != "perles-worker" {
-		t.Errorf("Server name = %q, want %q", ws.info.Name, "perles-worker")
-	}
-	if ws.info.Version != "1.0.0" {
-		t.Errorf("Server version = %q, want %q", ws.info.Version, "1.0.0")
-	}
+	require.NotEmpty(t, ws.instructions, "Instructions should be set")
+	require.Equal(t, "perles-worker", ws.info.Name, "Server name mismatch")
+	require.Equal(t, "1.0.0", ws.info.Version, "Server version mismatch")
 }
 
 // TestWorkerServer_DifferentWorkerIDs verifies different workers get separate identities.
@@ -182,15 +170,9 @@ func TestWorkerServer_DifferentWorkerIDs(t *testing.T) {
 	_, _ = handler2(context.Background(), json.RawMessage(`{"to": "ALL", "content": "from worker 2"}`))
 
 	// Verify messages were sent with correct worker IDs
-	if len(store.appendCalls) != 2 {
-		t.Fatalf("Expected 2 append calls, got %d", len(store.appendCalls))
-	}
-	if store.appendCalls[0].From != "WORKER.1" {
-		t.Errorf("First message from = %q, want %q", store.appendCalls[0].From, "WORKER.1")
-	}
-	if store.appendCalls[1].From != "WORKER.2" {
-		t.Errorf("Second message from = %q, want %q", store.appendCalls[1].From, "WORKER.2")
-	}
+	require.Len(t, store.appendCalls, 2, "Expected 2 append calls")
+	require.Equal(t, "WORKER.1", store.appendCalls[0].From, "First message from mismatch")
+	require.Equal(t, "WORKER.2", store.appendCalls[1].From, "Second message from mismatch")
 }
 
 // TestWorkerServer_CheckMessagesNoStore tests check_messages when no store is available.
@@ -199,12 +181,8 @@ func TestWorkerServer_CheckMessagesNoStore(t *testing.T) {
 	handler := ws.handlers["check_messages"]
 
 	_, err := handler(context.Background(), json.RawMessage(`{}`))
-	if err == nil {
-		t.Error("Expected error when message store is nil")
-	}
-	if !strings.Contains(err.Error(), "message store not available") {
-		t.Errorf("Error should mention 'message store not available', got: %v", err)
-	}
+	require.Error(t, err, "Expected error when message store is nil")
+	require.Contains(t, err.Error(), "message store not available", "Error should mention 'message store not available'")
 }
 
 // TestWorkerServer_CheckMessagesHappyPath tests successful message retrieval.
@@ -217,41 +195,28 @@ func TestWorkerServer_CheckMessagesHappyPath(t *testing.T) {
 	handler := ws.handlers["check_messages"]
 
 	result, err := handler(context.Background(), json.RawMessage(`{}`))
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
+	require.NoError(t, err, "Unexpected error")
 
 	// Verify UnreadFor was called with correct worker ID
-	if len(store.unreadForCalls) != 1 || store.unreadForCalls[0] != "WORKER.1" {
-		t.Errorf("UnreadFor not called correctly: %v", store.unreadForCalls)
-	}
+	require.Len(t, store.unreadForCalls, 1, "UnreadFor should be called once")
+	require.Equal(t, "WORKER.1", store.unreadForCalls[0], "UnreadFor called with wrong worker ID")
 
 	// Verify MarkRead was called
-	if len(store.markReadCalls) != 1 || store.markReadCalls[0] != "WORKER.1" {
-		t.Errorf("MarkRead not called correctly: %v", store.markReadCalls)
-	}
+	require.Len(t, store.markReadCalls, 1, "MarkRead should be called once")
+	require.Equal(t, "WORKER.1", store.markReadCalls[0], "MarkRead called with wrong worker ID")
 
 	// Verify result contains message count
-	if result == nil || len(result.Content) == 0 {
-		t.Fatal("Expected result with content")
-	}
+	require.NotNil(t, result, "Expected result with content")
+	require.NotEmpty(t, result.Content, "Expected result with content")
 	text := result.Content[0].Text
 
 	// Parse JSON response
 	var response checkMessagesResponse
-	if err := json.Unmarshal([]byte(text), &response); err != nil {
-		t.Fatalf("Failed to parse JSON response: %v", err)
-	}
+	require.NoError(t, json.Unmarshal([]byte(text), &response), "Failed to parse JSON response")
 
-	if response.UnreadCount != 2 {
-		t.Errorf("Expected unread_count=2, got: %d", response.UnreadCount)
-	}
-	if len(response.Messages) != 2 {
-		t.Errorf("Expected 2 messages, got: %d", len(response.Messages))
-	}
-	if response.Messages[0].Content != "Hello worker!" {
-		t.Errorf("Expected first message content 'Hello worker!', got: %s", response.Messages[0].Content)
-	}
+	require.Equal(t, 2, response.UnreadCount, "Expected unread_count=2")
+	require.Len(t, response.Messages, 2, "Expected 2 messages")
+	require.Equal(t, "Hello worker!", response.Messages[0].Content, "First message content mismatch")
 }
 
 // TestWorkerServer_CheckMessagesNoMessages tests when there are no unread messages.
@@ -261,27 +226,18 @@ func TestWorkerServer_CheckMessagesNoMessages(t *testing.T) {
 	handler := ws.handlers["check_messages"]
 
 	result, err := handler(context.Background(), json.RawMessage(`{}`))
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
+	require.NoError(t, err, "Unexpected error")
 
-	if result == nil || len(result.Content) == 0 {
-		t.Fatal("Expected result with content")
-	}
+	require.NotNil(t, result, "Expected result with content")
+	require.NotEmpty(t, result.Content, "Expected result with content")
 	text := result.Content[0].Text
 
 	// Parse JSON response
 	var response checkMessagesResponse
-	if err := json.Unmarshal([]byte(text), &response); err != nil {
-		t.Fatalf("Failed to parse JSON response: %v", err)
-	}
+	require.NoError(t, json.Unmarshal([]byte(text), &response), "Failed to parse JSON response")
 
-	if response.UnreadCount != 0 {
-		t.Errorf("Expected unread_count=0, got: %d", response.UnreadCount)
-	}
-	if len(response.Messages) != 0 {
-		t.Errorf("Expected 0 messages, got: %d", len(response.Messages))
-	}
+	require.Equal(t, 0, response.UnreadCount, "Expected unread_count=0")
+	require.Empty(t, response.Messages, "Expected 0 messages")
 }
 
 // TestWorkerServer_CheckMessagesSeesAllMessages tests that workers see all messages.
@@ -296,37 +252,25 @@ func TestWorkerServer_CheckMessagesSeesAllMessages(t *testing.T) {
 	handler := ws.handlers["check_messages"]
 
 	result, err := handler(context.Background(), json.RawMessage(`{}`))
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
+	require.NoError(t, err, "Unexpected error")
 
 	text := result.Content[0].Text
 
 	// Parse JSON response
 	var response checkMessagesResponse
-	if err := json.Unmarshal([]byte(text), &response); err != nil {
-		t.Fatalf("Failed to parse JSON response: %v", err)
-	}
+	require.NoError(t, json.Unmarshal([]byte(text), &response), "Failed to parse JSON response")
 
 	// Workers see ALL messages (no filtering by recipient)
-	if response.UnreadCount != 3 {
-		t.Errorf("Expected 3 messages, got %d", response.UnreadCount)
-	}
+	require.Equal(t, 3, response.UnreadCount, "Expected 3 messages")
 
 	contents := make(map[string]bool)
 	for _, msg := range response.Messages {
 		contents[msg.Content] = true
 	}
 
-	if !contents["For worker 1"] {
-		t.Error("Should contain message addressed to WORKER.1")
-	}
-	if !contents["For everyone"] {
-		t.Error("Should contain message addressed to ALL")
-	}
-	if !contents["For worker 2"] {
-		t.Error("Should contain message addressed to WORKER.2 (workers see all messages)")
-	}
+	require.True(t, contents["For worker 1"], "Should contain message addressed to WORKER.1")
+	require.True(t, contents["For everyone"], "Should contain message addressed to ALL")
+	require.True(t, contents["For worker 2"], "Should contain message addressed to WORKER.2 (workers see all messages)")
 }
 
 // TestWorkerServer_CheckMessagesReadTracking tests that messages are marked as read.
@@ -340,22 +284,15 @@ func TestWorkerServer_CheckMessagesReadTracking(t *testing.T) {
 	// First call should return the message
 	result1, _ := handler(context.Background(), json.RawMessage(`{}`))
 	var response1 checkMessagesResponse
-	if err := json.Unmarshal([]byte(result1.Content[0].Text), &response1); err != nil {
-		t.Fatalf("Failed to parse JSON response: %v", err)
-	}
-	if response1.UnreadCount != 1 || response1.Messages[0].Content != "First message" {
-		t.Error("First call should return the message")
-	}
+	require.NoError(t, json.Unmarshal([]byte(result1.Content[0].Text), &response1), "Failed to parse JSON response")
+	require.Equal(t, 1, response1.UnreadCount, "First call should return 1 message")
+	require.Equal(t, "First message", response1.Messages[0].Content, "First call should return the message")
 
 	// Second call should return no new messages
 	result2, _ := handler(context.Background(), json.RawMessage(`{}`))
 	var response2 checkMessagesResponse
-	if err := json.Unmarshal([]byte(result2.Content[0].Text), &response2); err != nil {
-		t.Fatalf("Failed to parse JSON response: %v", err)
-	}
-	if response2.UnreadCount != 0 {
-		t.Errorf("Second call should return 0 unread messages, got: %d", response2.UnreadCount)
-	}
+	require.NoError(t, json.Unmarshal([]byte(result2.Content[0].Text), &response2), "Failed to parse JSON response")
+	require.Equal(t, 0, response2.UnreadCount, "Second call should return 0 unread messages")
 
 	// Add a new message
 	store.addEntry(message.ActorCoordinator, "WORKER.1", "Second message")
@@ -363,15 +300,9 @@ func TestWorkerServer_CheckMessagesReadTracking(t *testing.T) {
 	// Third call should return only the new message
 	result3, _ := handler(context.Background(), json.RawMessage(`{}`))
 	var response3 checkMessagesResponse
-	if err := json.Unmarshal([]byte(result3.Content[0].Text), &response3); err != nil {
-		t.Fatalf("Failed to parse JSON response: %v", err)
-	}
-	if response3.UnreadCount != 1 {
-		t.Errorf("Third call should return 1 new message, got: %d", response3.UnreadCount)
-	}
-	if response3.Messages[0].Content != "Second message" {
-		t.Error("Third call should return the new message")
-	}
+	require.NoError(t, json.Unmarshal([]byte(result3.Content[0].Text), &response3), "Failed to parse JSON response")
+	require.Equal(t, 1, response3.UnreadCount, "Third call should return 1 new message")
+	require.Equal(t, "Second message", response3.Messages[0].Content, "Third call should return the new message")
 }
 
 // TestWorkerServer_SendMessageValidation tests input validation for post_message.
@@ -419,13 +350,8 @@ func TestWorkerServer_SendMessageValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := handler(context.Background(), json.RawMessage(tt.args))
-			if err == nil {
-				t.Error("Expected error but got none")
-				return
-			}
-			if !strings.Contains(err.Error(), tt.wantErr) {
-				t.Errorf("Error should contain %q, got: %v", tt.wantErr, err)
-			}
+			require.Error(t, err, "Expected error but got none")
+			require.Contains(t, err.Error(), tt.wantErr, "Error should contain expected message")
 		})
 	}
 }
@@ -437,32 +363,18 @@ func TestWorkerServer_SendMessageHappyPath(t *testing.T) {
 	handler := ws.handlers["post_message"]
 
 	result, err := handler(context.Background(), json.RawMessage(`{"to": "COORDINATOR", "content": "Task complete"}`))
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
+	require.NoError(t, err, "Unexpected error")
 
 	// Verify Append was called with correct parameters
-	if len(store.appendCalls) != 1 {
-		t.Fatalf("Expected 1 append call, got %d", len(store.appendCalls))
-	}
+	require.Len(t, store.appendCalls, 1, "Expected 1 append call")
 	call := store.appendCalls[0]
-	if call.From != "WORKER.1" {
-		t.Errorf("From = %q, want %q", call.From, "WORKER.1")
-	}
-	if call.To != "COORDINATOR" {
-		t.Errorf("To = %q, want %q", call.To, "COORDINATOR")
-	}
-	if call.Content != "Task complete" {
-		t.Errorf("Content = %q, want %q", call.Content, "Task complete")
-	}
-	if call.Type != message.MessageInfo {
-		t.Errorf("Type = %v, want %v", call.Type, message.MessageInfo)
-	}
+	require.Equal(t, "WORKER.1", call.From, "From mismatch")
+	require.Equal(t, "COORDINATOR", call.To, "To mismatch")
+	require.Equal(t, "Task complete", call.Content, "Content mismatch")
+	require.Equal(t, message.MessageInfo, call.Type, "Type mismatch")
 
 	// Verify success result
-	if !strings.Contains(result.Content[0].Text, "Message sent to COORDINATOR") {
-		t.Errorf("Result should confirm sending, got: %s", result.Content[0].Text)
-	}
+	require.Contains(t, result.Content[0].Text, "Message sent to COORDINATOR", "Result should confirm sending")
 }
 
 // TestWorkerServer_SignalReadyValidation tests input validation for signal_ready.
@@ -472,12 +384,8 @@ func TestWorkerServer_SignalReadyValidation(t *testing.T) {
 
 	// signal_ready takes no parameters, so only test message store error
 	_, err := handler(context.Background(), json.RawMessage(`{}`))
-	if err == nil {
-		t.Error("Expected error when message store is nil")
-	}
-	if !strings.Contains(err.Error(), "message store not available") {
-		t.Errorf("Error should contain 'message store not available', got: %v", err)
-	}
+	require.Error(t, err, "Expected error when message store is nil")
+	require.Contains(t, err.Error(), "message store not available", "Error should mention 'message store not available'")
 }
 
 // TestWorkerServer_SignalReadyHappyPath tests successful ready signaling.
@@ -487,33 +395,19 @@ func TestWorkerServer_SignalReadyHappyPath(t *testing.T) {
 	handler := ws.handlers["signal_ready"]
 
 	result, err := handler(context.Background(), json.RawMessage(`{}`))
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
+	require.NoError(t, err, "Unexpected error")
 
 	// Verify Append was called with correct parameters
-	if len(store.appendCalls) != 1 {
-		t.Fatalf("Expected 1 append call, got %d", len(store.appendCalls))
-	}
+	require.Len(t, store.appendCalls, 1, "Expected 1 append call")
 	call := store.appendCalls[0]
-	if call.From != "WORKER.1" {
-		t.Errorf("From = %q, want %q", call.From, "WORKER.1")
-	}
-	if call.To != message.ActorCoordinator {
-		t.Errorf("To = %q, want %q", call.To, message.ActorCoordinator)
-	}
+	require.Equal(t, "WORKER.1", call.From, "From mismatch")
+	require.Equal(t, message.ActorCoordinator, call.To, "To mismatch")
 	expectedContent := "Worker WORKER.1 ready for task assignment"
-	if call.Content != expectedContent {
-		t.Errorf("Content = %q, want %q", call.Content, expectedContent)
-	}
-	if call.Type != message.MessageWorkerReady {
-		t.Errorf("Type = %v, want %v", call.Type, message.MessageWorkerReady)
-	}
+	require.Equal(t, expectedContent, call.Content, "Content mismatch")
+	require.Equal(t, message.MessageWorkerReady, call.Type, "Type mismatch")
 
 	// Verify success result
-	if !strings.Contains(result.Content[0].Text, "Ready signal sent") {
-		t.Errorf("Result should confirm signal, got: %s", result.Content[0].Text)
-	}
+	require.Contains(t, result.Content[0].Text, "Ready signal sent", "Result should confirm signal")
 }
 
 // TestWorkerServer_ToolDescriptionsAreHelpful verifies tool descriptions are informative.
@@ -547,14 +441,10 @@ func TestWorkerServer_ToolDescriptionsAreHelpful(t *testing.T) {
 			tool := ws.tools[tt.toolName]
 			desc := strings.ToLower(tool.Description)
 
-			if len(tool.Description) < tt.descMinLength {
-				t.Errorf("Description too short: %d chars, want at least %d", len(tool.Description), tt.descMinLength)
-			}
+			require.GreaterOrEqual(t, len(tool.Description), tt.descMinLength, "Description too short: want at least %d chars", tt.descMinLength)
 
 			for _, keyword := range tt.mustContain {
-				if !strings.Contains(desc, keyword) {
-					t.Errorf("Description should contain %q: %s", keyword, tool.Description)
-				}
+				require.Contains(t, desc, keyword, "Description should contain %q", keyword)
 			}
 		})
 	}
@@ -567,9 +457,7 @@ func TestWorkerServer_InstructionsContainToolNames(t *testing.T) {
 
 	toolNames := []string{"check_messages", "post_message", "signal_ready"}
 	for _, name := range toolNames {
-		if !strings.Contains(instructions, name) {
-			t.Errorf("Instructions should mention %q", name)
-		}
+		require.Contains(t, instructions, name, "Instructions should mention %q", name)
 	}
 }
 
@@ -578,13 +466,9 @@ func TestWorkerServer_CheckMessagesSchema(t *testing.T) {
 	ws := NewWorkerServer("WORKER.1", nil)
 
 	tool, ok := ws.tools["check_messages"]
-	if !ok {
-		t.Fatal("check_messages tool not registered")
-	}
+	require.True(t, ok, "check_messages tool not registered")
 
-	if len(tool.InputSchema.Required) != 0 {
-		t.Error("check_messages should not have required parameters")
-	}
+	require.Empty(t, tool.InputSchema.Required, "check_messages should not have required parameters")
 }
 
 // TestWorkerServer_SendMessageSchema verifies post_message tool schema.
@@ -592,24 +476,16 @@ func TestWorkerServer_SendMessageSchema(t *testing.T) {
 	ws := NewWorkerServer("WORKER.1", nil)
 
 	tool, ok := ws.tools["post_message"]
-	if !ok {
-		t.Fatal("post_message tool not registered")
-	}
+	require.True(t, ok, "post_message tool not registered")
 
-	if len(tool.InputSchema.Required) != 2 {
-		t.Errorf("post_message should have 2 required parameters, got %d", len(tool.InputSchema.Required))
-	}
+	require.Len(t, tool.InputSchema.Required, 2, "post_message should have 2 required parameters")
 
 	requiredSet := make(map[string]bool)
 	for _, r := range tool.InputSchema.Required {
 		requiredSet[r] = true
 	}
-	if !requiredSet["to"] {
-		t.Error("'to' should be required")
-	}
-	if !requiredSet["content"] {
-		t.Error("'content' should be required")
-	}
+	require.True(t, requiredSet["to"], "'to' should be required")
+	require.True(t, requiredSet["content"], "'content' should be required")
 }
 
 // TestWorkerServer_SignalReadySchema verifies signal_ready tool schema.
@@ -617,14 +493,332 @@ func TestWorkerServer_SignalReadySchema(t *testing.T) {
 	ws := NewWorkerServer("WORKER.1", nil)
 
 	tool, ok := ws.tools["signal_ready"]
-	if !ok {
-		t.Fatal("signal_ready tool not registered")
-	}
+	require.True(t, ok, "signal_ready tool not registered")
 
-	if len(tool.InputSchema.Required) != 0 {
-		t.Errorf("signal_ready should have 0 required parameters, got %d", len(tool.InputSchema.Required))
+	require.Empty(t, tool.InputSchema.Required, "signal_ready should have 0 required parameters")
+	require.Empty(t, tool.InputSchema.Properties, "signal_ready should have 0 properties")
+}
+
+// mockStateCallback implements WorkerStateCallback for testing.
+type mockStateCallback struct {
+	workerPhases map[string]events.WorkerPhase
+	calls        []stateCallbackCall
+	mu           sync.RWMutex
+
+	// Error injection
+	getPhaseError                 error
+	onImplementationCompleteError error
+	onReviewVerdictError          error
+}
+
+type stateCallbackCall struct {
+	Method   string
+	WorkerID string
+	Summary  string
+	Verdict  string
+	Comments string
+}
+
+func newMockStateCallback() *mockStateCallback {
+	return &mockStateCallback{
+		workerPhases: make(map[string]events.WorkerPhase),
+		calls:        make([]stateCallbackCall, 0),
 	}
-	if len(tool.InputSchema.Properties) != 0 {
-		t.Errorf("signal_ready should have 0 properties, got %d", len(tool.InputSchema.Properties))
+}
+
+func (m *mockStateCallback) setPhase(workerID string, phase events.WorkerPhase) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.workerPhases[workerID] = phase
+}
+
+func (m *mockStateCallback) GetWorkerPhase(workerID string) (events.WorkerPhase, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, stateCallbackCall{Method: "GetWorkerPhase", WorkerID: workerID})
+	if m.getPhaseError != nil {
+		return "", m.getPhaseError
 	}
+	phase, ok := m.workerPhases[workerID]
+	if !ok {
+		return events.PhaseIdle, nil
+	}
+	return phase, nil
+}
+
+func (m *mockStateCallback) OnImplementationComplete(workerID, summary string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, stateCallbackCall{Method: "OnImplementationComplete", WorkerID: workerID, Summary: summary})
+	if m.onImplementationCompleteError != nil {
+		return m.onImplementationCompleteError
+	}
+	// Update phase as coordinator would
+	m.workerPhases[workerID] = events.PhaseAwaitingReview
+	return nil
+}
+
+func (m *mockStateCallback) OnReviewVerdict(workerID, verdict, comments string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, stateCallbackCall{Method: "OnReviewVerdict", WorkerID: workerID, Verdict: verdict, Comments: comments})
+	if m.onReviewVerdictError != nil {
+		return m.onReviewVerdictError
+	}
+	// Update phase as coordinator would
+	m.workerPhases[workerID] = events.PhaseIdle
+	return nil
+}
+
+// TestWorkerServer_ReportImplementationComplete_NoCallback tests error when callback not set.
+func TestWorkerServer_ReportImplementationComplete_NoCallback(t *testing.T) {
+	store := newMockMessageStore()
+	ws := NewWorkerServer("WORKER.1", store)
+	handler := ws.handlers["report_implementation_complete"]
+
+	_, err := handler(context.Background(), json.RawMessage(`{"summary": "completed feature X"}`))
+	require.Error(t, err, "Expected error when callback not configured")
+	require.Contains(t, err.Error(), "state callback not configured", "Expected 'state callback not configured' error")
+}
+
+// TestWorkerServer_ReportImplementationComplete_MissingSummary tests validation.
+func TestWorkerServer_ReportImplementationComplete_MissingSummary(t *testing.T) {
+	store := newMockMessageStore()
+	callback := newMockStateCallback()
+	ws := NewWorkerServer("WORKER.1", store)
+	ws.SetStateCallback(callback)
+	handler := ws.handlers["report_implementation_complete"]
+
+	_, err := handler(context.Background(), json.RawMessage(`{}`))
+	require.Error(t, err, "Expected error for missing summary")
+	require.Contains(t, err.Error(), "summary is required", "Expected 'summary is required' error")
+}
+
+// TestWorkerServer_ReportImplementationComplete_WrongPhase tests phase validation.
+func TestWorkerServer_ReportImplementationComplete_WrongPhase(t *testing.T) {
+	store := newMockMessageStore()
+	callback := newMockStateCallback()
+	callback.setPhase("WORKER.1", events.PhaseIdle) // Not implementing
+
+	ws := NewWorkerServer("WORKER.1", store)
+	ws.SetStateCallback(callback)
+	handler := ws.handlers["report_implementation_complete"]
+
+	_, err := handler(context.Background(), json.RawMessage(`{"summary": "done"}`))
+	require.Error(t, err, "Expected error for wrong phase")
+	require.Contains(t, err.Error(), "not in implementing or addressing_feedback phase", "Expected phase error")
+}
+
+// TestWorkerServer_ReportImplementationComplete_HappyPath tests successful completion.
+func TestWorkerServer_ReportImplementationComplete_HappyPath(t *testing.T) {
+	store := newMockMessageStore()
+	callback := newMockStateCallback()
+	callback.setPhase("WORKER.1", events.PhaseImplementing)
+
+	ws := NewWorkerServer("WORKER.1", store)
+	ws.SetStateCallback(callback)
+	handler := ws.handlers["report_implementation_complete"]
+
+	result, err := handler(context.Background(), json.RawMessage(`{"summary": "Added feature X with tests"}`))
+	require.NoError(t, err, "Unexpected error")
+
+	// Verify callback was called
+	require.Len(t, callback.calls, 2, "Expected 2 callback calls (GetWorkerPhase + OnImplementationComplete)")
+	// Find the OnImplementationComplete call
+	found := false
+	for _, call := range callback.calls {
+		if call.Method == "OnImplementationComplete" {
+			found = true
+			require.Equal(t, "WORKER.1", call.WorkerID, "WorkerID mismatch")
+			require.Equal(t, "Added feature X with tests", call.Summary, "Summary mismatch")
+		}
+	}
+	require.True(t, found, "OnImplementationComplete callback not called")
+
+	// Verify message was posted to coordinator
+	require.Len(t, store.appendCalls, 1, "Expected 1 message posted")
+	require.Contains(t, store.appendCalls[0].Content, "Implementation complete", "Message should contain 'Implementation complete'")
+
+	// Verify structured response
+	require.NotNil(t, result, "Expected result with content")
+	require.NotEmpty(t, result.Content, "Expected result with content")
+	require.Contains(t, result.Content[0].Text, "awaiting_review", "Response should contain 'awaiting_review'")
+}
+
+// TestWorkerServer_ReportImplementationComplete_AddressingFeedback tests completion from addressing_feedback phase.
+func TestWorkerServer_ReportImplementationComplete_AddressingFeedback(t *testing.T) {
+	store := newMockMessageStore()
+	callback := newMockStateCallback()
+	callback.setPhase("WORKER.1", events.PhaseAddressingFeedback)
+
+	ws := NewWorkerServer("WORKER.1", store)
+	ws.SetStateCallback(callback)
+	handler := ws.handlers["report_implementation_complete"]
+
+	_, err := handler(context.Background(), json.RawMessage(`{"summary": "Fixed review feedback"}`))
+	require.NoError(t, err, "Should succeed from addressing_feedback phase")
+}
+
+// TestWorkerServer_ReportReviewVerdict_NoCallback tests error when callback not set.
+func TestWorkerServer_ReportReviewVerdict_NoCallback(t *testing.T) {
+	store := newMockMessageStore()
+	ws := NewWorkerServer("WORKER.1", store)
+	handler := ws.handlers["report_review_verdict"]
+
+	_, err := handler(context.Background(), json.RawMessage(`{"verdict": "APPROVED", "comments": "LGTM"}`))
+	require.Error(t, err, "Expected error when callback not configured")
+	require.Contains(t, err.Error(), "state callback not configured", "Expected 'state callback not configured' error")
+}
+
+// TestWorkerServer_ReportReviewVerdict_MissingVerdict tests validation.
+func TestWorkerServer_ReportReviewVerdict_MissingVerdict(t *testing.T) {
+	store := newMockMessageStore()
+	callback := newMockStateCallback()
+	ws := NewWorkerServer("WORKER.1", store)
+	ws.SetStateCallback(callback)
+	handler := ws.handlers["report_review_verdict"]
+
+	_, err := handler(context.Background(), json.RawMessage(`{"comments": "LGTM"}`))
+	require.Error(t, err, "Expected error for missing verdict")
+	require.Contains(t, err.Error(), "verdict is required", "Expected 'verdict is required' error")
+}
+
+// TestWorkerServer_ReportReviewVerdict_MissingComments tests validation.
+func TestWorkerServer_ReportReviewVerdict_MissingComments(t *testing.T) {
+	store := newMockMessageStore()
+	callback := newMockStateCallback()
+	ws := NewWorkerServer("WORKER.1", store)
+	ws.SetStateCallback(callback)
+	handler := ws.handlers["report_review_verdict"]
+
+	_, err := handler(context.Background(), json.RawMessage(`{"verdict": "APPROVED"}`))
+	require.Error(t, err, "Expected error for missing comments")
+	require.Contains(t, err.Error(), "comments is required", "Expected 'comments is required' error")
+}
+
+// TestWorkerServer_ReportReviewVerdict_InvalidVerdict tests invalid verdict value.
+func TestWorkerServer_ReportReviewVerdict_InvalidVerdict(t *testing.T) {
+	store := newMockMessageStore()
+	callback := newMockStateCallback()
+	callback.setPhase("WORKER.1", events.PhaseReviewing)
+	ws := NewWorkerServer("WORKER.1", store)
+	ws.SetStateCallback(callback)
+	handler := ws.handlers["report_review_verdict"]
+
+	_, err := handler(context.Background(), json.RawMessage(`{"verdict": "MAYBE", "comments": "Not sure"}`))
+	require.Error(t, err, "Expected error for invalid verdict")
+	require.Contains(t, err.Error(), "must be 'APPROVED' or 'DENIED'", "Expected verdict validation error")
+}
+
+// TestWorkerServer_ReportReviewVerdict_WrongPhase tests phase validation.
+func TestWorkerServer_ReportReviewVerdict_WrongPhase(t *testing.T) {
+	store := newMockMessageStore()
+	callback := newMockStateCallback()
+	callback.setPhase("WORKER.1", events.PhaseImplementing) // Not reviewing
+
+	ws := NewWorkerServer("WORKER.1", store)
+	ws.SetStateCallback(callback)
+	handler := ws.handlers["report_review_verdict"]
+
+	_, err := handler(context.Background(), json.RawMessage(`{"verdict": "APPROVED", "comments": "LGTM"}`))
+	require.Error(t, err, "Expected error for wrong phase")
+	require.Contains(t, err.Error(), "not in reviewing phase", "Expected phase error")
+}
+
+// TestWorkerServer_ReportReviewVerdict_Approved tests successful approval.
+func TestWorkerServer_ReportReviewVerdict_Approved(t *testing.T) {
+	store := newMockMessageStore()
+	callback := newMockStateCallback()
+	callback.setPhase("WORKER.1", events.PhaseReviewing)
+
+	ws := NewWorkerServer("WORKER.1", store)
+	ws.SetStateCallback(callback)
+	handler := ws.handlers["report_review_verdict"]
+
+	result, err := handler(context.Background(), json.RawMessage(`{"verdict": "APPROVED", "comments": "Code looks great, tests pass"}`))
+	require.NoError(t, err, "Unexpected error")
+
+	// Verify callback was called
+	found := false
+	for _, call := range callback.calls {
+		if call.Method == "OnReviewVerdict" {
+			found = true
+			require.Equal(t, "APPROVED", call.Verdict, "Verdict mismatch")
+			require.Equal(t, "Code looks great, tests pass", call.Comments, "Comments mismatch")
+		}
+	}
+	require.True(t, found, "OnReviewVerdict callback not called")
+
+	// Verify message was posted
+	require.Len(t, store.appendCalls, 1, "Expected 1 message posted")
+	require.Contains(t, store.appendCalls[0].Content, "Review verdict: APPROVED", "Message should contain verdict")
+
+	// Verify structured response
+	require.NotNil(t, result, "Expected result with content")
+	require.NotEmpty(t, result.Content, "Expected result with content")
+	require.Contains(t, result.Content[0].Text, "APPROVED", "Response should contain 'APPROVED'")
+	require.Contains(t, result.Content[0].Text, "idle", "Response should contain 'idle' phase")
+}
+
+// TestWorkerServer_ReportReviewVerdict_Denied tests successful denial.
+func TestWorkerServer_ReportReviewVerdict_Denied(t *testing.T) {
+	store := newMockMessageStore()
+	callback := newMockStateCallback()
+	callback.setPhase("WORKER.1", events.PhaseReviewing)
+
+	ws := NewWorkerServer("WORKER.1", store)
+	ws.SetStateCallback(callback)
+	handler := ws.handlers["report_review_verdict"]
+
+	result, err := handler(context.Background(), json.RawMessage(`{"verdict": "DENIED", "comments": "Missing error handling in line 50"}`))
+	require.NoError(t, err, "Unexpected error")
+
+	// Verify callback was called with DENIED
+	found := false
+	for _, call := range callback.calls {
+		if call.Method == "OnReviewVerdict" && call.Verdict == "DENIED" {
+			found = true
+			require.Contains(t, call.Comments, "Missing error handling", "Comments should be passed correctly")
+		}
+	}
+	require.True(t, found, "OnReviewVerdict callback not called with DENIED")
+
+	// Verify structured response contains DENIED
+	require.Contains(t, result.Content[0].Text, "DENIED", "Response should contain 'DENIED'")
+}
+
+// TestWorkerServer_ReportImplementationCompleteSchema verifies tool schema.
+func TestWorkerServer_ReportImplementationCompleteSchema(t *testing.T) {
+	ws := NewWorkerServer("WORKER.1", nil)
+
+	tool, ok := ws.tools["report_implementation_complete"]
+	require.True(t, ok, "report_implementation_complete tool not registered")
+
+	require.Len(t, tool.InputSchema.Required, 1, "report_implementation_complete should have 1 required parameter")
+	require.Equal(t, "summary", tool.InputSchema.Required[0], "Required parameter should be 'summary'")
+
+	_, ok = tool.InputSchema.Properties["summary"]
+	require.True(t, ok, "'summary' property should be defined")
+}
+
+// TestWorkerServer_ReportReviewVerdictSchema verifies tool schema.
+func TestWorkerServer_ReportReviewVerdictSchema(t *testing.T) {
+	ws := NewWorkerServer("WORKER.1", nil)
+
+	tool, ok := ws.tools["report_review_verdict"]
+	require.True(t, ok, "report_review_verdict tool not registered")
+
+	require.Len(t, tool.InputSchema.Required, 2, "report_review_verdict should have 2 required parameters")
+
+	requiredSet := make(map[string]bool)
+	for _, r := range tool.InputSchema.Required {
+		requiredSet[r] = true
+	}
+	require.True(t, requiredSet["verdict"], "'verdict' should be required")
+	require.True(t, requiredSet["comments"], "'comments' should be required")
+
+	_, ok = tool.InputSchema.Properties["verdict"]
+	require.True(t, ok, "'verdict' property should be defined")
+	_, ok = tool.InputSchema.Properties["comments"]
+	require.True(t, ok, "'comments' property should be defined")
 }

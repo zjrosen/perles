@@ -291,6 +291,15 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 				}
 				return m, nil
 			}
+			if fs.config.Type == FieldTypeSelect {
+				// Single-select: select current, deselect others
+				if fs.listCursor >= 0 && fs.listCursor < len(fs.listItems) {
+					for i := range fs.listItems {
+						fs.listItems[i].selected = (i == fs.listCursor)
+					}
+				}
+				return m, nil
+			}
 		}
 	}
 

@@ -1,6 +1,10 @@
 package orchestration
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/zjrosen/perles/internal/ui/styles"
+)
 
 // Layout constants
 const (
@@ -22,3 +26,6 @@ var (
 	WorkerColor      = lipgloss.AdaptiveColor{Light: "#43BF6D", Dark: "#43BF6D"}
 	UserColor        = lipgloss.AdaptiveColor{Light: "#FB923C", Dark: "#FB923C"}
 )
+
+// TitleContextStyle is used for muted contextual info in pane titles (port numbers, task IDs, phases).
+var TitleContextStyle = lipgloss.NewStyle().Foreground(styles.TextMutedColor)

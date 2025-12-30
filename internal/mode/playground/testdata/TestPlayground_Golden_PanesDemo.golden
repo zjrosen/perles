@@ -1,0 +1,28 @@
+╭────────────────────────────╮  ╭─ formmodal ──────────────────────────────────────────────────────╮
+│ Components                 │  │ Multi-field form modal demo:                                     │
+│ ────────────────────────── │  │                                                                  │
+│   vimtextarea              │  │   • Text field: Name input                                       │
+│   modal                    │  │   • Color field: Color picker                                    │
+│ ● formmodal                │  │   • Select field: Priority                                       │
+│   panes                    │  │   • Toggle field: Status                                         │
+│   scrollpane               │  │                                                                  │
+│   colorpicker              │  │ Press Enter to open form                                         │
+│   picker                   │  │                                                                  │
+│   toaster                  │  │                                                                  │
+│   logoverlay               │  │                                                                  │
+│   markdown                 │  │                                                                  │
+│   chainart                 │  │                                                                  │
+│   issuebadge               │  │                                                                  │
+│   Theme Tokens             │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+╰────────────────────────────╯  ╰──────────────────────────────────────────────────────────────────╯
+Tab: Switch panes  │  Ctrl+R: Reset  │  Ctrl+C: Quit                                                

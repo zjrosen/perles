@@ -8,8 +8,11 @@ import (
 	"io"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/zjrosen/perles/internal/log"
+	"github.com/zjrosen/perles/internal/orchestration/events"
+	"github.com/zjrosen/perles/internal/pubsub"
 )
 
 // ToolHandler is a function that handles a tool call.
@@ -32,6 +35,9 @@ type Server struct {
 	mu     sync.RWMutex
 
 	initialized bool
+
+	// broker publishes MCPEvent for session logging
+	broker *pubsub.Broker[events.MCPEvent]
 }
 
 // ServerOption configures a Server.
@@ -56,6 +62,7 @@ func NewServer(name, version string, opts ...ServerOption) *Server {
 		handlers: make(map[string]ToolHandler),
 		ctx:      ctx,
 		cancel:   cancel,
+		broker:   pubsub.NewBrokerWithBuffer[events.MCPEvent](128),
 	}
 
 	for _, opt := range opts {
@@ -72,6 +79,11 @@ func (s *Server) RegisterTool(tool Tool, handler ToolHandler) {
 	s.tools[tool.Name] = tool
 	s.handlers[tool.Name] = handler
 	log.Debug(log.CatMCP, "Registered tool", "name", tool.Name)
+}
+
+// Broker returns the MCP event broker for session logging.
+func (s *Server) Broker() *pubsub.Broker[events.MCPEvent] {
+	return s.broker
 }
 
 // Serve starts the server, reading from stdin and writing to stdout.
@@ -320,7 +332,14 @@ func (s *Server) handleToolsCall(params json.RawMessage) (any, *RPCError) {
 
 	log.Debug(log.CatMCP, "Calling tool", "name", p.Name)
 
+	// Capture start time for duration calculation
+	startTime := time.Now()
 	result, err := handler(s.ctx, p.Arguments)
+	duration := time.Since(startTime)
+
+	// Publish MCP event for session logging
+	s.publishToolEvent(p.Name, params, result, err, duration)
+
 	if err != nil {
 		log.Debug(log.CatMCP, "Tool execution failed", "name", p.Name, "error", err)
 		// Return the error as a tool result, not an RPC error
@@ -328,6 +347,38 @@ func (s *Server) handleToolsCall(params json.RawMessage) (any, *RPCError) {
 	}
 
 	return result, nil
+}
+
+// publishToolEvent publishes an MCPEvent for the tool call.
+func (s *Server) publishToolEvent(toolName string, requestParams json.RawMessage, result *ToolCallResult, err error, duration time.Duration) {
+	if s.broker == nil {
+		return
+	}
+
+	evt := events.MCPEvent{
+		Timestamp:   time.Now(),
+		Method:      "tools/call",
+		ToolName:    toolName,
+		RequestJSON: requestParams,
+		Duration:    duration,
+	}
+
+	// Serialize response if present
+	if result != nil {
+		if respJSON, marshalErr := json.Marshal(result); marshalErr == nil {
+			evt.ResponseJSON = respJSON
+		}
+	}
+
+	// Set event type and error based on outcome
+	if err != nil {
+		evt.Type = events.MCPError
+		evt.Error = err.Error()
+	} else {
+		evt.Type = events.MCPToolResult
+	}
+
+	s.broker.Publish(pubsub.CreatedEvent, evt)
 }
 
 // sendResult sends a success response.

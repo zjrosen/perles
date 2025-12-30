@@ -3,11 +3,11 @@ package board
 import (
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/zjrosen/perles/internal/beads"
 	"github.com/zjrosen/perles/internal/bql"
 	"github.com/zjrosen/perles/internal/mode/shared"
+	"github.com/zjrosen/perles/internal/ui/shared/issuebadge"
 	"github.com/zjrosen/perles/internal/ui/styles"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -91,31 +91,10 @@ func (d issueDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd {
 
 // renderIssueLine returns the rendered line for an issue (used by both Render and width calculation).
 func renderIssueLine(issue beads.Issue, isSelected bool) string {
-	// Text content
-	priorityText := fmt.Sprintf("[P%d]", issue.Priority)
-	typeText := styles.GetTypeIndicator(issue.Type)
-	issueId := fmt.Sprintf("[%s]", issue.ID)
-	issueTitle := issue.TitleText
-
-	// Component styles
-	priorityStyle := styles.GetPriorityStyle(issue.Priority)
-	typeStyle := styles.GetTypeStyle(issue.Type)
-	issueIdStyle := lipgloss.NewStyle().Foreground(styles.TextSecondaryColor)
-
-	lineParts := []string{
-		typeStyle.Render(typeText),
-		priorityStyle.Render(priorityText),
-		issueIdStyle.Render(issueId),
-		fmt.Sprintf(" %s", issueTitle),
-	}
-	line := strings.Join(lineParts, "")
-
-	if isSelected {
-		line = styles.SelectionIndicatorStyle.Render(">") + line
-	} else {
-		line = " " + line
-	}
-	return line
+	return issuebadge.Render(issue, issuebadge.Config{
+		ShowSelection: true,
+		Selected:      isSelected,
+	})
 }
 
 // itemRenderedLines returns how many lines an issue takes when rendered at the given width.

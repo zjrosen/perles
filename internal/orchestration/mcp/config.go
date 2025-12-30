@@ -26,17 +26,6 @@ type MCPConfig struct {
 // Amp expects a flat structure: {"serverName": {"url": "..."}} without the mcpServers wrapper.
 type AmpMCPConfig map[string]MCPServerConfig
 
-// GenerateCoordinatorConfig creates the MCP config JSON for the coordinator server.
-// The config specifies how Claude should launch the perles MCP server subprocess.
-//
-// Parameters:
-//   - workDir: Working directory for the MCP server (unused, kept for API compatibility)
-//
-// Returns the JSON string suitable for --mcp-config flag.
-func GenerateCoordinatorConfig(workDir string) (string, error) {
-	return GenerateCoordinatorConfigHTTP(8765) // Use fixed port for now
-}
-
 // GenerateCoordinatorConfigHTTP creates an MCP config that connects to an HTTP server.
 // The server should be running on localhost at the specified port.
 func GenerateCoordinatorConfigHTTP(port int) (string, error) {

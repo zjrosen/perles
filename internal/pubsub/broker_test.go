@@ -25,7 +25,7 @@ func TestBroker_Subscribe(t *testing.T) {
 		require.Equal(t, UpdatedEvent, event.Type)
 		require.False(t, event.Timestamp.IsZero())
 	case <-time.After(100 * time.Millisecond):
-		t.Fatal("timeout waiting for event")
+		require.Fail(t, "timeout waiting for event")
 	}
 }
 
@@ -50,7 +50,7 @@ func TestBroker_MultipleSubscribers(t *testing.T) {
 			require.Equal(t, 42, event.Payload, "subscriber %d", i)
 			require.Equal(t, CreatedEvent, event.Type, "subscriber %d", i)
 		case <-time.After(100 * time.Millisecond):
-			t.Fatalf("timeout waiting for event on subscriber %d", i)
+			require.Fail(t, "timeout waiting for event", "subscriber %d", i)
 		}
 	}
 }
@@ -97,7 +97,7 @@ func TestBroker_NonBlocking(t *testing.T) {
 	case <-done:
 		// Success - didn't block
 	case <-time.After(100 * time.Millisecond):
-		t.Fatal("Publish blocked")
+		require.Fail(t, "Publish blocked")
 	}
 
 	// Only first event received (buffer was full for others)

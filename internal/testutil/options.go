@@ -15,24 +15,31 @@ func Comment(author, text string) CommentData {
 
 // issueData holds all data for an issue to be inserted.
 type issueData struct {
-	id          string
-	title       string
-	description string
-	status      string
-	priority    int
-	issueType   string
-	assignee    *string
-	sender      string
-	ephemeral   bool
-	pinned      *bool
-	isTemplate  *bool
-	labels      []string
-	comments    []CommentData
-	createdAt   time.Time
-	createdBy   string
-	updatedAt   time.Time
-	closedAt    *time.Time
-	deletedAt   *time.Time
+	id           string
+	title        string
+	description  string
+	status       string
+	priority     int
+	issueType    string
+	assignee     *string
+	sender       string
+	ephemeral    bool
+	pinned       *bool
+	isTemplate   *bool
+	labels       []string
+	comments     []CommentData
+	createdAt    time.Time
+	createdBy    string
+	updatedAt    time.Time
+	closedAt     *time.Time
+	deletedAt    *time.Time
+	hookBead     string
+	roleBead     string
+	agentState   string
+	lastActivity *time.Time
+	roleType     string
+	rig          string
+	molType      string
 }
 
 // defaultIssue returns an issueData with sensible defaults.
@@ -141,4 +148,39 @@ func Pinned(p bool) IssueOption {
 // IsTemplate sets the is_template flag for the issue.
 func IsTemplate(t bool) IssueOption {
 	return func(i *issueData) { i.isTemplate = &t }
+}
+
+// HookBead sets the hook_bead field for the issue.
+func HookBead(s string) IssueOption {
+	return func(i *issueData) { i.hookBead = s }
+}
+
+// RoleBead sets the role_bead field for the issue.
+func RoleBead(s string) IssueOption {
+	return func(i *issueData) { i.roleBead = s }
+}
+
+// AgentState sets the agent_state field for the issue.
+func AgentState(s string) IssueOption {
+	return func(i *issueData) { i.agentState = s }
+}
+
+// LastActivity sets the last_activity timestamp for the issue.
+func LastActivity(t time.Time) IssueOption {
+	return func(i *issueData) { i.lastActivity = &t }
+}
+
+// RoleType sets the role_type field for the issue.
+func RoleType(s string) IssueOption {
+	return func(i *issueData) { i.roleType = s }
+}
+
+// Rig sets the rig field for the issue.
+func Rig(s string) IssueOption {
+	return func(i *issueData) { i.rig = s }
+}
+
+// MolType sets the mol_type field for the issue.
+func MolType(s string) IssueOption {
+	return func(i *issueData) { i.molType = s }
 }

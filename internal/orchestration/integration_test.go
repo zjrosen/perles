@@ -51,7 +51,7 @@ func TestIntegration_CoordinatorEventFlow(t *testing.T) {
 			require.Equal(t, pubsub.UpdatedEvent, received.Type, "wrapper event type should be UpdatedEvent")
 			require.False(t, received.Timestamp.IsZero(), "timestamp should be set")
 		case <-time.After(100 * time.Millisecond):
-			t.Fatalf("timeout waiting for event %d", i)
+			require.Fail(t, "timeout waiting for event", "event %d", i)
 		}
 	}
 }
@@ -89,7 +89,7 @@ func TestIntegration_MultipleSubscribers(t *testing.T) {
 			require.Equal(t, testEvent.Role, received.Payload.Role, "subscriber %d: role mismatch", i)
 			require.Equal(t, testEvent.Content, received.Payload.Content, "subscriber %d: content mismatch", i)
 		case <-time.After(100 * time.Millisecond):
-			t.Fatalf("subscriber %d: timeout waiting for event", i)
+			require.Fail(t, "timeout waiting for event", "subscriber %d", i)
 		}
 	}
 }
@@ -132,7 +132,7 @@ func TestIntegration_WorkerEventForwarding(t *testing.T) {
 			require.Equal(t, expected.Output, received.Payload.Output, "event %d output mismatch", i)
 			require.Equal(t, expected.Message, received.Payload.Message, "event %d message mismatch", i)
 		case <-time.After(100 * time.Millisecond):
-			t.Fatalf("timeout waiting for event %d", i)
+			require.Fail(t, "timeout waiting for event", "event %d", i)
 		}
 	}
 }
@@ -300,6 +300,6 @@ func TestIntegration_ContextCancellationCleanup(t *testing.T) {
 	case event := <-ch2:
 		require.Equal(t, events.CoordinatorReady, event.Payload.Type)
 	case <-time.After(100 * time.Millisecond):
-		t.Fatal("ch2 should still receive events")
+		require.Fail(t, "ch2 should still receive events")
 	}
 }

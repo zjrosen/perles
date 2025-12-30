@@ -20,7 +20,7 @@
                                                                                                                         
                                     Oh no! Looks like there's a break in the chain!                                     
                                                                                                                         
-                     Your beads database version (0.29.0) is older than required version (0.38.0).                      
+                     Your beads database version (0.29.0) is older than required version (0.41.0).                      
                                                                                                                         
                    Upgrade your beads instance and run `bd migrate` to update your database version.                    
                                                                                                                         

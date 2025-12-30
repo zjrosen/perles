@@ -8,6 +8,8 @@ import (
 
 	"github.com/zjrosen/perles/internal/app"
 	"github.com/zjrosen/perles/internal/beads"
+	"github.com/zjrosen/perles/internal/bql"
+	"github.com/zjrosen/perles/internal/cachemanager"
 	"github.com/zjrosen/perles/internal/config"
 	"github.com/zjrosen/perles/internal/log"
 	"github.com/zjrosen/perles/internal/ui/nobeads"
@@ -141,14 +143,16 @@ func runApp(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid orchestration configuration: %w", err)
 	}
 
-	// Use provided beads directory or current directory
+	// Working directory is always the current directory (where perles was invoked)
+	workDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("getting current directory: %w", err)
+	}
+
+	// Use provided beads directory or current directory for database
 	dbPath := cfg.BeadsDir
 	if dbPath == "" {
-		var err error
-		dbPath, err = os.Getwd()
-		if err != nil {
-			return fmt.Errorf("getting current directory: %w", err)
-		}
+		dbPath = workDir
 	}
 
 	client, err := beads.NewClient(dbPath)
@@ -182,8 +186,29 @@ func runApp(cmd *cobra.Command, args []string) error {
 		configFilePath = ".perles/config.yaml"
 	}
 
+	// Initialize BQL cache managers
+	bqlCache := cachemanager.NewInMemoryCacheManager[string, []beads.Issue](
+		"bql-cache",
+		cachemanager.DefaultExpiration,
+		cachemanager.DefaultCleanupInterval,
+	)
+	depGraphCache := cachemanager.NewInMemoryCacheManager[string, *bql.DependencyGraph](
+		"bql-dep-cache",
+		cachemanager.DefaultExpiration,
+		cachemanager.DefaultCleanupInterval,
+	)
+
 	// Pass config to app with database and config paths (debug for log overlay)
-	model := app.NewWithConfig(client, cfg, dbPath+"/.beads/beads.db", configFilePath, debug)
+	model := app.NewWithConfig(
+		client,
+		cfg,
+		bqlCache,
+		depGraphCache,
+		dbPath+"/.beads/beads.db",
+		configFilePath,
+		workDir,
+		debug,
+	)
 	p := tea.NewProgram(
 		&model,
 		tea.WithAltScreen(),

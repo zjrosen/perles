@@ -3,6 +3,8 @@ package shared
 import (
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestFormatRelativeTime(t *testing.T) {
@@ -61,10 +63,7 @@ func TestFormatRelativeTime(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := FormatRelativeTimeFrom(tt.input, now)
-			if got != tt.expected {
-				t.Errorf("FormatRelativeTimeFrom(%v, %v) = %q, want %q",
-					tt.input, now, got, tt.expected)
-			}
+			require.Equal(t, tt.expected, got, "FormatRelativeTimeFrom(%v, %v)", tt.input, now)
 		})
 	}
 }

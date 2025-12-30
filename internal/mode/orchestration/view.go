@@ -11,12 +11,9 @@ import (
 
 // View styles
 var (
-	inputPromptStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.AdaptiveColor{Light: "#54A0FF", Dark: "#54A0FF"})
-
 	statusPausedStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.AdaptiveColor{Light: "#FECA57", Dark: "#FECA57"}).
-				Bold(true)
+		Foreground(lipgloss.AdaptiveColor{Light: "#FECA57", Dark: "#FECA57"}).
+		Bold(true)
 )
 
 // View renders the orchestration mode UI.
@@ -36,11 +33,9 @@ func (m Model) View() string {
 
 // renderMainView renders the three-pane orchestration mode UI.
 func (m Model) renderMainView() string {
-	// Reserve 4 lines for input bar
-	contentHeight := max(m.height-4, 5)
-	if m.height < 16 {
-		contentHeight = max(m.height-3, 3)
-	}
+	// Calculate dynamic input bar height based on textarea content
+	inputHeight := m.calculateInputHeight()
+	contentHeight := max(m.height-inputHeight, 5)
 
 	var panes string
 
@@ -97,12 +92,20 @@ func (m Model) renderMainView() string {
 	return mainView
 }
 
+// calculateInputHeight returns the height of the input bar based on content.
+// Height starts at 4 (2 content lines + 2 borders) and can grow to 6 (4 content + 2 borders).
+// Uses display lines (accounting for soft-wrap) rather than logical lines.
+func (m Model) calculateInputHeight() int {
+	// Border takes 2 lines (top + bottom)
+	displayLines := m.input.TotalDisplayLines()
+
+	// Height = display lines + 2 for borders, clamped to [4, 6]
+	return max(min(displayLines+2, 6), 4)
+}
+
 // renderInputBar renders the bottom input bar.
 func (m Model) renderInputBar() string {
-	inputHeight := 4
-	if m.height < 16 {
-		inputHeight = 3
-	}
+	inputHeight := m.calculateInputHeight()
 	// Navigation mode: show help instead of input
 	if m.navigationMode {
 		navHelp := "1-4=workers  5=coordinator  6=messages  esc=exit"
@@ -143,12 +146,9 @@ func (m Model) renderInputBar() string {
 		borderColor = CoordinatorColor
 	}
 
-	// Input bar - show target in title and input field
-	prompt := inputPromptStyle.Render("> ")
-
-	// Calculate available width for input (accounting for borders and spacing)
-	innerWidth := m.width - 2                // Remove left/right border
-	inputWidth := innerWidth - len("> ") - 4 // Space for prompt and padding
+	// Calculate available width for input (accounting for borders and padding)
+	innerWidth := m.width - 2    // Remove left/right border
+	inputWidth := innerWidth - 2 // Space for padding
 
 	// Get input view (may need to truncate/scroll)
 	inputView := m.input.View()
@@ -156,7 +156,6 @@ func (m Model) renderInputBar() string {
 	// Build the bar content with padding
 	content := lipgloss.JoinHorizontal(lipgloss.Left,
 		" ", // Left padding
-		prompt,
 		lipgloss.NewStyle().Width(inputWidth).Render(inputView),
 		" ", // Right padding
 	)
@@ -168,8 +167,9 @@ func (m Model) renderInputBar() string {
 		Content:            content,
 		Width:              m.width,
 		Height:             inputHeight,
-		TopLeft:            targetLabel,       // Left title shows target
-		Focused:            m.input.Focused(), // Highlight border when input is focused
+		TopLeft:            targetLabel,             // Left title shows target
+		BottomLeft:         m.input.ModeIndicator(), // Vim mode indicator (styled by component)
+		Focused:            m.input.Focused(),       // Highlight border when input is focused
 		TitleColor:         titleColor,
 		FocusedBorderColor: borderColor,
 	})

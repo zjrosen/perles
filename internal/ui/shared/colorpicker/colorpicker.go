@@ -383,7 +383,14 @@ func (m Model) View() string {
 				Render("    ")
 			inputLine = inputLine + "  " + previewSwatch
 		}
-		inputSection := styles.RenderFormSection([]string{inputLine}, "Hex", "#RRGGBB", width-2, m.customFocus == customFocusInput, styles.BorderHighlightFocusColor)
+		inputSection := styles.FormSection(styles.FormSectionConfig{
+			Content:            []string{inputLine},
+			Width:              width - 2,
+			TopLeft:            "Hex",
+			TopLeftHint:        "#RRGGBB",
+			Focused:            m.customFocus == customFocusInput,
+			FocusedBorderColor: styles.BorderHighlightFocusColor,
+		})
 		content.WriteString(lipgloss.NewStyle().PaddingLeft(1).Render(inputSection))
 		content.WriteString("\n")
 

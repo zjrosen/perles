@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/exp/teatest"
 	"github.com/stretchr/testify/require"
 
+	"github.com/zjrosen/perles/internal/orchestration/events"
 	"github.com/zjrosen/perles/internal/orchestration/message"
 	"github.com/zjrosen/perles/internal/orchestration/pool"
 	"github.com/zjrosen/perles/internal/ui/shared/panes"
@@ -27,6 +28,30 @@ func TestNew(t *testing.T) {
 	require.Equal(t, 0, total)
 	require.Equal(t, 0, active)
 	require.Equal(t, "", m.CurrentWorkerID())
+}
+
+func TestNew_VimModeDisabledByDefault(t *testing.T) {
+	// When VimMode is not set in config, it defaults to false
+	m := New(Config{})
+
+	// The input textarea should NOT have vim mode enabled
+	require.False(t, m.input.VimEnabled(), "vim mode should be disabled by default")
+}
+
+func TestNew_VimModeEnabled(t *testing.T) {
+	// When VimMode is explicitly set to true
+	m := New(Config{VimMode: true})
+
+	// The input textarea should have vim mode enabled
+	require.True(t, m.input.VimEnabled(), "vim mode should be enabled when configured")
+}
+
+func TestNew_VimModeExplicitlyDisabled(t *testing.T) {
+	// When VimMode is explicitly set to false
+	m := New(Config{VimMode: false})
+
+	// The input textarea should NOT have vim mode enabled
+	require.False(t, m.input.VimEnabled(), "vim mode should be disabled when configured")
 }
 
 func TestSetSize(t *testing.T) {
@@ -434,6 +459,8 @@ func TestFocusCycling(t *testing.T) {
 func TestView_Golden_Empty(t *testing.T) {
 	m := New(Config{})
 	m = m.SetSize(120, 30)
+	// Set mcpPort to demonstrate coordinator title with port
+	m.mcpPort = 8467
 
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))
@@ -481,6 +508,13 @@ func TestView_Golden_WithMessages(t *testing.T) {
 func TestView_Golden_WithWorkers(t *testing.T) {
 	m := New(Config{})
 	m = m.SetSize(120, 30)
+	m.mcpPort = 9000
+
+	// Create a pool with workers that have task IDs and phases
+	workerPool := pool.NewWorkerPool(pool.Config{})
+	workerPool.AddWorkerForTesting("worker-1", "perles-abc.1", pool.WorkerWorking, events.PhaseImplementing)
+	workerPool.AddWorkerForTesting("worker-2", "", pool.WorkerReady, events.PhaseIdle)
+	m.pool = workerPool
 
 	m = m.UpdateWorker("worker-1", pool.WorkerWorking)
 	m = m.AddWorkerMessage("worker-1", "Reading auth/oauth.go\nFound existing setup\nAdding Google provider")
@@ -494,6 +528,13 @@ func TestView_Golden_WithWorkers(t *testing.T) {
 func TestView_Golden_FullState(t *testing.T) {
 	m := New(Config{})
 	m = m.SetSize(140, 35)
+	m.mcpPort = 8467
+
+	// Create a pool with workers that have task IDs and phases
+	workerPool := pool.NewWorkerPool(pool.Config{})
+	workerPool.AddWorkerForTesting("worker-1", "perles-auth.1", pool.WorkerReady, events.PhaseIdle)
+	workerPool.AddWorkerForTesting("worker-2", "perles-auth.2", pool.WorkerWorking, events.PhaseReviewing)
+	m.pool = workerPool
 
 	// Add chat messages
 	m = m.AddChatMessage("user", "Start working on the auth epic")
@@ -692,6 +733,12 @@ func TestView_Golden_FullscreenMessages(t *testing.T) {
 func TestView_Golden_FullscreenWorker(t *testing.T) {
 	m := New(Config{})
 	m = m.SetSize(120, 30)
+
+	// Create a pool with workers that have task IDs and phases
+	workerPool := pool.NewWorkerPool(pool.Config{})
+	workerPool.AddWorkerForTesting("worker-1", "perles-oauth.3", pool.WorkerWorking, events.PhaseAddressingFeedback)
+	workerPool.AddWorkerForTesting("worker-2", "", pool.WorkerReady, events.PhaseIdle)
+	m.pool = workerPool
 
 	// Add workers with messages
 	m = m.UpdateWorker("worker-1", pool.WorkerWorking)

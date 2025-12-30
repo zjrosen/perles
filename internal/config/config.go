@@ -40,6 +40,7 @@ type UIConfig struct {
 	ShowCounts      bool   `mapstructure:"show_counts"`
 	ShowStatusBar   bool   `mapstructure:"show_status_bar"`
 	MarkdownStyle   string `mapstructure:"markdown_style"` // "dark" (default) or "light"
+	VimMode       bool `mapstructure:"vim_mode"` // Enable vim keybindings in text input areas
 }
 
 // ThemeConfig holds all theme customization options.
@@ -261,6 +262,7 @@ func Defaults() Config {
 			ShowCounts:    true,
 			ShowStatusBar: true,
 			MarkdownStyle: "dark",
+			VimMode:       false, // Disabled by default for non-vim users
 		},
 		Theme: ThemeConfig{
 			// Default theme uses the "default" preset
@@ -292,9 +294,10 @@ auto_refresh: true
 
 # UI settings
 ui:
-  show_counts: true        # Show issue counts in column headers
-  show_status_bar: true    # Show status bar at bottom
-  # markdown_style: dark   # Markdown rendering style: "dark" (default) or "light"
+  show_counts: true       # Show issue counts in column headers
+  show_status_bar: true   # Show status bar at bottom
+  # markdown_style: dark  # Markdown rendering style: "dark" (default) or "light"
+  vim_mode: false         # Enable vim keybindings in text input areas (orchestration mode)
 
 # Theme configuration
 # Use a preset theme or customize individual colors

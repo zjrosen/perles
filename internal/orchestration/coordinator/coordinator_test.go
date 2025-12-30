@@ -231,7 +231,7 @@ func TestCoordinator_Subscribe(t *testing.T) {
 		require.Equal(t, events.CoordinatorStatusChange, event.Payload.Type)
 		require.Equal(t, events.StatusReady, event.Payload.Status)
 	case <-time.After(100 * time.Millisecond):
-		t.Fatal("timeout waiting for event")
+		require.Fail(t, "timeout waiting for event")
 	}
 }
 
@@ -273,7 +273,7 @@ func TestCoordinator_WorkerBroker(t *testing.T) {
 		require.Equal(t, events.WorkerSpawned, event.Payload.Type)
 		require.Equal(t, "worker-1", event.Payload.WorkerID)
 	case <-time.After(100 * time.Millisecond):
-		t.Fatal("timeout waiting for worker event")
+		require.Fail(t, "timeout waiting for worker event")
 	}
 }
 

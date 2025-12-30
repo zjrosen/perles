@@ -50,6 +50,7 @@ type Services struct {
 	Config     *config.Config
 	ConfigPath string
 	DBPath     string
+	WorkDir    string // Application root directory (where perles was invoked)
 	Clipboard  shared.Clipboard
 	Clock      shared.Clock
 }

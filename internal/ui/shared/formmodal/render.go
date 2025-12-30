@@ -70,20 +70,28 @@ func (m Model) renderField(index int, width int) string {
 
 	switch cfg.Type {
 	case FieldTypeText:
-		return styles.RenderFormSection(
-			[]string{fs.textInput.View()},
-			cfg.Label, cfg.Hint, width, focused, styles.BorderHighlightFocusColor,
-		)
+		return styles.FormSection(styles.FormSectionConfig{
+			Content:            []string{fs.textInput.View()},
+			Width:              width,
+			TopLeft:            cfg.Label,
+			TopLeftHint:        cfg.Hint,
+			Focused:            focused,
+			FocusedBorderColor: styles.BorderHighlightFocusColor,
+		})
 
 	case FieldTypeColor:
 		swatch := lipgloss.NewStyle().
 			Background(lipgloss.Color(fs.selectedColor)).
 			Render("  ")
 		colorRow := swatch + " " + fs.selectedColor
-		return styles.RenderFormSection(
-			[]string{colorRow},
-			cfg.Label, cfg.Hint, width, focused, styles.BorderHighlightFocusColor,
-		)
+		return styles.FormSection(styles.FormSectionConfig{
+			Content:            []string{colorRow},
+			Width:              width,
+			TopLeft:            cfg.Label,
+			TopLeftHint:        cfg.Hint,
+			Focused:            focused,
+			FocusedBorderColor: styles.BorderHighlightFocusColor,
+		})
 
 	case FieldTypeList:
 		var rows []string
@@ -101,10 +109,14 @@ func (m Model) renderField(index int, width int) string {
 		if len(rows) == 0 {
 			rows = []string{" (no items)"}
 		}
-		return styles.RenderFormSection(
-			rows,
-			cfg.Label, cfg.Hint, width, focused, styles.BorderHighlightFocusColor,
-		)
+		return styles.FormSection(styles.FormSectionConfig{
+			Content:            rows,
+			Width:              width,
+			TopLeft:            cfg.Label,
+			TopLeftHint:        cfg.Hint,
+			Focused:            focused,
+			FocusedBorderColor: styles.BorderHighlightFocusColor,
+		})
 
 	case FieldTypeSelect:
 		var rows []string
@@ -113,15 +125,23 @@ func (m Model) renderField(index int, width int) string {
 			if focused && i == fs.listCursor {
 				prefix = styles.SelectionIndicatorStyle.Render(">")
 			}
-			rows = append(rows, prefix+" "+item.label)
+			radio := "( )"
+			if item.selected {
+				radio = "(●)"
+			}
+			rows = append(rows, prefix+radio+" "+item.label)
 		}
 		if len(rows) == 0 {
 			rows = []string{" (no items)"}
 		}
-		return styles.RenderFormSection(
-			rows,
-			cfg.Label, cfg.Hint, width, focused, styles.BorderHighlightFocusColor,
-		)
+		return styles.FormSection(styles.FormSectionConfig{
+			Content:            rows,
+			Width:              width,
+			TopLeft:            cfg.Label,
+			TopLeftHint:        cfg.Hint,
+			Focused:            focused,
+			FocusedBorderColor: styles.BorderHighlightFocusColor,
+		})
 
 	case FieldTypeEditableList:
 		return m.renderEditableListField(fs, width, focused)
@@ -158,10 +178,14 @@ func (m Model) renderEditableListField(fs *fieldState, width int, focused bool) 
 	if len(listRows) == 0 {
 		listRows = []string{" (no items)"}
 	}
-	listSection := styles.RenderFormSection(
-		listRows,
-		cfg.Label, cfg.Hint, width, listFocused, styles.BorderHighlightFocusColor,
-	)
+	listSection := styles.FormSection(styles.FormSectionConfig{
+		Content:            listRows,
+		Width:              width,
+		TopLeft:            cfg.Label,
+		TopLeftHint:        cfg.Hint,
+		Focused:            listFocused,
+		FocusedBorderColor: styles.BorderHighlightFocusColor,
+	})
 
 	// Render input section
 	inputPrefix := " "
@@ -169,10 +193,14 @@ func (m Model) renderEditableListField(fs *fieldState, width int, focused bool) 
 		inputPrefix = styles.SelectionIndicatorStyle.Render(">")
 	}
 	inputView := inputPrefix + fs.addInput.View()
-	inputSection := styles.RenderFormSection(
-		[]string{inputView},
-		cfg.InputLabel, cfg.InputHint, width, inputFocused, styles.BorderHighlightFocusColor,
-	)
+	inputSection := styles.FormSection(styles.FormSectionConfig{
+		Content:            []string{inputView},
+		Width:              width,
+		TopLeft:            cfg.InputLabel,
+		TopLeftHint:        cfg.InputHint,
+		Focused:            inputFocused,
+		FocusedBorderColor: styles.BorderHighlightFocusColor,
+	})
 
 	// Join with a small gap
 	return lipgloss.JoinVertical(lipgloss.Left, listSection, "", inputSection)
@@ -185,10 +213,14 @@ func (m Model) renderToggleField(fs *fieldState, width int, focused bool) string
 
 	// Ensure we have exactly 2 options
 	if len(cfg.Options) < 2 {
-		return styles.RenderFormSection(
-			[]string{"(invalid: need 2 options)"},
-			cfg.Label, cfg.Hint, width, focused, styles.BorderHighlightFocusColor,
-		)
+		return styles.FormSection(styles.FormSectionConfig{
+			Content:            []string{"(invalid: need 2 options)"},
+			Width:              width,
+			TopLeft:            cfg.Label,
+			TopLeftHint:        cfg.Hint,
+			Focused:            focused,
+			FocusedBorderColor: styles.BorderHighlightFocusColor,
+		})
 	}
 
 	selectedStyle := lipgloss.NewStyle().
@@ -211,10 +243,14 @@ func (m Model) renderToggleField(fs *fieldState, width int, focused bool) string
 	hint := hintStyle.Render(" [←/→]")
 	toggleRow := opt0Label + "    " + opt1Label + hint
 
-	return styles.RenderFormSection(
-		[]string{toggleRow},
-		cfg.Label, cfg.Hint, width, focused, styles.BorderHighlightFocusColor,
-	)
+	return styles.FormSection(styles.FormSectionConfig{
+		Content:            []string{toggleRow},
+		Width:              width,
+		TopLeft:            cfg.Label,
+		TopLeftHint:        cfg.Hint,
+		Focused:            focused,
+		FocusedBorderColor: styles.BorderHighlightFocusColor,
+	})
 }
 
 // renderButtons renders the submit and cancel buttons.
