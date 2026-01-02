@@ -123,6 +123,7 @@ var (
 	IssueBugColor      = lipgloss.AdaptiveColor{Light: "#874BFD", Dark: "#7D56F4"}
 	IssueFeatureColor  = lipgloss.AdaptiveColor{Light: "#43BF6D", Dark: "#73F59F"}
 	IssueMoleculeColor = lipgloss.AdaptiveColor{Light: "#FF731A", Dark: "#FF731A"}
+	IssueConvoyColor   = lipgloss.AdaptiveColor{Light: "#888888", Dark: "#888888"}
 
 	TypeBugStyle      = lipgloss.NewStyle().Foreground(StatusErrorColor)
 	TypeFeatureStyle  = lipgloss.NewStyle().Foreground(IssueFeatureColor)
@@ -130,6 +131,7 @@ var (
 	TypeEpicStyle     = lipgloss.NewStyle().Foreground(IssueEpicColor)
 	TypeChoreStyle    = lipgloss.NewStyle().Foreground(IssueChoreColor)
 	TypeMoleculeStyle = lipgloss.NewStyle().Foreground(IssueMoleculeColor)
+	TypeConvoyStyle   = lipgloss.NewStyle().Foreground(IssueConvoyColor)
 
 	// Status bar
 	StatusBarStyle = lipgloss.NewStyle().
@@ -167,6 +169,8 @@ func GetTypeIndicator(t beads.IssueType) string {
 		return "[C]"
 	case beads.TypeMolecule:
 		return "[M]"
+	case beads.TypeConvoy:
+		return "[🚚]"
 	default:
 		return "[?]"
 	}
@@ -187,6 +191,8 @@ func GetTypeStyle(t beads.IssueType) lipgloss.Style {
 		return TypeChoreStyle
 	case beads.TypeMolecule:
 		return TypeMoleculeStyle
+	case beads.TypeConvoy:
+		return TypeConvoyStyle
 	default:
 		return lipgloss.NewStyle()
 	}

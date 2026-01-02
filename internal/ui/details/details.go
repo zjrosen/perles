@@ -858,6 +858,8 @@ func getTypeStyle(t beads.IssueType) lipgloss.Style {
 		return styles.TypeChoreStyle
 	case beads.TypeMolecule:
 		return styles.TypeMoleculeStyle
+	case beads.TypeConvoy:
+		return styles.TypeConvoyStyle
 	default:
 		return lipgloss.NewStyle()
 	}
@@ -940,6 +942,8 @@ func formatType(t beads.IssueType) string {
 		return "Chore"
 	case beads.TypeMolecule:
 		return "Molecule"
+	case beads.TypeConvoy:
+		return "Convoy"
 	default:
 		return string(t)
 	}

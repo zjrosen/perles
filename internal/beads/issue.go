@@ -33,6 +33,7 @@ const (
 	TypeEpic     IssueType = "epic"
 	TypeChore    IssueType = "chore"
 	TypeMolecule IssueType = "molecule"
+	TypeConvoy   IssueType = "convoy"
 )
 
 // Comment represents a comment on an issue.

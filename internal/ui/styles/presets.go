@@ -89,6 +89,7 @@ var DefaultPreset = Preset{
 		TokenTypeBug:      "#FF8787",
 		TokenTypeFeature:  "#73F59F",
 		TokenTypeMolecule: "#FF731A",
+		TokenTypeConvoy:   "#888888",
 
 		// BQL syntax highlighting (Catppuccin Mocha inspired)
 		TokenBQLKeyword:  "#CBA6F7",
@@ -175,7 +176,8 @@ var CatppuccinMochaPreset = Preset{
 		TokenTypeEpic:     "#CBA6F7", // mauve
 		TokenTypeBug:      "#F38BA8", // red
 		TokenTypeFeature:  "#A6E3A1", // green
-		TokenTypeMolecule: "#6C7086", // overlay0
+		TokenTypeMolecule: "#FAB387", // peach
+		TokenTypeConvoy:   "#6C7086", // overlay0
 
 		// BQL syntax highlighting
 		TokenBQLKeyword:  "#CBA6F7", // mauve
@@ -262,7 +264,8 @@ var CatppuccinLattePreset = Preset{
 		TokenTypeEpic:     "#8839EF", // mauve
 		TokenTypeBug:      "#D20F39", // red
 		TokenTypeFeature:  "#40A02B", // green
-		TokenTypeMolecule: "#9CA0B0", // overlay0
+		TokenTypeMolecule: "#FE640B", // peach
+		TokenTypeConvoy:   "#9CA0B0", // overlay0
 
 		// BQL syntax highlighting
 		TokenBQLKeyword:  "#8839EF", // mauve
@@ -349,7 +352,8 @@ var DraculaPreset = Preset{
 		TokenTypeEpic:     "#BD93F9", // purple
 		TokenTypeBug:      "#FF5555", // red
 		TokenTypeFeature:  "#50FA7B", // green
-		TokenTypeMolecule: "#6272A4", // comment
+		TokenTypeMolecule: "#FFB86C", // orange
+		TokenTypeConvoy:   "#6272A4", // comment
 
 		// BQL syntax highlighting
 		TokenBQLKeyword:  "#FF79C6", // pink
@@ -440,7 +444,8 @@ var NordPreset = Preset{
 		TokenTypeEpic:     "#B48EAD", // aurora purple
 		TokenTypeBug:      "#BF616A", // aurora red
 		TokenTypeFeature:  "#A3BE8C", // aurora green
-		TokenTypeMolecule: "#4C566A", // polar night 4
+		TokenTypeMolecule: "#D08770", // aurora orange
+		TokenTypeConvoy:   "#4C566A", // polar night 4
 
 		// BQL syntax highlighting
 		TokenBQLKeyword:  "#81A1C1", // frost 3
@@ -528,7 +533,8 @@ var HighContrastPreset = Preset{
 		TokenTypeEpic:     "#FF00FF", // magenta
 		TokenTypeBug:      "#FF0000", // red
 		TokenTypeFeature:  "#00FF00", // green
-		TokenTypeMolecule: "#808080", // gray
+		TokenTypeMolecule: "#FFA500", // orange
+		TokenTypeConvoy:   "#808080", // gray
 
 		// BQL syntax highlighting - high contrast
 		TokenBQLKeyword:  "#FF00FF", // magenta
