@@ -303,13 +303,266 @@ func TestListField_Navigation(t *testing.T) {
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	require.Equal(t, 2, m.fields[0].listCursor, "after down")
 
-	// At boundary, doesn't go past
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	require.Equal(t, 2, m.fields[0].listCursor, "at boundary")
-
 	// k/up moves cursor up
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
 	require.Equal(t, 1, m.fields[0].listCursor, "after 'k'")
+}
+
+// --- List Field Boundary Escape Tests ---
+
+func TestListField_JAtBottomEscapesToNextField(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:   "items",
+				Type:  FieldTypeList,
+				Label: "Items",
+				Options: []ListOption{
+					{Label: "Item 1", Value: "1"},
+					{Label: "Item 2", Value: "2"},
+				},
+			},
+			{Key: "name", Type: FieldTypeText, Label: "Name"},
+		},
+	}
+	m := New(cfg)
+
+	// Start on list field
+	require.Equal(t, 0, m.focusedIndex)
+	require.Equal(t, 0, m.fields[0].listCursor)
+
+	// Navigate to last item
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	require.Equal(t, 1, m.fields[0].listCursor, "at last item")
+
+	// j at bottom should escape to next field
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	require.Equal(t, 1, m.focusedIndex, "should move to next field")
+}
+
+func TestListField_DownAtBottomEscapesToNextField(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:   "items",
+				Type:  FieldTypeList,
+				Label: "Items",
+				Options: []ListOption{
+					{Label: "Item 1", Value: "1"},
+					{Label: "Item 2", Value: "2"},
+				},
+			},
+			{Key: "name", Type: FieldTypeText, Label: "Name"},
+		},
+	}
+	m := New(cfg)
+
+	// Navigate to last item
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	require.Equal(t, 1, m.fields[0].listCursor, "at last item")
+
+	// Down at bottom should escape to next field
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	require.Equal(t, 1, m.focusedIndex, "should move to next field")
+}
+
+func TestListField_KAtTopEscapesToPrevField(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{Key: "name", Type: FieldTypeText, Label: "Name"},
+			{
+				Key:   "items",
+				Type:  FieldTypeList,
+				Label: "Items",
+				Options: []ListOption{
+					{Label: "Item 1", Value: "1"},
+					{Label: "Item 2", Value: "2"},
+				},
+			},
+		},
+	}
+	m := New(cfg)
+
+	// Move to list field
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	require.Equal(t, 1, m.focusedIndex)
+	require.Equal(t, 0, m.fields[1].listCursor, "at first item")
+
+	// k at top should escape to previous field
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	require.Equal(t, 0, m.focusedIndex, "should move to previous field")
+}
+
+func TestListField_UpAtTopEscapesToPrevField(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{Key: "name", Type: FieldTypeText, Label: "Name"},
+			{
+				Key:   "items",
+				Type:  FieldTypeList,
+				Label: "Items",
+				Options: []ListOption{
+					{Label: "Item 1", Value: "1"},
+					{Label: "Item 2", Value: "2"},
+				},
+			},
+		},
+	}
+	m := New(cfg)
+
+	// Move to list field
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	require.Equal(t, 1, m.focusedIndex)
+	require.Equal(t, 0, m.fields[1].listCursor, "at first item")
+
+	// Up at top should escape to previous field
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	require.Equal(t, 0, m.focusedIndex, "should move to previous field")
+}
+
+func TestSelectField_JAtBottomEscapesToNextField(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:   "priority",
+				Type:  FieldTypeSelect,
+				Label: "Priority",
+				Options: []ListOption{
+					{Label: "P0", Value: "0"},
+					{Label: "P1", Value: "1"},
+				},
+			},
+			{Key: "name", Type: FieldTypeText, Label: "Name"},
+		},
+	}
+	m := New(cfg)
+
+	// Navigate to last item
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	require.Equal(t, 1, m.fields[0].listCursor, "at last item")
+
+	// j at bottom should escape to next field
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	require.Equal(t, 1, m.focusedIndex, "should move to next field")
+}
+
+func TestSelectField_KAtTopEscapesToPrevField(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{Key: "name", Type: FieldTypeText, Label: "Name"},
+			{
+				Key:   "priority",
+				Type:  FieldTypeSelect,
+				Label: "Priority",
+				Options: []ListOption{
+					{Label: "P0", Value: "0"},
+					{Label: "P1", Value: "1"},
+				},
+			},
+		},
+	}
+	m := New(cfg)
+
+	// Move to select field
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	require.Equal(t, 1, m.focusedIndex)
+
+	// k at top should escape to previous field
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	require.Equal(t, 0, m.focusedIndex, "should move to previous field")
+}
+
+func TestListField_EmptyList_JEscapesToNextField(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:     "items",
+				Type:    FieldTypeList,
+				Label:   "Items",
+				Options: []ListOption{}, // Empty list
+			},
+			{Key: "name", Type: FieldTypeText, Label: "Name"},
+		},
+	}
+	m := New(cfg)
+
+	// j on empty list should immediately escape to next field
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	require.Equal(t, 1, m.focusedIndex, "should move to next field on empty list")
+}
+
+func TestListField_EmptyList_KWrapsToCancel(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:     "items",
+				Type:    FieldTypeList,
+				Label:   "Items",
+				Options: []ListOption{}, // Empty list
+			},
+		},
+	}
+	m := New(cfg)
+
+	// k on empty list should wrap to cancel button
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	require.Equal(t, -1, m.focusedIndex, "should wrap to buttons")
+	require.Equal(t, 1, m.focusedButton, "should be on cancel button")
+}
+
+func TestTextField_JK_TypesCharacters(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{Key: "name", Type: FieldTypeText, Label: "Name"},
+		},
+	}
+	m := New(cfg)
+
+	// Start on text field (focused)
+	require.Equal(t, 0, m.focusedIndex)
+
+	// Type 'j' and 'k' - should add characters to input
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+
+	// j and k should be typed, not navigate
+	require.Equal(t, "jk", m.fields[0].textInput.Value(), "j/k should type in text field")
+	require.Equal(t, 0, m.focusedIndex, "should stay on text field")
+}
+
+func TestEditableListField_JK_InInputTypesCharacters(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:  "tags",
+				Type: FieldTypeEditableList,
+				Options: []ListOption{
+					{Label: "one", Value: "1"},
+				},
+			},
+		},
+	}
+	m := New(cfg)
+
+	// Move to input section
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	require.Equal(t, SubFocusInput, m.fields[0].subFocus)
+
+	// Type 'j' and 'k' - should add characters to input (not navigate)
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+
+	require.Equal(t, "jk", m.fields[0].addInput.Value(), "j/k should type in editable list input")
 }
 
 func TestListField_Selection_MultiSelect(t *testing.T) {

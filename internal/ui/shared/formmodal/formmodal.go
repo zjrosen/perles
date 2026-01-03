@@ -189,6 +189,64 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case key.Matches(msg, keys.Common.Enter):
 		return m.handleEnter()
 
+	case msg.String() == "j" || msg.String() == "k":
+		// j/k only navigate in list fields; in text inputs they type characters
+		// Check msg.String() before keys.Common.Down/Up since those bindings include j/k
+		if m.focusedIndex >= 0 && m.focusedIndex < len(m.fields) {
+			fs := &m.fields[m.focusedIndex]
+			if fs.config.Type == FieldTypeList || fs.config.Type == FieldTypeSelect {
+				if msg.String() == "j" {
+					// At bottom of list, escape to next field
+					if len(fs.listItems) == 0 || fs.listCursor >= len(fs.listItems)-1 {
+						m = m.nextField()
+						return m, m.blinkCmd()
+					}
+					// Otherwise navigate down in list
+					fs.listCursor++
+					return m, nil
+				}
+				// k: at top of list, escape to previous field
+				if fs.listCursor <= 0 {
+					m = m.prevField()
+					return m, m.blinkCmd()
+				}
+				// Otherwise navigate up in list
+				fs.listCursor--
+				return m, nil
+			}
+			// For toggle fields, j/k moves to next/previous field
+			if fs.config.Type == FieldTypeToggle {
+				if msg.String() == "j" {
+					m = m.nextField()
+				} else {
+					m = m.prevField()
+				}
+				return m, m.blinkCmd()
+			}
+			// For text inputs, j/k should type characters - fall through to input handler
+		} else if m.focusedIndex == -1 {
+			// On buttons: j navigates Save -> Cancel -> first field, k does reverse
+			if msg.String() == "j" {
+				if m.focusedButton == 0 {
+					m.focusedButton = 1
+					return m, nil
+				} else if len(m.fields) > 0 {
+					m.focusedIndex = 0
+					m.focusNextFieldByType()
+					return m, m.blinkCmd()
+				}
+			} else { // k
+				if m.focusedButton == 1 {
+					m.focusedButton = 0
+					return m, nil
+				} else if len(m.fields) > 0 {
+					m.focusedIndex = len(m.fields) - 1
+					m.focusPrevFieldByType()
+					return m, m.blinkCmd()
+				}
+			}
+		}
+
 	case key.Matches(msg, keys.Common.Left):
 		// For toggle fields, switch to first option
 		if m.focusedIndex >= 0 && m.focusedIndex < len(m.fields) {
@@ -220,13 +278,17 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 
 	case key.Matches(msg, keys.Common.Down):
-		// For list fields, navigate within the list
+		// For list fields, navigate within the list or escape at boundary
 		if m.focusedIndex >= 0 && m.focusedIndex < len(m.fields) {
 			fs := &m.fields[m.focusedIndex]
 			if fs.config.Type == FieldTypeList || fs.config.Type == FieldTypeSelect {
-				if fs.listCursor < len(fs.listItems)-1 {
-					fs.listCursor++
+				// At bottom (or empty list), escape to next field
+				if len(fs.listItems) == 0 || fs.listCursor >= len(fs.listItems)-1 {
+					m = m.nextField()
+					return m, m.blinkCmd()
 				}
+				// Otherwise navigate down in list
+				fs.listCursor++
 				return m, nil
 			}
 			// For toggle fields, j/down moves to next field (not within toggle)
@@ -247,13 +309,17 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 
 	case key.Matches(msg, keys.Common.Up):
-		// For list fields, navigate within the list
+		// For list fields, navigate within the list or escape at boundary
 		if m.focusedIndex >= 0 && m.focusedIndex < len(m.fields) {
 			fs := &m.fields[m.focusedIndex]
 			if fs.config.Type == FieldTypeList || fs.config.Type == FieldTypeSelect {
-				if fs.listCursor > 0 {
-					fs.listCursor--
+				// At top (or empty list), escape to previous field
+				if len(fs.listItems) == 0 || fs.listCursor <= 0 {
+					m = m.prevField()
+					return m, m.blinkCmd()
 				}
+				// Otherwise navigate up in list
+				fs.listCursor--
 				return m, nil
 			}
 			// For toggle fields, k/up moves to previous field (not within toggle)
