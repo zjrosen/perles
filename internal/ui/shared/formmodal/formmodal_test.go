@@ -681,6 +681,205 @@ func TestListField_ShiftTabEntersFromNextField(t *testing.T) {
 	require.Equal(t, 0, m.focusedIndex, "expected focus on list")
 }
 
+// --- Cursor Positioning Tests ---
+
+func TestListField_CursorPositionFromAbove(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{Key: "name", Type: FieldTypeText, Label: "Name"},
+			{
+				Key:   "items",
+				Type:  FieldTypeList,
+				Label: "Items",
+				Options: []ListOption{
+					{Label: "Item 1", Value: "1"},
+					{Label: "Item 2", Value: "2"},
+					{Label: "Item 3", Value: "3"},
+				},
+			},
+		},
+	}
+	m := New(cfg)
+
+	// Start on text field
+	require.Equal(t, 0, m.focusedIndex)
+
+	// Tab to list field (entering from above)
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	require.Equal(t, 1, m.focusedIndex, "should be on list field")
+
+	// Cursor should be at first item (index 0)
+	require.Equal(t, 0, m.fields[1].listCursor, "cursor should be at first item when entering from above")
+}
+
+func TestListField_CursorPositionFromBelow(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:   "items",
+				Type:  FieldTypeList,
+				Label: "Items",
+				Options: []ListOption{
+					{Label: "Item 1", Value: "1"},
+					{Label: "Item 2", Value: "2"},
+					{Label: "Item 3", Value: "3"},
+				},
+			},
+			{Key: "name", Type: FieldTypeText, Label: "Name"},
+		},
+	}
+	m := New(cfg)
+
+	// Move to second field (text field)
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	require.Equal(t, 1, m.focusedIndex)
+
+	// Shift+Tab to go back to list (entering from below)
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	require.Equal(t, 0, m.focusedIndex, "should be on list field")
+
+	// Cursor should be at last item (index 2)
+	require.Equal(t, 2, m.fields[0].listCursor, "cursor should be at last item when entering from below")
+}
+
+func TestSelectField_CursorPositionFromAbove(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{Key: "name", Type: FieldTypeText, Label: "Name"},
+			{
+				Key:   "priority",
+				Type:  FieldTypeSelect,
+				Label: "Priority",
+				Options: []ListOption{
+					{Label: "P0", Value: "0"},
+					{Label: "P1", Value: "1"},
+					{Label: "P2", Value: "2"},
+				},
+			},
+		},
+	}
+	m := New(cfg)
+
+	// Start on text field
+	require.Equal(t, 0, m.focusedIndex)
+
+	// Tab to select field (entering from above)
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	require.Equal(t, 1, m.focusedIndex, "should be on select field")
+
+	// Cursor should be at first item (index 0)
+	require.Equal(t, 0, m.fields[1].listCursor, "cursor should be at first item when entering from above")
+}
+
+func TestSelectField_CursorPositionFromBelow(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:   "priority",
+				Type:  FieldTypeSelect,
+				Label: "Priority",
+				Options: []ListOption{
+					{Label: "P0", Value: "0"},
+					{Label: "P1", Value: "1"},
+					{Label: "P2", Value: "2"},
+					{Label: "P3", Value: "3"},
+					{Label: "P4", Value: "4"},
+				},
+			},
+			{Key: "name", Type: FieldTypeText, Label: "Name"},
+		},
+	}
+	m := New(cfg)
+
+	// Move to second field (text field)
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	require.Equal(t, 1, m.focusedIndex)
+
+	// Shift+Tab to go back to select (entering from below)
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	require.Equal(t, 0, m.focusedIndex, "should be on select field")
+
+	// Cursor should be at last item (index 4)
+	require.Equal(t, 4, m.fields[0].listCursor, "cursor should be at last item when entering from below")
+}
+
+func TestListField_NavigationFlow_FromAboveToBelow(t *testing.T) {
+	// Test the full navigation flow: text1 -> list (at top) -> through list -> text2 -> back to list (at bottom)
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{Key: "field1", Type: FieldTypeText, Label: "Field 1"},
+			{
+				Key:   "items",
+				Type:  FieldTypeList,
+				Label: "Items",
+				Options: []ListOption{
+					{Label: "Item 1", Value: "1"},
+					{Label: "Item 2", Value: "2"},
+					{Label: "Item 3", Value: "3"},
+				},
+			},
+			{Key: "field2", Type: FieldTypeText, Label: "Field 2"},
+		},
+	}
+	m := New(cfg)
+
+	// Start on field1
+	require.Equal(t, 0, m.focusedIndex)
+
+	// Tab to list (enters from above -> cursor at top)
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	require.Equal(t, 1, m.focusedIndex, "on list")
+	require.Equal(t, 0, m.fields[1].listCursor, "cursor at top")
+
+	// Navigate down through list
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	require.Equal(t, 1, m.fields[1].listCursor)
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	require.Equal(t, 2, m.fields[1].listCursor, "cursor at bottom")
+
+	// Down at bottom escapes to field2
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	require.Equal(t, 2, m.focusedIndex, "escaped to field2")
+
+	// Up from field2 should go back to list with cursor at bottom
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	require.Equal(t, 1, m.focusedIndex, "back on list")
+	require.Equal(t, 2, m.fields[1].listCursor, "cursor at bottom when entering from below")
+}
+
+func TestListField_CursorPositionFromButtons(t *testing.T) {
+	// When navigating up from buttons to list, should position cursor at bottom
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:   "items",
+				Type:  FieldTypeList,
+				Label: "Items",
+				Options: []ListOption{
+					{Label: "Item 1", Value: "1"},
+					{Label: "Item 2", Value: "2"},
+				},
+			},
+		},
+	}
+	m := New(cfg)
+
+	// Tab to buttons
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	require.Equal(t, -1, m.focusedIndex, "on buttons")
+
+	// k or Shift+Tab from buttons should go to list with cursor at bottom
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	require.Equal(t, 0, m.focusedIndex, "back on list")
+	require.Equal(t, 1, m.fields[0].listCursor, "cursor at bottom when entering from buttons")
+}
+
 func TestListField_SubmitIncludesSelectedValues(t *testing.T) {
 	cfg := FormConfig{
 		Title: "Test Form",

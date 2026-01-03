@@ -487,6 +487,9 @@ func (m *Model) focusNextFieldByType() {
 		fs.textInput.Focus()
 	case FieldTypeEditableList:
 		fs.subFocus = SubFocusList // Start on list when navigating forward
+	case FieldTypeList, FieldTypeSelect:
+		// Position cursor at first item when entering from above
+		fs.listCursor = 0
 	}
 }
 
@@ -540,6 +543,11 @@ func (m *Model) focusPrevFieldByType() {
 		// When navigating backward, land on the input section first
 		fs.subFocus = SubFocusInput
 		fs.addInput.Focus()
+	case FieldTypeList, FieldTypeSelect:
+		// Position cursor at last item when entering from below
+		if len(fs.listItems) > 0 {
+			fs.listCursor = len(fs.listItems) - 1
+		}
 	}
 }
 
