@@ -13,6 +13,7 @@ import (
 	"github.com/zjrosen/perles/internal/mode"
 	"github.com/zjrosen/perles/internal/ui/board"
 	"github.com/zjrosen/perles/internal/ui/coleditor"
+	"github.com/zjrosen/perles/internal/ui/details"
 	"github.com/zjrosen/perles/internal/ui/modals/help"
 	"github.com/zjrosen/perles/internal/ui/modals/issueeditor"
 	"github.com/zjrosen/perles/internal/ui/shared/colorpicker"
@@ -35,7 +36,8 @@ const (
 	ViewViewMenu
 	ViewDeleteColumnModal
 	ViewRenameViewModal
-	ViewEditIssue // Unified issue editor modal
+	ViewEditIssue   // Unified issue editor modal
+	ViewDeleteIssue // Delete issue confirmation modal
 )
 
 // cursorState tracks the current selection for restoration after refresh.
@@ -63,7 +65,9 @@ type Model struct {
 	errContext  string // Context for the error (e.g., "updating status")
 
 	// Delete operation state
-	pendingDeleteColumn int // Index of column to delete, -1 if none
+	pendingDeleteColumn int          // Index of column to delete, -1 if none
+	deleteIssueIDs      []string     // IDs to delete (includes descendants for epics)
+	selectedIssue       *beads.Issue // Issue being deleted
 
 	// Pending cursor restoration after refresh
 	pendingCursor *cursorState
@@ -205,6 +209,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.view = ViewBoard
 		return m, nil
 
+	case details.DeleteIssueMsg:
+		return m.openDeleteConfirm(msg)
+
+	case issueDeletedMsg:
+		return m.handleIssueDeleted(msg)
+
 	case labelsChangedMsg:
 		return m.handleLabelsChanged(msg)
 
@@ -342,8 +352,8 @@ func (m Model) renderCurrentView() string {
 			bg += "\n" + m.renderStatusBar()
 		}
 		return m.picker.Overlay(bg)
-	case ViewDeleteColumnModal:
-		// Render delete column modal overlay on top of board
+	case ViewDeleteColumnModal, ViewDeleteIssue:
+		// Render delete modal overlay on top of board
 		bg := m.board.View()
 		if m.showStatusBar {
 			bg += "\n" + m.renderStatusBar()

@@ -814,7 +814,7 @@ func (m Model) renderFooter() string {
 		scrollPercent = fmt.Sprintf(" %3.0f%%", m.viewport.ScrollPercent()*100)
 	}
 
-	return footerStyle.Render("[j/k] Scroll  [ctrl+e] Edit Issue  [d] Delete Issue  [Esc] Back" + scrollPercent)
+	return footerStyle.Render("[j/k] Scroll  [ctrl+e] Edit Issue  [ctrl+d] Delete Issue  [Esc] Back" + scrollPercent)
 }
 
 // getTypeStyle returns the style for an issue type.

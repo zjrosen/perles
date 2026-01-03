@@ -1185,8 +1185,8 @@ func TestSearch_DeleteKey_ListSubMode_EmitsDeleteIssueMsg(t *testing.T) {
 	require.Equal(t, mode.SubModeList, m.subMode, "should be in list sub-mode")
 	require.Equal(t, "test-1", m.results[m.selectedIdx].ID, "should have test-1 selected")
 
-	// Press 'd' while focused on results in list mode
-	m, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	// Press 'ctrl+d' while focused on results in list mode
+	m, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlD})
 
 	// Should return a command that emits DeleteIssueMsg
 	require.NotNil(t, cmd, "expected a command to be returned")
@@ -1206,8 +1206,8 @@ func TestSearch_DeleteKey_EmptyList_NoOp(t *testing.T) {
 	m.focus = FocusResults
 	// No results loaded - m.results is nil/empty
 
-	// Press 'd' with no selected issue
-	m, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	// Press 'ctrl+d' with no selected issue
+	m, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlD})
 
 	// Should return nil command (no-op)
 	require.Nil(t, cmd, "expected no command when no issue is selected")
@@ -1220,8 +1220,8 @@ func TestSearch_DeleteKey_FocusDetails_DelegatesToDetails(t *testing.T) {
 	m.details = details.New(m.results[0], m.services.Executor, m.services.Client).SetSize(50, 30)
 	m.hasDetail = true
 
-	// Press 'd' while focused on details - should delegate to details component
-	m, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	// Press 'ctrl+d' while focused on details - should delegate to details component
+	m, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlD})
 
 	// Details component handles 'd' key, so cmd should exist (from details)
 	require.NotNil(t, cmd, "expected command from details delegation")

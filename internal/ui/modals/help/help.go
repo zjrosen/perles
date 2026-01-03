@@ -216,8 +216,11 @@ func (m Model) renderKanbanContent() string {
 	actionsCol.WriteString(renderBinding(keys.Kanban.Yank))
 	actionsCol.WriteString(renderBinding(keys.Kanban.AddColumn))
 	actionsCol.WriteString(renderBinding(keys.Kanban.EditColumn))
+	actionsCol.WriteString(renderBinding(keys.Kanban.DeleteColumn))
 	actionsCol.WriteString(renderBinding(keys.Kanban.MoveColumnLeft))
 	actionsCol.WriteString(renderBinding(keys.Kanban.MoveColumnRight))
+	actionsCol.WriteString(renderBinding(keys.Component.EditAction))
+	actionsCol.WriteString(renderBinding(keys.Component.DelAction))
 
 	// Views column
 	var viewsCol strings.Builder
@@ -226,7 +229,6 @@ func (m Model) renderKanbanContent() string {
 	viewsCol.WriteString(renderBinding(keys.Kanban.NextView))
 	viewsCol.WriteString(renderBinding(keys.Kanban.PrevView))
 	viewsCol.WriteString(renderBinding(keys.Kanban.ViewMenu))
-	viewsCol.WriteString(renderBinding(keys.Kanban.DeleteColumn))
 	viewsCol.WriteString(renderBinding(keys.Kanban.SearchFromColumn))
 
 	// General column

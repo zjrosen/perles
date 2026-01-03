@@ -155,7 +155,6 @@ https://github.com/user-attachments/assets/8ce16144-15dd-4509-8cd9-aa8e07477b5d
 | `Ctrl+J` / `Ctrl+N` | Next view |
 | `Ctrl+K` / `Ctrl+P` | Previous view |
 | `Ctrl+V` | View menu (Create/Delete/Rename) |
-| `Ctrl+D` | Delete current column |
 
 #### Columns
 
@@ -163,6 +162,7 @@ https://github.com/user-attachments/assets/8ce16144-15dd-4509-8cd9-aa8e07477b5d
 |-----|--------|
 | `a` | Add new column |
 | `e` | Edit current column |
+| `d` | Delete current column |
 | `Ctrl+H` | Move column left |
 | `Ctrl+L` | Move column right |
 | `/` | Open search with column's BQL query |
@@ -179,8 +179,8 @@ https://github.com/user-attachments/assets/8ce16144-15dd-4509-8cd9-aa8e07477b5d
 
 | Key | Action |
 |-----|--------|
-| `e` | Open edit menu (labels, priority, status) |
-| `d` | Delete issue |
+| `Ctrl+E` | Edit issue (labels, priority, status) |
+| `Ctrl+D` | Delete issue |
 | `j` / `k` | Scroll content |
 | `Esc` | Back to kanban board |
 

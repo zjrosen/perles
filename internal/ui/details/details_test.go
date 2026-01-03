@@ -687,11 +687,11 @@ func TestDetails_DeleteKey_EmitsDeleteIssueMsg(t *testing.T) {
 	m := createTestModel(t, issue)
 	m = m.SetSize(100, 40)
 
-	// Press 'd' to request deletion
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	// Press 'ctrl+d' to request deletion
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
 
 	// Should return a command that produces DeleteIssueMsg
-	require.NotNil(t, cmd, "expected command from 'd' key")
+	require.NotNil(t, cmd, "expected command from 'ctrl+d' key")
 	msg := cmd()
 	deleteMsg, ok := msg.(DeleteIssueMsg)
 	require.True(t, ok, "expected DeleteIssueMsg")
@@ -709,8 +709,8 @@ func TestDetails_DeleteKey_EpicType(t *testing.T) {
 	m := createTestModel(t, issue)
 	m = m.SetSize(100, 40)
 
-	// Press 'd' to request deletion
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	// Press 'ctrl+d' to request deletion
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
 
 	msg := cmd()
 	deleteMsg, ok := msg.(DeleteIssueMsg)
@@ -729,7 +729,7 @@ func TestDetails_FooterShowsDeleteKeybinding(t *testing.T) {
 	m = m.SetSize(100, 40)
 	view := m.View()
 
-	require.Contains(t, view, "[d] Delete Issue", "expected footer to show delete keybinding")
+	require.Contains(t, view, "[ctrl+d] Delete Issue", "expected footer to show delete keybinding")
 }
 
 // TestDetails_View_Golden uses teatest golden file comparison.

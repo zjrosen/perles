@@ -123,8 +123,8 @@ var Kanban = struct {
 		key.WithHelp("ctrl+v", "view menu"),
 	),
 	DeleteColumn: key.NewBinding(
-		key.WithKeys("ctrl+d"),
-		key.WithHelp("ctrl+d", "delete column"),
+		key.WithKeys("d"),
+		key.WithHelp("d", "delete column"),
 	),
 	SearchFromColumn: key.NewBinding(
 		key.WithKeys("/"),
@@ -295,11 +295,11 @@ var Component = struct {
 	),
 	EditAction: key.NewBinding(
 		key.WithKeys("ctrl+e"),
-		key.WithHelp("ctrl+e", "edit"),
+		key.WithHelp("ctrl+e", "edit issue"),
 	),
 	DelAction: key.NewBinding(
-		key.WithKeys("d"),
-		key.WithHelp("d", "delete"),
+		key.WithKeys("ctrl+d"),
+		key.WithHelp("ctrl+d", "delete issue"),
 	),
 	Clear: key.NewBinding(
 		key.WithKeys("c"),

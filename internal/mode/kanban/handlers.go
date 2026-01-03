@@ -6,11 +6,14 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/zjrosen/perles/internal/beads"
 	"github.com/zjrosen/perles/internal/config"
 	"github.com/zjrosen/perles/internal/keys"
 	"github.com/zjrosen/perles/internal/log"
 	"github.com/zjrosen/perles/internal/mode"
+	"github.com/zjrosen/perles/internal/mode/shared"
 	"github.com/zjrosen/perles/internal/ui/coleditor"
+	"github.com/zjrosen/perles/internal/ui/details"
 	"github.com/zjrosen/perles/internal/ui/shared/modal"
 	"github.com/zjrosen/perles/internal/ui/shared/picker"
 	"github.com/zjrosen/perles/internal/ui/shared/toaster"
@@ -45,6 +48,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m.handleRenameViewModalKey(msg)
 	case ViewEditIssue:
 		return m.handleEditIssueKey(msg)
+	case ViewDeleteIssue:
+		return m.handleDeleteIssueKey(msg)
 	}
 	return m, nil
 }
@@ -304,6 +309,19 @@ func (m Model) handleBoardKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+
+	case key.Matches(msg, keys.Component.DelAction):
+		// Open delete confirmation for the selected issue
+		issue := m.board.SelectedIssue()
+		if issue != nil {
+			return m, func() tea.Msg {
+				return details.DeleteIssueMsg{
+					IssueID:   issue.ID,
+					IssueType: issue.Type,
+				}
+			}
+		}
+		return m, nil
 	}
 
 	// Delegate navigation to board
@@ -362,6 +380,50 @@ func (m Model) handleEditIssueKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.issueEditor, cmd = m.issueEditor.Update(msg)
 	return m, cmd
+}
+
+func (m Model) handleDeleteIssueKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	if msg.Type == tea.KeyCtrlC {
+		// Close overlay instead of quitting
+		m.view = ViewBoard
+		m.deleteIssueIDs = nil
+		m.selectedIssue = nil
+		return m, nil
+	}
+
+	// Delegate to modal
+	var cmd tea.Cmd
+	m.modal, cmd = m.modal.Update(msg)
+	return m, cmd
+}
+
+// openDeleteConfirm opens the delete confirmation modal.
+func (m Model) openDeleteConfirm(msg details.DeleteIssueMsg) (Model, tea.Cmd) {
+	// Get full issue data
+	var issue *beads.Issue
+
+	// First try to get from selected issue on board
+	if selected := m.board.SelectedIssue(); selected != nil && selected.ID == msg.IssueID {
+		issue = selected
+	}
+
+	// Fallback: query via executor if needed
+	if issue == nil {
+		issues, err := m.services.Executor.Execute(fmt.Sprintf(`id = "%s"`, msg.IssueID))
+		if err != nil || len(issues) == 0 {
+			m.err = fmt.Errorf("could not find issue %s", msg.IssueID)
+			m.errContext = "preparing delete"
+			return m, scheduleErrorClear()
+		}
+		issue = &issues[0]
+	}
+
+	// Create delete modal using shared component
+	m.modal, m.deleteIssueIDs = shared.CreateDeleteModal(issue, m.services.Executor)
+	m.modal.SetSize(m.width, m.height)
+	m.selectedIssue = issue
+	m.view = ViewDeleteIssue
+	return m, m.modal.Init()
 }
 
 func (m Model) handleViewMenuKey(msg tea.KeyMsg) (Model, tea.Cmd) {
@@ -637,6 +699,17 @@ func (m Model) handleModalSubmit(msg modal.SubmitMsg) (Model, tea.Cmd) {
 	if m.view == ViewRenameViewModal {
 		return m.renameCurrentView(msg.Values["name"])
 	}
+	if m.view == ViewDeleteIssue {
+		if len(m.deleteIssueIDs) > 0 {
+			issueIDs := m.deleteIssueIDs
+			m.view = ViewBoard
+			m.deleteIssueIDs = nil
+			m.selectedIssue = nil
+			return m, deleteIssueCmd(issueIDs)
+		}
+		m.view = ViewBoard
+		return m, nil
+	}
 	// Route to column editor for delete confirmation modal
 	if m.view == ViewColumnEditor {
 		var cmd tea.Cmd
@@ -653,6 +726,12 @@ func (m Model) handleModalCancel() (Model, tea.Cmd) {
 		m.pendingDeleteColumn = -1
 		return m, nil
 	}
+	if m.view == ViewDeleteIssue {
+		m.view = ViewBoard
+		m.deleteIssueIDs = nil
+		m.selectedIssue = nil
+		return m, nil
+	}
 	// Route to column editor for delete confirmation modal
 	if m.view == ViewColumnEditor {
 		var cmd tea.Cmd
@@ -660,4 +739,45 @@ func (m Model) handleModalCancel() (Model, tea.Cmd) {
 		return m, cmd
 	}
 	return m, nil
+}
+
+// issueDeletedMsg is sent when issue deletion completes.
+type issueDeletedMsg struct {
+	err error
+}
+
+// deleteIssueCmd creates a command that deletes the specified issues.
+func deleteIssueCmd(issueIDs []string) tea.Cmd {
+	return func() tea.Msg {
+		if len(issueIDs) == 0 {
+			return issueDeletedMsg{err: nil}
+		}
+		err := beads.DeleteIssues(issueIDs)
+		return issueDeletedMsg{err: err}
+	}
+}
+
+// handleIssueDeleted processes issue deletion results.
+func (m Model) handleIssueDeleted(msg issueDeletedMsg) (Model, tea.Cmd) {
+	if msg.err != nil {
+		m.view = ViewBoard
+		m.deleteIssueIDs = nil
+		m.selectedIssue = nil
+		return m, func() tea.Msg {
+			return mode.ShowToastMsg{Message: "Delete failed: " + msg.err.Error(), Style: toaster.StyleError}
+		}
+	}
+
+	// Success: reset state, refresh board, show success toast
+	m.view = ViewBoard
+	m.deleteIssueIDs = nil
+	m.selectedIssue = nil
+	m.pendingCursor = nil // Don't try to restore cursor to deleted issue
+	m.loading = true
+	m.board = m.board.InvalidateViews()
+
+	return m, tea.Batch(
+		m.board.LoadAllColumns(),
+		func() tea.Msg { return mode.ShowToastMsg{Message: "Issue deleted", Style: toaster.StyleSuccess} },
+	)
 }
