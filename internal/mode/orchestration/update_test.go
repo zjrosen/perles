@@ -9,8 +9,11 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/zjrosen/perles/internal/git"
+	"github.com/zjrosen/perles/internal/mocks"
 	"github.com/zjrosen/perles/internal/orchestration/events"
 	"github.com/zjrosen/perles/internal/orchestration/mcp"
 	"github.com/zjrosen/perles/internal/orchestration/message"
@@ -24,6 +27,7 @@ import (
 	"github.com/zjrosen/perles/internal/orchestration/v2/repository"
 	"github.com/zjrosen/perles/internal/orchestration/workflow"
 	"github.com/zjrosen/perles/internal/pubsub"
+	"github.com/zjrosen/perles/internal/ui/shared/formmodal"
 	"github.com/zjrosen/perles/internal/ui/shared/modal"
 	"github.com/zjrosen/perles/internal/ui/shared/vimtextarea"
 )
@@ -3508,4 +3512,229 @@ func TestHandleSlashCommand_RoutesReplaceCommand(t *testing.T) {
 	replaceCmd, ok := commands[0].(*command.ReplaceProcessCommand)
 	require.True(t, ok, "should be a ReplaceProcessCommand")
 	require.Equal(t, "worker-1", replaceCmd.ProcessID, "should have correct process ID")
+}
+
+// --- Worktree Modal Tests ---
+
+func TestHandleStartCoordinator_ShowsWorktreeModalInGitRepo(t *testing.T) {
+	// Test that handleStartCoordinator shows worktree modal when in a git repo
+	m := New(Config{WorkDir: "/test/dir"})
+	m = m.SetSize(120, 40)
+
+	// Set up mock git executor that reports this is a git repo
+	mockGit := mocks.NewMockGitExecutor(t)
+	mockGit.EXPECT().IsGitRepo().Return(true)
+	m.gitExecutor = mockGit
+
+	// Call handleStartCoordinator
+	m, _ = m.handleStartCoordinator()
+
+	// Verify worktree modal is shown
+	require.NotNil(t, m.worktreeModal, "should show worktree modal in git repo")
+	require.Nil(t, m.initializer, "should not create initializer while modal is shown")
+	require.False(t, m.worktreeDecisionMade, "worktree decision should not be made yet")
+}
+
+func TestHandleStartCoordinator_SkipsWorktreeModalWhenNotGitRepo(t *testing.T) {
+	// Test that handleStartCoordinator skips modal when not in a git repo
+	m := New(Config{WorkDir: "/test/dir"})
+	m = m.SetSize(120, 40)
+
+	// Set up mock git executor that reports this is NOT a git repo
+	mockGit := mocks.NewMockGitExecutor(t)
+	mockGit.EXPECT().IsGitRepo().Return(false)
+	m.gitExecutor = mockGit
+
+	// Call handleStartCoordinator
+	m, _ = m.handleStartCoordinator()
+
+	// Verify worktree modal is NOT shown and initializer is created
+	require.Nil(t, m.worktreeModal, "should not show worktree modal outside git repo")
+	require.NotNil(t, m.initializer, "should create initializer when not in git repo")
+}
+
+func TestHandleStartCoordinator_SkipsWorktreeModalWhenDecisionMade(t *testing.T) {
+	// Test that handleStartCoordinator skips modal when decision already made
+	m := New(Config{WorkDir: "/test/dir"})
+	m = m.SetSize(120, 40)
+
+	// Set up mock git executor that reports this is a git repo
+	mockGit := mocks.NewMockGitExecutor(t)
+	mockGit.EXPECT().IsGitRepo().Return(true)
+	m.gitExecutor = mockGit
+	m.worktreeDecisionMade = true // Decision already made
+
+	// Call handleStartCoordinator
+	m, _ = m.handleStartCoordinator()
+
+	// Verify worktree modal is NOT shown and initializer is created
+	require.Nil(t, m.worktreeModal, "should not show worktree modal when decision made")
+	require.NotNil(t, m.initializer, "should create initializer when decision made")
+}
+
+func TestWorktreeModal_CancelStartsWithoutWorktree(t *testing.T) {
+	// Test that canceling the worktree modal starts without worktree
+	m := New(Config{WorkDir: "/test/dir"})
+	m = m.SetSize(120, 40)
+
+	// Set up mock git executor
+	// Note: After modal cancel, handleStartCoordinator is called which creates an initializer.
+	// Since worktree is disabled, no worktree methods will be called.
+	mockGit := mocks.NewMockGitExecutor(t)
+	mockGit.EXPECT().IsGitRepo().Return(true).Maybe()
+	m.gitExecutor = mockGit
+
+	// Create worktree modal
+	mdl := modal.New(modal.Config{Title: "Use Git Worktree?"})
+	m.worktreeModal = &mdl
+
+	// Send CancelMsg
+	m, _ = m.Update(modal.CancelMsg{})
+
+	// Verify modal is closed and worktree is disabled
+	require.Nil(t, m.worktreeModal, "worktree modal should be closed")
+	require.True(t, m.worktreeDecisionMade, "worktree decision should be made")
+	require.False(t, m.worktreeEnabled, "worktree should be disabled when cancelled")
+
+	// Cleanup to stop the initializer goroutine
+	m.Cleanup()
+}
+
+func TestWorktreeModal_SubmitAlwaysShowsBranchModal(t *testing.T) {
+	// Test that submitting worktree modal always shows branch selection modal
+	m := New(Config{WorkDir: "/test/dir"})
+	m = m.SetSize(120, 40)
+
+	// Set up mock git executor
+	mockGit := mocks.NewMockGitExecutor(t)
+	mockGit.EXPECT().GetCurrentBranch().Return("main", nil)
+	mockGit.EXPECT().ListBranches().Return([]git.BranchInfo{
+		{Name: "main", IsCurrent: true},
+		{Name: "develop", IsCurrent: false},
+	}, nil)
+	m.gitExecutor = mockGit
+
+	// Create worktree modal
+	mdl := modal.New(modal.Config{Title: "Use Git Worktree?"})
+	m.worktreeModal = &mdl
+
+	// Send SubmitMsg
+	m, _ = m.Update(modal.SubmitMsg{Values: map[string]string{}})
+
+	// Verify worktree modal is closed and branch modal is shown
+	require.Nil(t, m.worktreeModal, "worktree modal should be closed")
+	require.NotNil(t, m.branchSelectModal, "branch select modal should always be shown")
+	require.True(t, m.worktreeEnabled, "worktree should be enabled")
+	require.False(t, m.worktreeDecisionMade, "worktree decision should NOT be made until branch selected")
+}
+
+func TestBranchSelectModal_SubmitSetsBranch(t *testing.T) {
+	// Test that submitting branch selection modal sets the branch
+	m := New(Config{WorkDir: "/test/dir"})
+	m = m.SetSize(120, 40)
+
+	// Set up mock git executor
+	// Note: After modal submit, handleStartCoordinator is called which creates an initializer.
+	// The initializer will call additional methods on gitExecutor in a goroutine.
+	mockGit := mocks.NewMockGitExecutor(t)
+	mockGit.EXPECT().IsGitRepo().Return(true).Maybe()
+	mockGit.EXPECT().PruneWorktrees().Return(nil).Maybe()
+	mockGit.EXPECT().DetermineWorktreePath(mock.Anything).Return("/tmp/worktree", nil).Maybe()
+	mockGit.EXPECT().CreateWorktree(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	m.gitExecutor = mockGit
+	m.worktreeEnabled = true
+
+	// Create branch select modal
+	mdl := formmodal.New(formmodal.FormConfig{
+		Title: "Select Base Branch",
+		Fields: []formmodal.FieldConfig{
+			{Key: "branch", Type: formmodal.FieldTypeText, Label: "Branch", InitialValue: "main"},
+		},
+	})
+	m.branchSelectModal = &mdl
+
+	// Send SubmitMsg with branch value
+	m, _ = m.Update(formmodal.SubmitMsg{Values: map[string]any{"branch": "develop"}})
+
+	// Verify modal is closed and base branch is set
+	require.Nil(t, m.branchSelectModal, "branch select modal should be closed")
+	require.True(t, m.worktreeDecisionMade, "worktree decision should be made")
+	require.Equal(t, "develop", m.worktreeBaseBranch, "base branch should be set from modal")
+
+	// Cancel the initializer to stop the goroutine before test cleanup
+	if m.initializer != nil {
+		m.initializer.Cancel()
+	}
+}
+
+func TestBranchSelectModal_CancelReturnsToWorktreeModal(t *testing.T) {
+	// Test that canceling branch selection modal returns to worktree modal
+	m := New(Config{WorkDir: "/test/dir"})
+	m = m.SetSize(120, 40)
+
+	// Set up mock git executor
+	// Note: After modal cancel, handleStartCoordinator is called which will show the worktree modal again.
+	// No initializer is created in this path because worktreeDecisionMade is reset to false.
+	mockGit := mocks.NewMockGitExecutor(t)
+	mockGit.EXPECT().IsGitRepo().Return(true)
+	m.gitExecutor = mockGit
+	m.worktreeEnabled = true
+
+	// Create branch select modal
+	mdl := formmodal.New(formmodal.FormConfig{Title: "Select Base Branch"})
+	m.branchSelectModal = &mdl
+
+	// Send CancelMsg
+	m, _ = m.Update(formmodal.CancelMsg{})
+
+	// Verify branch modal is closed and decision is reset (so worktree modal will show again)
+	require.Nil(t, m.branchSelectModal, "branch select modal should be closed")
+	require.False(t, m.worktreeDecisionMade, "worktree decision should be reset to allow re-prompt")
+	// After cancel, handleStartCoordinator is called which shows the worktree modal again
+	require.NotNil(t, m.worktreeModal, "worktree modal should be shown after cancel")
+}
+
+func TestSkipWorktree_OnlyAvailableForWorktreeFailure(t *testing.T) {
+	// Test that S key only skips when worktree creation failed
+	m := New(Config{WorkDir: "/test/dir"})
+	m = m.SetSize(120, 40)
+
+	// Set up mock git executor
+	mockGit := mocks.NewMockGitExecutor(t)
+	mockGit.EXPECT().IsGitRepo().Return(true).Maybe()
+	m.gitExecutor = mockGit
+
+	// Create a mock initializer that failed at worktree phase
+	m.initializer = &Initializer{
+		phase:         InitFailed,
+		failedAtPhase: InitCreatingWorktree,
+	}
+
+	// Send S key
+	keyMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}}
+	m, cmd := m.Update(keyMsg)
+
+	// Verify worktree is disabled and restart triggered
+	require.False(t, m.worktreeEnabled, "worktree should be disabled after skip")
+	require.True(t, m.worktreeDecisionMade, "worktree decision should be marked as made")
+	require.NotNil(t, cmd, "should return command to restart")
+}
+
+func TestSkipWorktree_NotAvailableForOtherFailures(t *testing.T) {
+	// Test that S key does nothing when failure is NOT worktree phase
+	m := New(Config{WorkDir: "/test/dir"})
+	m = m.SetSize(120, 40)
+
+	// Create a mock initializer that failed at a different phase
+	m.initializer = &Initializer{
+		phase:         InitFailed,
+		failedAtPhase: InitCreatingWorkspace, // Not worktree phase
+	}
+
+	// Send S key
+	keyMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}}
+	m, cmd := m.Update(keyMsg)
+
+	// Verify S key was ignored
+	require.Nil(t, cmd, "S key should be ignored when not worktree failure")
 }

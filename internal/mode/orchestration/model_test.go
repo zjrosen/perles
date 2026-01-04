@@ -1,6 +1,7 @@
 package orchestration
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -8,8 +9,10 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/exp/teatest"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/zjrosen/perles/internal/mocks"
 	"github.com/zjrosen/perles/internal/orchestration/events"
 	"github.com/zjrosen/perles/internal/orchestration/message"
 	"github.com/zjrosen/perles/internal/orchestration/v2/command"
@@ -133,8 +136,7 @@ func TestSetSize_AtBottomStaysAtBottom(t *testing.T) {
 }
 
 func TestSetSize_UpdatesWorkerViewports(t *testing.T) {
-	m := New(Config{})
-	m = m.SetSize(120, 30)
+	m := newReadyModel(120, 30)
 
 	// Add workers with viewports
 	m = m.UpdateWorker("worker-1", events.ProcessStatusWorking)
@@ -160,8 +162,7 @@ func TestSetSize_UpdatesWorkerViewports(t *testing.T) {
 }
 
 func TestAddChatMessage(t *testing.T) {
-	m := New(Config{})
-	m = m.SetSize(120, 30)
+	m := newReadyModel(120, 30)
 
 	m = m.AddChatMessage("user", "Hello, coordinator!")
 	m = m.AddChatMessage("coordinator", "I'll help you orchestrate this epic.")
@@ -175,8 +176,7 @@ func TestAddChatMessage(t *testing.T) {
 }
 
 func TestSetMessageEntries(t *testing.T) {
-	m := New(Config{})
-	m = m.SetSize(120, 30)
+	m := newReadyModel(120, 30)
 
 	entries := []message.Entry{
 		{
@@ -411,9 +411,18 @@ func TestFocusCycling(t *testing.T) {
 // Golden tests for view rendering.
 // Run with -update flag to update golden files: go test -update ./internal/mode/orchestration/...
 
-func TestView_Golden_Empty(t *testing.T) {
+// newReadyModel creates a model with InitReady phase for main view golden tests.
+// This is needed because InitNotStarted now shows a blank screen (to prevent
+// flash of main view before worktree modal appears during real initialization).
+func newReadyModel(width, height int) Model {
 	m := New(Config{})
-	m = m.SetSize(120, 30)
+	m = m.SetSize(width, height)
+	m.initializer = newTestInitializer(InitReady, nil)
+	return m
+}
+
+func TestView_Golden_Empty(t *testing.T) {
+	m := newReadyModel(120, 30)
 	// Set mcpPort to demonstrate coordinator title with port
 	m.mcpPort = 8467
 
@@ -422,8 +431,7 @@ func TestView_Golden_Empty(t *testing.T) {
 }
 
 func TestView_Golden_WithChat(t *testing.T) {
-	m := New(Config{})
-	m = m.SetSize(120, 30)
+	m := newReadyModel(120, 30)
 
 	m = m.AddChatMessage("user", "Start working on the auth epic")
 	m = m.AddChatMessage("coordinator", "I'll analyze the epic and plan the execution. I see 4 tasks with dependencies.")
@@ -433,8 +441,7 @@ func TestView_Golden_WithChat(t *testing.T) {
 }
 
 func TestView_Golden_WithMessages(t *testing.T) {
-	m := New(Config{})
-	m = m.SetSize(120, 30)
+	m := newReadyModel(120, 30)
 
 	entries := []message.Entry{
 		{
@@ -461,8 +468,7 @@ func TestView_Golden_WithMessages(t *testing.T) {
 }
 
 func TestView_Golden_WithWorkers(t *testing.T) {
-	m := New(Config{})
-	m = m.SetSize(120, 30)
+	m := newReadyModel(120, 30)
 	m.mcpPort = 9000
 
 	// Add workers with task IDs and phases
@@ -478,8 +484,7 @@ func TestView_Golden_WithWorkers(t *testing.T) {
 }
 
 func TestView_Golden_FullState(t *testing.T) {
-	m := New(Config{})
-	m = m.SetSize(140, 35)
+	m := newReadyModel(140, 35)
 	m.mcpPort = 8467
 
 	// Add chat messages
@@ -532,8 +537,7 @@ func TestView_Golden_FullState(t *testing.T) {
 }
 
 func TestView_Golden_Narrow(t *testing.T) {
-	m := New(Config{})
-	m = m.SetSize(80, 24)
+	m := newReadyModel(80, 24)
 
 	m = m.AddChatMessage("user", "Hello")
 	m = m.UpdateWorker("worker-1", events.ProcessStatusReady)
@@ -543,8 +547,7 @@ func TestView_Golden_Narrow(t *testing.T) {
 }
 
 func TestView_Golden_Wide(t *testing.T) {
-	m := New(Config{})
-	m = m.SetSize(200, 40)
+	m := newReadyModel(200, 40)
 
 	m = m.AddChatMessage("coordinator", "I see this epic has many tasks. Let me analyze the dependency graph to determine optimal execution order.")
 
@@ -553,8 +556,7 @@ func TestView_Golden_Wide(t *testing.T) {
 }
 
 func TestView_Golden_CoordinatorStopped(t *testing.T) {
-	m := New(Config{})
-	m = m.SetSize(120, 30)
+	m := newReadyModel(120, 30)
 	m.mcpPort = 8467
 
 	// Set coordinator to stopped status
@@ -568,8 +570,7 @@ func TestView_Golden_CoordinatorStopped(t *testing.T) {
 }
 
 func TestView_Golden_WorkerStopped(t *testing.T) {
-	m := New(Config{})
-	m = m.SetSize(120, 30)
+	m := newReadyModel(120, 30)
 	m.mcpPort = 9000
 
 	// Add a working worker and a stopped worker
@@ -585,8 +586,7 @@ func TestView_Golden_WorkerStopped(t *testing.T) {
 }
 
 func TestView_Golden_WithToolCalls(t *testing.T) {
-	m := New(Config{})
-	m = m.SetSize(120, 30)
+	m := newReadyModel(120, 30)
 
 	// User asks coordinator to start
 	m = m.AddChatMessage("user", "Start working on the epic")
@@ -621,8 +621,7 @@ func TestView_Golden_WithToolCalls(t *testing.T) {
 }
 
 func TestView_Golden_Paused(t *testing.T) {
-	m := New(Config{})
-	m = m.SetSize(120, 30)
+	m := newReadyModel(120, 30)
 	m.paused = true
 
 	view := m.View()
@@ -630,8 +629,7 @@ func TestView_Golden_Paused(t *testing.T) {
 }
 
 func TestView_Golden_WithError(t *testing.T) {
-	m := New(Config{})
-	m = m.SetSize(120, 30)
+	m := newReadyModel(120, 30)
 	m = m.SetError("Worker failed: connection refused")
 
 	view := m.View()
@@ -639,8 +637,7 @@ func TestView_Golden_WithError(t *testing.T) {
 }
 
 func TestView_Golden_FullscreenCoordinator(t *testing.T) {
-	m := New(Config{})
-	m = m.SetSize(120, 30)
+	m := newReadyModel(120, 30)
 
 	// Add chat messages to the coordinator pane
 	m = m.AddChatMessage("user", "Start working on the auth epic")
@@ -661,8 +658,7 @@ func TestView_Golden_FullscreenCoordinator(t *testing.T) {
 }
 
 func TestView_Golden_FullscreenMessages(t *testing.T) {
-	m := New(Config{})
-	m = m.SetSize(120, 30)
+	m := newReadyModel(120, 30)
 
 	// Add message log entries
 	entries := []message.Entry{
@@ -711,8 +707,7 @@ func TestView_Golden_FullscreenMessages(t *testing.T) {
 }
 
 func TestView_Golden_FullscreenWorker(t *testing.T) {
-	m := New(Config{})
-	m = m.SetSize(120, 30)
+	m := newReadyModel(120, 30)
 
 	// Add workers with messages, task IDs and phases
 	m = m.UpdateWorker("worker-1", events.ProcessStatusWorking)
@@ -740,8 +735,7 @@ func TestView_Golden_FullscreenWorker(t *testing.T) {
 }
 
 func TestView_Golden_FullscreenCommand(t *testing.T) {
-	m := New(Config{})
-	m = m.SetSize(120, 30)
+	m := newReadyModel(120, 30)
 
 	// Add command log entries
 	m.commandPane.entries = []CommandLogEntry{
@@ -1172,8 +1166,7 @@ func TestRenderChatContent_NonToolCallSurroundedByToolCalls(t *testing.T) {
 // ============================================================================
 
 func TestView_Golden_WithCommandPane(t *testing.T) {
-	m := New(Config{})
-	m = m.SetSize(120, 30)
+	m := newReadyModel(120, 30)
 
 	// Show the command pane
 	m.showCommandPane = true
@@ -1212,8 +1205,7 @@ func TestView_Golden_WithCommandPane(t *testing.T) {
 }
 
 func TestView_Golden_CommandPaneEmpty(t *testing.T) {
-	m := New(Config{})
-	m = m.SetSize(120, 30)
+	m := newReadyModel(120, 30)
 
 	// Show the command pane with no entries
 	m.showCommandPane = true
@@ -1225,8 +1217,7 @@ func TestView_Golden_CommandPaneEmpty(t *testing.T) {
 }
 
 func TestView_Golden_CommandPaneWithErrors(t *testing.T) {
-	m := New(Config{})
-	m = m.SetSize(120, 30)
+	m := newReadyModel(120, 30)
 
 	// Show the command pane with error entries
 	m.showCommandPane = true
@@ -1267,8 +1258,7 @@ func TestView_Golden_CommandPaneWithErrors(t *testing.T) {
 }
 
 func TestView_Golden_CommandPaneHidden(t *testing.T) {
-	m := New(Config{})
-	m = m.SetSize(120, 30)
+	m := newReadyModel(120, 30)
 
 	// Verify command pane is hidden by default (no debug mode)
 	require.False(t, m.showCommandPane)
@@ -1290,4 +1280,168 @@ func TestView_Golden_CommandPaneHidden(t *testing.T) {
 
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))
+}
+
+// ============================================================================
+// Worktree Cleanup and Exit Message Tests
+// ============================================================================
+
+func TestModel_Cleanup_RemovesWorktree(t *testing.T) {
+	// Test that Cleanup() removes the worktree directory
+	m := New(Config{WorkDir: "/test/dir"})
+
+	// Set up mock git executor that expects RemoveWorktree to be called
+	mockGit := mocks.NewMockGitExecutor(t)
+	mockGit.EXPECT().RemoveWorktree("/tmp/test-worktree").Return(nil)
+	m.gitExecutor = mockGit
+
+	// Set worktree path and branch (simulating successful worktree creation)
+	m.worktreePath = "/tmp/test-worktree"
+	m.worktreeBranch = "perles-session-abc12345"
+
+	// Call Cleanup
+	m.Cleanup()
+
+	// Mock expectations are automatically verified by testify
+}
+
+func TestModel_Cleanup_HandlesRemoveError(t *testing.T) {
+	// Test that Cleanup() handles RemoveWorktree errors gracefully
+	m := New(Config{WorkDir: "/test/dir"})
+
+	// Set up mock git executor that returns an error
+	mockGit := mocks.NewMockGitExecutor(t)
+	mockGit.EXPECT().RemoveWorktree("/tmp/test-worktree").Return(errors.New("worktree in use"))
+	m.gitExecutor = mockGit
+
+	// Set worktree path and branch
+	m.worktreePath = "/tmp/test-worktree"
+	m.worktreeBranch = "perles-session-abc12345"
+
+	// Call Cleanup - should not panic
+	require.NotPanics(t, func() {
+		m.Cleanup()
+	})
+
+	// Exit message should indicate failure
+	require.Contains(t, m.ExitMessage(), "Failed to remove worktree")
+	require.Contains(t, m.ExitMessage(), "git worktree remove")
+}
+
+func TestModel_Cleanup_NoWorktree_NoOp(t *testing.T) {
+	// Test that Cleanup() is a no-op when no worktree was created
+	m := New(Config{WorkDir: "/test/dir"})
+
+	// Set up mock git executor - it should NOT be called
+	mockGit := mocks.NewMockGitExecutor(t)
+	// No expectations set - any call would fail the test
+	m.gitExecutor = mockGit
+
+	// No worktree path set (worktree not created)
+	m.worktreePath = ""
+	m.worktreeBranch = ""
+
+	// Call Cleanup - should not call RemoveWorktree
+	m.Cleanup()
+
+	// Exit message should be empty
+	require.Empty(t, m.ExitMessage())
+}
+
+func TestModel_Cleanup_NoGitExecutor_NoOp(t *testing.T) {
+	// Test that Cleanup() handles missing git executor gracefully
+	m := New(Config{WorkDir: "/test/dir"})
+
+	// No git executor set
+	m.gitExecutor = nil
+	m.worktreePath = "/tmp/test-worktree"
+	m.worktreeBranch = "perles-session-abc12345"
+
+	// Call Cleanup - should not panic
+	require.NotPanics(t, func() {
+		m.Cleanup()
+	})
+
+	// Exit message should be empty (no cleanup attempted)
+	require.Empty(t, m.ExitMessage())
+}
+
+func TestModel_ExitMessage_ShowsBranchName(t *testing.T) {
+	// Test that exit message includes the branch name
+	m := New(Config{WorkDir: "/test/dir"})
+
+	// Set up mock git executor
+	mockGit := mocks.NewMockGitExecutor(t)
+	mockGit.EXPECT().RemoveWorktree(mock.Anything).Return(nil)
+	m.gitExecutor = mockGit
+
+	// Set worktree path and branch
+	m.worktreePath = "/tmp/test-worktree"
+	m.worktreeBranch = "perles-session-abc12345"
+
+	// Call Cleanup
+	m.Cleanup()
+
+	// Exit message should show branch name
+	exitMsg := m.ExitMessage()
+	require.Contains(t, exitMsg, "perles-session-abc12345")
+}
+
+func TestModel_ExitMessage_ShowsResumeInstructions(t *testing.T) {
+	// Test that exit message shows git checkout instructions
+	m := New(Config{WorkDir: "/test/dir"})
+
+	// Set up mock git executor
+	mockGit := mocks.NewMockGitExecutor(t)
+	mockGit.EXPECT().RemoveWorktree(mock.Anything).Return(nil)
+	m.gitExecutor = mockGit
+
+	// Set worktree path and branch
+	m.worktreePath = "/tmp/test-worktree"
+	m.worktreeBranch = "feature-branch"
+
+	// Call Cleanup
+	m.Cleanup()
+
+	// Exit message should show resume instructions
+	exitMsg := m.ExitMessage()
+	require.Contains(t, exitMsg, "git checkout feature-branch")
+	require.Contains(t, exitMsg, "preserved")
+}
+
+func TestModel_ExitMessage_EmptyBranch_NoMessage(t *testing.T) {
+	// Test that exit message is empty when branch name is missing
+	m := New(Config{WorkDir: "/test/dir"})
+
+	// Set up mock git executor
+	mockGit := mocks.NewMockGitExecutor(t)
+	mockGit.EXPECT().RemoveWorktree(mock.Anything).Return(nil)
+	m.gitExecutor = mockGit
+
+	// Set worktree path but no branch (edge case)
+	m.worktreePath = "/tmp/test-worktree"
+	m.worktreeBranch = "" // Empty branch name
+
+	// Call Cleanup
+	m.Cleanup()
+
+	// Exit message should be empty when branch name is missing
+	require.Empty(t, m.ExitMessage())
+}
+
+func TestModel_Cleanup_CancelsInitializer(t *testing.T) {
+	// Test that Cleanup() cancels the initializer if running
+	m := New(Config{WorkDir: t.TempDir()})
+	m = m.SetSize(120, 40)
+
+	// Create a real initializer
+	m.initializer = NewInitializer(InitializerConfig{
+		WorkDir:         t.TempDir(),
+		ExpectedWorkers: 4,
+	})
+
+	// Call Cleanup - should cancel initializer without panic
+	require.NotPanics(t, func() {
+		m.Cleanup()
+	})
 }

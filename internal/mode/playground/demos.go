@@ -830,6 +830,20 @@ func (m *FormmodalDemoModel) Update(msg tea.Msg) (DemoModel, tea.Cmd, string) {
 							},
 							InitialToggleIndex: 0,
 						},
+						{
+							Key:   "branch",
+							Type:  formmodal.FieldTypeSearchSelect,
+							Label: "Branch",
+							Options: []formmodal.ListOption{
+								{Label: "main", Value: "main", Selected: true},
+								{Label: "develop", Value: "develop"},
+								{Label: "feature-auth", Value: "feature-auth"},
+								{Label: "feature-login", Value: "feature-login"},
+								{Label: "feature-settings", Value: "feature-settings"},
+								{Label: "hotfix-123", Value: "hotfix-123"},
+								{Label: "release-v1.0", Value: "release-v1.0"},
+							},
+						},
 					},
 					SubmitLabel: "Create",
 				}).SetSize(m.width, m.height)

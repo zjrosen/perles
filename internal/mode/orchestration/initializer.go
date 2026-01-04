@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/zjrosen/perles/internal/beads"
+	"github.com/zjrosen/perles/internal/git"
 	"github.com/zjrosen/perles/internal/log"
 	"github.com/zjrosen/perles/internal/orchestration/amp"
 	"github.com/zjrosen/perles/internal/orchestration/client"
@@ -58,6 +59,9 @@ type InitializerConfig struct {
 	AmpMode         string
 	ExpectedWorkers int
 	Timeout         time.Duration
+	// Worktree configuration
+	WorktreeBaseBranch string          // Branch to base worktree on. Empty = skip worktree creation
+	GitExecutor        git.GitExecutor // Injected for testability
 }
 
 // InitializerResources holds the resources created during initialization.
@@ -85,6 +89,11 @@ type Initializer struct {
 	workerConfirmation *workerConfirmation // Thread-safe tracker for worker confirmations
 	startTime          time.Time
 	err                error
+
+	// Worktree state (set during createWorktree phase)
+	worktreePath   string // Path to created worktree (empty if disabled)
+	worktreeBranch string // Branch name used for worktree
+	sessionID      string // Session ID for branch naming (set during Start)
 
 	// Resources created during initialization
 	messageRepo    *repository.MemoryMessageRepository // Message repository for inter-agent messaging
@@ -151,6 +160,20 @@ func (i *Initializer) FailedAtPhase() InitPhase {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
 	return i.failedAtPhase
+}
+
+// WorktreePath returns the path to the created worktree, or empty string if disabled.
+func (i *Initializer) WorktreePath() string {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	return i.worktreePath
+}
+
+// WorktreeBranch returns the branch name used for the worktree, or empty string if disabled.
+func (i *Initializer) WorktreeBranch() string {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	return i.worktreeBranch
 }
 
 // SpinnerData returns data needed for spinner rendering.
@@ -239,6 +262,8 @@ func (i *Initializer) Start() error {
 	i.started = true
 	i.ctx, i.cancel = context.WithCancel(context.Background())
 	i.startTime = time.Now()
+	// Generate session ID early for worktree branch naming
+	i.sessionID = uuid.New().String()
 	i.mu.Unlock()
 
 	go i.run()
@@ -262,6 +287,10 @@ func (i *Initializer) Retry() error {
 	i.mcpCoordServer = nil
 	i.session = nil
 	i.v2Infra = nil
+	// Reset worktree state
+	i.worktreePath = ""
+	i.worktreeBranch = ""
+	i.sessionID = ""
 	i.mu.Unlock()
 
 	return i.Start()
@@ -291,6 +320,15 @@ func (i *Initializer) run() {
 	// Start timeout timer
 	timeoutTimer := time.NewTimer(i.cfg.Timeout)
 	defer timeoutTimer.Stop()
+
+	// Phase 0: Create worktree if branch specified
+	if i.cfg.WorktreeBaseBranch != "" && i.cfg.GitExecutor != nil {
+		i.transitionTo(InitCreatingWorktree)
+		if err := i.createWorktree(); err != nil {
+			i.fail(err)
+			return
+		}
+	}
 
 	// Phase 1: Create workspace
 	i.transitionTo(InitCreatingWorkspace)
@@ -349,11 +387,23 @@ func (i *Initializer) run() {
 }
 
 // createSession creates a new orchestration session with its directory structure.
-// It generates a unique session ID, creates the session directory, and initializes
-// the session tracking object.
+// It uses the session ID generated during Start(), creates the session directory,
+// and initializes the session tracking object.
 func (i *Initializer) createSession() (*session.Session, error) {
-	sessionID := uuid.New().String()
-	sessionDir := filepath.Join(i.cfg.WorkDir, ".perles", "sessions", sessionID)
+	// Use the session ID generated during Start()
+	i.mu.RLock()
+	sessionID := i.sessionID
+	i.mu.RUnlock()
+
+	// Determine effective work directory (use worktree path if created)
+	effectiveWorkDir := i.cfg.WorkDir
+	i.mu.RLock()
+	if i.worktreePath != "" {
+		effectiveWorkDir = i.worktreePath
+	}
+	i.mu.RUnlock()
+
+	sessionDir := filepath.Join(effectiveWorkDir, ".perles", "sessions", sessionID)
 
 	sess, err := session.New(sessionID, sessionDir)
 	if err != nil {
@@ -362,6 +412,60 @@ func (i *Initializer) createSession() (*session.Session, error) {
 
 	log.Debug(log.CatOrch, "Session created", "subsystem", "init", "sessionID", sessionID, "dir", sessionDir)
 	return sess, nil
+}
+
+// createWorktree creates a git worktree for isolated workspace operation.
+// It performs pre-flight checks, determines the worktree path, and creates
+// the worktree with an auto-generated or configured branch name.
+func (i *Initializer) createWorktree() error {
+	gitExec := i.cfg.GitExecutor
+
+	// Pre-flight check: ensure we're in a git repository
+	if !gitExec.IsGitRepo() {
+		return fmt.Errorf("not a git repository")
+	}
+
+	// Prune stale worktrees before creating a new one
+	if err := gitExec.PruneWorktrees(); err != nil {
+		log.Warn(log.CatOrch, "Failed to prune worktrees", "subsystem", "init", "error", err)
+		// Continue anyway - pruning is a best-effort cleanup
+	}
+
+	// Get the session ID for path and branch generation
+	i.mu.RLock()
+	sessionID := i.sessionID
+	i.mu.RUnlock()
+
+	// Determine worktree path
+	path, err := gitExec.DetermineWorktreePath(sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to determine worktree path: %w", err)
+	}
+
+	// Auto-generate branch name using first 8 chars of session ID
+	shortID := sessionID
+	if len(shortID) > 8 {
+		shortID = shortID[:8]
+	}
+	newBranch := fmt.Sprintf("perles-session-%s", shortID)
+
+	// Base branch is what the user selected (main, current branch, etc.)
+	// Empty means use current HEAD
+	baseBranch := i.cfg.WorktreeBaseBranch
+
+	// Create the worktree with new branch based on selected branch
+	if err := gitExec.CreateWorktree(path, newBranch, baseBranch); err != nil {
+		return fmt.Errorf("failed to create worktree: %w", err)
+	}
+
+	// Store worktree state
+	i.mu.Lock()
+	i.worktreePath = path
+	i.worktreeBranch = newBranch
+	i.mu.Unlock()
+
+	log.Info(log.CatOrch, "Worktree created", "subsystem", "init", "path", path, "branch", newBranch, "basedOn", baseBranch)
+	return nil
 }
 
 // AIClientResult holds the result of createAIClient().
@@ -523,6 +627,14 @@ func (i *Initializer) createMCPServer(cfg MCPServerConfig) (*MCPServerResult, er
 //
 // Error handling: Each step properly cleans up resources from previous steps on failure.
 func (i *Initializer) createWorkspace() error {
+	// Determine effective work directory (use worktree path if created)
+	effectiveWorkDir := i.cfg.WorkDir
+	i.mu.RLock()
+	if i.worktreePath != "" {
+		effectiveWorkDir = i.worktreePath
+	}
+	i.mu.RUnlock()
+
 	// ============================================================
 	// Step 1: Create AI client
 	// ============================================================
@@ -568,7 +680,7 @@ func (i *Initializer) createWorkspace() error {
 	v2Infra, err := v2.NewInfrastructure(v2.InfrastructureConfig{
 		Port:            port,
 		AIClient:        aiClient,
-		WorkDir:         i.cfg.WorkDir,
+		WorkDir:         effectiveWorkDir, // Use worktree path when enabled
 		Extensions:      extensions,
 		MessageRepo:     msgRepo,
 		ExpectedWorkers: i.cfg.ExpectedWorkers,
@@ -609,7 +721,7 @@ func (i *Initializer) createWorkspace() error {
 		Session:      sess,
 		V2Adapter:    v2Infra.Core.Adapter,
 		TurnEnforcer: v2Infra.Internal.TurnEnforcer,
-		WorkDir:      i.cfg.WorkDir,
+		WorkDir:      effectiveWorkDir, // Use worktree path when enabled
 		Extensions:   extensions,
 	})
 	if err != nil {

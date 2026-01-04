@@ -263,6 +263,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Clean up all orchestration resources (processes, MCP server, subscriptions)
 		m.orchestration.Cleanup()
 
+		// Log exit message if present (worktree cleanup info)
+		if exitMsg := m.orchestration.ExitMessage(); exitMsg != "" {
+			log.Info(log.CatMode, "Orchestration exit", "message", exitMsg)
+		}
+
 		m.currentMode = mode.ModeKanban
 		// Refresh kanban to show any changes made during orchestration
 		var cmd tea.Cmd

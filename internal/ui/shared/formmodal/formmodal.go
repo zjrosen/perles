@@ -82,9 +82,15 @@ func New(cfg FormConfig) Model {
 		m.fields[i] = newFieldState(fieldCfg)
 	}
 
-	// Focus the first text input if it exists
-	if len(m.fields) > 0 && m.fields[0].config.Type == FieldTypeText {
-		m.fields[0].textInput.Focus()
+	// Focus the first focusable input if it exists
+	if len(m.fields) > 0 {
+		switch m.fields[0].config.Type {
+		case FieldTypeText:
+			m.fields[0].textInput.Focus()
+		case FieldTypeSearchSelect:
+			// Start collapsed - don't focus search input yet
+			m.fields[0].searchExpanded = false
+		}
 	}
 
 	// If no fields, start on submit button
@@ -96,12 +102,17 @@ func New(cfg FormConfig) Model {
 }
 
 // Init returns the initial command for the Bubble Tea model.
-// Returns a cursor blink command if the first focused field is a text input.
+// Returns a cursor blink command if the first focused field has a text input.
 func (m Model) Init() tea.Cmd {
-	// Find the first focused text input and return its blink command
 	if m.focusedIndex >= 0 && m.focusedIndex < len(m.fields) {
-		if m.fields[m.focusedIndex].config.Type == FieldTypeText {
+		fs := &m.fields[m.focusedIndex]
+		switch fs.config.Type {
+		case FieldTypeText:
 			return textinput.Blink
+		case FieldTypeSearchSelect:
+			if fs.searchExpanded {
+				return textinput.Blink
+			}
 		}
 	}
 	return nil
@@ -161,8 +172,18 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 // handleKeyMsg processes keyboard input.
 func (m Model) handleKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
-	// Handle Esc globally
+	// Handle Esc - check if search field is expanded first
 	if key.Matches(msg, keys.Common.Escape) {
+		// If a SearchSelect field is expanded, collapse it instead of closing modal
+		if m.focusedIndex >= 0 && m.focusedIndex < len(m.fields) {
+			fs := &m.fields[m.focusedIndex]
+			if fs.config.Type == FieldTypeSearchSelect && fs.searchExpanded {
+				fs.searchExpanded = false
+				fs.searchInput.Blur()
+				return m, nil
+			}
+		}
+		// Otherwise, cancel the modal
 		if m.config.OnCancel != nil {
 			return m, func() tea.Msg { return m.config.OnCancel() }
 		}
@@ -174,11 +195,14 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m.submit()
 	}
 
-	// Dispatch to editable list handler if that field type is focused
+	// Dispatch to specialized handlers for composite field types
 	if m.focusedIndex >= 0 && m.focusedIndex < len(m.fields) {
 		fs := &m.fields[m.focusedIndex]
-		if fs.config.Type == FieldTypeEditableList {
+		switch fs.config.Type {
+		case FieldTypeEditableList:
 			return m.handleKeyForEditableList(msg, fs)
+		case FieldTypeSearchSelect:
+			return m.handleKeyForSearchSelect(msg, fs)
 		}
 	}
 
@@ -249,6 +273,11 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 				m = m.nextField()
 				return m, m.blinkCmd()
 			}
+			// For color fields (when picker not open), j/down moves to next field
+			if fs.config.Type == FieldTypeColor && !m.showColorPicker {
+				m = m.nextField()
+				return m, m.blinkCmd()
+			}
 		} else if m.focusedIndex == -1 {
 			// On buttons: Save -> Cancel -> first field
 			if m.focusedButton == 0 {
@@ -283,6 +312,11 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 			}
 			// For toggle fields, k/up moves to previous field (not within toggle)
 			if fs.config.Type == FieldTypeToggle {
+				m = m.prevField()
+				return m, m.blinkCmd()
+			}
+			// For color fields (when picker not open), k/up moves to previous field
+			if fs.config.Type == FieldTypeColor && !m.showColorPicker {
 				m = m.prevField()
 				return m, m.blinkCmd()
 			}
@@ -409,6 +443,9 @@ func (m Model) nextField() Model {
 		case FieldTypeEditableList:
 			fs.addInput.Blur()
 			fs.subFocus = SubFocusList // Reset for next time
+		case FieldTypeSearchSelect:
+			fs.searchInput.Blur()
+			fs.searchExpanded = false // Collapse when leaving field
 		}
 
 		if m.focusedIndex < len(m.fields)-1 {
@@ -449,6 +486,9 @@ func (m *Model) focusNextFieldByType() {
 	case FieldTypeList, FieldTypeSelect:
 		// Position cursor at first item when entering from above
 		fs.listCursor = 0
+	case FieldTypeSearchSelect:
+		// Start collapsed - user must press Enter to expand
+		fs.searchExpanded = false
 	}
 }
 
@@ -463,6 +503,9 @@ func (m Model) prevField() Model {
 		case FieldTypeEditableList:
 			fs.addInput.Blur()
 			fs.subFocus = SubFocusList // Reset for next time
+		case FieldTypeSearchSelect:
+			fs.searchInput.Blur()
+			fs.searchExpanded = false // Collapse when leaving field
 		}
 
 		if m.focusedIndex > 0 {
@@ -507,6 +550,9 @@ func (m *Model) focusPrevFieldByType() {
 		if len(fs.listItems) > 0 {
 			fs.listCursor = len(fs.listItems) - 1
 		}
+	case FieldTypeSearchSelect:
+		// Start collapsed - user must press Enter to expand
+		fs.searchExpanded = false
 	}
 }
 
@@ -519,6 +565,10 @@ func (m Model) blinkCmd() tea.Cmd {
 			return textinput.Blink
 		case FieldTypeEditableList:
 			if fs.subFocus == SubFocusInput {
+				return textinput.Blink
+			}
+		case FieldTypeSearchSelect:
+			if fs.searchExpanded {
 				return textinput.Blink
 			}
 		}
@@ -672,4 +722,142 @@ func (m Model) handleKeyForEditableList(msg tea.KeyMsg, fs *fieldState) (Model, 
 	}
 
 	return m, nil
+}
+
+// handleKeyForSearchSelect processes keyboard input for searchable select fields.
+// The field has two states:
+//   - Collapsed: Shows selected value, Enter expands to search mode
+//   - Expanded: Shows search input + filtered list, Enter selects and collapses
+//
+// Uses arrow keys (not j/k) for list navigation to avoid conflicts with typing.
+func (m Model) handleKeyForSearchSelect(msg tea.KeyMsg, fs *fieldState) (Model, tea.Cmd) {
+	// Handle collapsed state (showing selected value)
+	if !fs.searchExpanded {
+		switch {
+		case key.Matches(msg, keys.Component.Tab), msg.Type == tea.KeyDown, key.Matches(msg, keys.Component.Next), msg.String() == "j":
+			return m.nextField(), m.blinkCmd()
+		case key.Matches(msg, keys.Component.ShiftTab), msg.Type == tea.KeyUp, key.Matches(msg, keys.Component.Prev), msg.String() == "k":
+			return m.prevField(), m.blinkCmd()
+		case key.Matches(msg, keys.Common.Enter):
+			// Expand to show search + list
+			fs.searchExpanded = true
+			fs.searchInput.SetValue("")
+			fs.searchInput.Focus()
+			// Reset filter to show all items
+			m = m.updateSearchFilter(fs)
+			// Position cursor at selected item
+			for i, idx := range fs.searchFiltered {
+				if fs.listItems[idx].selected {
+					fs.listCursor = i
+					break
+				}
+			}
+			fs.scrollOffset = 0
+			m = m.ensureSearchCursorVisible(fs)
+			return m, textinput.Blink
+		}
+		return m, nil
+	}
+
+	// Handle expanded state (search + list visible)
+	switch {
+	case key.Matches(msg, keys.Component.Tab):
+		// Tab collapses and moves to next field
+		fs.searchExpanded = false
+		fs.searchInput.Blur()
+		return m.nextField(), m.blinkCmd()
+
+	case key.Matches(msg, keys.Component.ShiftTab):
+		// Shift+Tab collapses and moves to previous field
+		fs.searchExpanded = false
+		fs.searchInput.Blur()
+		return m.prevField(), m.blinkCmd()
+
+	// Note: Escape is handled in handleKeyMsg before dispatch to collapse search
+
+	case msg.Type == tea.KeyDown, key.Matches(msg, keys.Component.Next):
+		// Arrow down or ctrl+n navigates list
+		if len(fs.searchFiltered) > 0 && fs.listCursor < len(fs.searchFiltered)-1 {
+			fs.listCursor++
+			m = m.ensureSearchCursorVisible(fs)
+		}
+		return m, nil
+
+	case msg.Type == tea.KeyUp, key.Matches(msg, keys.Component.Prev):
+		// Arrow up or ctrl+p navigates list
+		if fs.listCursor > 0 {
+			fs.listCursor--
+			m = m.ensureSearchCursorVisible(fs)
+		}
+		return m, nil
+
+	case key.Matches(msg, keys.Common.Enter):
+		// Enter selects current item and collapses
+		if len(fs.searchFiltered) > 0 {
+			// Deselect all first
+			for i := range fs.listItems {
+				fs.listItems[i].selected = false
+			}
+			// Select current
+			actualIdx := fs.searchFiltered[fs.listCursor]
+			fs.listItems[actualIdx].selected = true
+		}
+		// Collapse back to showing selected value
+		fs.searchExpanded = false
+		fs.searchInput.Blur()
+		return m, nil
+
+	default:
+		// Forward all other keys to search input (including j/k for typing)
+		var cmd tea.Cmd
+		fs.searchInput, cmd = fs.searchInput.Update(msg)
+		m = m.updateSearchFilter(fs)
+		return m, cmd
+	}
+}
+
+// updateSearchFilter filters items based on current search text.
+func (m Model) updateSearchFilter(fs *fieldState) Model {
+	query := strings.ToLower(fs.searchInput.Value())
+
+	if query == "" {
+		// Show all items
+		fs.searchFiltered = make([]int, len(fs.listItems))
+		for i := range fs.listItems {
+			fs.searchFiltered[i] = i
+		}
+	} else {
+		// Filter items by label
+		fs.searchFiltered = nil
+		for i, item := range fs.listItems {
+			if strings.Contains(strings.ToLower(item.label), query) {
+				fs.searchFiltered = append(fs.searchFiltered, i)
+			}
+		}
+	}
+
+	// Reset cursor if out of bounds
+	if fs.listCursor >= len(fs.searchFiltered) {
+		fs.listCursor = 0
+		fs.scrollOffset = 0
+	}
+
+	return m
+}
+
+// ensureSearchCursorVisible adjusts scroll offset to keep cursor in view.
+func (m Model) ensureSearchCursorVisible(fs *fieldState) Model {
+	maxVisible := fs.config.MaxVisibleItems
+	if maxVisible <= 0 {
+		maxVisible = 5
+	}
+
+	if fs.listCursor >= fs.scrollOffset+maxVisible {
+		fs.scrollOffset = fs.listCursor - maxVisible + 1
+	}
+	if fs.listCursor < fs.scrollOffset {
+		fs.scrollOffset = fs.listCursor
+	}
+
+	return m
 }

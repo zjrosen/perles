@@ -20,3 +20,6 @@ packages:
     interfaces:
       HeadlessClient:
       HeadlessProcess:
+  github.com/zjrosen/perles/internal/git:
+    interfaces:
+      GitExecutor:

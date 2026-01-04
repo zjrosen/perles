@@ -192,6 +192,9 @@ func (m Model) renderField(index int, width int) string {
 
 	case FieldTypeToggle:
 		return m.renderToggleField(fs, width, focused)
+
+	case FieldTypeSearchSelect:
+		return m.renderSearchSelectField(fs, width, focused)
 	}
 
 	return ""
@@ -360,4 +363,118 @@ func (m Model) Overlay(bg string) string {
 	}
 
 	return result
+}
+
+// renderSearchSelectField renders the searchable select field.
+// Has two states:
+//   - Collapsed: Shows selected value with hint to press Enter to change
+//   - Expanded: Shows search input + filtered list with scroll indicators
+func (m Model) renderSearchSelectField(fs *fieldState, width int, focused bool) string {
+	// Collapsed state: show selected value
+	if !fs.searchExpanded {
+		return m.renderSearchSelectCollapsed(fs, width, focused)
+	}
+
+	// Expanded state: show search + list
+	return m.renderSearchSelectExpanded(fs, width, focused)
+}
+
+// renderSearchSelectCollapsed renders the collapsed state showing selected value.
+func (m Model) renderSearchSelectCollapsed(fs *fieldState, width int, focused bool) string {
+	cfg := fs.config
+
+	// Find selected item
+	selectedLabel := "(none)"
+	for _, item := range fs.listItems {
+		if item.selected {
+			selectedLabel = item.label
+			break
+		}
+	}
+
+	// Build content row (no indicator when collapsed, just indent)
+	row := " " + selectedLabel
+
+	// Add hint on the right
+	hintStyle := lipgloss.NewStyle().Foreground(styles.TextMutedColor)
+	hint := hintStyle.Render(" [enter to change]")
+	row += hint
+
+	return styles.FormSection(styles.FormSectionConfig{
+		Content:            []string{row},
+		Width:              width,
+		TopLeft:            cfg.Label,
+		TopLeftHint:        cfg.Hint,
+		Focused:            focused,
+		FocusedBorderColor: styles.BorderHighlightFocusColor,
+	})
+}
+
+// renderSearchSelectExpanded renders the expanded state with search input and list.
+func (m Model) renderSearchSelectExpanded(fs *fieldState, width int, focused bool) string {
+	cfg := fs.config
+	maxVisible := cfg.MaxVisibleItems
+	if maxVisible <= 0 {
+		maxVisible = 5
+	}
+
+	// Search input row
+	searchRow := " " + fs.searchInput.View()
+
+	// Divider spans full inner width (width - 2 for FormSection borders)
+	innerWidth := width - 2
+	dividerStyle := lipgloss.NewStyle().Foreground(styles.BorderDefaultColor)
+	divider := dividerStyle.Render(strings.Repeat("─", innerWidth))
+
+	// Build content rows
+	var rows []string
+	rows = append(rows, searchRow)
+	rows = append(rows, divider)
+
+	if len(fs.searchFiltered) == 0 {
+		noMatchStyle := lipgloss.NewStyle().
+			Foreground(styles.TextMutedColor).
+			Italic(true)
+		rows = append(rows, noMatchStyle.Render(" No matches"))
+	} else {
+		endIdx := min(fs.scrollOffset+maxVisible, len(fs.searchFiltered))
+		for i := fs.scrollOffset; i < endIdx; i++ {
+			actualIdx := fs.searchFiltered[i]
+			item := fs.listItems[actualIdx]
+
+			// Build row content with padding
+			rowContent := " " + item.label
+
+			// Highlight the cursor row (what user is about to select)
+			isCursorRow := focused && i == fs.listCursor
+			if isCursorRow {
+				// Pad to full width for consistent highlight
+				rowWidth := lipgloss.Width(rowContent)
+				if rowWidth < innerWidth {
+					rowContent += strings.Repeat(" ", innerWidth-rowWidth)
+				}
+				cursorStyle := lipgloss.NewStyle().
+					Background(styles.SelectionBackgroundColor).
+					Foreground(lipgloss.Color("#FFFFFF"))
+				rowContent = cursorStyle.Render(rowContent)
+			}
+
+			rows = append(rows, rowContent)
+		}
+
+		// "More" indicator if there are items below
+		if endIdx < len(fs.searchFiltered) {
+			moreStyle := lipgloss.NewStyle().Foreground(styles.TextMutedColor)
+			rows = append(rows, moreStyle.Render(" ↓ more..."))
+		}
+	}
+
+	return styles.FormSection(styles.FormSectionConfig{
+		Content:            rows,
+		Width:              width,
+		TopLeft:            cfg.Label,
+		TopLeftHint:        cfg.Hint,
+		Focused:            focused,
+		FocusedBorderColor: styles.BorderHighlightFocusColor,
+	})
 }

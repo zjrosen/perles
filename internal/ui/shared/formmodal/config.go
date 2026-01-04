@@ -120,6 +120,13 @@ const (
 	// Supports Options, InitialToggleIndex (0 or 1).
 	// Visual pattern: ● Selected    ○ Unselected [←/→]
 	FieldTypeToggle
+
+	// FieldTypeSearchSelect is a searchable single-select list.
+	// Combines a search input with a filterable list of options.
+	// Navigate with arrow keys (not j/k which type in search), select with Enter.
+	// Supports Options, SearchPlaceholder, MaxVisibleItems.
+	// Returns the selected option's Value (string).
+	FieldTypeSearchSelect
 )
 
 // FieldConfig defines a single form field.
@@ -175,6 +182,10 @@ type FieldConfig struct {
 
 	// Toggle field options (FieldTypeToggle)
 	InitialToggleIndex int // 0 or 1 - which option is initially selected (default: 0)
+
+	// SearchSelect field options (FieldTypeSearchSelect)
+	SearchPlaceholder string // Placeholder for search input (default: "Search...")
+	MaxVisibleItems   int    // Max items visible before scrolling (default: 5)
 }
 
 // ListOption represents an item in a list or select field.

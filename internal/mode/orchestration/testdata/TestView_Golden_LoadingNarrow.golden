@@ -9,6 +9,7 @@
                                                                                 
                           Initializing Orchestration                            
                                                                                 
+                              ✓ Creating Worktree                               
                              ✓ Creating Workspace                               
                             ⠙ Spawning Coordinator                              
                                Coordinator Loaded                               
@@ -17,7 +18,6 @@
                                                                                 
                                                                                 
                                  [ESC] Cancel                                   
-                                                                                
                                                                                 
                                                                                 
                                                                                 

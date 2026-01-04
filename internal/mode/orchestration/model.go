@@ -19,6 +19,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/zjrosen/perles/internal/git"
+	"github.com/zjrosen/perles/internal/log"
 	"github.com/zjrosen/perles/internal/mode"
 	"github.com/zjrosen/perles/internal/orchestration/events"
 	"github.com/zjrosen/perles/internal/orchestration/mcp"
@@ -31,6 +33,7 @@ import (
 	"github.com/zjrosen/perles/internal/orchestration/workflow"
 	"github.com/zjrosen/perles/internal/pubsub"
 	"github.com/zjrosen/perles/internal/ui/commandpalette"
+	"github.com/zjrosen/perles/internal/ui/shared/formmodal"
 	"github.com/zjrosen/perles/internal/ui/shared/modal"
 	"github.com/zjrosen/perles/internal/ui/shared/quitmodal"
 	"github.com/zjrosen/perles/internal/ui/shared/vimtextarea"
@@ -63,6 +66,7 @@ type InitPhase int
 
 const (
 	InitNotStarted           InitPhase = iota
+	InitCreatingWorktree               // Create git worktree before workspace
 	InitCreatingWorkspace              // Consolidates client, pool, message log, MCP server creation
 	InitSpawningCoordinator            // Coordinator process started
 	InitAwaitingFirstMessage           // Waiting for coordinator's first response
@@ -124,6 +128,7 @@ type Model struct {
 	mcpPort            int                          // Dynamic port for MCP server
 	mcpCoordServer     *mcp.CoordinatorServer       // MCP coordinator server for direct worker messaging
 	workDir            string
+	worktreeEnabled    bool // Whether worktree isolation is enabled
 	services           mode.Services
 	coordinatorMetrics *metrics.TokenMetrics // Token usage and cost data for coordinator
 	coordinatorWorking bool                  // True when coordinator is processing, false when waiting for input
@@ -162,6 +167,18 @@ type Model struct {
 
 	// Coordinator refresh handoff state
 	pendingRefresh bool // True when waiting for handoff before refresh
+
+	// Worktree modal state
+	worktreeModal        *modal.Model     // Worktree prompt modal ("Use Git Worktree?")
+	branchSelectModal    *formmodal.Model // Branch selection modal (when not on main)
+	worktreeDecisionMade bool             // True after user has made worktree decision
+	gitExecutor          git.GitExecutor  // Git executor for worktree operations
+	worktreeBaseBranch   string           // Branch to base worktree on (set by branch modal)
+	worktreeBranch       string           // Auto-generated branch name (set after worktree creation)
+	worktreePath         string           // Path to the worktree directory (set after creation)
+
+	// Exit state
+	exitMessage string // Message to display when exiting (e.g., worktree cleanup info)
 
 	// Dimensions
 	width  int
@@ -669,6 +686,11 @@ func (m *Model) Cleanup() {
 	// Cancel any active subscriptions
 	m.CancelSubscriptions()
 
+	// Cancel initializer if running (stop background goroutine)
+	if m.initializer != nil {
+		m.initializer.Cancel()
+	}
+
 	// Shutdown v2 infrastructure (stops all processes and drains command processor)
 	if m.v2Infra != nil {
 		m.v2Infra.Shutdown()
@@ -686,12 +708,51 @@ func (m *Model) Cleanup() {
 	// Clear message repository
 	m.messageRepo = nil
 
+	// Get worktree path - check initializer first (for early exit during init),
+	// then fall back to model's worktreePath (for normal exit after init complete)
+	worktreePath := m.worktreePath
+	worktreeBranch := m.worktreeBranch
+	if worktreePath == "" && m.initializer != nil {
+		worktreePath = m.initializer.WorktreePath()
+		worktreeBranch = m.initializer.WorktreeBranch()
+	}
+
+	// Cleanup worktree if created (removes directory, preserves branch)
+	if worktreePath != "" && m.gitExecutor != nil {
+		// Set exit message with branch info before cleanup
+		if worktreeBranch != "" {
+			m.exitMessage = fmt.Sprintf(
+				"Worktree cleaned up. Your work is preserved on branch '%s'.\nTo resume: git checkout %s",
+				worktreeBranch, worktreeBranch,
+			)
+		}
+
+		if err := m.gitExecutor.RemoveWorktree(worktreePath); err != nil {
+			log.Warn(log.CatOrch, "Failed to remove worktree", "path", worktreePath, "error", err)
+			// Update exit message to indicate failure
+			if worktreeBranch != "" {
+				m.exitMessage = fmt.Sprintf(
+					"Warning: Failed to remove worktree at %s.\nYour work is preserved on branch '%s'.\nTo resume: git checkout %s\nTo manually clean up: git worktree remove %s",
+					worktreePath, worktreeBranch, worktreeBranch, worktreePath,
+				)
+			}
+		} else {
+			log.Info(log.CatOrch, "Worktree removed", "path", worktreePath, "branch", worktreeBranch)
+		}
+	}
+
 	// Reset listeners
 	m.messageListener = nil
 	m.v2Listener = nil
 	m.ctx = nil
 	m.cancel = nil
 	m.nudgeBatcher = nil
+}
+
+// ExitMessage returns the exit message to display to the user after cleanup.
+// Returns empty string if there's no message to display.
+func (m *Model) ExitMessage() string {
+	return m.exitMessage
 }
 
 // openWorkflowPicker creates and shows the workflow picker modal.

@@ -22,8 +22,23 @@ func (m Model) View() string {
 		return ""
 	}
 
-	// During initialization phases, show the init screen instead of main view
 	initPhase := m.getInitPhase()
+
+	// During InitNotStarted, show blank background (with modal overlay if present).
+	// This prevents flash of main view before worktree modal appears.
+	if initPhase == InitNotStarted {
+		blankBg := lipgloss.NewStyle().Width(m.width).Height(m.height).Render("")
+		if m.worktreeModal != nil {
+			return m.worktreeModal.Overlay(blankBg)
+		}
+		if m.branchSelectModal != nil {
+			return m.branchSelectModal.Overlay(blankBg)
+		}
+		// No modal yet, but still show blank to avoid flash
+		return blankBg
+	}
+
+	// During initialization phases, show the init screen instead of main view
 	if initPhase != InitReady && initPhase != InitNotStarted {
 		return m.renderInitScreen()
 	}

@@ -16,6 +16,7 @@ var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 
 // phaseLabels maps each InitPhase to its display text.
 var phaseLabels = map[InitPhase]string{
+	InitCreatingWorktree:     "Creating Worktree",
 	InitCreatingWorkspace:    "Creating Workspace",
 	InitSpawningCoordinator:  "Spawning Coordinator",
 	InitAwaitingFirstMessage: "Coordinator Loaded",
@@ -25,6 +26,7 @@ var phaseLabels = map[InitPhase]string{
 
 // phaseOrder defines the order in which phases are displayed.
 var phaseOrder = []InitPhase{
+	InitCreatingWorktree,
 	InitCreatingWorkspace,
 	InitSpawningCoordinator,
 	InitAwaitingFirstMessage,
@@ -61,27 +63,30 @@ var (
 			Foreground(styles.TextMutedColor)
 )
 
-// phaseToLinkIndex maps InitPhase to chain link index (0-4).
-// The 5 chain links map to the 5 loading phases:
-//   - Link 0: InitCreatingWorkspace
-//   - Link 1: InitSpawningCoordinator
-//   - Link 2: InitAwaitingFirstMessage
-//   - Link 3: InitSpawningWorkers
-//   - Link 4: InitWorkersReady
+// phaseToLinkIndex maps InitPhase to chain link index (0-5).
+// The 6 chain links map to the 6 loading phases:
+//   - Link 0: InitCreatingWorktree
+//   - Link 1: InitCreatingWorkspace
+//   - Link 2: InitSpawningCoordinator
+//   - Link 3: InitAwaitingFirstMessage
+//   - Link 4: InitSpawningWorkers
+//   - Link 5: InitWorkersReady
 func phaseToLinkIndex(phase InitPhase) int {
 	switch phase {
-	case InitCreatingWorkspace:
+	case InitCreatingWorktree:
 		return 0
-	case InitSpawningCoordinator:
+	case InitCreatingWorkspace:
 		return 1
-	case InitAwaitingFirstMessage:
+	case InitSpawningCoordinator:
 		return 2
-	case InitSpawningWorkers:
+	case InitAwaitingFirstMessage:
 		return 3
-	case InitWorkersReady:
+	case InitSpawningWorkers:
 		return 4
+	case InitWorkersReady:
+		return 5
 	case InitReady:
-		return 5 // All phases complete, show all links colored
+		return 6 // All phases complete, show all links colored
 	default:
 		return 0
 	}
@@ -141,12 +146,24 @@ func (m Model) renderInitScreen() string {
 	// Build phase lines
 	var phaseLines []string
 	for _, phase := range phaseOrder {
+		// Skip worktree phase if worktree is not enabled
+		if phase == InitCreatingWorktree && !m.worktreeEnabled {
+			continue
+		}
+
 		label := phaseLabels[phase]
 		indicator, style := m.getPhaseIndicatorAndStyle(phase, currentPhase)
 
 		// Append "(timed out)" suffix for the timeout case
 		if currentPhase == InitTimedOut && phase == InitWorkersReady {
 			label = label + " (timed out)"
+		}
+
+		// Show worktree path during CreatingWorktree phase
+		if phase == InitCreatingWorktree && currentPhase == InitCreatingWorktree {
+			if worktreePath := m.getWorktreePath(); worktreePath != "" {
+				label = fmt.Sprintf("%s: %s", label, worktreePath)
+			}
 		}
 
 		// Show worker loading progress for WorkersReady phase
@@ -178,10 +195,17 @@ func (m Model) renderInitScreen() string {
 	lines = append(lines, centerTextStyle.Render(phaseBlock))
 
 	// Error message (if failed)
+	actualFailedPhase := m.getFailedPhase()
 	if currentPhase == InitFailed {
 		if initErr := m.getInitError(); initErr != nil {
 			lines = append(lines, "") // Spacing
-			errMsg := errorMessageStyle.Render("Error: " + initErr.Error())
+			// Use worktree-specific error message if the failure was during worktree creation
+			var errMsg string
+			if actualFailedPhase == InitCreatingWorktree {
+				errMsg = errorMessageStyle.Render("Error: " + worktreeErrorMessage(initErr))
+			} else {
+				errMsg = errorMessageStyle.Render("Error: " + initErr.Error())
+			}
 			lines = append(lines, centerTextStyle.Render(errMsg))
 		}
 	}
@@ -200,6 +224,10 @@ func (m Model) renderInitScreen() string {
 	// Action hints
 	if isError {
 		hints := hintStyle.Render("[R] Retry     [ESC] Exit to Kanban")
+		// Worktree-specific hints include Skip option
+		if actualFailedPhase == InitCreatingWorktree {
+			hints = hintStyle.Render("[R] Retry     [S] Skip (use current dir)     [ESC] Exit")
+		}
 		lines = append(lines, centerTextStyle.Render(hints))
 	} else {
 		hints := hintStyle.Render("[ESC] Cancel")
@@ -313,4 +341,32 @@ func (m Model) getFailedPhase() InitPhase {
 	}
 	// Initializer should always be present; default to first phase if somehow nil
 	return InitCreatingWorkspace
+}
+
+// getWorktreePath returns the worktree path from the Initializer.
+// Returns empty string if initializer is nil or worktree is not enabled.
+func (m Model) getWorktreePath() string {
+	if m.initializer != nil {
+		return m.initializer.WorktreePath()
+	}
+	return ""
+}
+
+// worktreeErrorMessage returns a user-friendly error message for worktree-specific errors.
+// It parses the error to identify common git worktree failure modes.
+func worktreeErrorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	errStr := err.Error()
+	switch {
+	case strings.Contains(errStr, "already checked out"):
+		return "Branch is already checked out in another worktree."
+	case strings.Contains(errStr, "already exists"):
+		return "Worktree path already exists."
+	case strings.Contains(errStr, "not a git repository"):
+		return "Not a git repository. Worktree feature unavailable."
+	default:
+		return fmt.Sprintf("Worktree creation failed: %v", err)
+	}
 }

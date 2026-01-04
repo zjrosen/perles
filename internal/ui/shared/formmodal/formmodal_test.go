@@ -1335,6 +1335,45 @@ func TestColorField_SubmitIncludesColor(t *testing.T) {
 	require.Equal(t, "#FF8787", submitMsg.Values["color"])
 }
 
+func TestColorField_JNavigatesToNextFieldWhenPickerClosed(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{Key: "color", Type: FieldTypeColor, Label: "Color", InitialColor: "#FF8787"},
+			{Key: "desc", Type: FieldTypeText, Label: "Description"},
+		},
+	}
+	m := New(cfg).SetSize(80, 24)
+
+	// Start on color field
+	require.Equal(t, 0, m.focusedIndex, "should start on color field")
+	require.False(t, m.showColorPicker, "picker should be closed")
+
+	// j should move to next field when picker is closed
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	require.Equal(t, 1, m.focusedIndex, "j should move to next field when picker closed")
+}
+
+func TestColorField_KNavigatesToPrevFieldWhenPickerClosed(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{Key: "name", Type: FieldTypeText, Label: "Name"},
+			{Key: "color", Type: FieldTypeColor, Label: "Color", InitialColor: "#FF8787"},
+		},
+	}
+	m := New(cfg).SetSize(80, 24)
+
+	// Move to color field
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	require.Equal(t, 1, m.focusedIndex, "should be on color field")
+	require.False(t, m.showColorPicker, "picker should be closed")
+
+	// k should move to previous field when picker is closed
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	require.Equal(t, 0, m.focusedIndex, "k should move to previous field when picker closed")
+}
+
 // --- Golden Tests ---
 
 func TestGolden_TextFieldFocused(t *testing.T) {
@@ -2000,6 +2039,387 @@ func TestEditableListField_SpaceInInput(t *testing.T) {
 
 	// Verify space was typed into input
 	require.Equal(t, "hello world", m.fields[0].addInput.Value())
+}
+
+// --- SearchSelect Field Tests ---
+
+func TestSearchSelectField_StartsCollapsed(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:   "branch",
+				Type:  FieldTypeSearchSelect,
+				Label: "Branch",
+				Options: []ListOption{
+					{Label: "main", Value: "main", Selected: true},
+					{Label: "develop", Value: "develop"},
+					{Label: "feature-1", Value: "feature-1"},
+				},
+			},
+		},
+	}
+	m := New(cfg)
+
+	// Should start collapsed
+	require.False(t, m.fields[0].searchExpanded, "expected search to start collapsed")
+}
+
+func TestSearchSelectField_EnterExpands(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:   "branch",
+				Type:  FieldTypeSearchSelect,
+				Label: "Branch",
+				Options: []ListOption{
+					{Label: "main", Value: "main", Selected: true},
+					{Label: "develop", Value: "develop"},
+				},
+			},
+		},
+	}
+	m := New(cfg)
+
+	// Press Enter to expand
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	require.True(t, m.fields[0].searchExpanded, "expected search to be expanded after Enter")
+}
+
+func TestSearchSelectField_EscapeCollapsesSearch(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:   "branch",
+				Type:  FieldTypeSearchSelect,
+				Label: "Branch",
+				Options: []ListOption{
+					{Label: "main", Value: "main", Selected: true},
+					{Label: "develop", Value: "develop"},
+				},
+			},
+		},
+	}
+	m := New(cfg)
+
+	// Expand first
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	require.True(t, m.fields[0].searchExpanded, "precondition: should be expanded")
+
+	// Escape should collapse, not cancel modal
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+
+	require.False(t, m.fields[0].searchExpanded, "expected search to be collapsed after Escape")
+	require.Nil(t, cmd, "expected no cancel command when collapsing search")
+}
+
+func TestSearchSelectField_EscapeWhenCollapsedCancelsModal(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:   "branch",
+				Type:  FieldTypeSearchSelect,
+				Label: "Branch",
+				Options: []ListOption{
+					{Label: "main", Value: "main", Selected: true},
+				},
+			},
+		},
+	}
+	m := New(cfg)
+
+	// Should start collapsed
+	require.False(t, m.fields[0].searchExpanded, "precondition: should be collapsed")
+
+	// Escape should cancel modal
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+
+	require.NotNil(t, cmd, "expected cancel command")
+	msg := cmd()
+	_, ok := msg.(CancelMsg)
+	require.True(t, ok, "expected CancelMsg, got %T", msg)
+}
+
+func TestSearchSelectField_EnterSelectsAndCollapses(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:   "branch",
+				Type:  FieldTypeSearchSelect,
+				Label: "Branch",
+				Options: []ListOption{
+					{Label: "main", Value: "main", Selected: true},
+					{Label: "develop", Value: "develop"},
+					{Label: "feature-1", Value: "feature-1"},
+				},
+			},
+		},
+	}
+	m := New(cfg)
+
+	// Expand
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	require.True(t, m.fields[0].searchExpanded)
+
+	// Move to second item
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+
+	// Enter to select and collapse
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	require.False(t, m.fields[0].searchExpanded, "expected collapsed after selection")
+	require.True(t, m.fields[0].listItems[1].selected, "expected second item selected")
+	require.False(t, m.fields[0].listItems[0].selected, "expected first item deselected")
+}
+
+func TestSearchSelectField_ArrowNavigation(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:   "branch",
+				Type:  FieldTypeSearchSelect,
+				Label: "Branch",
+				Options: []ListOption{
+					{Label: "main", Value: "main", Selected: true},
+					{Label: "develop", Value: "develop"},
+					{Label: "feature-1", Value: "feature-1"},
+				},
+			},
+		},
+	}
+	m := New(cfg)
+
+	// Expand
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// Cursor starts at selected item (main = index 0)
+	require.Equal(t, 0, m.fields[0].listCursor)
+
+	// Arrow down
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	require.Equal(t, 1, m.fields[0].listCursor)
+
+	// Arrow down again
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	require.Equal(t, 2, m.fields[0].listCursor)
+
+	// Arrow up
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	require.Equal(t, 1, m.fields[0].listCursor)
+}
+
+func TestSearchSelectField_CollapsedArrowDownNavigatesToNextField(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:   "branch",
+				Type:  FieldTypeSearchSelect,
+				Label: "Branch",
+				Options: []ListOption{
+					{Label: "main", Value: "main", Selected: true},
+					{Label: "develop", Value: "develop"},
+				},
+			},
+			{
+				Key:   "desc",
+				Type:  FieldTypeText,
+				Label: "Description",
+			},
+		},
+	}
+	m := New(cfg)
+
+	// Start on SearchSelect field (collapsed)
+	require.Equal(t, 0, m.focusedIndex, "should start on SearchSelect field")
+	require.False(t, m.fields[0].searchExpanded, "should be collapsed")
+
+	// Arrow down should move to next field (not expand)
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	require.Equal(t, 1, m.focusedIndex, "arrow down should move to next field when collapsed")
+}
+
+func TestSearchSelectField_CollapsedArrowUpNavigatesToPrevField(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:   "name",
+				Type:  FieldTypeText,
+				Label: "Name",
+			},
+			{
+				Key:   "branch",
+				Type:  FieldTypeSearchSelect,
+				Label: "Branch",
+				Options: []ListOption{
+					{Label: "main", Value: "main", Selected: true},
+					{Label: "develop", Value: "develop"},
+				},
+			},
+		},
+	}
+	m := New(cfg)
+
+	// Move to SearchSelect field
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	require.Equal(t, 1, m.focusedIndex, "should be on SearchSelect field")
+	require.False(t, m.fields[1].searchExpanded, "should be collapsed")
+
+	// Arrow up should move to previous field
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	require.Equal(t, 0, m.focusedIndex, "arrow up should move to previous field when collapsed")
+}
+
+func TestSearchSelectField_CollapsedJNavigatesToNextField(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:   "branch",
+				Type:  FieldTypeSearchSelect,
+				Label: "Branch",
+				Options: []ListOption{
+					{Label: "main", Value: "main", Selected: true},
+					{Label: "develop", Value: "develop"},
+				},
+			},
+			{
+				Key:   "desc",
+				Type:  FieldTypeText,
+				Label: "Description",
+			},
+		},
+	}
+	m := New(cfg)
+
+	// Start on SearchSelect field (collapsed)
+	require.Equal(t, 0, m.focusedIndex, "should start on SearchSelect field")
+	require.False(t, m.fields[0].searchExpanded, "should be collapsed")
+
+	// j should move to next field when collapsed
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	require.Equal(t, 1, m.focusedIndex, "j should move to next field when collapsed")
+}
+
+func TestSearchSelectField_CollapsedKNavigatesToPrevField(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:   "name",
+				Type:  FieldTypeText,
+				Label: "Name",
+			},
+			{
+				Key:   "branch",
+				Type:  FieldTypeSearchSelect,
+				Label: "Branch",
+				Options: []ListOption{
+					{Label: "main", Value: "main", Selected: true},
+					{Label: "develop", Value: "develop"},
+				},
+			},
+		},
+	}
+	m := New(cfg)
+
+	// Move to SearchSelect field
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	require.Equal(t, 1, m.focusedIndex, "should be on SearchSelect field")
+	require.False(t, m.fields[1].searchExpanded, "should be collapsed")
+
+	// k should move to previous field when collapsed
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	require.Equal(t, 0, m.focusedIndex, "k should move to previous field when collapsed")
+}
+
+// --- SearchSelect Golden Tests ---
+
+func TestGolden_SearchSelectCollapsed(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Select Branch",
+		Fields: []FieldConfig{
+			{
+				Key:   "branch",
+				Type:  FieldTypeSearchSelect,
+				Label: "Branch",
+				Options: []ListOption{
+					{Label: "main", Value: "main", Selected: true},
+					{Label: "develop", Value: "develop"},
+					{Label: "feature-auth", Value: "feature-auth"},
+				},
+			},
+		},
+		SubmitLabel: "Create",
+		MinWidth:    50,
+	}
+	m := New(cfg).SetSize(80, 24)
+
+	compareGolden(t, "search_select_collapsed", m.View())
+}
+
+func TestGolden_SearchSelectExpanded(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Select Branch",
+		Fields: []FieldConfig{
+			{
+				Key:   "branch",
+				Type:  FieldTypeSearchSelect,
+				Label: "Branch",
+				Options: []ListOption{
+					{Label: "main", Value: "main", Selected: true},
+					{Label: "develop", Value: "develop"},
+					{Label: "feature-auth", Value: "feature-auth"},
+					{Label: "feature-login", Value: "feature-login"},
+					{Label: "hotfix-123", Value: "hotfix-123"},
+				},
+			},
+		},
+		SubmitLabel: "Create",
+		MinWidth:    50,
+	}
+	m := New(cfg).SetSize(80, 24)
+
+	// Expand the search
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	compareGolden(t, "search_select_expanded", m.View())
+}
+
+func TestGolden_SearchSelectExpandedWithFilter(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Select Branch",
+		Fields: []FieldConfig{
+			{
+				Key:   "branch",
+				Type:  FieldTypeSearchSelect,
+				Label: "Branch",
+				Options: []ListOption{
+					{Label: "main", Value: "main", Selected: true},
+					{Label: "develop", Value: "develop"},
+					{Label: "feature-auth", Value: "feature-auth"},
+					{Label: "feature-login", Value: "feature-login"},
+					{Label: "hotfix-123", Value: "hotfix-123"},
+				},
+			},
+		},
+		SubmitLabel: "Create",
+		MinWidth:    50,
+	}
+	m := New(cfg).SetSize(80, 24)
+
+	// Expand and type filter
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f', 'e', 'a', 't'}})
+
+	compareGolden(t, "search_select_expanded_filtered", m.View())
 }
 
 // --- Editable List Golden Tests ---

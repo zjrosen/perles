@@ -38,8 +38,11 @@ type Config struct {
 	Message        string        // Optional message/prompt text
 	Inputs         []InputConfig // Input fields; if empty, modal is in confirmation mode
 	ConfirmVariant ButtonVariant // Style for confirm button (default: ButtonPrimary)
+	ConfirmText    string        // Custom confirm button text (default: "Save" or "Confirm")
+	CancelText     string        // Custom cancel button text (default: "Cancel")
 	MinWidth       int           // Minimum width (0 = default 40)
 	HideButtons    bool          // If true, hide confirm/cancel buttons (message-only modal)
+	Required       bool          // If true, Esc key is disabled - user must click a button
 }
 
 // SubmitMsg is sent when the user confirms the modal (Enter on Save button).
@@ -179,7 +182,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, keys.Common.Escape):
-			return m, func() tea.Msg { return CancelMsg{} }
+			if !m.config.Required {
+				return m, func() tea.Msg { return CancelMsg{} }
+			}
 		}
 
 	case tea.WindowSizeMsg:
@@ -363,7 +368,9 @@ func (m Model) renderButtons() string {
 	}
 
 	var saveLabel string
-	if m.hasInputs {
+	if m.config.ConfirmText != "" {
+		saveLabel = m.config.ConfirmText
+	} else if m.hasInputs {
 		saveLabel = "Save"
 	} else {
 		saveLabel = "Confirm"
@@ -375,7 +382,11 @@ func (m Model) renderButtons() string {
 	if onButtons && m.focusedField == FieldCancel {
 		cancelStyle = styles.SecondaryButtonFocusedStyle
 	}
-	cancelBtn := cancelStyle.Render("Cancel")
+	cancelLabel := "Cancel"
+	if m.config.CancelText != "" {
+		cancelLabel = m.config.CancelText
+	}
+	cancelBtn := cancelStyle.Render(cancelLabel)
 
 	return saveBtn + "  " + cancelBtn
 }

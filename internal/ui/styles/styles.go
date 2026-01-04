@@ -26,6 +26,9 @@ var (
 	// Selection indicator color (used for ">" prefix in lists)
 	SelectionIndicatorColor = lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#FFFFFF"}
 
+	// Selection background color (used to highlight selected items in lists)
+	SelectionBackgroundColor = lipgloss.AdaptiveColor{Light: "#1A5276", Dark: "#1A5276"}
+
 	// Button colors
 	ButtonTextColor             = lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#FFFFFF"}
 	ButtonPrimaryBgColor        = lipgloss.AdaptiveColor{Light: "#1A5276", Dark: "#1A5276"}

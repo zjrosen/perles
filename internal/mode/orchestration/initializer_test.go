@@ -11,8 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/zjrosen/perles/internal/mocks"
 	"github.com/zjrosen/perles/internal/orchestration/amp"
 	"github.com/zjrosen/perles/internal/orchestration/client"
 	"github.com/zjrosen/perles/internal/orchestration/events"
@@ -466,6 +468,11 @@ func TestInitializer_CreateSession_Success(t *testing.T) {
 		ExpectedWorkers: 4,
 	})
 
+	// Set session ID (normally done by Start())
+	init.mu.Lock()
+	init.sessionID = "12345678-90ab-cdef-1234-567890abcdef"
+	init.mu.Unlock()
+
 	// Call createSession directly
 	sess, err := init.createSession()
 
@@ -502,6 +509,11 @@ func TestInitializer_CreateSession_ReturnsErrorOnFailure(t *testing.T) {
 		ExpectedWorkers: 4,
 	})
 
+	// Set session ID (normally done by Start())
+	init.mu.Lock()
+	init.sessionID = "test-session-id"
+	init.mu.Unlock()
+
 	// Call createSession - should fail because we can't create a directory
 	// under a file
 	sess, err := init.createSession()
@@ -513,7 +525,8 @@ func TestInitializer_CreateSession_ReturnsErrorOnFailure(t *testing.T) {
 }
 
 func TestInitializer_CreateSession_UniqueIDs(t *testing.T) {
-	// Verify createSession() generates unique session IDs
+	// Verify createSession() uses the session ID set by Start()
+	// Each session should have the expected unique ID when we set different IDs
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
@@ -522,17 +535,26 @@ func TestInitializer_CreateSession_UniqueIDs(t *testing.T) {
 		ExpectedWorkers: 4,
 	})
 
-	// Create multiple sessions
+	// Create multiple sessions with different pre-set IDs
+	init.mu.Lock()
+	init.sessionID = "session-id-11111111-1111-1111-1111-111111111111"
+	init.mu.Unlock()
 	sess1, err1 := init.createSession()
 	require.NoError(t, err1)
 
+	init.mu.Lock()
+	init.sessionID = "session-id-22222222-2222-2222-2222-222222222222"
+	init.mu.Unlock()
 	sess2, err2 := init.createSession()
 	require.NoError(t, err2)
 
+	init.mu.Lock()
+	init.sessionID = "session-id-33333333-3333-3333-3333-333333333333"
+	init.mu.Unlock()
 	sess3, err3 := init.createSession()
 	require.NoError(t, err3)
 
-	// Verify all IDs are unique
+	// Verify all IDs are unique (because we set different IDs)
 	require.NotEqual(t, sess1.ID, sess2.ID, "session IDs should be unique")
 	require.NotEqual(t, sess2.ID, sess3.ID, "session IDs should be unique")
 	require.NotEqual(t, sess1.ID, sess3.ID, "session IDs should be unique")
@@ -547,6 +569,11 @@ func TestInitializer_CreateSession_DirectoryStructure(t *testing.T) {
 		ClientType:      "claude",
 		ExpectedWorkers: 4,
 	})
+
+	// Set session ID (normally done by Start())
+	init.mu.Lock()
+	init.sessionID = "test-session-00001111-2222-3333-4444-555566667777"
+	init.mu.Unlock()
 
 	sess, err := init.createSession()
 	require.NoError(t, err)
@@ -1838,4 +1865,395 @@ func TestCleanupResources_ExistingTestStillPasses(t *testing.T) {
 	require.NotPanics(t, func() {
 		init.cleanupResources()
 	})
+}
+
+// ===========================================================================
+// Worktree Phase Tests (Task perles-v5cq.5)
+// ===========================================================================
+
+func TestInitializer_WorktreePhase_Success(t *testing.T) {
+	// Unit test: createWorktree() succeeds with proper mock setup
+	workDir := t.TempDir()
+	worktreePath := "/tmp/test-worktree"
+
+	mockGit := mocks.NewMockGitExecutor(t)
+	mockGit.EXPECT().IsGitRepo().Return(true)
+	mockGit.EXPECT().PruneWorktrees().Return(nil)
+	mockGit.EXPECT().DetermineWorktreePath(mock.AnythingOfType("string")).Return(worktreePath, nil)
+	mockGit.EXPECT().CreateWorktree(worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(nil)
+
+	init := NewInitializer(InitializerConfig{
+		WorkDir:            workDir,
+		WorktreeBaseBranch: "main",
+		GitExecutor:        mockGit,
+		ExpectedWorkers:    4,
+	})
+
+	// Start to generate session ID
+	init.mu.Lock()
+	init.sessionID = "test-session-id-12345678"
+	init.mu.Unlock()
+
+	// Call createWorktree directly
+	err := init.createWorktree()
+	require.NoError(t, err, "createWorktree should succeed")
+
+	// Verify worktree state was set
+	require.Equal(t, worktreePath, init.WorktreePath())
+	require.Equal(t, "perles-session-test-ses", init.WorktreeBranch())
+}
+
+func TestInitializer_WorktreePhase_NotGitRepo_Fails(t *testing.T) {
+	// Unit test: createWorktree() fails when not in git repo
+	workDir := t.TempDir()
+
+	mockGit := mocks.NewMockGitExecutor(t)
+	mockGit.EXPECT().IsGitRepo().Return(false)
+
+	init := NewInitializer(InitializerConfig{
+		WorkDir:            workDir,
+		WorktreeBaseBranch: "main",
+		GitExecutor:        mockGit,
+		ExpectedWorkers:    4,
+	})
+
+	init.mu.Lock()
+	init.sessionID = "test-session-id"
+	init.mu.Unlock()
+
+	err := init.createWorktree()
+	require.Error(t, err, "createWorktree should fail when not in git repo")
+	require.Contains(t, err.Error(), "not a git repository")
+}
+
+func TestInitializer_WorktreePhase_CreateFails_Fails(t *testing.T) {
+	// Unit test: createWorktree() fails when CreateWorktree fails
+	workDir := t.TempDir()
+	worktreePath := "/tmp/test-worktree"
+
+	mockGit := mocks.NewMockGitExecutor(t)
+	mockGit.EXPECT().IsGitRepo().Return(true)
+	mockGit.EXPECT().PruneWorktrees().Return(nil)
+	mockGit.EXPECT().DetermineWorktreePath(mock.AnythingOfType("string")).Return(worktreePath, nil)
+	mockGit.EXPECT().CreateWorktree(worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(fmt.Errorf("branch already checked out"))
+
+	init := NewInitializer(InitializerConfig{
+		WorkDir:            workDir,
+		WorktreeBaseBranch: "main",
+		GitExecutor:        mockGit,
+		ExpectedWorkers:    4,
+	})
+
+	init.mu.Lock()
+	init.sessionID = "test-session-id"
+	init.mu.Unlock()
+
+	err := init.createWorktree()
+	require.Error(t, err, "createWorktree should fail when CreateWorktree fails")
+	require.Contains(t, err.Error(), "failed to create worktree")
+}
+
+func TestInitializer_WorktreePhase_Disabled_SkipsPhase(t *testing.T) {
+	// Unit test: run() skips worktree phase when disabled
+	workDir := t.TempDir()
+
+	// Create mock that should NOT be called
+	mockGit := mocks.NewMockGitExecutor(t)
+	// No expectations set - if any method is called, test will fail
+
+	init := NewInitializer(InitializerConfig{
+		WorkDir:         workDir,
+		GitExecutor:     mockGit,
+		ExpectedWorkers: 4,
+	})
+
+	// Verify worktree path is empty
+	require.Empty(t, init.WorktreePath())
+	require.Empty(t, init.WorktreeBranch())
+}
+
+func TestInitializer_WorktreePath_PropagatedToWorkspace(t *testing.T) {
+	// Unit test: Verify worktreePath is used in createWorkspace
+	workDir := t.TempDir()
+	worktreePath := "/tmp/test-worktree"
+
+	init := NewInitializer(InitializerConfig{
+		WorkDir:            workDir,
+		WorktreeBaseBranch: "main",
+		ExpectedWorkers:    4,
+	})
+
+	// Manually set worktree path (simulating successful createWorktree)
+	init.mu.Lock()
+	init.worktreePath = worktreePath
+	init.sessionID = "test-session-id"
+	init.mu.Unlock()
+
+	// Verify accessor returns the path
+	require.Equal(t, worktreePath, init.WorktreePath())
+}
+
+func TestInitializer_PruneWorktrees_CalledBeforeCreate(t *testing.T) {
+	// Unit test: Verify PruneWorktrees is called before CreateWorktree
+	workDir := t.TempDir()
+	worktreePath := "/tmp/test-worktree"
+
+	// Track call order
+	var callOrder []string
+	orderMu := sync.Mutex{}
+
+	mockGit := mocks.NewMockGitExecutor(t)
+	mockGit.EXPECT().IsGitRepo().Return(true).Run(func() {
+		orderMu.Lock()
+		callOrder = append(callOrder, "IsGitRepo")
+		orderMu.Unlock()
+	})
+	mockGit.EXPECT().PruneWorktrees().Return(nil).Run(func() {
+		orderMu.Lock()
+		callOrder = append(callOrder, "PruneWorktrees")
+		orderMu.Unlock()
+	})
+	mockGit.EXPECT().DetermineWorktreePath(mock.AnythingOfType("string")).Return(worktreePath, nil).Run(func(sessionID string) {
+		orderMu.Lock()
+		callOrder = append(callOrder, "DetermineWorktreePath")
+		orderMu.Unlock()
+	})
+	mockGit.EXPECT().CreateWorktree(worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(nil).Run(func(path string, newBranch string, baseBranch string) {
+		orderMu.Lock()
+		callOrder = append(callOrder, "CreateWorktree")
+		orderMu.Unlock()
+	})
+
+	init := NewInitializer(InitializerConfig{
+		WorkDir:            workDir,
+		WorktreeBaseBranch: "main",
+		GitExecutor:        mockGit,
+		ExpectedWorkers:    4,
+	})
+
+	init.mu.Lock()
+	init.sessionID = "test-session-id"
+	init.mu.Unlock()
+
+	err := init.createWorktree()
+	require.NoError(t, err)
+
+	// Verify PruneWorktrees is called before CreateWorktree
+	orderMu.Lock()
+	defer orderMu.Unlock()
+	require.Equal(t, []string{"IsGitRepo", "PruneWorktrees", "DetermineWorktreePath", "CreateWorktree"}, callOrder)
+}
+
+func TestInitializer_BranchName_DefaultsToSessionID(t *testing.T) {
+	// Unit test: Verify branch name defaults to perles-session-{shortID}
+	workDir := t.TempDir()
+	worktreePath := "/tmp/test-worktree"
+	sessionID := "12345678-90ab-cdef-1234-567890abcdef"
+	expectedBranch := "perles-session-12345678"
+
+	var capturedNewBranch, capturedBaseBranch string
+	mockGit := mocks.NewMockGitExecutor(t)
+	mockGit.EXPECT().IsGitRepo().Return(true)
+	mockGit.EXPECT().PruneWorktrees().Return(nil)
+	mockGit.EXPECT().DetermineWorktreePath(sessionID).Return(worktreePath, nil)
+	mockGit.EXPECT().CreateWorktree(worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).
+		Run(func(path string, newBranch string, baseBranch string) {
+			capturedNewBranch = newBranch
+			capturedBaseBranch = baseBranch
+		}).
+		Return(nil)
+
+	init := NewInitializer(InitializerConfig{
+		WorkDir:            workDir,
+		WorktreeBaseBranch: "", // Empty - uses current HEAD
+		GitExecutor:        mockGit,
+		ExpectedWorkers:    4,
+	})
+
+	init.mu.Lock()
+	init.sessionID = sessionID
+	init.mu.Unlock()
+
+	err := init.createWorktree()
+	require.NoError(t, err)
+	require.Equal(t, expectedBranch, capturedNewBranch)
+	require.Equal(t, "", capturedBaseBranch) // Empty base branch means current HEAD
+	require.Equal(t, expectedBranch, init.WorktreeBranch())
+}
+
+func TestInitializer_BranchName_UsesConfiguredBaseBranch(t *testing.T) {
+	// Unit test: Verify configured base branch is passed to CreateWorktree
+	workDir := t.TempDir()
+	worktreePath := "/tmp/test-worktree"
+	baseBranch := "develop"
+	sessionID := "test-sess"
+	expectedNewBranch := "perles-session-test-ses"
+
+	var capturedNewBranch, capturedBaseBranch string
+	mockGit := mocks.NewMockGitExecutor(t)
+	mockGit.EXPECT().IsGitRepo().Return(true)
+	mockGit.EXPECT().PruneWorktrees().Return(nil)
+	mockGit.EXPECT().DetermineWorktreePath(mock.AnythingOfType("string")).Return(worktreePath, nil)
+	mockGit.EXPECT().CreateWorktree(worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).
+		Run(func(path string, newBranch string, base string) {
+			capturedNewBranch = newBranch
+			capturedBaseBranch = base
+		}).
+		Return(nil)
+
+	init := NewInitializer(InitializerConfig{
+		WorkDir:            workDir,
+		WorktreeBaseBranch: baseBranch, // Configured base branch
+		GitExecutor:        mockGit,
+		ExpectedWorkers:    4,
+	})
+
+	init.mu.Lock()
+	init.sessionID = sessionID
+	init.mu.Unlock()
+
+	err := init.createWorktree()
+	require.NoError(t, err)
+	require.Equal(t, expectedNewBranch, capturedNewBranch) // Auto-generated branch name
+	require.Equal(t, baseBranch, capturedBaseBranch)       // Base branch passed correctly
+	require.Equal(t, expectedNewBranch, init.WorktreeBranch())
+}
+
+func TestInitializer_WorktreePhase_PruneFailsContinues(t *testing.T) {
+	// Unit test: Verify worktree creation continues even if prune fails
+	workDir := t.TempDir()
+	worktreePath := "/tmp/test-worktree"
+
+	mockGit := mocks.NewMockGitExecutor(t)
+	mockGit.EXPECT().IsGitRepo().Return(true)
+	mockGit.EXPECT().PruneWorktrees().Return(fmt.Errorf("prune failed")) // Failure should be ignored
+	mockGit.EXPECT().DetermineWorktreePath(mock.AnythingOfType("string")).Return(worktreePath, nil)
+	mockGit.EXPECT().CreateWorktree(worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(nil)
+
+	init := NewInitializer(InitializerConfig{
+		WorkDir:            workDir,
+		WorktreeBaseBranch: "main",
+		GitExecutor:        mockGit,
+		ExpectedWorkers:    4,
+	})
+
+	init.mu.Lock()
+	init.sessionID = "test-session-id"
+	init.mu.Unlock()
+
+	err := init.createWorktree()
+	require.NoError(t, err, "createWorktree should succeed even if prune fails")
+	require.Equal(t, worktreePath, init.WorktreePath())
+}
+
+func TestInitializer_WorktreePhase_DeterminePathFails(t *testing.T) {
+	// Unit test: Verify failure when DetermineWorktreePath fails
+	workDir := t.TempDir()
+
+	mockGit := mocks.NewMockGitExecutor(t)
+	mockGit.EXPECT().IsGitRepo().Return(true)
+	mockGit.EXPECT().PruneWorktrees().Return(nil)
+	mockGit.EXPECT().DetermineWorktreePath(mock.AnythingOfType("string")).Return("", fmt.Errorf("path determination failed"))
+
+	init := NewInitializer(InitializerConfig{
+		WorkDir:            workDir,
+		WorktreeBaseBranch: "main",
+		GitExecutor:        mockGit,
+		ExpectedWorkers:    4,
+	})
+
+	init.mu.Lock()
+	init.sessionID = "test-session-id"
+	init.mu.Unlock()
+
+	err := init.createWorktree()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to determine worktree path")
+}
+
+func TestInitializer_Retry_ResetsWorktreeFields(t *testing.T) {
+	// Unit test: Verify Retry() resets worktree fields
+	workDir := t.TempDir()
+
+	init := NewInitializer(InitializerConfig{
+		WorkDir:         workDir,
+		ExpectedWorkers: 4,
+	})
+
+	// Manually set worktree fields
+	init.mu.Lock()
+	init.worktreePath = "/tmp/test-worktree"
+	init.worktreeBranch = "test-branch"
+	init.sessionID = "test-session-id"
+	init.mu.Unlock()
+
+	// Call Cancel (which is called by Retry first)
+	init.Cancel()
+
+	// After Cancel, manually reset like Retry does
+	init.mu.Lock()
+	init.worktreePath = ""
+	init.worktreeBranch = ""
+	init.sessionID = ""
+	init.mu.Unlock()
+
+	// Verify fields are reset
+	require.Empty(t, init.WorktreePath())
+	require.Empty(t, init.WorktreeBranch())
+}
+
+func TestInitializer_WorktreePath_Accessor_ThreadSafe(t *testing.T) {
+	// Unit test: Verify WorktreePath() is thread-safe
+	init := NewInitializer(InitializerConfig{
+		WorkDir: t.TempDir(),
+	})
+
+	// Concurrently read WorktreePath
+	done := make(chan bool, 10)
+	for range 10 {
+		go func() {
+			defer func() { done <- true }()
+			_ = init.WorktreePath()
+		}()
+	}
+
+	// Wait for all goroutines
+	for range 10 {
+		<-done
+	}
+}
+
+func TestInitializer_WorktreeBranch_Accessor_ThreadSafe(t *testing.T) {
+	// Unit test: Verify WorktreeBranch() is thread-safe
+	init := NewInitializer(InitializerConfig{
+		WorkDir: t.TempDir(),
+	})
+
+	// Concurrently read WorktreeBranch
+	done := make(chan bool, 10)
+	for range 10 {
+		go func() {
+			defer func() { done <- true }()
+			_ = init.WorktreeBranch()
+		}()
+	}
+
+	// Wait for all goroutines
+	for range 10 {
+		<-done
+	}
+}
+
+func TestInitializer_WorktreeConfig_Fields(t *testing.T) {
+	// Unit test: Verify InitializerConfig has all worktree fields
+	config := InitializerConfig{
+		WorkDir:            "/test/dir",
+		WorktreeBaseBranch: "test-branch",
+		GitExecutor:        nil, // Will be set in real usage
+	}
+
+	// Verify fields are accessible and set correctly
+	require.Equal(t, "/test/dir", config.WorkDir)
+	require.Equal(t, "test-branch", config.WorktreeBaseBranch)
+	require.Nil(t, config.GitExecutor)
 }

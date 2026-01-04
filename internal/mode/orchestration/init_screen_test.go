@@ -43,7 +43,8 @@ func newTestInitializerWithFailedPhase(phase InitPhase, failedAt InitPhase, err 
 
 func TestInitPhase_PhaseOrdering(t *testing.T) {
 	// Verify the numerical ordering of phases is correct
-	require.Less(t, int(InitNotStarted), int(InitCreatingWorkspace))
+	require.Less(t, int(InitNotStarted), int(InitCreatingWorktree))
+	require.Less(t, int(InitCreatingWorktree), int(InitCreatingWorkspace))
 	require.Less(t, int(InitCreatingWorkspace), int(InitSpawningCoordinator))
 	require.Less(t, int(InitSpawningCoordinator), int(InitSpawningWorkers))
 	require.Less(t, int(InitSpawningWorkers), int(InitWorkersReady))
@@ -415,6 +416,7 @@ func TestView_Golden_LoadingCreatingWorkspace(t *testing.T) {
 	m := New(Config{})
 	m = m.SetSize(120, 30)
 	m.initializer = newTestInitializer(InitCreatingWorkspace, nil)
+	m.worktreeEnabled = true // Show worktree phase in loading screen
 	m.spinnerFrame = 0
 
 	view := m.View()
@@ -425,6 +427,7 @@ func TestView_Golden_LoadingSpawningCoordinator(t *testing.T) {
 	m := New(Config{})
 	m = m.SetSize(120, 30)
 	m.initializer = newTestInitializer(InitSpawningCoordinator, nil)
+	m.worktreeEnabled = true // Show worktree phase in loading screen
 	m.spinnerFrame = 2
 
 	view := m.View()
@@ -435,6 +438,7 @@ func TestView_Golden_LoadingAwaitingFirstMessage(t *testing.T) {
 	m := New(Config{})
 	m = m.SetSize(120, 30)
 	m.initializer = newTestInitializer(InitAwaitingFirstMessage, nil)
+	m.worktreeEnabled = true // Show worktree phase in loading screen
 	m.spinnerFrame = 3
 
 	view := m.View()
@@ -445,6 +449,7 @@ func TestView_Golden_LoadingSpawningWorkers(t *testing.T) {
 	m := New(Config{})
 	m = m.SetSize(120, 30)
 	m.initializer = newTestInitializer(InitSpawningWorkers, nil)
+	m.worktreeEnabled = true // Show worktree phase in loading screen
 	m.spinnerFrame = 4
 
 	view := m.View()
@@ -455,6 +460,7 @@ func TestView_Golden_LoadingWorkersReady(t *testing.T) {
 	m := New(Config{})
 	m = m.SetSize(120, 30)
 	m.initializer = newTestInitializer(InitWorkersReady, nil)
+	m.worktreeEnabled = true // Show worktree phase in loading screen
 	m.spinnerFrame = 6
 
 	view := m.View()
@@ -465,6 +471,7 @@ func TestView_Golden_LoadingFailed(t *testing.T) {
 	m := New(Config{})
 	m = m.SetSize(120, 30)
 	m.initializer = newTestInitializer(InitFailed, errors.New("listen tcp :8765: address already in use"))
+	m.worktreeEnabled = true // Show worktree phase in loading screen
 
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))
@@ -474,6 +481,7 @@ func TestView_Golden_LoadingTimedOut(t *testing.T) {
 	m := New(Config{})
 	m = m.SetSize(120, 30)
 	m.initializer = newTestInitializerWithFailedPhase(InitTimedOut, InitSpawningWorkers, nil)
+	m.worktreeEnabled = true // Show worktree phase in loading screen
 
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))
@@ -483,6 +491,7 @@ func TestView_Golden_LoadingNarrow(t *testing.T) {
 	m := New(Config{})
 	m = m.SetSize(80, 24)
 	m.initializer = newTestInitializer(InitSpawningCoordinator, nil)
+	m.worktreeEnabled = true // Show worktree phase in loading screen
 	m.spinnerFrame = 1
 
 	view := m.View()
@@ -493,6 +502,7 @@ func TestView_Golden_LoadingWide(t *testing.T) {
 	m := New(Config{})
 	m = m.SetSize(160, 40)
 	m.initializer = newTestInitializer(InitSpawningWorkers, nil)
+	m.worktreeEnabled = true // Show worktree phase in loading screen
 	m.spinnerFrame = 5
 
 	view := m.View()
@@ -593,4 +603,222 @@ func TestRenderInitScreen_ShowsCorrectHints(t *testing.T) {
 			}
 		})
 	}
+}
+
+// --- Worktree phase tests ---
+
+// newTestInitializerWithWorktree creates an Initializer with worktree-specific state for testing.
+func newTestInitializerWithWorktree(phase InitPhase, failedAt InitPhase, err error, worktreePath string) *Initializer {
+	return &Initializer{
+		phase:              phase,
+		failedAtPhase:      failedAt,
+		err:                err,
+		worktreePath:       worktreePath,
+		workerConfirmation: newWorkerConfirmation(4),
+		cfg: InitializerConfig{
+			ExpectedWorkers: 4,
+		},
+	}
+}
+
+func TestInitScreen_PhaseLabel_CreatingWorktree(t *testing.T) {
+	// Verify the phaseLabels map includes InitCreatingWorktree
+	label, exists := phaseLabels[InitCreatingWorktree]
+	require.True(t, exists, "phaseLabels should include InitCreatingWorktree")
+	require.Equal(t, "Creating Worktree", label)
+}
+
+func TestInitScreen_PhaseOrder_IncludesWorktree(t *testing.T) {
+	// Verify InitCreatingWorktree is in phaseOrder and comes before InitCreatingWorkspace
+	found := false
+	worktreeIdx := -1
+	workspaceIdx := -1
+	for i, phase := range phaseOrder {
+		if phase == InitCreatingWorktree {
+			found = true
+			worktreeIdx = i
+		}
+		if phase == InitCreatingWorkspace {
+			workspaceIdx = i
+		}
+	}
+	require.True(t, found, "phaseOrder should include InitCreatingWorktree")
+	require.True(t, worktreeIdx < workspaceIdx, "InitCreatingWorktree should come before InitCreatingWorkspace")
+}
+
+func TestInitScreen_WorktreePath_DisplayedDuringCreation(t *testing.T) {
+	m := New(Config{})
+	m = m.SetSize(120, 30)
+	m.worktreeEnabled = true // Must enable worktree to show the phase
+	worktreePath := "/tmp/test-worktree-abc123"
+	m.initializer = newTestInitializerWithWorktree(InitCreatingWorktree, InitNotStarted, nil, worktreePath)
+	m.spinnerFrame = 0
+
+	view := m.View()
+
+	// Should show the worktree path during creation
+	require.Contains(t, view, worktreePath)
+	require.Contains(t, view, "Creating Worktree")
+}
+
+func TestInitScreen_WorktreePath_NotDisplayedWhenEmpty(t *testing.T) {
+	m := New(Config{})
+	m = m.SetSize(120, 30)
+	m.worktreeEnabled = true // Must enable worktree to show the phase
+	m.initializer = newTestInitializerWithWorktree(InitCreatingWorktree, InitNotStarted, nil, "")
+	m.spinnerFrame = 0
+
+	view := m.View()
+
+	// Should show just the label without path when path is empty
+	require.Contains(t, view, "Creating Worktree")
+	// Should not have a colon after "Creating Worktree" (which indicates path display)
+	require.NotContains(t, view, "Creating Worktree:")
+}
+
+func TestInitScreen_WorktreeError_ShowsHints(t *testing.T) {
+	m := New(Config{})
+	m = m.SetSize(120, 30)
+	m.worktreeEnabled = true // Must enable worktree to show the phase
+	m.initializer = newTestInitializerWithWorktree(InitFailed, InitCreatingWorktree, errors.New("worktree creation failed"), "")
+
+	view := m.View()
+
+	// Should show worktree-specific hints
+	require.Contains(t, view, "[R] Retry")
+	require.Contains(t, view, "[S] Skip")
+	require.Contains(t, view, "[ESC] Exit")
+	require.Contains(t, view, "use current dir")
+}
+
+func TestInitScreen_WorktreeError_BranchConflict_Message(t *testing.T) {
+	m := New(Config{})
+	m = m.SetSize(120, 30)
+	m.worktreeEnabled = true // Must enable worktree to show the phase
+	m.initializer = newTestInitializerWithWorktree(InitFailed, InitCreatingWorktree, errors.New("fatal: 'main' is already checked out at '/other/worktree'"), "")
+
+	view := m.View()
+
+	// Should show user-friendly branch conflict message
+	require.Contains(t, view, "Branch is already checked out in another worktree")
+}
+
+func TestInitScreen_WorktreeError_PathExists_Message(t *testing.T) {
+	m := New(Config{})
+	m = m.SetSize(120, 30)
+	m.worktreeEnabled = true // Must enable worktree to show the phase
+	m.initializer = newTestInitializerWithWorktree(InitFailed, InitCreatingWorktree, errors.New("fatal: '/tmp/worktree' already exists"), "")
+
+	view := m.View()
+
+	// Should show user-friendly path exists message
+	require.Contains(t, view, "Worktree path already exists")
+}
+
+func TestInitScreen_WorktreeError_NotGitRepo_Message(t *testing.T) {
+	m := New(Config{})
+	m = m.SetSize(120, 30)
+	m.worktreeEnabled = true // Must enable worktree to show the phase
+	m.initializer = newTestInitializerWithWorktree(InitFailed, InitCreatingWorktree, errors.New("fatal: not a git repository"), "")
+
+	view := m.View()
+
+	// Should show user-friendly not git repo message
+	require.Contains(t, view, "Not a git repository")
+	require.Contains(t, view, "Worktree feature unavailable")
+}
+
+func TestInitScreen_WorktreeError_GenericError_Message(t *testing.T) {
+	m := New(Config{})
+	m = m.SetSize(120, 30)
+	m.worktreeEnabled = true // Must enable worktree to show the phase
+	genericErr := errors.New("some unexpected error")
+	m.initializer = newTestInitializerWithWorktree(InitFailed, InitCreatingWorktree, genericErr, "")
+
+	view := m.View()
+
+	// Should show generic worktree error message
+	require.Contains(t, view, "Worktree creation failed")
+	require.Contains(t, view, "some unexpected error")
+}
+
+func TestInitScreen_NonWorktreeError_DoesNotShowSkipHint(t *testing.T) {
+	m := New(Config{})
+	m = m.SetSize(120, 30)
+	m.initializer = newTestInitializerWithFailedPhase(InitFailed, InitCreatingWorkspace, errors.New("workspace error"))
+
+	view := m.View()
+
+	// Should NOT show Skip hint for non-worktree errors
+	require.NotContains(t, view, "[S] Skip")
+	require.Contains(t, view, "[R] Retry")
+	require.Contains(t, view, "[ESC] Exit")
+}
+
+func TestWorktreeErrorMessage_BranchConflict(t *testing.T) {
+	err := errors.New("fatal: 'feature' is already checked out at '/path'")
+	msg := worktreeErrorMessage(err)
+	require.Equal(t, "Branch is already checked out in another worktree.", msg)
+}
+
+func TestWorktreeErrorMessage_PathExists(t *testing.T) {
+	err := errors.New("fatal: '/tmp/worktree' already exists")
+	msg := worktreeErrorMessage(err)
+	require.Equal(t, "Worktree path already exists.", msg)
+}
+
+func TestWorktreeErrorMessage_NotGitRepo(t *testing.T) {
+	err := errors.New("fatal: not a git repository (or any of the parent directories): .git")
+	msg := worktreeErrorMessage(err)
+	require.Equal(t, "Not a git repository. Worktree feature unavailable.", msg)
+}
+
+func TestWorktreeErrorMessage_Generic(t *testing.T) {
+	err := errors.New("some unknown error")
+	msg := worktreeErrorMessage(err)
+	require.Equal(t, "Worktree creation failed: some unknown error", msg)
+}
+
+func TestWorktreeErrorMessage_NilError(t *testing.T) {
+	msg := worktreeErrorMessage(nil)
+	require.Empty(t, msg)
+}
+
+func TestPhaseToLinkIndex_IncludesWorktree(t *testing.T) {
+	// Verify phaseToLinkIndex properly maps InitCreatingWorktree
+	require.Equal(t, 0, phaseToLinkIndex(InitCreatingWorktree))
+	require.Equal(t, 1, phaseToLinkIndex(InitCreatingWorkspace))
+	require.Equal(t, 2, phaseToLinkIndex(InitSpawningCoordinator))
+	require.Equal(t, 3, phaseToLinkIndex(InitAwaitingFirstMessage))
+	require.Equal(t, 4, phaseToLinkIndex(InitSpawningWorkers))
+	require.Equal(t, 5, phaseToLinkIndex(InitWorkersReady))
+	require.Equal(t, 6, phaseToLinkIndex(InitReady))
+}
+
+func TestGetPhaseIndicatorAndStyle_Worktree_InProgress(t *testing.T) {
+	m := New(Config{})
+	m.initializer = newTestInitializerWithWorktree(InitCreatingWorktree, InitNotStarted, nil, "/tmp/test")
+	m.spinnerFrame = 0
+
+	// Worktree phase should show spinner when in progress
+	indicator, _ := m.getPhaseIndicatorAndStyle(InitCreatingWorktree, InitCreatingWorktree)
+	require.Contains(t, indicator, spinnerFrames[0])
+}
+
+func TestGetPhaseIndicatorAndStyle_Worktree_Failed(t *testing.T) {
+	m := New(Config{})
+	m.initializer = newTestInitializerWithWorktree(InitFailed, InitCreatingWorktree, errors.New("test error"), "")
+
+	// Worktree phase should show ✗ when failed
+	indicator, _ := m.getPhaseIndicatorAndStyle(InitCreatingWorktree, InitFailed)
+	require.Contains(t, indicator, "✗")
+}
+
+func TestGetPhaseIndicatorAndStyle_Worktree_Completed(t *testing.T) {
+	m := New(Config{})
+	m.initializer = newTestInitializerWithWorktree(InitCreatingWorkspace, InitNotStarted, nil, "/tmp/test")
+
+	// Worktree phase should show ✓ when completed (moved past it)
+	indicator, _ := m.getPhaseIndicatorAndStyle(InitCreatingWorktree, InitCreatingWorkspace)
+	require.Contains(t, indicator, "✓")
 }

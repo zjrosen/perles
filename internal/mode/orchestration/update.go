@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/zjrosen/perles/internal/git"
 	"github.com/zjrosen/perles/internal/log"
 	"github.com/zjrosen/perles/internal/orchestration/events"
 	"github.com/zjrosen/perles/internal/orchestration/mcp"
@@ -22,6 +23,7 @@ import (
 	"github.com/zjrosen/perles/internal/orchestration/v2/repository"
 	"github.com/zjrosen/perles/internal/pubsub"
 	"github.com/zjrosen/perles/internal/ui/commandpalette"
+	"github.com/zjrosen/perles/internal/ui/shared/formmodal"
 	"github.com/zjrosen/perles/internal/ui/shared/modal"
 	"github.com/zjrosen/perles/internal/ui/shared/quitmodal"
 	"github.com/zjrosen/perles/internal/ui/shared/vimtextarea"
@@ -171,7 +173,51 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	// Handle modal cancel for error modal (quit modal handled above via quitmodal.Result)
 	case modal.CancelMsg:
+		// Check if this is from worktree modal (user chose "No")
+		if m.worktreeModal != nil {
+			m.worktreeModal = nil
+			m.worktreeDecisionMade = true
+			m.worktreeEnabled = false
+			// Continue to start coordinator without worktree
+			return m.handleStartCoordinator()
+		}
 		m = m.ClearError()
+		return m, nil
+
+	// Handle modal submit for worktree modal
+	case modal.SubmitMsg:
+		// Worktree modal confirmed - user chose "Yes"
+		if m.worktreeModal != nil {
+			m.worktreeModal = nil
+			m.worktreeEnabled = true
+
+			// Always show branch selection modal so user can choose base branch
+			return m.showBranchSelectionModal()
+		}
+
+		return m, nil
+
+	// Handle formmodal submit for branch selection
+	case formmodal.SubmitMsg:
+		if m.branchSelectModal != nil {
+			m.branchSelectModal = nil
+			m.worktreeDecisionMade = true
+			// The msg.Values will contain the selected base branch
+			if branch, ok := msg.Values["branch"].(string); ok && branch != "" {
+				m.worktreeBaseBranch = branch
+			}
+			return m.handleStartCoordinator()
+		}
+		return m, nil
+
+	// Handle formmodal cancel for branch selection
+	case formmodal.CancelMsg:
+		if m.branchSelectModal != nil {
+			// User cancelled branch selection - go back to worktree modal
+			m.branchSelectModal = nil
+			m.worktreeDecisionMade = false
+			return m.handleStartCoordinator()
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -191,11 +237,26 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, cmd
 		}
 
+		// Forward key events to worktree modal when it's visible
+		if m.worktreeModal != nil {
+			var cmd tea.Cmd
+			*m.worktreeModal, cmd = m.worktreeModal.Update(msg)
+			return m, cmd
+		}
+
+		// Forward key events to branch selection modal when it's visible
+		if m.branchSelectModal != nil {
+			var cmd tea.Cmd
+			*m.branchSelectModal, cmd = m.branchSelectModal.Update(msg)
+			return m, cmd
+		}
+
 		// Handle keys during initialization phases
 		initPhase := m.getInitPhase()
 		if initPhase != InitReady && initPhase != InitNotStarted {
-			// In failed/timeout state: R retries, ESC/Ctrl+C exits
+			// In failed/timeout state: R retries, S skips (worktree only), ESC/Ctrl+C exits
 			if initPhase == InitFailed || initPhase == InitTimedOut {
+				failedPhase := m.getFailedPhase()
 				switch {
 				case msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && (msg.Runes[0] == 'r' || msg.Runes[0] == 'R'):
 					// Retry: use the initializer's Retry method
@@ -211,6 +272,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 					// Fallback if no initializer or listener (e.g., in tests) - restart initialization
 					m.Cleanup()
 					return m, func() tea.Msg { return StartCoordinatorMsg{} }
+				case msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && (msg.Runes[0] == 's' || msg.Runes[0] == 'S'):
+					// Skip worktree: only available when worktree creation failed
+					if failedPhase == InitCreatingWorktree {
+						// Disable worktree and restart initialization
+						m.worktreeEnabled = false
+						m.worktreeDecisionMade = true
+						m.Cleanup()
+						return m, func() tea.Msg { return StartCoordinatorMsg{} }
+					}
 				case key.Matches(msg, keys.Quit) || msg.Type == tea.KeyCtrlC || msg.Type == tea.KeyEsc:
 					return m, func() tea.Msg { return QuitMsg{} }
 				}
@@ -950,6 +1020,10 @@ func (m Model) handleInitializerEvent(event pubsub.Event[InitializerEvent]) (Mod
 			m.v2Infra = res.V2Infra
 		}
 
+		// Store worktree info for cleanup on exit
+		m.worktreePath = m.initializer.WorktreePath()
+		m.worktreeBranch = m.initializer.WorktreeBranch()
+
 		// Set up pub/sub subscriptions if not already set up
 		// (they may have been set up earlier when coordinator became available)
 		// Note: All process events (coordinator + workers) flow through v2EventBus
@@ -995,9 +1069,31 @@ func (m Model) handleInitializerEvent(event pubsub.Event[InitializerEvent]) (Mod
 
 // handleStartCoordinator kicks off the phased initialization process.
 // It creates an Initializer and subscribes to its events.
+// If in a git repo and worktree decision hasn't been made, shows worktree prompt modal first.
 func (m Model) handleStartCoordinator() (Model, tea.Cmd) {
 	if m.workDir == "" {
 		m = m.SetError("Work directory not configured")
+		return m, nil
+	}
+
+	// Initialize GitExecutor if not set
+	if m.gitExecutor == nil {
+		m.gitExecutor = git.NewRealExecutor(m.workDir)
+	}
+
+	// Check if we should prompt for worktree (only if in git repo and decision not yet made)
+	if m.gitExecutor.IsGitRepo() && !m.worktreeDecisionMade {
+		// Show worktree prompt modal
+		mdl := modal.New(modal.Config{
+			Title:       "Use Git Worktree?",
+			Message:     "Create an isolated workspace for this session?\n\n• Yes: Changes happen in a separate worktree (safer)\n• No: Changes happen in current directory",
+			ConfirmText: "Yes",
+			CancelText:  "No",
+			Required:    true, // User must explicitly choose Yes or No
+			MinWidth:    52,
+		})
+		mdl.SetSize(m.width, m.height)
+		m.worktreeModal = &mdl
 		return m, nil
 	}
 
@@ -1013,14 +1109,16 @@ func (m Model) handleStartCoordinator() (Model, tea.Cmd) {
 
 	// Create and start the Initializer
 	m.initializer = NewInitializer(InitializerConfig{
-		WorkDir:         m.workDir,
-		ClientType:      m.clientType,
-		ClaudeModel:     m.claudeModel,
-		CodexModel:      m.codexModel,
-		AmpModel:        m.ampModel,
-		AmpMode:         m.ampMode,
-		ExpectedWorkers: 4,
-		Timeout:         timeout,
+		WorkDir:            m.workDir,
+		ClientType:         m.clientType,
+		ClaudeModel:        m.claudeModel,
+		CodexModel:         m.codexModel,
+		AmpModel:           m.ampModel,
+		AmpMode:            m.ampMode,
+		ExpectedWorkers:    4,
+		Timeout:            timeout,
+		WorktreeBaseBranch: m.worktreeBaseBranch,
+		GitExecutor:        m.gitExecutor,
 	})
 
 	// Create context for subscriptions
@@ -1451,4 +1549,73 @@ func (m Model) determineSessionStatus() session.Status {
 
 	// Default to completed (normal shutdown, user interrupt, etc.)
 	return session.StatusCompleted
+}
+
+// showBranchSelectionModal shows the branch selection modal when user is not on main branch.
+// Uses a searchable select field populated with available branches.
+func (m Model) showBranchSelectionModal() (Model, tea.Cmd) {
+	// Get current branch for header context
+	currentBranch := "current"
+	if m.gitExecutor != nil {
+		if b, err := m.gitExecutor.GetCurrentBranch(); err == nil {
+			currentBranch = b
+		}
+	}
+
+	// Build branch options from git
+	var options []formmodal.ListOption
+	if m.gitExecutor != nil {
+		branches, err := m.gitExecutor.ListBranches()
+		if err == nil {
+			for _, b := range branches {
+				options = append(options, formmodal.ListOption{
+					Label:    b.Name,
+					Value:    b.Name,
+					Selected: b.IsCurrent, // Pre-select current branch
+				})
+			}
+		}
+	}
+
+	// Fallback if no branches found
+	if len(options) == 0 {
+		options = []formmodal.ListOption{
+			{Label: "main", Value: "main", Selected: true},
+		}
+	}
+
+	// Create branch selection modal with searchable select
+	mdl := formmodal.New(formmodal.FormConfig{
+		Title:       "Select Base Branch",
+		MinWidth:    52,
+		SubmitLabel: "Continue",
+		Fields: []formmodal.FieldConfig{
+			{
+				Key:               "branch",
+				Type:              formmodal.FieldTypeSearchSelect,
+				Label:             "Base Branch",
+				Options:           options,
+				SearchPlaceholder: "Search branches...",
+				MaxVisibleItems:   7,
+			},
+		},
+		Validate: func(values map[string]any) error {
+			branch, _ := values["branch"].(string)
+			if strings.TrimSpace(branch) == "" {
+				return fmt.Errorf("please select a branch")
+			}
+			// Verify branch still exists
+			if m.gitExecutor != nil && !m.gitExecutor.BranchExists(branch) {
+				return fmt.Errorf("branch '%s' no longer exists", branch)
+			}
+			return nil
+		},
+		HeaderContent: func(width int) string {
+			return fmt.Sprintf("You're on '%s'. The worktree creates an\nisolated copy from your chosen base branch.\nYour current work remains untouched.", currentBranch)
+		},
+	})
+	mdl = mdl.SetSize(m.width, m.height)
+	m.branchSelectModal = &mdl
+
+	return m, mdl.Init()
 }

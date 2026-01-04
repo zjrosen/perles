@@ -29,8 +29,7 @@ func TestEmptyPane_CoordinatorShowsNoScrollIndicator(t *testing.T) {
 }
 
 func TestEmptyPane_MessageShowsNoScrollIndicator(t *testing.T) {
-	m := New(Config{})
-	m = m.SetSize(120, 30)
+	m := newReadyModel(120, 30)
 
 	// Empty message pane should not have scroll indicator
 	view := m.View()
@@ -40,8 +39,7 @@ func TestEmptyPane_MessageShowsNoScrollIndicator(t *testing.T) {
 }
 
 func TestEmptyPane_WorkerShowsPlaceholder(t *testing.T) {
-	m := New(Config{})
-	m = m.SetSize(120, 30)
+	m := newReadyModel(120, 30)
 
 	// Add a worker but no messages
 	m = m.UpdateWorker("worker-1", events.ProcessStatusWorking)
@@ -108,8 +106,7 @@ func TestShortContent_WorkerNoScrollIndicator(t *testing.T) {
 // =============================================================================
 
 func TestMultipleWorkers_ScrollAffectsCurrentWorkerOnly(t *testing.T) {
-	m := New(Config{})
-	m = m.SetSize(120, 30)
+	m := newReadyModel(120, 30)
 
 	// Add two workers with enough content to scroll
 	m = m.UpdateWorker("worker-1", events.ProcessStatusWorking)
@@ -406,10 +403,7 @@ func TestNewContentIndicator_NotSetWhenAtBottom(t *testing.T) {
 // =============================================================================
 
 func TestViewportDimensions_MinimumSize(t *testing.T) {
-	m := New(Config{})
-
-	// Very small terminal
-	m = m.SetSize(40, 10)
+	m := newReadyModel(40, 10)
 
 	// Should not panic
 	view := m.View()
@@ -629,8 +623,7 @@ func TestCommandPane_MouseWheelRouting(t *testing.T) {
 }
 
 func TestCommandPane_HiddenPaneNoScrolling(t *testing.T) {
-	m := New(Config{})
-	m = m.SetSize(120, 30)
+	m := newReadyModel(120, 30)
 
 	// Verify pane is hidden by default (no debug mode)
 	require.False(t, m.showCommandPane)

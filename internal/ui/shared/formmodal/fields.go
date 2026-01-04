@@ -36,6 +36,12 @@ type fieldState struct {
 
 	// Toggle field state
 	toggleIndex int // 0 or 1 - which option is currently selected
+
+	// SearchSelect field state
+	searchInput    textinput.Model // Search/filter input
+	searchFiltered []int           // Indices into listItems matching search
+	scrollOffset   int             // First visible item for scrolling
+	searchExpanded bool            // Whether search list is expanded (vs showing selected value)
 }
 
 // listItem tracks selection state for list items.
@@ -116,6 +122,43 @@ func newFieldState(cfg FieldConfig) fieldState {
 		} else if fs.toggleIndex > 1 {
 			fs.toggleIndex = 1
 		}
+
+	case FieldTypeSearchSelect:
+		// Initialize list items from options
+		fs.listItems = make([]listItem, len(cfg.Options))
+		selectedIdx := -1
+		for i, opt := range cfg.Options {
+			fs.listItems[i] = listItem{
+				label:    opt.Label,
+				value:    opt.Value,
+				selected: opt.Selected,
+				color:    opt.Color,
+			}
+			if opt.Selected {
+				selectedIdx = i
+			}
+		}
+
+		// Initialize search input
+		ti := textinput.New()
+		ti.Placeholder = cfg.SearchPlaceholder
+		if ti.Placeholder == "" {
+			ti.Placeholder = "Search..."
+		}
+		ti.Prompt = ""
+		ti.Width = 36
+		fs.searchInput = ti
+
+		// Initialize filtered list to show all items
+		fs.searchFiltered = make([]int, len(cfg.Options))
+		for i := range cfg.Options {
+			fs.searchFiltered[i] = i
+		}
+
+		// Position cursor at the selected item if any
+		if selectedIdx >= 0 {
+			fs.listCursor = selectedIdx
+		}
 	}
 
 	return fs
@@ -163,6 +206,15 @@ func (fs *fieldState) value() any {
 		// Return the value of the selected option
 		if fs.toggleIndex >= 0 && fs.toggleIndex < len(fs.config.Options) {
 			return fs.config.Options[fs.toggleIndex].Value
+		}
+		return ""
+
+	case FieldTypeSearchSelect:
+		// Return the selected item's value (same as FieldTypeSelect)
+		for _, item := range fs.listItems {
+			if item.selected {
+				return item.value
+			}
 		}
 		return ""
 	}
