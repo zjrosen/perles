@@ -611,6 +611,16 @@ func TestStop_WaitsForEventLoopToExit(t *testing.T) {
 	}
 }
 
+func TestStop_CancelsUnderlyingProcess(t *testing.T) {
+	proc := newMockHeadlessProcess()
+	p := New("worker-1", repository.RoleWorker, proc, nil, nil)
+	p.Start()
+
+	p.Stop()
+
+	assert.True(t, proc.cancelled, "Stop should cancel the underlying process")
+}
+
 // ===========================================================================
 // Resume Tests
 // ===========================================================================

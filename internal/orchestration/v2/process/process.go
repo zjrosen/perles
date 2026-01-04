@@ -86,6 +86,17 @@ func (p *Process) Start() {
 // Stop cancels the event loop context and waits for it to finish.
 // This is useful for graceful shutdown. Safe to call multiple times.
 func (p *Process) Stop() {
+	// Get proc reference under lock to terminate the AI subprocess
+	p.mu.Lock()
+	proc := p.proc
+	p.mu.Unlock()
+
+	// Kill the AI subprocess first - this closes its Events() channel
+	if proc != nil {
+		_ = proc.Cancel()
+	}
+
+	// Stop the event loop
 	p.cancel()
 	<-p.eventDone
 }
