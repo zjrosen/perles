@@ -157,6 +157,7 @@ type DeliverProcessQueuedHandler struct {
 	queueRepo   repository.QueueRepository
 	registry    *process.ProcessRegistry
 	deliverer   MessageDeliverer
+	enforcer    TurnCompletionEnforcer
 }
 
 // DeliverProcessQueuedHandlerOption configures DeliverProcessQueuedHandler.
@@ -166,6 +167,14 @@ type DeliverProcessQueuedHandlerOption func(*DeliverProcessQueuedHandler)
 func WithProcessDeliverer(deliverer MessageDeliverer) DeliverProcessQueuedHandlerOption {
 	return func(h *DeliverProcessQueuedHandler) {
 		h.deliverer = deliverer
+	}
+}
+
+// WithDeliverTurnEnforcer sets the turn completion enforcer for the handler.
+// The enforcer is notified when a message is delivered to reset turn tracking state.
+func WithDeliverTurnEnforcer(enforcer TurnCompletionEnforcer) DeliverProcessQueuedHandlerOption {
+	return func(h *DeliverProcessQueuedHandler) {
+		h.enforcer = enforcer
 	}
 }
 
@@ -249,6 +258,14 @@ func (h *DeliverProcessQueuedHandler) Handle(ctx context.Context, cmd command.Co
 		}
 	}
 
+	// Reset turn tracking for the new turn, UNLESS this is an enforcement reminder.
+	// Enforcement reminders (SenderSystem) continue the same turn, so we preserve
+	// the retry count and other state.
+	// For normal messages (SenderUser, SenderCoordinator), we start a fresh turn.
+	if h.enforcer != nil && entry.Sender != repository.SenderSystem {
+		h.enforcer.ResetTurn(proc.ID)
+	}
+
 	// Build events
 	var resultEvents []any
 
@@ -310,25 +327,45 @@ type DeliverProcessQueuedResult struct {
 // ProcessTurnCompleteHandler handles CmdProcessTurnComplete commands.
 // It processes turn completion, updates the repository, and triggers queue drain.
 // Same logic for both coordinator and workers.
+// For workers, it also enforces turn completion by checking if required tools were called.
 type ProcessTurnCompleteHandler struct {
 	processRepo repository.ProcessRepository
 	queueRepo   repository.QueueRepository
+	enforcer    TurnCompletionEnforcer
+}
+
+// ProcessTurnCompleteHandlerOption configures ProcessTurnCompleteHandler.
+type ProcessTurnCompleteHandlerOption func(*ProcessTurnCompleteHandler)
+
+// WithProcessTurnEnforcer sets the turn completion enforcer for the handler.
+// The enforcer checks if workers called required tools during their turn
+// and sends reminders if not.
+func WithProcessTurnEnforcer(enforcer TurnCompletionEnforcer) ProcessTurnCompleteHandlerOption {
+	return func(h *ProcessTurnCompleteHandler) {
+		h.enforcer = enforcer
+	}
 }
 
 // NewProcessTurnCompleteHandler creates a new ProcessTurnCompleteHandler.
 func NewProcessTurnCompleteHandler(
 	processRepo repository.ProcessRepository,
 	queueRepo repository.QueueRepository,
+	opts ...ProcessTurnCompleteHandlerOption,
 ) *ProcessTurnCompleteHandler {
-	return &ProcessTurnCompleteHandler{
+	h := &ProcessTurnCompleteHandler{
 		processRepo: processRepo,
 		queueRepo:   queueRepo,
 	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 // Handle processes a ProcessTurnCompleteCommand.
 // Updates process status to Ready and triggers queue drain if needed.
 // Same logic for coordinator and workers.
+// For workers, enforces turn completion by checking if required tools were called.
 func (h *ProcessTurnCompleteHandler) Handle(ctx context.Context, cmd command.Command) (*command.CommandResult, error) {
 	turnCmd := cmd.(*command.ProcessTurnCompleteCommand)
 
@@ -349,6 +386,84 @@ func (h *ProcessTurnCompleteHandler) Handle(ctx context.Context, cmd command.Com
 			WasNoOp:   true,
 		}), nil
 	}
+
+	// ===========================================================================
+	// Turn completion enforcement for workers
+	// ===========================================================================
+	// Check exemptions FIRST (workers only, coordinators are never enforced)
+	if proc.Role == repository.RoleWorker && h.enforcer != nil {
+		// Skip if turn failed (crash, error, context exceeded)
+		if !turnCmd.Succeeded {
+			// Skip enforcement - process had an error
+		} else if h.enforcer.IsNewlySpawned(proc.ID) {
+			// Skip enforcement - startup turn (workers call signal_ready on first turn)
+		} else {
+			// Check tool calls
+			missingTools := h.enforcer.CheckTurnCompletion(proc.ID, proc.Role)
+			if len(missingTools) > 0 {
+				if h.enforcer.ShouldRetry(proc.ID) {
+					// Increment retry counter
+					h.enforcer.IncrementRetry(proc.ID)
+
+					// Generate reminder message
+					reminder := h.enforcer.GetReminderMessage(proc.ID, missingTools)
+
+					// Enqueue the reminder directly to the queue
+					queue := h.queueRepo.GetOrCreate(proc.ID)
+					if err := queue.Enqueue(reminder, repository.SenderSystem); err != nil {
+						return nil, fmt.Errorf("failed to enqueue enforcement reminder: %w", err)
+					}
+
+					// Transition to Ready so DeliverProcessQueuedCommand can deliver the reminder
+					proc.Status = repository.StatusReady
+					proc.LastActivityAt = time.Now()
+
+					// Update metrics if provided
+					if turnCmd.Metrics != nil {
+						proc.Metrics = turnCmd.Metrics
+					}
+
+					if err := h.processRepo.Save(proc); err != nil {
+						return nil, fmt.Errorf("failed to save process: %w", err)
+					}
+
+					// Build events - only emit token usage, NOT ProcessReady (to avoid UI confusion)
+					var resultEvents []any
+					if turnCmd.Metrics != nil {
+						tokenEvent := events.ProcessEvent{
+							Type:      events.ProcessTokenUsage,
+							ProcessID: proc.ID,
+							Role:      proc.Role,
+							Metrics:   turnCmd.Metrics,
+							TaskID:    proc.TaskID,
+						}
+						resultEvents = append(resultEvents, tokenEvent)
+					}
+
+					// Create DeliverProcessQueuedCommand to deliver the reminder
+					deliverCmd := command.NewDeliverProcessQueuedCommand(command.SourceInternal, proc.ID)
+					if turnCmd.TraceID() != "" {
+						deliverCmd.SetTraceID(turnCmd.TraceID())
+					}
+
+					result := &ProcessTurnCompleteResult{
+						ProcessID:            proc.ID,
+						NewStatus:            repository.StatusReady, // Ready, pending reminder delivery
+						QueuedDelivery:       true,
+						WasNoOp:              false,
+						EnforcementTriggered: true,
+					}
+
+					return SuccessWithEventsAndFollowUp(result, resultEvents, []command.Command{deliverCmd}), nil
+				}
+				// Max retries exceeded - log warning and allow turn to complete
+				h.enforcer.OnMaxRetriesExceeded(proc.ID, missingTools)
+			}
+		}
+	}
+	// ===========================================================================
+	// End of turn completion enforcement
+	// ===========================================================================
 
 	// Update process state - same for coordinator and workers
 	// Always transition to Ready (even if succeeded=false, we don't auto-retire)
@@ -412,10 +527,11 @@ func (h *ProcessTurnCompleteHandler) Handle(ctx context.Context, cmd command.Com
 
 // ProcessTurnCompleteResult contains the result of handling turn completion.
 type ProcessTurnCompleteResult struct {
-	ProcessID      string
-	NewStatus      repository.ProcessStatus
-	QueuedDelivery bool // true if DeliverProcessQueuedCommand was added to follow-ups
-	WasNoOp        bool // true if process was already Retired (idempotent)
+	ProcessID            string
+	NewStatus            repository.ProcessStatus
+	QueuedDelivery       bool // true if DeliverProcessQueuedCommand was added to follow-ups
+	WasNoOp              bool // true if process was already Retired (idempotent)
+	EnforcementTriggered bool // true if a turn completion enforcement reminder was sent
 }
 
 // ===========================================================================
@@ -427,17 +543,34 @@ type ProcessTurnCompleteResult struct {
 type RetireProcessHandler struct {
 	processRepo repository.ProcessRepository
 	registry    *process.ProcessRegistry
+	enforcer    TurnCompletionEnforcer
+}
+
+// RetireProcessHandlerOption configures RetireProcessHandler.
+type RetireProcessHandlerOption func(*RetireProcessHandler)
+
+// WithRetireTurnEnforcer sets the turn completion enforcer for the handler.
+// The enforcer is notified when a process is retired to clean up tracking state.
+func WithRetireTurnEnforcer(enforcer TurnCompletionEnforcer) RetireProcessHandlerOption {
+	return func(h *RetireProcessHandler) {
+		h.enforcer = enforcer
+	}
 }
 
 // NewRetireProcessHandler creates a new RetireProcessHandler.
 func NewRetireProcessHandler(
 	processRepo repository.ProcessRepository,
 	registry *process.ProcessRegistry,
+	opts ...RetireProcessHandlerOption,
 ) *RetireProcessHandler {
-	return &RetireProcessHandler{
+	h := &RetireProcessHandler{
 		processRepo: processRepo,
 		registry:    registry,
 	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 // Handle processes a RetireProcessCommand.
@@ -478,6 +611,11 @@ func (h *RetireProcessHandler) Handle(ctx context.Context, cmd command.Command) 
 			liveProcess.SetRetired(true)
 			liveProcess.Stop()
 		}
+	}
+
+	// Clean up turn completion tracking state to prevent memory leaks
+	if h.enforcer != nil {
+		h.enforcer.CleanupProcess(retireCmd.ProcessID)
 	}
 
 	// Emit ProcessStatusChange event
@@ -583,6 +721,7 @@ type SpawnProcessHandler struct {
 	registry    *process.ProcessRegistry
 	spawner     UnifiedProcessSpawner
 	maxWorkers  int
+	enforcer    TurnCompletionEnforcer
 }
 
 // SpawnProcessHandlerOption configures SpawnProcessHandler.
@@ -599,6 +738,14 @@ func WithSpawnMaxWorkers(max int) SpawnProcessHandlerOption {
 func WithUnifiedSpawner(spawner UnifiedProcessSpawner) SpawnProcessHandlerOption {
 	return func(h *SpawnProcessHandler) {
 		h.spawner = spawner
+	}
+}
+
+// WithTurnEnforcer sets the turn completion enforcer for spawn tracking.
+// The enforcer is notified when a process is spawned so the first turn is exempt from enforcement.
+func WithTurnEnforcer(enforcer TurnCompletionEnforcer) SpawnProcessHandlerOption {
+	return func(h *SpawnProcessHandler) {
+		h.enforcer = enforcer
 	}
 }
 
@@ -688,6 +835,12 @@ func (h *SpawnProcessHandler) Handle(ctx context.Context, cmd command.Command) (
 		proc.Status = repository.StatusReady
 	}
 	_ = h.processRepo.Save(proc)
+
+	// Mark process as newly spawned for turn completion enforcement exemption.
+	// The first turn after spawn is exempt (workers call signal_ready).
+	if h.enforcer != nil {
+		h.enforcer.MarkAsNewlySpawned(processID)
+	}
 
 	// Emit ProcessSpawned event
 	event := events.ProcessEvent{

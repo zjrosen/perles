@@ -190,22 +190,32 @@ sequenceDiagram
     participant AI as AI Process
     participant Proc as Process
     participant CP as CommandProcessor
+    participant TE as TurnEnforcer
     participant Queue as MessageQueue
     participant EB as EventBus
     
     AI->>Proc: Turn Complete
     Proc->>CP: ProcessTurnComplete
-    CP->>CP: Working → Ready
-    CP->>Queue: Check queue
     
-    alt Queue not empty
+    alt Worker missing required tool call
+        CP->>TE: CheckTurnCompletion
+        TE-->>CP: Missing tools (retries < 2)
+        CP->>Queue: Enqueue reminder (SenderSystem)
         CP->>CP: Return DeliverProcessQueued
-        CP->>Queue: Dequeue message
-        Queue-->>CP: Message content
-        CP->>AI: Deliver message
-        CP->>CP: Ready → Working
-    else Queue empty
-        CP->>EB: Emit ProcessReady
+        Note over CP: Retry count preserved
+    else Compliant or max retries exceeded
+        CP->>CP: Working → Ready
+        CP->>Queue: Check queue
+        
+        alt Queue not empty
+            CP->>CP: Return DeliverProcessQueued
+            CP->>Queue: Dequeue message
+            Queue-->>CP: Message content
+            CP->>AI: Deliver message
+            CP->>CP: Ready → Working
+        else Queue empty
+            CP->>EB: Emit ProcessReady
+        end
     end
 ```
 

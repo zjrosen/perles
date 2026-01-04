@@ -1364,6 +1364,7 @@ type workerServerCache struct {
 	msgStore             mcp.MessageStore
 	accountabilityWriter mcp.AccountabilityWriter
 	v2Adapter            *adapter.V2Adapter
+	turnEnforcer         mcp.ToolCallRecorder
 	servers              map[string]*mcp.WorkerServer
 	mu                   sync.RWMutex
 }
@@ -1371,11 +1372,13 @@ type workerServerCache struct {
 // newWorkerServerCache creates a new worker server cache.
 // The accountabilityWriter allows workers to save accountability summaries to session storage.
 // The v2Adapter routes all worker MCP tool handlers through v2 orchestration.
-func newWorkerServerCache(msgStore mcp.MessageStore, accountabilityWriter mcp.AccountabilityWriter, v2Adapter *adapter.V2Adapter) *workerServerCache {
+// The turnEnforcer tracks tool calls during worker turns for compliance enforcement.
+func newWorkerServerCache(msgStore mcp.MessageStore, accountabilityWriter mcp.AccountabilityWriter, v2Adapter *adapter.V2Adapter, turnEnforcer mcp.ToolCallRecorder) *workerServerCache {
 	return &workerServerCache{
 		msgStore:             msgStore,
 		accountabilityWriter: accountabilityWriter,
 		v2Adapter:            v2Adapter,
+		turnEnforcer:         turnEnforcer,
 		servers:              make(map[string]*mcp.WorkerServer),
 	}
 }
@@ -1419,6 +1422,10 @@ func (c *workerServerCache) getOrCreate(workerID string) *mcp.WorkerServer {
 	// Set the v2 adapter so all handlers route through v2 orchestration
 	if c.v2Adapter != nil {
 		ws.SetV2Adapter(c.v2Adapter)
+	}
+	// Set the turn enforcer so tool calls are tracked for turn completion enforcement
+	if c.turnEnforcer != nil {
+		ws.SetTurnEnforcer(c.turnEnforcer)
 	}
 	c.servers[workerID] = ws
 	log.Debug(log.CatOrch, "Created worker server", "subsystem", "update", "workerID", workerID)

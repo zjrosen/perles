@@ -25,6 +25,7 @@ var (
 	CoordinatorColor = lipgloss.AdaptiveColor{Light: "#179299", Dark: "#179299"}
 	WorkerColor      = lipgloss.AdaptiveColor{Light: "#43BF6D", Dark: "#43BF6D"}
 	UserColor        = lipgloss.AdaptiveColor{Light: "#FB923C", Dark: "#FB923C"}
+	SystemColor      = lipgloss.AdaptiveColor{Light: "#FF6B6B", Dark: "#FF8787"} // Red for system/enforcement messages
 )
 
 // TitleContextStyle is used for muted contextual info in pane titles (port numbers, task IDs, phases).

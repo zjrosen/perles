@@ -100,6 +100,7 @@ v2/
 | **Repositories** | In-memory stores for processes, tasks, queues, messages |
 | **EventBus** | Pub/sub broker for async TUI notification |
 | **Process** | Unified struct managing AI event loops |
+| **TurnCompletionEnforcer** | Ensures workers call required MCP tools each turn |
 
 ## Documentation
 

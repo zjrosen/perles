@@ -153,6 +153,8 @@ const (
 	SenderUser SenderType = "user"
 	// SenderCoordinator indicates the message came from the coordinator process.
 	SenderCoordinator SenderType = "coordinator"
+	// SenderSystem indicates the message came from the orchestration system (e.g., enforcement reminders).
+	SenderSystem SenderType = "system"
 )
 
 // QueueEntry represents a single message in a worker's message queue.

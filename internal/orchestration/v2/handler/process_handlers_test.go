@@ -378,6 +378,142 @@ func TestDeliverProcessQueuedHandler_EmptyQueue_ReturnsError(t *testing.T) {
 	assert.ErrorIs(t, err, handler.ErrQueueEmpty)
 }
 
+func TestDeliverProcessQueuedHandler_CallsResetTurnWhenDeliveringMessage(t *testing.T) {
+	processRepo, queueRepo := setupProcessRepos()
+	registry := process.NewProcessRegistry()
+	enforcer := handler.NewTurnCompletionTracker()
+
+	worker := &repository.Process{
+		ID:     "worker-1",
+		Role:   repository.RoleWorker,
+		Status: repository.StatusReady,
+	}
+	processRepo.AddProcess(worker)
+
+	// Set up some state that should be cleared by ResetTurn
+	enforcer.MarkAsNewlySpawned("worker-1")
+	enforcer.RecordToolCall("worker-1", "post_message")
+	enforcer.IncrementRetry("worker-1")
+
+	// Verify state exists before delivery
+	assert.True(t, enforcer.IsNewlySpawned("worker-1"))
+
+	// Queue a message
+	queue := queueRepo.GetOrCreate("worker-1")
+	_ = queue.Enqueue("message", repository.SenderUser)
+
+	h := handler.NewDeliverProcessQueuedHandler(processRepo, queueRepo, registry,
+		handler.WithDeliverTurnEnforcer(enforcer))
+
+	cmd := command.NewDeliverProcessQueuedCommand(command.SourceInternal, "worker-1")
+	result, err := h.Handle(context.Background(), cmd)
+
+	require.NoError(t, err)
+	assert.True(t, result.Success)
+
+	// Verify ResetTurn was called - all state should be cleared
+	assert.False(t, enforcer.IsNewlySpawned("worker-1"),
+		"newlySpawned flag should be cleared by ResetTurn")
+	assert.True(t, enforcer.ShouldRetry("worker-1"),
+		"retry count should be reset (ShouldRetry returns true when count is 0)")
+}
+
+func TestDeliverProcessQueuedHandler_WorksCorrectlyWhenEnforcerIsNil(t *testing.T) {
+	processRepo, queueRepo := setupProcessRepos()
+	registry := process.NewProcessRegistry()
+
+	worker := &repository.Process{
+		ID:     "worker-1",
+		Role:   repository.RoleWorker,
+		Status: repository.StatusReady,
+	}
+	processRepo.AddProcess(worker)
+
+	// Queue a message
+	queue := queueRepo.GetOrCreate("worker-1")
+	_ = queue.Enqueue("message", repository.SenderUser)
+
+	// Create handler WITHOUT enforcer (default behavior)
+	h := handler.NewDeliverProcessQueuedHandler(processRepo, queueRepo, registry)
+
+	cmd := command.NewDeliverProcessQueuedCommand(command.SourceInternal, "worker-1")
+	result, err := h.Handle(context.Background(), cmd)
+
+	// Should not panic and should complete successfully
+	require.NoError(t, err)
+	assert.True(t, result.Success)
+}
+
+func TestDeliverProcessQueuedHandler_ResetTurnClearsNewlySpawnedFlagAfterFirstTurn(t *testing.T) {
+	processRepo, queueRepo := setupProcessRepos()
+	registry := process.NewProcessRegistry()
+	enforcer := handler.NewTurnCompletionTracker()
+
+	worker := &repository.Process{
+		ID:     "worker-1",
+		Role:   repository.RoleWorker,
+		Status: repository.StatusReady,
+	}
+	processRepo.AddProcess(worker)
+
+	// Simulate worker being newly spawned (first turn after spawn)
+	enforcer.MarkAsNewlySpawned("worker-1")
+	assert.True(t, enforcer.IsNewlySpawned("worker-1"))
+
+	// Queue a message for the first turn
+	queue := queueRepo.GetOrCreate("worker-1")
+	_ = queue.Enqueue("first turn message", repository.SenderUser)
+
+	h := handler.NewDeliverProcessQueuedHandler(processRepo, queueRepo, registry,
+		handler.WithDeliverTurnEnforcer(enforcer))
+
+	cmd := command.NewDeliverProcessQueuedCommand(command.SourceInternal, "worker-1")
+	_, err := h.Handle(context.Background(), cmd)
+	require.NoError(t, err)
+
+	// After delivery, newlySpawned flag should be cleared
+	assert.False(t, enforcer.IsNewlySpawned("worker-1"),
+		"newlySpawned flag should be cleared after first turn delivery")
+}
+
+func TestDeliverProcessQueuedHandler_ToolCallsFromPreviousTurnAreCleared(t *testing.T) {
+	processRepo, queueRepo := setupProcessRepos()
+	registry := process.NewProcessRegistry()
+	enforcer := handler.NewTurnCompletionTracker()
+
+	worker := &repository.Process{
+		ID:     "worker-1",
+		Role:   repository.RoleWorker,
+		Status: repository.StatusReady,
+	}
+	processRepo.AddProcess(worker)
+
+	// Simulate tool calls from previous turn
+	enforcer.RecordToolCall("worker-1", "post_message")
+	enforcer.RecordToolCall("worker-1", "signal_ready")
+
+	// Before delivery, tool calls exist - CheckTurnCompletion returns empty (compliant)
+	missingBefore := enforcer.CheckTurnCompletion("worker-1", repository.RoleWorker)
+	assert.Empty(t, missingBefore, "should be compliant with tool calls recorded")
+
+	// Queue a message to start new turn
+	queue := queueRepo.GetOrCreate("worker-1")
+	_ = queue.Enqueue("new turn message", repository.SenderUser)
+
+	h := handler.NewDeliverProcessQueuedHandler(processRepo, queueRepo, registry,
+		handler.WithDeliverTurnEnforcer(enforcer))
+
+	cmd := command.NewDeliverProcessQueuedCommand(command.SourceInternal, "worker-1")
+	_, err := h.Handle(context.Background(), cmd)
+	require.NoError(t, err)
+
+	// After delivery (new turn started), tool calls should be cleared
+	// CheckTurnCompletion should now return missing tools since no tools called this turn
+	missingAfter := enforcer.CheckTurnCompletion("worker-1", repository.RoleWorker)
+	assert.NotEmpty(t, missingAfter,
+		"tool calls from previous turn should be cleared, making new turn non-compliant")
+}
+
 // ===========================================================================
 // ProcessTurnCompleteHandler Tests
 // ===========================================================================
@@ -577,6 +713,457 @@ func TestProcessTurnCompleteHandler_SucceededFalseStillTransitionsToReady(t *tes
 }
 
 // ===========================================================================
+// ProcessTurnCompleteHandler Turn Enforcement Tests
+// ===========================================================================
+
+func TestProcessTurnCompleteHandler_WorkerWithoutRequiredToolCall_GetsReminder(t *testing.T) {
+	processRepo, queueRepo := setupProcessRepos()
+	enforcer := handler.NewTurnCompletionTracker()
+
+	worker := &repository.Process{
+		ID:     "worker-1",
+		Role:   repository.RoleWorker,
+		Status: repository.StatusWorking,
+	}
+	processRepo.AddProcess(worker)
+
+	// NO tool calls recorded - worker didn't call post_message or report_implementation_complete
+
+	h := handler.NewProcessTurnCompleteHandler(processRepo, queueRepo,
+		handler.WithProcessTurnEnforcer(enforcer))
+
+	cmd := command.NewProcessTurnCompleteCommand("worker-1", true, nil, nil)
+	result, err := h.Handle(context.Background(), cmd)
+
+	require.NoError(t, err)
+	assert.True(t, result.Success)
+
+	// Verify enforcement was triggered
+	turnResult := result.Data.(*handler.ProcessTurnCompleteResult)
+	assert.True(t, turnResult.EnforcementTriggered, "enforcement should be triggered")
+	assert.Equal(t, repository.StatusReady, turnResult.NewStatus, "should transition to Ready for delivery")
+	assert.True(t, turnResult.QueuedDelivery, "should have queued delivery")
+
+	// Verify follow-up DeliverProcessQueuedCommand to deliver the reminder
+	require.Len(t, result.FollowUp, 1, "should have follow-up command")
+	deliverCmd, ok := result.FollowUp[0].(*command.DeliverProcessQueuedCommand)
+	require.True(t, ok, "follow-up should be DeliverProcessQueuedCommand")
+	assert.Equal(t, "worker-1", deliverCmd.ProcessID)
+
+	// Verify reminder was enqueued
+	queue := queueRepo.GetOrCreate("worker-1")
+	require.False(t, queue.IsEmpty(), "queue should contain reminder")
+	entry, _ := queue.Dequeue()
+	assert.Contains(t, entry.Content, "SYSTEM REMINDER")
+	assert.Contains(t, entry.Content, "post_message")
+	assert.Equal(t, repository.SenderSystem, entry.Sender)
+
+	// Verify ProcessReady event was NOT emitted (to avoid UI confusion)
+	for _, evt := range result.Events {
+		if pe, ok := evt.(events.ProcessEvent); ok {
+			assert.NotEqual(t, events.ProcessReady, pe.Type, "ProcessReady should not be emitted during enforcement")
+		}
+	}
+}
+
+func TestProcessTurnCompleteHandler_WorkerWithRequiredToolCall_NoReminder(t *testing.T) {
+	processRepo, queueRepo := setupProcessRepos()
+	enforcer := handler.NewTurnCompletionTracker()
+
+	worker := &repository.Process{
+		ID:     "worker-1",
+		Role:   repository.RoleWorker,
+		Status: repository.StatusWorking,
+	}
+	processRepo.AddProcess(worker)
+
+	// Worker called post_message during turn
+	enforcer.RecordToolCall("worker-1", "post_message")
+
+	h := handler.NewProcessTurnCompleteHandler(processRepo, queueRepo,
+		handler.WithProcessTurnEnforcer(enforcer))
+
+	cmd := command.NewProcessTurnCompleteCommand("worker-1", true, nil, nil)
+	result, err := h.Handle(context.Background(), cmd)
+
+	require.NoError(t, err)
+	assert.True(t, result.Success)
+
+	// Verify enforcement was NOT triggered
+	turnResult := result.Data.(*handler.ProcessTurnCompleteResult)
+	assert.False(t, turnResult.EnforcementTriggered, "enforcement should NOT be triggered")
+	assert.Equal(t, repository.StatusReady, turnResult.NewStatus, "should transition to Ready")
+
+	// Verify ProcessReady event was emitted
+	var foundReady bool
+	for _, evt := range result.Events {
+		if pe, ok := evt.(events.ProcessEvent); ok && pe.Type == events.ProcessReady {
+			foundReady = true
+		}
+	}
+	assert.True(t, foundReady, "ProcessReady event should be emitted")
+}
+
+func TestProcessTurnCompleteHandler_CoordinatorsNeverGetEnforcement(t *testing.T) {
+	processRepo, queueRepo := setupProcessRepos()
+	enforcer := handler.NewTurnCompletionTracker()
+
+	coord := &repository.Process{
+		ID:     repository.CoordinatorID,
+		Role:   repository.RoleCoordinator,
+		Status: repository.StatusWorking,
+	}
+	processRepo.AddProcess(coord)
+
+	// Coordinator didn't call any tools - should NOT trigger enforcement
+
+	h := handler.NewProcessTurnCompleteHandler(processRepo, queueRepo,
+		handler.WithProcessTurnEnforcer(enforcer))
+
+	cmd := command.NewProcessTurnCompleteCommand(repository.CoordinatorID, true, nil, nil)
+	result, err := h.Handle(context.Background(), cmd)
+
+	require.NoError(t, err)
+	assert.True(t, result.Success)
+
+	// Verify enforcement was NOT triggered
+	turnResult := result.Data.(*handler.ProcessTurnCompleteResult)
+	assert.False(t, turnResult.EnforcementTriggered, "coordinators should never get enforcement")
+	assert.Equal(t, repository.StatusReady, turnResult.NewStatus)
+
+	// Verify ProcessReady event was emitted
+	var foundReady bool
+	for _, evt := range result.Events {
+		if pe, ok := evt.(events.ProcessEvent); ok && pe.Type == events.ProcessReady {
+			foundReady = true
+		}
+	}
+	assert.True(t, foundReady, "ProcessReady should be emitted for coordinator")
+}
+
+func TestProcessTurnCompleteHandler_FailedTurns_SkipEnforcement(t *testing.T) {
+	processRepo, queueRepo := setupProcessRepos()
+	enforcer := handler.NewTurnCompletionTracker()
+
+	worker := &repository.Process{
+		ID:     "worker-1",
+		Role:   repository.RoleWorker,
+		Status: repository.StatusWorking,
+	}
+	processRepo.AddProcess(worker)
+
+	// Worker didn't call any tools but turn FAILED
+
+	h := handler.NewProcessTurnCompleteHandler(processRepo, queueRepo,
+		handler.WithProcessTurnEnforcer(enforcer))
+
+	// succeeded=false means the turn failed (crash, error, context exceeded)
+	cmd := command.NewProcessTurnCompleteCommand("worker-1", false, nil, nil)
+	result, err := h.Handle(context.Background(), cmd)
+
+	require.NoError(t, err)
+	assert.True(t, result.Success)
+
+	// Verify enforcement was NOT triggered for failed turns
+	turnResult := result.Data.(*handler.ProcessTurnCompleteResult)
+	assert.False(t, turnResult.EnforcementTriggered, "failed turns should skip enforcement")
+	assert.Equal(t, repository.StatusReady, turnResult.NewStatus)
+}
+
+func TestProcessTurnCompleteHandler_StartupTurns_SkipEnforcement(t *testing.T) {
+	processRepo, queueRepo := setupProcessRepos()
+	enforcer := handler.NewTurnCompletionTracker()
+
+	worker := &repository.Process{
+		ID:     "worker-1",
+		Role:   repository.RoleWorker,
+		Status: repository.StatusWorking,
+	}
+	processRepo.AddProcess(worker)
+
+	// Mark as newly spawned - first turn after spawn
+	enforcer.MarkAsNewlySpawned("worker-1")
+
+	// Worker didn't call required tools but this is startup turn
+
+	h := handler.NewProcessTurnCompleteHandler(processRepo, queueRepo,
+		handler.WithProcessTurnEnforcer(enforcer))
+
+	cmd := command.NewProcessTurnCompleteCommand("worker-1", true, nil, nil)
+	result, err := h.Handle(context.Background(), cmd)
+
+	require.NoError(t, err)
+	assert.True(t, result.Success)
+
+	// Verify enforcement was NOT triggered for startup turns
+	turnResult := result.Data.(*handler.ProcessTurnCompleteResult)
+	assert.False(t, turnResult.EnforcementTriggered, "startup turns should skip enforcement")
+	assert.Equal(t, repository.StatusReady, turnResult.NewStatus)
+}
+
+func TestProcessTurnCompleteHandler_MaxRetriesThenOnMaxRetriesExceededCalled(t *testing.T) {
+	processRepo, queueRepo := setupProcessRepos()
+
+	// Track if OnMaxRetriesExceeded was called
+	var maxRetriesExceededCalled bool
+	var maxRetriesProcessID string
+	var maxRetriesMissingTools []string
+
+	enforcer := handler.NewTurnCompletionTrackerWithOptions(
+		handler.WithLogger(func(format string, args ...any) {
+			// This is called by OnMaxRetriesExceeded
+			maxRetriesExceededCalled = true
+			if len(args) >= 2 {
+				maxRetriesProcessID, _ = args[0].(string)
+				maxRetriesMissingTools, _ = args[1].([]string)
+			}
+		}),
+	)
+
+	worker := &repository.Process{
+		ID:     "worker-1",
+		Role:   repository.RoleWorker,
+		Status: repository.StatusWorking,
+	}
+	processRepo.AddProcess(worker)
+
+	h := handler.NewProcessTurnCompleteHandler(processRepo, queueRepo,
+		handler.WithProcessTurnEnforcer(enforcer))
+
+	// First turn without tools - should get reminder (retry 1)
+	cmd1 := command.NewProcessTurnCompleteCommand("worker-1", true, nil, nil)
+	result1, err := h.Handle(context.Background(), cmd1)
+	require.NoError(t, err)
+	assert.True(t, result1.Data.(*handler.ProcessTurnCompleteResult).EnforcementTriggered)
+	assert.False(t, maxRetriesExceededCalled, "should not exceed max retries yet")
+
+	// Second turn without tools - should get reminder (retry 2)
+	cmd2 := command.NewProcessTurnCompleteCommand("worker-1", true, nil, nil)
+	result2, err := h.Handle(context.Background(), cmd2)
+	require.NoError(t, err)
+	assert.True(t, result2.Data.(*handler.ProcessTurnCompleteResult).EnforcementTriggered)
+	assert.False(t, maxRetriesExceededCalled, "should not exceed max retries yet")
+
+	// Third turn without tools - max retries exceeded, should complete normally
+	cmd3 := command.NewProcessTurnCompleteCommand("worker-1", true, nil, nil)
+	result3, err := h.Handle(context.Background(), cmd3)
+	require.NoError(t, err)
+
+	// Verify max retries exceeded was called and turn completed
+	turnResult := result3.Data.(*handler.ProcessTurnCompleteResult)
+	assert.False(t, turnResult.EnforcementTriggered, "should not trigger enforcement after max retries")
+	assert.Equal(t, repository.StatusReady, turnResult.NewStatus, "should transition to Ready")
+	assert.True(t, maxRetriesExceededCalled, "OnMaxRetriesExceeded should be called")
+	assert.Equal(t, "worker-1", maxRetriesProcessID)
+	assert.NotEmpty(t, maxRetriesMissingTools)
+}
+
+func TestProcessTurnCompleteHandler_AfterMaxRetries_TurnCompletesWithReadyEvent(t *testing.T) {
+	processRepo, queueRepo := setupProcessRepos()
+	enforcer := handler.NewTurnCompletionTracker()
+
+	worker := &repository.Process{
+		ID:     "worker-1",
+		Role:   repository.RoleWorker,
+		Status: repository.StatusWorking,
+	}
+	processRepo.AddProcess(worker)
+
+	h := handler.NewProcessTurnCompleteHandler(processRepo, queueRepo,
+		handler.WithProcessTurnEnforcer(enforcer))
+
+	// Exhaust retries (max is 2)
+	for i := 0; i < 2; i++ {
+		cmd := command.NewProcessTurnCompleteCommand("worker-1", true, nil, nil)
+		_, err := h.Handle(context.Background(), cmd)
+		require.NoError(t, err)
+	}
+
+	// Third turn - should complete normally
+	cmd := command.NewProcessTurnCompleteCommand("worker-1", true, nil, nil)
+	result, err := h.Handle(context.Background(), cmd)
+	require.NoError(t, err)
+
+	// Verify turn completed with Ready event
+	var foundReady bool
+	for _, evt := range result.Events {
+		if pe, ok := evt.(events.ProcessEvent); ok && pe.Type == events.ProcessReady {
+			foundReady = true
+		}
+	}
+	assert.True(t, foundReady, "ProcessReady event should be emitted after max retries")
+}
+
+func TestProcessTurnCompleteHandler_ReminderMessageIncludesMissingToolNames(t *testing.T) {
+	processRepo, queueRepo := setupProcessRepos()
+	enforcer := handler.NewTurnCompletionTracker()
+
+	worker := &repository.Process{
+		ID:     "worker-1",
+		Role:   repository.RoleWorker,
+		Status: repository.StatusWorking,
+	}
+	processRepo.AddProcess(worker)
+
+	h := handler.NewProcessTurnCompleteHandler(processRepo, queueRepo,
+		handler.WithProcessTurnEnforcer(enforcer))
+
+	cmd := command.NewProcessTurnCompleteCommand("worker-1", true, nil, nil)
+	result, err := h.Handle(context.Background(), cmd)
+
+	require.NoError(t, err)
+	require.Len(t, result.FollowUp, 1)
+
+	// Verify follow-up is DeliverProcessQueuedCommand
+	_, ok := result.FollowUp[0].(*command.DeliverProcessQueuedCommand)
+	require.True(t, ok, "follow-up should be DeliverProcessQueuedCommand")
+
+	// Get the reminder from the queue and verify it includes all the required tool names
+	queue := queueRepo.GetOrCreate("worker-1")
+	entry, _ := queue.Dequeue()
+	assert.Contains(t, entry.Content, "post_message")
+	assert.Contains(t, entry.Content, "report_implementation_complete")
+	assert.Contains(t, entry.Content, "report_review_verdict")
+	assert.Contains(t, entry.Content, "signal_ready")
+}
+
+func TestProcessTurnCompleteHandler_WorksCorrectlyWhenEnforcerIsNil(t *testing.T) {
+	processRepo, queueRepo := setupProcessRepos()
+
+	worker := &repository.Process{
+		ID:     "worker-1",
+		Role:   repository.RoleWorker,
+		Status: repository.StatusWorking,
+	}
+	processRepo.AddProcess(worker)
+
+	// Create handler WITHOUT enforcer (default behavior)
+	h := handler.NewProcessTurnCompleteHandler(processRepo, queueRepo)
+
+	cmd := command.NewProcessTurnCompleteCommand("worker-1", true, nil, nil)
+	result, err := h.Handle(context.Background(), cmd)
+
+	// Should not panic and should complete successfully
+	require.NoError(t, err)
+	assert.True(t, result.Success)
+
+	turnResult := result.Data.(*handler.ProcessTurnCompleteResult)
+	assert.Equal(t, repository.StatusReady, turnResult.NewStatus)
+	assert.False(t, turnResult.EnforcementTriggered)
+}
+
+func TestProcessTurnCompleteHandler_EnforcementWithSignalReadyTool_NoReminder(t *testing.T) {
+	processRepo, queueRepo := setupProcessRepos()
+	enforcer := handler.NewTurnCompletionTracker()
+
+	worker := &repository.Process{
+		ID:     "worker-1",
+		Role:   repository.RoleWorker,
+		Status: repository.StatusWorking,
+	}
+	processRepo.AddProcess(worker)
+
+	// Worker called signal_ready (one of the required tools)
+	enforcer.RecordToolCall("worker-1", "signal_ready")
+
+	h := handler.NewProcessTurnCompleteHandler(processRepo, queueRepo,
+		handler.WithProcessTurnEnforcer(enforcer))
+
+	cmd := command.NewProcessTurnCompleteCommand("worker-1", true, nil, nil)
+	result, err := h.Handle(context.Background(), cmd)
+
+	require.NoError(t, err)
+
+	// Verify no enforcement triggered - signal_ready satisfies requirement
+	turnResult := result.Data.(*handler.ProcessTurnCompleteResult)
+	assert.False(t, turnResult.EnforcementTriggered)
+	assert.Equal(t, repository.StatusReady, turnResult.NewStatus)
+}
+
+func TestProcessTurnCompleteHandler_EnforcementWithReportReviewVerdict_NoReminder(t *testing.T) {
+	processRepo, queueRepo := setupProcessRepos()
+	enforcer := handler.NewTurnCompletionTracker()
+
+	worker := &repository.Process{
+		ID:     "worker-1",
+		Role:   repository.RoleWorker,
+		Status: repository.StatusWorking,
+	}
+	processRepo.AddProcess(worker)
+
+	// Worker called report_review_verdict (one of the required tools)
+	enforcer.RecordToolCall("worker-1", "report_review_verdict")
+
+	h := handler.NewProcessTurnCompleteHandler(processRepo, queueRepo,
+		handler.WithProcessTurnEnforcer(enforcer))
+
+	cmd := command.NewProcessTurnCompleteCommand("worker-1", true, nil, nil)
+	result, err := h.Handle(context.Background(), cmd)
+
+	require.NoError(t, err)
+
+	// Verify no enforcement triggered
+	turnResult := result.Data.(*handler.ProcessTurnCompleteResult)
+	assert.False(t, turnResult.EnforcementTriggered)
+	assert.Equal(t, repository.StatusReady, turnResult.NewStatus)
+}
+
+func TestProcessTurnCompleteHandler_EnforcementTransitionsToReadyForDelivery(t *testing.T) {
+	processRepo, queueRepo := setupProcessRepos()
+	enforcer := handler.NewTurnCompletionTracker()
+
+	worker := &repository.Process{
+		ID:     "worker-1",
+		Role:   repository.RoleWorker,
+		Status: repository.StatusWorking,
+	}
+	processRepo.AddProcess(worker)
+
+	h := handler.NewProcessTurnCompleteHandler(processRepo, queueRepo,
+		handler.WithProcessTurnEnforcer(enforcer))
+
+	cmd := command.NewProcessTurnCompleteCommand("worker-1", true, nil, nil)
+	result, err := h.Handle(context.Background(), cmd)
+	require.NoError(t, err)
+
+	// Verify process transitions to Ready so DeliverProcessQueuedCommand can deliver the reminder
+	updated, _ := processRepo.Get("worker-1")
+	assert.Equal(t, repository.StatusReady, updated.Status,
+		"process should transition to Ready for reminder delivery")
+
+	// Verify a DeliverProcessQueuedCommand follow-up is returned
+	require.Len(t, result.FollowUp, 1)
+	_, ok := result.FollowUp[0].(*command.DeliverProcessQueuedCommand)
+	assert.True(t, ok, "follow-up should be DeliverProcessQueuedCommand")
+}
+
+func TestProcessTurnCompleteHandler_EnforcementPreservesTraceID(t *testing.T) {
+	processRepo, queueRepo := setupProcessRepos()
+	enforcer := handler.NewTurnCompletionTracker()
+
+	worker := &repository.Process{
+		ID:     "worker-1",
+		Role:   repository.RoleWorker,
+		Status: repository.StatusWorking,
+	}
+	processRepo.AddProcess(worker)
+
+	h := handler.NewProcessTurnCompleteHandler(processRepo, queueRepo,
+		handler.WithProcessTurnEnforcer(enforcer))
+
+	cmd := command.NewProcessTurnCompleteCommand("worker-1", true, nil, nil)
+	cmd.SetTraceID("test-trace-123")
+
+	result, err := h.Handle(context.Background(), cmd)
+	require.NoError(t, err)
+
+	// Verify the follow-up command has the trace ID
+	require.Len(t, result.FollowUp, 1)
+	deliverCmd := result.FollowUp[0].(*command.DeliverProcessQueuedCommand)
+	assert.Equal(t, "test-trace-123", deliverCmd.TraceID())
+}
+
+// ===========================================================================
 // RetireProcessHandler Tests
 // ===========================================================================
 
@@ -684,6 +1271,164 @@ func TestRetireProcessHandler_AlreadyRetired_ReturnsSuccessNoOp(t *testing.T) {
 
 	retireResult := result.Data.(*handler.RetireProcessResult)
 	assert.True(t, retireResult.WasNoOp)
+}
+
+func TestRetireProcessHandler_CallsCleanupProcessWhenRetiring(t *testing.T) {
+	processRepo, _ := setupProcessRepos()
+	registry := process.NewProcessRegistry()
+
+	worker := &repository.Process{
+		ID:     "worker-1",
+		Role:   repository.RoleWorker,
+		Status: repository.StatusReady,
+	}
+	processRepo.AddProcess(worker)
+
+	// Create enforcer and populate state
+	enforcer := handler.NewTurnCompletionTracker()
+	enforcer.RecordToolCall("worker-1", "some_tool")
+	enforcer.MarkAsNewlySpawned("worker-1")
+	enforcer.IncrementRetry("worker-1")
+
+	// Verify state exists before retire
+	assert.True(t, enforcer.IsNewlySpawned("worker-1"))
+	assert.True(t, enforcer.ShouldRetry("worker-1")) // retry count is 1, still < 2
+
+	h := handler.NewRetireProcessHandler(processRepo, registry,
+		handler.WithRetireTurnEnforcer(enforcer))
+
+	cmd := command.NewRetireProcessCommand(command.SourceMCPTool, "worker-1", "context full")
+	result, err := h.Handle(context.Background(), cmd)
+
+	require.NoError(t, err)
+	assert.True(t, result.Success)
+
+	// Verify CleanupProcess was called - all state should be removed
+	assert.False(t, enforcer.IsNewlySpawned("worker-1"))
+	// After cleanup, retry count should be 0, so ShouldRetry returns true (0 < 2)
+	// We verify cleanup by checking the CheckTurnCompletion returns RequiredTools (no calls recorded)
+	missingTools := enforcer.CheckTurnCompletion("worker-1", repository.RoleWorker)
+	assert.Equal(t, handler.RequiredTools, missingTools)
+}
+
+func TestRetireProcessHandler_WorksWithNilEnforcer(t *testing.T) {
+	processRepo, _ := setupProcessRepos()
+	registry := process.NewProcessRegistry()
+
+	worker := &repository.Process{
+		ID:     "worker-1",
+		Role:   repository.RoleWorker,
+		Status: repository.StatusReady,
+	}
+	processRepo.AddProcess(worker)
+
+	// Create handler without enforcer (nil by default)
+	h := handler.NewRetireProcessHandler(processRepo, registry)
+
+	cmd := command.NewRetireProcessCommand(command.SourceMCPTool, "worker-1", "")
+	result, err := h.Handle(context.Background(), cmd)
+
+	// Should succeed without panic
+	require.NoError(t, err)
+	assert.True(t, result.Success)
+
+	updated, _ := processRepo.Get("worker-1")
+	assert.Equal(t, repository.StatusRetired, updated.Status)
+}
+
+func TestRetireProcessHandler_CleanupDoesNotAffectOtherProcesses(t *testing.T) {
+	processRepo, _ := setupProcessRepos()
+	registry := process.NewProcessRegistry()
+
+	worker1 := &repository.Process{
+		ID:     "worker-1",
+		Role:   repository.RoleWorker,
+		Status: repository.StatusReady,
+	}
+	worker2 := &repository.Process{
+		ID:     "worker-2",
+		Role:   repository.RoleWorker,
+		Status: repository.StatusWorking,
+	}
+	processRepo.AddProcess(worker1)
+	processRepo.AddProcess(worker2)
+
+	// Create enforcer and populate state for both workers
+	enforcer := handler.NewTurnCompletionTracker()
+	enforcer.RecordToolCall("worker-1", "post_message")
+	enforcer.MarkAsNewlySpawned("worker-1")
+	enforcer.RecordToolCall("worker-2", "signal_ready")
+	enforcer.MarkAsNewlySpawned("worker-2")
+
+	h := handler.NewRetireProcessHandler(processRepo, registry,
+		handler.WithRetireTurnEnforcer(enforcer))
+
+	// Retire worker-1 only
+	cmd := command.NewRetireProcessCommand(command.SourceMCPTool, "worker-1", "")
+	result, err := h.Handle(context.Background(), cmd)
+
+	require.NoError(t, err)
+	assert.True(t, result.Success)
+
+	// Verify worker-1 state is cleaned up
+	assert.False(t, enforcer.IsNewlySpawned("worker-1"))
+	missingTools1 := enforcer.CheckTurnCompletion("worker-1", repository.RoleWorker)
+	assert.Equal(t, handler.RequiredTools, missingTools1) // No calls recorded
+
+	// Verify worker-2 state is preserved
+	assert.True(t, enforcer.IsNewlySpawned("worker-2"))
+	missingTools2 := enforcer.CheckTurnCompletion("worker-2", repository.RoleWorker)
+	assert.Empty(t, missingTools2) // signal_ready was recorded
+}
+
+func TestRetireProcessHandler_CleanupRemovesAllStateForProcess(t *testing.T) {
+	processRepo, _ := setupProcessRepos()
+	registry := process.NewProcessRegistry()
+
+	worker := &repository.Process{
+		ID:     "worker-1",
+		Role:   repository.RoleWorker,
+		Status: repository.StatusReady,
+	}
+	processRepo.AddProcess(worker)
+
+	// Create enforcer and populate ALL types of state
+	enforcer := handler.NewTurnCompletionTracker()
+
+	// Record tool calls
+	enforcer.RecordToolCall("worker-1", "post_message")
+	enforcer.RecordToolCall("worker-1", "signal_ready")
+
+	// Mark as newly spawned
+	enforcer.MarkAsNewlySpawned("worker-1")
+
+	// Set retry count to 2 (max)
+	enforcer.IncrementRetry("worker-1")
+	enforcer.IncrementRetry("worker-1")
+
+	// Verify state exists before retire
+	assert.True(t, enforcer.IsNewlySpawned("worker-1"))
+	assert.False(t, enforcer.ShouldRetry("worker-1")) // retry count is 2, at max
+	missingBefore := enforcer.CheckTurnCompletion("worker-1", repository.RoleWorker)
+	assert.Empty(t, missingBefore) // Tools were recorded
+
+	h := handler.NewRetireProcessHandler(processRepo, registry,
+		handler.WithRetireTurnEnforcer(enforcer))
+
+	cmd := command.NewRetireProcessCommand(command.SourceMCPTool, "worker-1", "")
+	_, err := h.Handle(context.Background(), cmd)
+	require.NoError(t, err)
+
+	// Verify ALL state is removed after cleanup
+	// 1. newlySpawned flag should be cleared
+	assert.False(t, enforcer.IsNewlySpawned("worker-1"))
+
+	// 2. Tool calls should be cleared - CheckTurnCompletion returns RequiredTools
+	missingAfter := enforcer.CheckTurnCompletion("worker-1", repository.RoleWorker)
+	assert.Equal(t, handler.RequiredTools, missingAfter)
+
+	// 3. Retry count should be cleared - ShouldRetry returns true (0 < 2)
+	assert.True(t, enforcer.ShouldRetry("worker-1"))
 }
 
 // ===========================================================================
@@ -837,6 +1582,87 @@ func TestSpawnProcessHandler_EmitsProcessSpawnedEvent(t *testing.T) {
 	event := result.Events[0].(events.ProcessEvent)
 	assert.Equal(t, events.ProcessSpawned, event.Type)
 	assert.Equal(t, events.RoleWorker, event.Role)
+}
+
+func TestSpawnProcessHandler_CallsMarkAsNewlySpawned(t *testing.T) {
+	processRepo, _ := setupProcessRepos()
+	registry := process.NewProcessRegistry()
+	enforcer := handler.NewTurnCompletionTracker()
+
+	h := handler.NewSpawnProcessHandler(processRepo, registry, handler.WithTurnEnforcer(enforcer))
+
+	cmd := command.NewSpawnProcessCommand(command.SourceInternal, repository.RoleWorker)
+	result, err := h.Handle(context.Background(), cmd)
+
+	require.NoError(t, err)
+	assert.True(t, result.Success)
+
+	// Get the spawned process ID from result
+	spawnResult := result.Data.(*handler.SpawnProcessResult)
+
+	// Verify enforcer was notified
+	assert.True(t, enforcer.IsNewlySpawned(spawnResult.ProcessID),
+		"spawned process should be marked as newly spawned")
+}
+
+func TestSpawnProcessHandler_WorksCorrectlyWhenEnforcerIsNil(t *testing.T) {
+	processRepo, _ := setupProcessRepos()
+	registry := process.NewProcessRegistry()
+
+	// Create handler WITHOUT enforcer (default behavior)
+	h := handler.NewSpawnProcessHandler(processRepo, registry)
+
+	cmd := command.NewSpawnProcessCommand(command.SourceInternal, repository.RoleWorker)
+	result, err := h.Handle(context.Background(), cmd)
+
+	// Should not panic and should complete successfully
+	require.NoError(t, err)
+	assert.True(t, result.Success)
+}
+
+func TestSpawnProcessHandler_MarkAsNewlySpawnedNotCalledIfProcessCreationFails(t *testing.T) {
+	processRepo, _ := setupProcessRepos()
+	registry := process.NewProcessRegistry()
+	enforcer := handler.NewTurnCompletionTracker()
+
+	// Create a mock spawner that returns an error
+	failingSpawner := &mockProcessSpawner{spawnErr: assert.AnError}
+
+	h := handler.NewSpawnProcessHandler(processRepo, registry,
+		handler.WithTurnEnforcer(enforcer),
+		handler.WithUnifiedSpawner(failingSpawner))
+
+	cmd := command.NewSpawnProcessCommand(command.SourceInternal, repository.RoleWorker)
+	_, err := h.Handle(context.Background(), cmd)
+
+	// Should fail
+	require.Error(t, err)
+
+	// Verify no process was marked as newly spawned
+	// Check that no worker IDs are marked as newly spawned
+	workers := processRepo.Workers()
+	for _, w := range workers {
+		assert.False(t, enforcer.IsNewlySpawned(w.ID),
+			"no process should be marked as newly spawned when spawn fails")
+	}
+}
+
+func TestSpawnProcessHandler_MarksCoordinatorAsNewlySpawned(t *testing.T) {
+	processRepo, _ := setupProcessRepos()
+	registry := process.NewProcessRegistry()
+	enforcer := handler.NewTurnCompletionTracker()
+
+	h := handler.NewSpawnProcessHandler(processRepo, registry, handler.WithTurnEnforcer(enforcer))
+
+	cmd := command.NewSpawnProcessCommand(command.SourceInternal, repository.RoleCoordinator)
+	result, err := h.Handle(context.Background(), cmd)
+
+	require.NoError(t, err)
+	assert.True(t, result.Success)
+
+	// Verify coordinator is also marked as newly spawned
+	assert.True(t, enforcer.IsNewlySpawned(repository.CoordinatorID),
+		"coordinator should be marked as newly spawned")
 }
 
 // ===========================================================================

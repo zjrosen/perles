@@ -111,6 +111,8 @@ type RepositoryComponents struct {
 type InternalComponents struct {
 	// ProcessRegistry holds live Process instances for runtime operations.
 	ProcessRegistry *process.ProcessRegistry
+	// TurnEnforcer tracks MCP tool calls during worker turns for enforcement.
+	TurnEnforcer handler.TurnCompletionEnforcer
 }
 
 // NewInfrastructure creates all v2 orchestration infrastructure components.
@@ -154,11 +156,14 @@ func NewInfrastructure(cfg InfrastructureConfig) (*Infrastructure, error) {
 	// Create unified ProcessRegistry for coordinator and workers
 	processRegistry := process.NewProcessRegistry()
 
+	// Create turn completion enforcer for tracking worker tool calls
+	turnEnforcer := handler.NewTurnCompletionTracker()
+
 	// Create BDTaskExecutor for syncing v2 state changes to BD tracker
 	beadsExec := beads.NewRealExecutor(cfg.WorkDir)
 
 	// Register all command handlers
-	registerHandlers(cmdProcessor, processRepo, taskRepo, queueRepo, processRegistry,
+	registerHandlers(cmdProcessor, processRepo, taskRepo, queueRepo, processRegistry, turnEnforcer,
 		cfg.AIClient, cfg.Extensions, beadsExec, cfg.Port, cfg.ExpectedWorkers, eventBus, cfg.WorkDir)
 
 	// Create command submitter adapter
@@ -187,6 +192,7 @@ func NewInfrastructure(cfg InfrastructureConfig) (*Infrastructure, error) {
 		},
 		Internal: InternalComponents{
 			ProcessRegistry: processRegistry,
+			TurnEnforcer:    turnEnforcer,
 		},
 		config: cfg,
 	}, nil
@@ -240,6 +246,7 @@ func registerHandlers(
 	taskRepo repository.TaskRepository,
 	queueRepo repository.QueueRepository,
 	processRegistry *process.ProcessRegistry,
+	turnEnforcer handler.TurnCompletionEnforcer,
 	aiClient client.HeadlessClient,
 	extensions map[string]any,
 	beadsExec beads.BeadsExecutor,
@@ -277,7 +284,8 @@ func registerHandlers(
 	cmdProcessor.RegisterHandler(command.CmdTransitionPhase,
 		handler.NewTransitionPhaseHandler(processRepo, queueRepo))
 	cmdProcessor.RegisterHandler(command.CmdProcessTurnComplete,
-		handler.NewProcessTurnCompleteHandler(processRepo, queueRepo))
+		handler.NewProcessTurnCompleteHandler(processRepo, queueRepo,
+			handler.WithProcessTurnEnforcer(turnEnforcer)))
 
 	// ============================================================
 	// BD Task Status handlers (2)
@@ -308,14 +316,17 @@ func registerHandlers(
 	cmdProcessor.RegisterHandler(command.CmdSpawnProcess,
 		handler.NewSpawnProcessHandler(processRepo, processRegistry,
 			handler.WithSpawnMaxWorkers(expectedWorkers),
-			handler.WithUnifiedSpawner(processSpawner)))
+			handler.WithUnifiedSpawner(processSpawner),
+			handler.WithTurnEnforcer(turnEnforcer)))
 	cmdProcessor.RegisterHandler(command.CmdSendToProcess,
 		handler.NewSendToProcessHandler(processRepo, queueRepo))
 	cmdProcessor.RegisterHandler(command.CmdDeliverProcessQueued,
 		handler.NewDeliverProcessQueuedHandler(processRepo, queueRepo, processRegistry,
-			handler.WithProcessDeliverer(messageDeliverer)))
+			handler.WithProcessDeliverer(messageDeliverer),
+			handler.WithDeliverTurnEnforcer(turnEnforcer)))
 	cmdProcessor.RegisterHandler(command.CmdRetireProcess,
-		handler.NewRetireProcessHandler(processRepo, processRegistry))
+		handler.NewRetireProcessHandler(processRepo, processRegistry,
+			handler.WithRetireTurnEnforcer(turnEnforcer)))
 	cmdProcessor.RegisterHandler(command.CmdStopProcess,
 		handler.NewStopWorkerHandler(processRepo, taskRepo, queueRepo, processRegistry))
 	cmdProcessor.RegisterHandler(command.CmdReplaceProcess,

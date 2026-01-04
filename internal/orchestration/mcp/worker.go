@@ -43,6 +43,16 @@ type AccountabilityWriter interface {
 	WriteWorkerAccountabilitySummary(workerID string, content []byte) (string, error)
 }
 
+// ToolCallRecorder defines the interface for recording tool calls during worker turns.
+// This is a subset of the TurnCompletionEnforcer interface from handler package,
+// defined here to avoid import cycles. The handler.TurnCompletionTracker implements
+// this interface.
+type ToolCallRecorder interface {
+	// RecordToolCall records that a worker called a specific tool.
+	// Called from MCP tool handlers when a required tool is invoked.
+	RecordToolCall(processID, toolName string)
+}
+
 // WorkerServer is an MCP server that exposes communication tools to worker agents.
 // Each worker gets its own MCP server instance with a unique worker ID.
 type WorkerServer struct {
@@ -56,6 +66,11 @@ type WorkerServer struct {
 	// V2 adapter for command-based processing
 	// See docs/proposals/orchestration-v2-architecture.md for architecture details
 	v2Adapter *adapter.V2Adapter
+
+	// enforcer tracks tool calls for turn completion enforcement.
+	// When set, required tool calls are recorded so the orchestrator can verify
+	// workers properly complete their turns.
+	enforcer ToolCallRecorder
 }
 
 // NewWorkerServer creates a new worker MCP server.
@@ -85,6 +100,15 @@ func (ws *WorkerServer) SetAccountabilityWriter(writer AccountabilityWriter) {
 // SetV2Adapter allows setting the v2 adapter after construction.
 func (ws *WorkerServer) SetV2Adapter(adapter *adapter.V2Adapter) {
 	ws.v2Adapter = adapter
+}
+
+// SetTurnEnforcer sets the turn completion enforcer for tracking tool calls.
+// When set, required tool calls (post_message, report_implementation_complete,
+// report_review_verdict, signal_ready) are recorded so the orchestrator can
+// verify workers properly complete their turns.
+// The enforcer should implement ToolCallRecorder (handler.TurnCompletionTracker satisfies this).
+func (ws *WorkerServer) SetTurnEnforcer(enforcer ToolCallRecorder) {
+	ws.enforcer = enforcer
 }
 
 // registerTools registers all worker tools with the MCP server.
@@ -319,6 +343,11 @@ func (ws *WorkerServer) handlePostMessage(_ context.Context, rawArgs json.RawMes
 		return nil, fmt.Errorf("failed to send message: %w", err)
 	}
 
+	// Record tool call for turn completion enforcement
+	if ws.enforcer != nil {
+		ws.enforcer.RecordToolCall(ws.workerID, "post_message")
+	}
+
 	log.Debug(log.CatMCP, "Message sent", "workerID", ws.workerID, "to", args.To)
 
 	return SuccessResult(fmt.Sprintf("Message sent to %s", args.To)), nil
@@ -326,17 +355,47 @@ func (ws *WorkerServer) handlePostMessage(_ context.Context, rawArgs json.RawMes
 
 // handleSignalReady signals the coordinator that this worker is ready for task assignment.
 func (ws *WorkerServer) handleSignalReady(ctx context.Context, args json.RawMessage) (*ToolCallResult, error) {
-	return ws.v2Adapter.HandleSignalReady(ctx, args, ws.workerID)
+	result, err := ws.v2Adapter.HandleSignalReady(ctx, args, ws.workerID)
+	if err != nil {
+		return result, err
+	}
+
+	// Record tool call for turn completion enforcement
+	if ws.enforcer != nil {
+		ws.enforcer.RecordToolCall(ws.workerID, "signal_ready")
+	}
+
+	return result, nil
 }
 
 // handleReportImplementationComplete signals that implementation is complete and ready for review.
 func (ws *WorkerServer) handleReportImplementationComplete(ctx context.Context, rawArgs json.RawMessage) (*ToolCallResult, error) {
-	return ws.v2Adapter.HandleReportImplementationComplete(ctx, rawArgs, ws.workerID)
+	result, err := ws.v2Adapter.HandleReportImplementationComplete(ctx, rawArgs, ws.workerID)
+	if err != nil {
+		return result, err
+	}
+
+	// Record tool call for turn completion enforcement
+	if ws.enforcer != nil {
+		ws.enforcer.RecordToolCall(ws.workerID, "report_implementation_complete")
+	}
+
+	return result, nil
 }
 
 // handleReportReviewVerdict reports the code review verdict (APPROVED or DENIED).
 func (ws *WorkerServer) handleReportReviewVerdict(ctx context.Context, rawArgs json.RawMessage) (*ToolCallResult, error) {
-	return ws.v2Adapter.HandleReportReviewVerdict(ctx, rawArgs, ws.workerID)
+	result, err := ws.v2Adapter.HandleReportReviewVerdict(ctx, rawArgs, ws.workerID)
+	if err != nil {
+		return result, err
+	}
+
+	// Record tool call for turn completion enforcement
+	if ws.enforcer != nil {
+		ws.enforcer.RecordToolCall(ws.workerID, "report_review_verdict")
+	}
+
+	return result, nil
 }
 
 // validateAccountabilitySummaryArgs validates the arguments for the post_accountability_summary tool.

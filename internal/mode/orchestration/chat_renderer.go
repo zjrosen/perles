@@ -51,11 +51,15 @@ func renderChatContent(messages []ChatMessage, wrapWidth int, cfg ChatRenderConf
 			}
 
 		} else {
-			// Regular text message - show "Coordinator" in worker pane for coordinator messages
+			// Regular text message - show role-specific label and color
 			var roleLabel string
-			if cfg.ShowCoordinatorInWorker && msg.Role == "coordinator" {
+			switch {
+			case msg.Role == "system":
+				// System messages (enforcement reminders) get distinctive red styling
+				roleLabel = roleStyle.Foreground(SystemColor).Render("System")
+			case cfg.ShowCoordinatorInWorker && msg.Role == "coordinator":
 				roleLabel = roleStyle.Foreground(CoordinatorColor).Render("Coordinator")
-			} else {
+			default:
 				roleLabel = roleStyle.Foreground(cfg.AgentColor).Render(cfg.AgentLabel)
 			}
 			content.WriteString(roleLabel + "\n")

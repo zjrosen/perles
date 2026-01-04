@@ -1465,3 +1465,266 @@ func TestWorkerServer_RegistersAllToolsIncludingPostAccountabilitySummary(t *tes
 
 	require.Equal(t, len(expectedTools), len(ws.tools), "Tool count mismatch")
 }
+
+// ============================================================================
+// Tests for Turn Completion Enforcement Instrumentation
+// ============================================================================
+
+// mockToolCallRecorder implements ToolCallRecorder for testing.
+type mockToolCallRecorder struct {
+	mu    sync.Mutex
+	calls []toolCallRecord
+}
+
+type toolCallRecord struct {
+	ProcessID string
+	ToolName  string
+}
+
+func newMockToolCallRecorder() *mockToolCallRecorder {
+	return &mockToolCallRecorder{
+		calls: make([]toolCallRecord, 0),
+	}
+}
+
+func (m *mockToolCallRecorder) RecordToolCall(processID, toolName string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, toolCallRecord{
+		ProcessID: processID,
+		ToolName:  toolName,
+	})
+}
+
+// GetCalls returns a copy of recorded calls.
+func (m *mockToolCallRecorder) GetCalls() []toolCallRecord {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]toolCallRecord, len(m.calls))
+	copy(result, m.calls)
+	return result
+}
+
+// TestWorkerServer_SetTurnEnforcer tests that SetTurnEnforcer correctly sets the enforcer.
+func TestWorkerServer_SetTurnEnforcer(t *testing.T) {
+	ws := NewWorkerServer("WORKER.1", nil)
+	require.Nil(t, ws.enforcer, "enforcer should be nil initially")
+
+	recorder := newMockToolCallRecorder()
+	ws.SetTurnEnforcer(recorder)
+	require.NotNil(t, ws.enforcer, "enforcer should be set")
+}
+
+// TestWorkerServer_PostMessage_RecordsToolCall tests that post_message records tool call.
+func TestWorkerServer_PostMessage_RecordsToolCall(t *testing.T) {
+	store := newMockMessageStore()
+	recorder := newMockToolCallRecorder()
+
+	ws := NewWorkerServer("WORKER.1", store)
+	ws.SetTurnEnforcer(recorder)
+	handler := ws.handlers["post_message"]
+
+	result, err := handler(context.Background(), json.RawMessage(`{"to": "COORDINATOR", "content": "Test message"}`))
+	require.NoError(t, err, "Unexpected error")
+	require.NotNil(t, result, "Expected result")
+
+	// Verify RecordToolCall was called
+	calls := recorder.GetCalls()
+	require.Len(t, calls, 1, "Expected 1 recorder call")
+	require.Equal(t, "WORKER.1", calls[0].ProcessID, "Expected worker ID")
+	require.Equal(t, "post_message", calls[0].ToolName, "Expected tool name 'post_message'")
+}
+
+// TestWorkerServer_PostMessage_NilEnforcer tests that post_message works when enforcer is nil.
+func TestWorkerServer_PostMessage_NilEnforcer(t *testing.T) {
+	store := newMockMessageStore()
+	ws := NewWorkerServer("WORKER.1", store)
+	// Don't set enforcer - leave it nil
+	handler := ws.handlers["post_message"]
+
+	result, err := handler(context.Background(), json.RawMessage(`{"to": "COORDINATOR", "content": "Test message"}`))
+	require.NoError(t, err, "Should not panic with nil enforcer")
+	require.NotNil(t, result, "Expected result")
+}
+
+// TestWorkerServer_PostMessage_ErrorDoesNotRecordToolCall tests that errors don't record tool calls.
+func TestWorkerServer_PostMessage_ErrorDoesNotRecordToolCall(t *testing.T) {
+	recorder := newMockToolCallRecorder()
+
+	ws := NewWorkerServer("WORKER.1", nil) // nil store causes error
+	ws.SetTurnEnforcer(recorder)
+	handler := ws.handlers["post_message"]
+
+	_, err := handler(context.Background(), json.RawMessage(`{"to": "COORDINATOR", "content": "Test message"}`))
+	require.Error(t, err, "Expected error with nil store")
+
+	// Verify RecordToolCall was NOT called
+	calls := recorder.GetCalls()
+	require.Len(t, calls, 0, "RecordToolCall should not be called on error")
+}
+
+// TestWorkerServer_SignalReady_RecordsToolCall tests that signal_ready records tool call.
+func TestWorkerServer_SignalReady_RecordsToolCall(t *testing.T) {
+	store := newMockMessageStore()
+	recorder := newMockToolCallRecorder()
+
+	tws := NewTestWorkerServer(t, "WORKER.1", store)
+	defer tws.Close()
+	tws.SetTurnEnforcer(recorder)
+	handler := tws.handlers["signal_ready"]
+
+	result, err := handler(context.Background(), json.RawMessage(`{}`))
+	require.NoError(t, err, "Unexpected error")
+	require.NotNil(t, result, "Expected result")
+
+	// Verify RecordToolCall was called
+	calls := recorder.GetCalls()
+	require.Len(t, calls, 1, "Expected 1 recorder call")
+	require.Equal(t, "WORKER.1", calls[0].ProcessID, "Expected worker ID")
+	require.Equal(t, "signal_ready", calls[0].ToolName, "Expected tool name 'signal_ready'")
+}
+
+// TestWorkerServer_SignalReady_NilEnforcer tests that signal_ready works when enforcer is nil.
+func TestWorkerServer_SignalReady_NilEnforcer(t *testing.T) {
+	store := newMockMessageStore()
+	tws := NewTestWorkerServer(t, "WORKER.1", store)
+	defer tws.Close()
+	// Don't set enforcer - leave it nil
+	handler := tws.handlers["signal_ready"]
+
+	result, err := handler(context.Background(), json.RawMessage(`{}`))
+	require.NoError(t, err, "Should not panic with nil enforcer")
+	require.NotNil(t, result, "Expected result")
+}
+
+// TestWorkerServer_ReportImplementationComplete_RecordsToolCall tests that report_implementation_complete records tool call.
+func TestWorkerServer_ReportImplementationComplete_RecordsToolCall(t *testing.T) {
+	store := newMockMessageStore()
+	recorder := newMockToolCallRecorder()
+
+	tws := NewTestWorkerServer(t, "WORKER.1", store)
+	defer tws.Close()
+	tws.SetTurnEnforcer(recorder)
+	tws.V2Handler.SetResult(&command.CommandResult{
+		Success: true,
+		Data:    "Implementation complete",
+	})
+	handler := tws.handlers["report_implementation_complete"]
+
+	result, err := handler(context.Background(), json.RawMessage(`{"summary": "Done with task"}`))
+	require.NoError(t, err, "Unexpected error")
+	require.NotNil(t, result, "Expected result")
+	require.False(t, result.IsError, "Expected success result")
+
+	// Verify RecordToolCall was called
+	calls := recorder.GetCalls()
+	require.Len(t, calls, 1, "Expected 1 recorder call")
+	require.Equal(t, "WORKER.1", calls[0].ProcessID, "Expected worker ID")
+	require.Equal(t, "report_implementation_complete", calls[0].ToolName, "Expected tool name 'report_implementation_complete'")
+}
+
+// TestWorkerServer_ReportImplementationComplete_NilEnforcer tests that report_implementation_complete works when enforcer is nil.
+func TestWorkerServer_ReportImplementationComplete_NilEnforcer(t *testing.T) {
+	store := newMockMessageStore()
+	tws := NewTestWorkerServer(t, "WORKER.1", store)
+	defer tws.Close()
+	// Don't set enforcer - leave it nil
+	tws.V2Handler.SetResult(&command.CommandResult{
+		Success: true,
+		Data:    "Implementation complete",
+	})
+	handler := tws.handlers["report_implementation_complete"]
+
+	result, err := handler(context.Background(), json.RawMessage(`{"summary": "Done with task"}`))
+	require.NoError(t, err, "Should not panic with nil enforcer")
+	require.NotNil(t, result, "Expected result")
+}
+
+// TestWorkerServer_ReportImplementationComplete_ErrorDoesNotRecordToolCall tests that errors don't record tool calls.
+func TestWorkerServer_ReportImplementationComplete_ErrorDoesNotRecordToolCall(t *testing.T) {
+	store := newMockMessageStore()
+	recorder := newMockToolCallRecorder()
+
+	tws := NewTestWorkerServer(t, "WORKER.1", store)
+	defer tws.Close()
+	tws.SetTurnEnforcer(recorder)
+	// Configure mock to return error
+	tws.V2Handler.SetResult(&command.CommandResult{
+		Success: false,
+		Error:   fmt.Errorf("worker not in implementing phase"),
+	})
+	handler := tws.handlers["report_implementation_complete"]
+
+	result, err := handler(context.Background(), json.RawMessage(`{"summary": "Done with task"}`))
+	// Note: Handler returns nil error but sets IsError on result when processor fails
+	require.NoError(t, err, "Handler returns nil error")
+	require.True(t, result.IsError, "Expected error result")
+
+	// The result is error but returned via tool result, not Go error.
+	// RecordToolCall is still called because the underlying adapter call succeeded.
+	// This is the expected behavior - we record the tool call even when the processor reports an error in the result.
+	calls := recorder.GetCalls()
+	require.Len(t, calls, 1, "RecordToolCall is called because adapter call succeeded")
+}
+
+// TestWorkerServer_ReportReviewVerdict_RecordsToolCall tests that report_review_verdict records tool call.
+func TestWorkerServer_ReportReviewVerdict_RecordsToolCall(t *testing.T) {
+	store := newMockMessageStore()
+	recorder := newMockToolCallRecorder()
+
+	tws := NewTestWorkerServer(t, "WORKER.1", store)
+	defer tws.Close()
+	tws.SetTurnEnforcer(recorder)
+	tws.V2Handler.SetResult(&command.CommandResult{
+		Success: true,
+		Data:    "Verdict submitted",
+	})
+	handler := tws.handlers["report_review_verdict"]
+
+	result, err := handler(context.Background(), json.RawMessage(`{"verdict": "APPROVED", "comments": "LGTM"}`))
+	require.NoError(t, err, "Unexpected error")
+	require.NotNil(t, result, "Expected result")
+	require.False(t, result.IsError, "Expected success result")
+
+	// Verify RecordToolCall was called
+	calls := recorder.GetCalls()
+	require.Len(t, calls, 1, "Expected 1 recorder call")
+	require.Equal(t, "WORKER.1", calls[0].ProcessID, "Expected worker ID")
+	require.Equal(t, "report_review_verdict", calls[0].ToolName, "Expected tool name 'report_review_verdict'")
+}
+
+// TestWorkerServer_ReportReviewVerdict_NilEnforcer tests that report_review_verdict works when enforcer is nil.
+func TestWorkerServer_ReportReviewVerdict_NilEnforcer(t *testing.T) {
+	store := newMockMessageStore()
+	tws := NewTestWorkerServer(t, "WORKER.1", store)
+	defer tws.Close()
+	// Don't set enforcer - leave it nil
+	tws.V2Handler.SetResult(&command.CommandResult{
+		Success: true,
+		Data:    "Verdict submitted",
+	})
+	handler := tws.handlers["report_review_verdict"]
+
+	result, err := handler(context.Background(), json.RawMessage(`{"verdict": "APPROVED", "comments": "LGTM"}`))
+	require.NoError(t, err, "Should not panic with nil enforcer")
+	require.NotNil(t, result, "Expected result")
+}
+
+// TestWorkerServer_ReportReviewVerdict_ErrorDoesNotRecordToolCall tests that errors don't record tool calls.
+func TestWorkerServer_ReportReviewVerdict_ErrorDoesNotRecordToolCall(t *testing.T) {
+	store := newMockMessageStore()
+	recorder := newMockToolCallRecorder()
+
+	tws := NewTestWorkerServer(t, "WORKER.1", store)
+	defer tws.Close()
+	tws.SetTurnEnforcer(recorder)
+	handler := tws.handlers["report_review_verdict"]
+
+	// Missing required "verdict" field causes validation error that returns Go error
+	_, err := handler(context.Background(), json.RawMessage(`{"comments": "LGTM"}`))
+	require.Error(t, err, "Expected validation error")
+
+	// Verify RecordToolCall was NOT called
+	calls := recorder.GetCalls()
+	require.Len(t, calls, 0, "RecordToolCall should not be called on error")
+}

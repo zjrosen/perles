@@ -166,6 +166,7 @@ sequenceDiagram
     participant EL as Event Loop
     participant EB as EventBus
     participant CP as CommandProcessor
+    participant TE as TurnEnforcer
     
     AI->>EL: Output Event
     EL->>EL: Buffer output
@@ -177,8 +178,16 @@ sequenceDiagram
     
     AI->>EL: Turn Complete
     EL->>CP: Submit ProcessTurnComplete
-    CP->>CP: Working → Ready
-    CP->>EB: Publish ProcessReady
+    
+    alt Worker without required tool call
+        CP->>TE: CheckTurnCompletion
+        TE-->>CP: Missing tools
+        CP->>CP: Enqueue reminder (SenderSystem)
+        CP->>CP: Return DeliverProcessQueued
+    else Compliant or Coordinator
+        CP->>CP: Working → Ready
+        CP->>EB: Publish ProcessReady
+    end
 ```
 
 ### Event Loop Implementation
@@ -206,6 +215,50 @@ func (p *Process) eventLoop() {
     }
 }
 ```
+
+## Turn Completion Enforcement
+
+Workers are required to call specific MCP tools to properly complete their turn. This ensures workers always communicate their state back to the coordinator.
+
+### Required Tools
+
+| Tool | Purpose |
+|------|---------|
+| `post_message` | General communication with coordinator |
+| `report_implementation_complete` | Report task implementation done |
+| `report_review_verdict` | Report code review result |
+| `signal_ready` | Signal worker is ready (after startup) |
+
+### Enforcement Mechanism
+
+The `TurnCompletionEnforcer` tracks tool calls during each turn:
+
+```go
+type TurnCompletionEnforcer interface {
+    RecordToolCall(processID, toolName string)   // Called from MCP handlers
+    ResetTurn(processID string)                  // Clear state for new turn
+    CheckTurnCompletion(id, role) []string       // Returns missing tools
+    ShouldRetry(processID string) bool           // Check retry limit
+    IncrementRetry(processID string)             // Increment retry count
+}
+```
+
+### Enforcement Flow
+
+1. **Turn completes** without required tool call
+2. **Check exemptions**: Failed turns and newly spawned workers are exempt
+3. **Retry check**: If retries < 2, enqueue system reminder
+4. **Delivery**: Reminder delivered via `DeliverProcessQueuedHandler`
+5. **Preserve state**: `SenderSystem` messages don't reset retry count
+6. **Max exceeded**: After 2 retries, allow turn to complete (log warning)
+
+### Sender Types
+
+| Type | Description | Resets Turn? |
+|------|-------------|--------------|
+| `SenderUser` | Message from TUI user | Yes |
+| `SenderCoordinator` | Message from coordinator | Yes |
+| `SenderSystem` | Enforcement reminder | No |
 
 ## Output Buffer
 

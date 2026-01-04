@@ -1350,8 +1350,8 @@ func TestWorkerServerCache_WiresAccountabilityWriter(t *testing.T) {
 	// Create message issue
 	msgIssue := repository.NewMemoryMessageRepository()
 
-	// Create cache with session as accountability writer (nil v2Adapter for this test)
-	cache := newWorkerServerCache(msgIssue, sess, nil)
+	// Create cache with session as accountability writer (nil v2Adapter and turnEnforcer for this test)
+	cache := newWorkerServerCache(msgIssue, sess, nil, nil)
 
 	// Create a worker server via getOrCreate
 	ws := cache.getOrCreate("worker-1")
@@ -1384,8 +1384,8 @@ func TestWorkerServerCache_WiresAccountabilityWriter(t *testing.T) {
 func TestWorkerServerCache_NilAccountabilityWriter(t *testing.T) {
 	msgIssue := repository.NewMemoryMessageRepository()
 
-	// Create cache without accountability writer (nil v2Adapter for this test)
-	cache := newWorkerServerCache(msgIssue, nil, nil)
+	// Create cache without accountability writer (nil v2Adapter and turnEnforcer for this test)
+	cache := newWorkerServerCache(msgIssue, nil, nil, nil)
 
 	// Create a worker server
 	ws := cache.getOrCreate("worker-1")
@@ -1417,7 +1417,7 @@ func TestWorkerServerCache_MultipleWorkers(t *testing.T) {
 	defer sess.Close(session.StatusCompleted)
 
 	msgIssue := repository.NewMemoryMessageRepository()
-	cache := newWorkerServerCache(msgIssue, sess, nil)
+	cache := newWorkerServerCache(msgIssue, sess, nil, nil)
 
 	// Create multiple workers
 	ws1 := cache.getOrCreate("worker-1")
@@ -1539,8 +1539,8 @@ func TestWorkerServerCache_WiresV2Adapter(t *testing.T) {
 	cmdProcessor := processor.NewCommandProcessor()
 	v2Adapter := adapter.NewV2Adapter(cmdProcessor)
 
-	// Create cache with v2Adapter
-	cache := newWorkerServerCache(msgIssue, nil, v2Adapter)
+	// Create cache with v2Adapter (nil turnEnforcer for this test)
+	cache := newWorkerServerCache(msgIssue, nil, v2Adapter, nil)
 
 	// Verify v2Adapter is stored in cache
 	require.NotNil(t, cache.v2Adapter, "v2Adapter should be stored in cache")
@@ -1565,7 +1565,7 @@ func TestWorkerServerCache_MultipleWorkers_AllGetV2Adapter(t *testing.T) {
 	cmdProcessor := processor.NewCommandProcessor()
 	v2Adapter := adapter.NewV2Adapter(cmdProcessor)
 
-	cache := newWorkerServerCache(msgIssue, nil, v2Adapter)
+	cache := newWorkerServerCache(msgIssue, nil, v2Adapter, nil)
 
 	// Create multiple worker servers
 	ws1 := cache.getOrCreate("worker-1")
@@ -1589,7 +1589,7 @@ func TestWorkerServerCache_NilV2Adapter(t *testing.T) {
 	msgIssue := repository.NewMemoryMessageRepository()
 
 	// Create cache without v2Adapter (backward compatibility)
-	cache := newWorkerServerCache(msgIssue, nil, nil)
+	cache := newWorkerServerCache(msgIssue, nil, nil, nil)
 
 	require.Nil(t, cache.v2Adapter, "v2Adapter should be nil")
 

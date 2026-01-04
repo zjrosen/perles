@@ -236,9 +236,52 @@ Called when AI process completes a turn.
 **Flow:**
 1. Transition status Working → Ready
 2. Update token metrics
-3. Check message queue
-4. If queue not empty, return `DeliverProcessQueued` follow-up
-5. Emit `ProcessReady` event
+3. **[Workers only] Turn completion enforcement** (see below)
+4. Check message queue
+5. If queue not empty, return `DeliverProcessQueued` follow-up
+6. Emit `ProcessReady` event
+
+#### Turn Completion Enforcement (Workers Only)
+
+Workers must call one of the required MCP tools to properly complete their turn:
+- `post_message` - Send message to coordinator
+- `report_implementation_complete` - Report task completion
+- `report_review_verdict` - Report review result
+- `signal_ready` - Signal ready for work (after startup)
+
+**Enforcement Flow:**
+```mermaid
+flowchart TD
+    TC["Turn Complete"]
+    TC --> Role{Role?}
+    Role -->|Coordinator| Ready["→ Ready (no enforcement)"]
+    Role -->|Worker| Check["Check required tools"]
+    
+    Check --> Exempt{Exempt?}
+    Exempt -->|Failed turn| Ready
+    Exempt -->|Newly spawned| Ready
+    Exempt -->|No| ToolCheck["Check tool calls"]
+    
+    ToolCheck --> Called{Required tool called?}
+    Called -->|Yes| Ready
+    Called -->|No| Retry{Retry count < 2?}
+    
+    Retry -->|Yes| Remind["Enqueue system reminder"]
+    Remind --> Deliver["→ DeliverProcessQueued"]
+    Retry -->|No| MaxExceeded["Log warning, allow turn to complete"]
+    MaxExceeded --> Ready
+```
+
+**Sender Types:**
+- `SenderUser` - Message from TUI user
+- `SenderCoordinator` - Message from coordinator via MCP tool
+- `SenderSystem` - Enforcement reminder from the system
+
+**Key Behavior:**
+- System reminders (`SenderSystem`) preserve the retry count across delivery
+- Normal messages (`SenderUser`, `SenderCoordinator`) reset the turn state
+- Maximum 2 enforcement retries before allowing turn to complete
+- First turn after spawn is exempt (workers call `signal_ready`)
 
 ### AssignTaskHandler
 

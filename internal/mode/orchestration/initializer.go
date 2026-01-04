@@ -454,14 +454,15 @@ func (i *Initializer) createMCPListener() (*MCPListenerResult, error) {
 
 // MCPServerConfig holds the configuration for createMCPServer().
 type MCPServerConfig struct {
-	Listener   net.Listener                        // Pre-created TCP listener
-	Port       int                                 // Port the listener is bound to
-	AIClient   client.HeadlessClient               // AI client for coordinator server
-	MsgRepo    *repository.MemoryMessageRepository // Message repository for coordinator server
-	Session    *session.Session                    // Session for reflection writing
-	V2Adapter  *adapter.V2Adapter                  // V2 adapter for routing
-	WorkDir    string                              // Working directory
-	Extensions map[string]any                      // Provider-specific extensions
+	Listener     net.Listener                        // Pre-created TCP listener
+	Port         int                                 // Port the listener is bound to
+	AIClient     client.HeadlessClient               // AI client for coordinator server
+	MsgRepo      *repository.MemoryMessageRepository // Message repository for coordinator server
+	Session      *session.Session                    // Session for reflection writing
+	V2Adapter    *adapter.V2Adapter                  // V2 adapter for routing
+	TurnEnforcer mcp.ToolCallRecorder                // Turn completion enforcer for workers
+	WorkDir      string                              // Working directory
+	Extensions   map[string]any                      // Provider-specific extensions
 }
 
 // createMCPServer creates the MCP server with HTTP routes for coordinator and worker endpoints.
@@ -485,7 +486,8 @@ func (i *Initializer) createMCPServer(cfg MCPServerConfig) (*MCPServerResult, er
 
 	// Pass the session as the reflection writer so workers can save reflections
 	// Pass the v2Adapter so all worker servers route through v2
-	workerServers := newWorkerServerCache(cfg.MsgRepo, cfg.Session, cfg.V2Adapter)
+	// Pass the turnEnforcer to track tool calls during worker turns
+	workerServers := newWorkerServerCache(cfg.MsgRepo, cfg.Session, cfg.V2Adapter, cfg.TurnEnforcer)
 
 	// Set up HTTP routes
 	mux := http.NewServeMux()
@@ -600,14 +602,15 @@ func (i *Initializer) createWorkspace() error {
 	// Step 6: Create MCP server with HTTP routes
 	// ============================================================
 	mcpResult, err := i.createMCPServer(MCPServerConfig{
-		Listener:   listenerResult.Listener,
-		Port:       port,
-		AIClient:   aiClient,
-		MsgRepo:    msgRepo,
-		Session:    sess,
-		V2Adapter:  v2Infra.Core.Adapter,
-		WorkDir:    i.cfg.WorkDir,
-		Extensions: extensions,
+		Listener:     listenerResult.Listener,
+		Port:         port,
+		AIClient:     aiClient,
+		MsgRepo:      msgRepo,
+		Session:      sess,
+		V2Adapter:    v2Infra.Core.Adapter,
+		TurnEnforcer: v2Infra.Internal.TurnEnforcer,
+		WorkDir:      i.cfg.WorkDir,
+		Extensions:   extensions,
 	})
 	if err != nil {
 		_ = listenerResult.Listener.Close()
