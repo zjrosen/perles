@@ -789,100 +789,78 @@ func TestView_Golden_FullscreenCommand(t *testing.T) {
 	teatest.RequireEqualOutput(t, []byte(view))
 }
 
-func TestResizeViewportProportional(t *testing.T) {
-	tests := []struct {
-		name       string
-		setupVp    func() viewport.Model
-		newWidth   int
-		newHeight  int
-		wantBottom bool // Should be at bottom after resize
-	}{
-		{
-			name: "at bottom stays at bottom",
-			setupVp: func() viewport.Model {
-				vp := viewport.New(80, 20)
-				content := ""
-				for i := 0; i < 50; i++ {
-					content += "line\n"
-				}
-				vp.SetContent(content)
-				vp.GotoBottom()
-				return vp
-			},
-			newWidth:   100,
-			newHeight:  25,
-			wantBottom: true,
-		},
-		{
-			name: "scrolled up preserves position",
-			setupVp: func() viewport.Model {
-				vp := viewport.New(80, 20)
-				content := ""
-				for i := 0; i < 100; i++ {
-					content += "line\n"
-				}
-				vp.SetContent(content)
-				// Scroll to ~50% (offset 40 of 80 scrollable range)
-				vp.SetYOffset(40)
-				return vp
-			},
-			newWidth:   100,
-			newHeight:  25,
-			wantBottom: false,
-		},
-		{
-			name: "at top stays at top",
-			setupVp: func() viewport.Model {
-				vp := viewport.New(80, 20)
-				content := ""
-				for i := 0; i < 50; i++ {
-					content += "line\n"
-				}
-				vp.SetContent(content)
-				vp.SetYOffset(0) // At top
-				return vp
-			},
-			newWidth:   100,
-			newHeight:  25,
-			wantBottom: false,
-		},
-	}
+func TestScrollablePane_PreservesScrollOnResize(t *testing.T) {
+	// Test that ScrollablePane preserves scroll position proportionally on resize
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			vp := tt.setupVp()
-			wasAtBottom := vp.AtBottom()
-			oldPercent := vp.ScrollPercent()
+	t.Run("at bottom stays at bottom", func(t *testing.T) {
+		vp := viewport.New(80, 20)
+		content := strings.Repeat("line\n", 50)
+		vp.SetContent(content)
+		vp.GotoBottom()
+		require.True(t, vp.AtBottom(), "should start at bottom")
 
-			newVp := resizeViewportProportional(vp, tt.newWidth, tt.newHeight)
-
-			// Check dimensions updated
-			require.Equal(t, tt.newWidth, newVp.Width)
-			require.Equal(t, tt.newHeight, newVp.Height)
-
-			// Check scroll position behavior
-			if tt.wantBottom {
-				// Note: AtBottom check may not work immediately after dimension change
-				// since content wasn't re-set. The important thing is the scroll offset
-				// is at the maximum position.
-				if wasAtBottom {
-					// We expected to stay at bottom, so GotoBottom should have been called
-					// The actual AtBottom() result depends on content which wasn't updated
-					// So we just verify the function completed without error
-					_ = newVp.AtBottom()
-				}
-			} else {
-				// For non-bottom cases, verify scroll position was preserved
-				// (approximately, since line counts may change with re-wrapping)
-				if oldPercent > 0 && oldPercent < 1 {
-					// Non-trivial scroll position should be preserved
-					newPercent := newVp.ScrollPercent()
-					// Allow some variance due to dimension changes
-					require.Greater(t, newPercent, 0.0, "scroll position should not be at top")
-				}
-			}
+		// Call ScrollablePane with new dimensions
+		_ = panes.ScrollablePane(102, 27, panes.ScrollableConfig{
+			Viewport:     &vp,
+			ContentDirty: true,
+			LeftTitle:    "TEST",
+			TitleColor:   CoordinatorColor,
+			BorderColor:  CoordinatorColor,
+		}, func(wrapWidth int) string {
+			return strings.Repeat("line\n", 50)
 		})
-	}
+
+		require.True(t, vp.AtBottom(), "should stay at bottom after resize")
+	})
+
+	t.Run("scrolled up preserves position", func(t *testing.T) {
+		vp := viewport.New(80, 20)
+		content := strings.Repeat("line\n", 100)
+		vp.SetContent(content)
+		// Scroll to ~50% (offset 40 of 80 scrollable range)
+		vp.SetYOffset(40)
+		require.False(t, vp.AtBottom(), "should not be at bottom")
+		oldPercent := vp.ScrollPercent()
+
+		// Call ScrollablePane with new dimensions (resize)
+		_ = panes.ScrollablePane(102, 27, panes.ScrollableConfig{
+			Viewport:     &vp,
+			ContentDirty: true,
+			LeftTitle:    "TEST",
+			TitleColor:   CoordinatorColor,
+			BorderColor:  CoordinatorColor,
+		}, func(wrapWidth int) string {
+			return strings.Repeat("line\n", 100)
+		})
+
+		// Scroll position should be approximately preserved
+		newPercent := vp.ScrollPercent()
+		require.Greater(t, newPercent, 0.0, "should not be at top")
+		// Allow variance since dimensions changed, but should be in similar range
+		require.InDelta(t, oldPercent, newPercent, 0.15, "scroll position should be approximately preserved")
+	})
+
+	t.Run("at top stays at top", func(t *testing.T) {
+		vp := viewport.New(80, 20)
+		content := strings.Repeat("line\n", 50)
+		vp.SetContent(content)
+		vp.SetYOffset(0)
+		require.Equal(t, 0, vp.YOffset, "should start at top")
+
+		// Call ScrollablePane with new dimensions
+		_ = panes.ScrollablePane(102, 27, panes.ScrollableConfig{
+			Viewport:     &vp,
+			ContentDirty: true,
+			LeftTitle:    "TEST",
+			TitleColor:   CoordinatorColor,
+			BorderColor:  CoordinatorColor,
+		}, func(wrapWidth int) string {
+			return strings.Repeat("line\n", 50)
+		})
+
+		// When at top (0%), should stay at top
+		require.Equal(t, 0, vp.YOffset, "should stay at top after resize")
+	})
 }
 
 func TestBuildScrollIndicator(t *testing.T) {

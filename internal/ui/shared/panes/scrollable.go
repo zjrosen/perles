@@ -99,20 +99,32 @@ func ScrollablePane(
 		content = strings.Join(contentLines, "\n")
 	}
 
+	// Capture scroll state BEFORE dimension/content changes for proportional preservation.
+	// This must happen before any viewport mutations.
+	wasAtBottom := cfg.Viewport.AtBottom()
+	oldScrollPercent := cfg.Viewport.ScrollPercent()
+	dimensionsChanged := cfg.Viewport.Width != vpWidth || cfg.Viewport.Height != vpHeight
+
 	// Update viewport dimensions
 	cfg.Viewport.Width = vpWidth
 	cfg.Viewport.Height = vpHeight
 
-	// CRITICAL: Check if user was at bottom BEFORE SetContent() changes the viewport state.
-	// This enables smart auto-scroll: only follow new content if user was at bottom.
-	wasAtBottom := cfg.Viewport.AtBottom()
-
 	cfg.Viewport.SetContent(content)
 
-	// Smart auto-scroll: only scroll to bottom if content is dirty AND user was at bottom.
-	// This preserves scroll position when user has scrolled up to read history.
-	if cfg.ContentDirty && wasAtBottom {
+	// Scroll position restoration (order matters):
+	// 1. If at bottom, stay at bottom (live view experience)
+	// 2. If dimensions changed, restore proportional scroll position
+	// 3. Otherwise, scroll position is preserved by SetContent's internal offset handling
+	if wasAtBottom {
 		cfg.Viewport.GotoBottom()
+	} else if dimensionsChanged && oldScrollPercent > 0 {
+		// Restore proportional scroll position after resize
+		totalLines := cfg.Viewport.TotalLineCount()
+		scrollableRange := totalLines - cfg.Viewport.Height
+		if scrollableRange > 0 {
+			newOffset := int(oldScrollPercent * float64(scrollableRange))
+			cfg.Viewport.SetYOffset(newOffset)
+		}
 	}
 
 	// Get viewport view (handles scrolling and clipping)

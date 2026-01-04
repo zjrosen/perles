@@ -307,63 +307,15 @@ func (m Model) SetSize(width, height int) Model {
 	// Actual visible height is controlled by calculateInputHeight()
 	m.input.SetSize(width-4, 4)
 
-	// Calculate pane dimensions (matches view.go layout)
-	inputHeight := m.calculateInputHeight()
-	contentHeight := max(height-inputHeight, 5)
-	leftWidth := width * leftPanePercent / 100
-	middleWidth := width * middlePanePercent / 100
-	rightWidth := width - leftWidth - middleWidth
-
-	// Update coordinator viewport with proportional scroll preservation
-	coordVpWidth := max(leftWidth-2, 1)
-	coordVpHeight := max(contentHeight-2, 1)
-	if m.coordinatorPane.viewports == nil {
-		m.coordinatorPane.viewports = make(map[string]viewport.Model)
-		m.coordinatorPane.viewports[viewportKey] = viewport.New(0, 0)
-	}
-	m.coordinatorPane.viewports[viewportKey] = resizeViewportProportional(
-		m.coordinatorPane.viewports[viewportKey], coordVpWidth, coordVpHeight)
-	m.coordinatorPane.contentDirty = true // Re-render on resize
-
-	// Update message pane viewport with proportional scroll preservation
-	msgVpWidth := max(middleWidth-2, 1)
-	msgVpHeight := max(contentHeight-2, 1)
-	if m.messagePane.viewports == nil {
-		m.messagePane.viewports = make(map[string]viewport.Model)
-		m.messagePane.viewports[viewportKey] = viewport.New(0, 0)
-	}
-	m.messagePane.viewports[viewportKey] = resizeViewportProportional(
-		m.messagePane.viewports[viewportKey], msgVpWidth, msgVpHeight)
-	m.messagePane.contentDirty = true // Re-render on resize
-
-	// Update worker pane viewports with proportional scroll preservation
-	// Workers are stacked vertically, so they share the rightWidth
-	numWorkers := len(m.workerPane.workerIDs)
-	if numWorkers > 0 {
-		// Calculate height per worker (matches renderWorkerPanes logic)
-		heightPerWorker := max(contentHeight/numWorkers, minHeightPerWorker)
-
-		workerVpWidth := max(rightWidth-2, 1)
-
-		for i, workerID := range m.workerPane.workerIDs {
-			// Last worker gets remaining height
-			paneHeight := heightPerWorker
-			if i == numWorkers-1 {
-				paneHeight = contentHeight - (heightPerWorker * i)
-			}
-			workerVpHeight := max(paneHeight-2, 1)
-
-			if vp, ok := m.workerPane.viewports[workerID]; ok {
-				m.workerPane.viewports[workerID] = resizeViewportProportional(
-					vp, workerVpWidth, workerVpHeight)
-				m.workerPane.contentDirty[workerID] = true
-			}
-		}
-	}
-
-	// Mark command pane for re-render on resize
-	// (viewport dimensions are set by ScrollablePane during render)
+	// Mark all panes as dirty for re-render on resize.
+	// Viewport dimensions and proportional scroll preservation are handled
+	// by ScrollablePane during render (single source of truth).
+	m.coordinatorPane.contentDirty = true
+	m.messagePane.contentDirty = true
 	m.commandPane.contentDirty = true
+	for workerID := range m.workerPane.viewports {
+		m.workerPane.contentDirty[workerID] = true
+	}
 
 	// Update error modal size if present
 	if m.errorModal != nil {
@@ -380,38 +332,6 @@ func (m Model) SetSize(width, height int) Model {
 	}
 
 	return m
-}
-
-// resizeViewportProportional resizes a viewport while preserving scroll position proportionally.
-// If the user was at 50% scroll, they'll stay at 50% after resize.
-// If at bottom (live view), stays at bottom.
-func resizeViewportProportional(vp viewport.Model, newWidth, newHeight int) viewport.Model {
-	// Capture scroll state before resize
-	wasAtBottom := vp.AtBottom()
-	oldPercent := vp.ScrollPercent()
-
-	// Update dimensions
-	vp.Width = newWidth
-	vp.Height = newHeight
-
-	// Restore scroll position
-	if wasAtBottom {
-		// Keep at bottom for live view experience
-		vp.GotoBottom()
-	} else if oldPercent > 0 {
-		// Restore proportional position
-		// Note: The actual content will be re-set by the render functions,
-		// which will recalculate TotalLineCount. We store the percentage
-		// and the render functions handle the rest via contentDirty flag.
-		// For immediate effect, we estimate based on current content.
-		totalLines := vp.TotalLineCount()
-		if totalLines > vp.Height {
-			newOffset := int(oldPercent * float64(totalLines-vp.Height))
-			vp.SetYOffset(newOffset)
-		}
-	}
-
-	return vp
 }
 
 // AddChatMessage appends a message to the coordinator chat history.
