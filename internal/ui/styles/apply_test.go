@@ -97,6 +97,8 @@ func TestIsValidToken(t *testing.T) {
 	}{
 		{TokenTextPrimary, true},
 		{TokenStatusError, true},
+		{TokenSelectionBackground, true},
+		{ColorToken("selection.background"), true},
 		{ColorToken("invalid.token"), false},
 		{ColorToken(""), false},
 	}
@@ -105,6 +107,59 @@ func TestIsValidToken(t *testing.T) {
 			require.Equal(t, tt.valid, isValidToken(tt.token))
 		})
 	}
+}
+
+func TestTokenSelectionBackgroundInAllTokens(t *testing.T) {
+	tokens := AllTokens()
+	found := false
+	for _, token := range tokens {
+		if token == TokenSelectionBackground {
+			found = true
+			break
+		}
+	}
+	require.True(t, found, "TokenSelectionBackground should be in AllTokens()")
+}
+
+func TestApplyTheme_SelectionBackgroundColor(t *testing.T) {
+	// Create a test preset with a specific SelectionBackgroundColor
+	TestPreset := Preset{
+		Name:        "test-selection-bg",
+		Description: "Test preset for SelectionBackgroundColor",
+		Colors: map[ColorToken]string{
+			TokenSelectionBackground: "#AABBCC",
+		},
+	}
+	Presets["test-selection-bg"] = TestPreset
+	defer delete(Presets, "test-selection-bg")
+
+	err := ApplyTheme(ThemeConfig{Preset: "test-selection-bg"})
+	require.NoError(t, err)
+	require.Equal(t, "#AABBCC", SelectionBackgroundColor.Dark,
+		"ApplyTheme should update SelectionBackgroundColor.Dark")
+}
+
+func TestApplyTheme_SelectionBackgroundColorOverride(t *testing.T) {
+	// Config override should take precedence over preset value
+	TestPreset := Preset{
+		Name:        "test-selection-bg-override",
+		Description: "Test preset for SelectionBackgroundColor override",
+		Colors: map[ColorToken]string{
+			TokenSelectionBackground: "#111111", // Preset value
+		},
+	}
+	Presets["test-selection-bg-override"] = TestPreset
+	defer delete(Presets, "test-selection-bg-override")
+
+	err := ApplyTheme(ThemeConfig{
+		Preset: "test-selection-bg-override",
+		Colors: map[string]string{
+			"selection.background": "#222222", // Override value
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "#222222", SelectionBackgroundColor.Dark,
+		"Config override should take precedence over preset value for SelectionBackgroundColor")
 }
 
 func TestIsValidHexColor(t *testing.T) {

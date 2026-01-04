@@ -573,19 +573,20 @@ theme:
 
 Colors are organized by category:
 
-| Category | Tokens |
-|----------|--------|
-| **Text** | `text.primary`, `text.secondary`, `text.muted`, `text.description`, `text.placeholder` |
-| **Border** | `border.default`, `border.focus`, `border.highlight` |
-| **Status** | `status.success`, `status.warning`, `status.error` |
-| **Priority** | `priority.critical`, `priority.high`, `priority.medium`, `priority.low`, `priority.backlog` |
-| **Issue Status** | `issue.status.open`, `issue.status.in_progress`, `issue.status.closed` |
-| **Issue Type** | `type.task`, `type.bug`, `type.feature`, `type.epic`, `type.chore` |
-| **BQL Syntax** | `bql.keyword`, `bql.operator`, `bql.field`, `bql.string`, `bql.literal` |
-| **Buttons** | `button.text`, `button.primary.bg`, `button.primary.focus`, `button.danger.bg` |
-| **Toast** | `toast.success`, `toast.error`, `toast.info`, `toast.warn` |
+| Category           | Tokens |
+|--------------------|--------|
+| **Text**           | `text.primary`, `text.secondary`, `text.muted`, `text.description`, `text.placeholder` |
+| **Border**         | `border.default`, `border.focus`, `border.highlight` |
+| **Status**         | `status.success`, `status.warning`, `status.error` |
+| **Buttons**        | `button.text`, `button.primary.bg`, `button.primary.focus`, `button.danger.bg` |
+| **Selection**      | `selection.indicator`, `selection.background`|
+| **Toasts**         | `toast.success`, `toast.error`, `toast.info`, `toast.warn` |
+| **Issue Priority** | `priority.critical`, `priority.high`, `priority.medium`, `priority.low`, `priority.backlog` |
+| **Issue Status**   | `issue.status.open`, `issue.status.in_progress`, `issue.status.closed` |
+| **Issue Type**     | `type.task`, `type.bug`, `type.feature`, `type.epic`, `type.chore` |
+| **BQL Syntax**     | `bql.keyword`, `bql.operator`, `bql.field`, `bql.string`, `bql.literal` |
 
-See `internal/ui/styles/tokens.go` for the complete list of 51 color tokens.
+See `internal/ui/styles/tokens.go` for the complete list of color tokens.
 
 ---
 

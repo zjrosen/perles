@@ -40,6 +40,8 @@ func GetTokenColor(token styles.ColorToken) string {
 	// Selection
 	case styles.TokenSelectionIndicator:
 		return styles.SelectionIndicatorColor.Dark
+	case styles.TokenSelectionBackground:
+		return styles.SelectionBackgroundColor.Dark
 
 	// Buttons
 	case styles.TokenButtonText:
@@ -187,6 +189,7 @@ func GetTokenCategories() []TokenCategory {
 			Name: "Selection",
 			Tokens: []styles.ColorToken{
 				styles.TokenSelectionIndicator,
+				styles.TokenSelectionBackground,
 			},
 		},
 		{

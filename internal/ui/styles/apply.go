@@ -118,6 +118,9 @@ func applyColors(colors map[ColorToken]string) {
 	if c, ok := colors[TokenSelectionIndicator]; ok {
 		SelectionIndicatorColor = makeColor(c)
 	}
+	if c, ok := colors[TokenSelectionBackground]; ok {
+		SelectionBackgroundColor = makeColor(c)
+	}
 
 	// Buttons
 	if c, ok := colors[TokenButtonText]; ok {

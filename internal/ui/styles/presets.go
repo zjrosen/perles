@@ -43,7 +43,8 @@ var DefaultPreset = Preset{
 		TokenStatusError:   "#FF8787",
 
 		// Selection
-		TokenSelectionIndicator: "#FFFFFF",
+		TokenSelectionIndicator:  "#FFFFFF",
+		TokenSelectionBackground: "#1A5276",
 
 		// Buttons
 		TokenButtonText:             "#FFFFFF",
@@ -132,7 +133,8 @@ var CatppuccinMochaPreset = Preset{
 		TokenStatusError:   "#F38BA8", // red
 
 		// Selection
-		TokenSelectionIndicator: "#CDD6F4", // text
+		TokenSelectionIndicator:  "#CDD6F4", // text
+		TokenSelectionBackground: "#45475A", // surface1
 
 		// Buttons
 		TokenButtonText:             "#1E1E2E", // base
@@ -221,7 +223,8 @@ var CatppuccinLattePreset = Preset{
 		TokenStatusError:   "#D20F39", // red
 
 		// Selection
-		TokenSelectionIndicator: "#4C4F69", // text
+		TokenSelectionIndicator:  "#4C4F69", // text
+		TokenSelectionBackground: "#BCC0CC", // surface1
 
 		// Buttons
 		TokenButtonText:             "#EFF1F5", // base
@@ -310,7 +313,8 @@ var DraculaPreset = Preset{
 		TokenStatusError:   "#FF5555", // red
 
 		// Selection
-		TokenSelectionIndicator: "#F8F8F2", // foreground
+		TokenSelectionIndicator:  "#F8F8F2", // foreground
+		TokenSelectionBackground: "#44475A", // current line
 
 		// Buttons
 		TokenButtonText:             "#282A36", // background
@@ -403,7 +407,8 @@ var NordPreset = Preset{
 		TokenStatusError:   "#BF616A", // aurora red
 
 		// Selection
-		TokenSelectionIndicator: "#ECEFF4", // snow storm 3
+		TokenSelectionIndicator:  "#ECEFF4", // snow storm 3
+		TokenSelectionBackground: "#434C5E", // polar night 3
 
 		// Buttons
 		TokenButtonText:             "#2E3440", // polar night 1
@@ -493,7 +498,8 @@ var HighContrastPreset = Preset{
 		TokenStatusError:   "#FF0000", // pure red
 
 		// Selection - bright indicator
-		TokenSelectionIndicator: "#FFFF00", // yellow for visibility
+		TokenSelectionIndicator:  "#FFFF00", // yellow for visibility
+		TokenSelectionBackground: "#0000FF", // pure blue
 
 		// Buttons - high contrast backgrounds
 		TokenButtonText:             "#000000", // black text on bright buttons
@@ -581,7 +587,8 @@ var GruvboxPreset = Preset{
 		TokenStatusError:   "#FB4934", // red
 
 		// Selection
-		TokenSelectionIndicator: "#EBDBB2", // fg
+		TokenSelectionIndicator:  "#EBDBB2", // fg
+		TokenSelectionBackground: "#504945", // bg2
 
 		// Buttons
 		TokenButtonText:             "#282828", // bg

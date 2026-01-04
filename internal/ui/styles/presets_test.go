@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/exp/teatest"
+	"github.com/stretchr/testify/require"
 )
 
 // renderPresetSample creates a visual sample showing key colors from a preset.
@@ -118,4 +119,35 @@ func TestPreset_HighContrast_Golden(t *testing.T) {
 func TestPreset_CatppuccinLatte_Golden(t *testing.T) {
 	output := renderPresetSample("catppuccin-latte")
 	teatest.RequireEqualOutput(t, []byte(output))
+}
+
+// TestAllPresetsHaveTokenSelectionBackground verifies that all 7 theme presets
+// define TokenSelectionBackground with the correct palette-appropriate colors.
+func TestAllPresetsHaveTokenSelectionBackground(t *testing.T) {
+	expectedColors := map[string]string{
+		"default":          "#1A5276", // current hard-coded value
+		"catppuccin-mocha": "#45475A", // surface1
+		"catppuccin-latte": "#BCC0CC", // surface1 (light)
+		"dracula":          "#44475A", // current line
+		"nord":             "#434C5E", // polar night 3
+		"high-contrast":    "#0000FF", // pure blue
+		"gruvbox":          "#504945", // bg2
+	}
+
+	// Verify we're testing all presets
+	require.Equal(t, len(Presets), len(expectedColors),
+		"Test should cover all presets (expected %d, got %d)", len(Presets), len(expectedColors))
+
+	for presetName, expectedColor := range expectedColors {
+		t.Run(presetName, func(t *testing.T) {
+			preset, exists := Presets[presetName]
+			require.True(t, exists, "Preset %q should exist", presetName)
+
+			actualColor, hasToken := preset.Colors[TokenSelectionBackground]
+			require.True(t, hasToken,
+				"Preset %q should define TokenSelectionBackground", presetName)
+			require.Equal(t, expectedColor, actualColor,
+				"Preset %q TokenSelectionBackground color mismatch", presetName)
+		})
+	}
 }

@@ -25,7 +25,8 @@ const (
 	TokenStatusError   ColorToken = "status.error"
 
 	// Selection
-	TokenSelectionIndicator ColorToken = "selection.indicator"
+	TokenSelectionIndicator  ColorToken = "selection.indicator"
+	TokenSelectionBackground ColorToken = "selection.background"
 
 	// Buttons
 	TokenButtonText             ColorToken = "button.text"
@@ -110,6 +111,7 @@ func AllTokens() []ColorToken {
 
 		// Selection
 		TokenSelectionIndicator,
+		TokenSelectionBackground,
 
 		// Buttons
 		TokenButtonText,
