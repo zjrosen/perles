@@ -10,6 +10,7 @@ import (
 
 	"github.com/zjrosen/perles/internal/orchestration/events"
 	"github.com/zjrosen/perles/internal/orchestration/message"
+	"github.com/zjrosen/perles/internal/orchestration/workflow"
 	"github.com/zjrosen/perles/internal/ui/shared/panes"
 )
 
@@ -771,4 +772,94 @@ func TestBuildScrollIndicator_EdgeCases(t *testing.T) {
 			require.Equal(t, tt.wantIndicator, got)
 		})
 	}
+}
+
+// =============================================================================
+// Workflow Picker Mouse Scroll Tests
+// =============================================================================
+
+func TestWorkflowPicker_MouseScrollForwarded(t *testing.T) {
+	// Create a registry with many workflows to enable scrolling
+	reg := workflow.NewRegistry()
+	for i := 0; i < 10; i++ {
+		reg.Add(workflow.Workflow{
+			ID:          "test-workflow-" + string(rune('a'+i)),
+			Name:        "Test Workflow " + string(rune('A'+i)),
+			Description: "A test workflow " + string(rune('a'+i)),
+			Content:     "Test content",
+			Source:      workflow.SourceBuiltIn,
+		})
+	}
+
+	m := New(Config{
+		WorkflowRegistry: reg,
+	})
+	m = m.SetSize(120, 40)
+
+	// Open workflow picker
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	require.True(t, m.showWorkflowPicker)
+	require.NotNil(t, m.workflowPicker)
+
+	// Get initial scroll offset (should be 0)
+	initialOffset := m.workflowPicker.Cursor()
+	require.Equal(t, 0, initialOffset, "initial cursor should be at 0")
+
+	// Send mouse scroll down - should be forwarded to workflow picker
+	// and adjust scroll offset (since we have 10 items and only 5 visible by default)
+	m, _ = m.Update(tea.MouseMsg{
+		X:      60, // Center of screen
+		Y:      20, // Center of screen
+		Button: tea.MouseButtonWheelDown,
+	})
+
+	// Workflow picker should still be visible and have received the scroll event
+	require.True(t, m.showWorkflowPicker)
+	require.NotNil(t, m.workflowPicker)
+}
+
+func TestWorkflowPicker_MouseScrollDoesNotReachPanes(t *testing.T) {
+	// Create a registry with workflows
+	reg := workflow.NewRegistry()
+	for i := 0; i < 10; i++ {
+		reg.Add(workflow.Workflow{
+			ID:          "test-workflow-" + string(rune('a'+i)),
+			Name:        "Test Workflow " + string(rune('A'+i)),
+			Description: "A test workflow " + string(rune('a'+i)),
+			Content:     "Test content",
+			Source:      workflow.SourceBuiltIn,
+		})
+	}
+
+	m := New(Config{
+		WorkflowRegistry: reg,
+	})
+	m = m.SetSize(120, 40)
+
+	// Add content to coordinator pane so it can scroll
+	for i := 0; i < 50; i++ {
+		m = m.AddChatMessage("coordinator", "Message line")
+	}
+	_ = m.View() // Render to populate viewport
+
+	// Get coordinator pane scroll position before
+	vpBefore := m.coordinatorPane.viewports[viewportKey]
+	offsetBefore := vpBefore.YOffset
+
+	// Open workflow picker
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	require.True(t, m.showWorkflowPicker)
+
+	// Send mouse scroll down - should NOT reach coordinator pane
+	// (should be intercepted by workflow picker)
+	m, _ = m.Update(tea.MouseMsg{
+		X:      10, // In coordinator pane area
+		Y:      10,
+		Button: tea.MouseButtonWheelDown,
+	})
+
+	// Coordinator pane scroll position should be unchanged
+	vpAfter := m.coordinatorPane.viewports[viewportKey]
+	require.Equal(t, offsetBefore, vpAfter.YOffset,
+		"coordinator pane should not scroll when workflow picker is open")
 }

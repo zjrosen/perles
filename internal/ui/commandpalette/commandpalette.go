@@ -122,6 +122,24 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, cmd
 		}
 
+	case tea.MouseMsg:
+		// Only handle wheel events for scrolling
+		if msg.Button != tea.MouseButtonWheelUp && msg.Button != tea.MouseButtonWheelDown {
+			return m, nil
+		}
+		maxVisible := m.maxVisibleItems()
+		maxOffset := max(0, len(m.filtered)-maxVisible)
+		if msg.Button == tea.MouseButtonWheelUp {
+			if m.scrollOffset > 0 {
+				m.scrollOffset--
+			}
+		} else {
+			if m.scrollOffset < maxOffset {
+				m.scrollOffset++
+			}
+		}
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.viewportWidth = msg.Width
 		m.viewportHeight = msg.Height

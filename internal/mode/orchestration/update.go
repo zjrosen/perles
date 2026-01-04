@@ -297,6 +297,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseMsg:
+		// Forward mouse events to workflow picker when it's visible
+		if m.showWorkflowPicker && m.workflowPicker != nil {
+			var cmd tea.Cmd
+			updatedPicker, cmd := m.workflowPicker.Update(msg)
+			m.workflowPicker = &updatedPicker
+			return m, cmd
+		}
+
 		// Only handle wheel events for scrolling
 		if msg.Button != tea.MouseButtonWheelUp && msg.Button != tea.MouseButtonWheelDown {
 			return m, nil

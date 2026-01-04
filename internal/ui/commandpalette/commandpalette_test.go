@@ -423,3 +423,112 @@ func TestCommandPalette_View_Golden_WithScrollIndicator(t *testing.T) {
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))
 }
+
+// Mouse scroll tests
+
+func manyItems() []Item {
+	return []Item{
+		{ID: "1", Name: "Item One", Description: "First item"},
+		{ID: "2", Name: "Item Two", Description: "Second item"},
+		{ID: "3", Name: "Item Three", Description: "Third item"},
+		{ID: "4", Name: "Item Four", Description: "Fourth item"},
+		{ID: "5", Name: "Item Five", Description: "Fifth item"},
+		{ID: "6", Name: "Item Six", Description: "Sixth item"},
+		{ID: "7", Name: "Item Seven", Description: "Seventh item"},
+	}
+}
+
+func TestCommandPalette_Update_MouseScrollDown(t *testing.T) {
+	m := New(Config{Items: manyItems()}).SetSize(80, 24)
+
+	// Initial scroll offset should be 0
+	require.Equal(t, 0, m.scrollOffset)
+
+	// Scroll down with mouse wheel
+	m, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown})
+	require.Equal(t, 1, m.scrollOffset)
+
+	// Scroll down again
+	m, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown})
+	require.Equal(t, 2, m.scrollOffset)
+}
+
+func TestCommandPalette_Update_MouseScrollUp(t *testing.T) {
+	m := New(Config{Items: manyItems()}).SetSize(80, 24)
+
+	// Set initial scroll offset
+	m.scrollOffset = 2
+
+	// Scroll up with mouse wheel
+	m, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelUp})
+	require.Equal(t, 1, m.scrollOffset)
+
+	// Scroll up again
+	m, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelUp})
+	require.Equal(t, 0, m.scrollOffset)
+}
+
+func TestCommandPalette_Update_MouseScrollBoundaryTop(t *testing.T) {
+	m := New(Config{Items: manyItems()}).SetSize(80, 24)
+
+	// Already at top (scrollOffset = 0)
+	require.Equal(t, 0, m.scrollOffset)
+
+	// Try to scroll up - should stay at 0
+	m, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelUp})
+	require.Equal(t, 0, m.scrollOffset)
+
+	// Multiple attempts should still stay at 0
+	m, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelUp})
+	require.Equal(t, 0, m.scrollOffset)
+}
+
+func TestCommandPalette_Update_MouseScrollBoundaryBottom(t *testing.T) {
+	m := New(Config{Items: manyItems()}).SetSize(80, 24)
+
+	// 7 items, maxVisible = 5, so maxOffset = 2
+	// Scroll to bottom
+	m, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown})
+	m, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown})
+	require.Equal(t, 2, m.scrollOffset)
+
+	// Try to scroll past bottom - should stay at maxOffset (2)
+	m, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown})
+	require.Equal(t, 2, m.scrollOffset)
+
+	// Multiple attempts should still stay at 2
+	m, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown})
+	require.Equal(t, 2, m.scrollOffset)
+}
+
+func TestCommandPalette_Update_MouseIgnoresNonWheelEvents(t *testing.T) {
+	m := New(Config{Items: manyItems()}).SetSize(80, 24)
+
+	// Set initial state
+	initialCursor := m.cursor
+	initialOffset := m.scrollOffset
+
+	// Left click should be ignored
+	m, cmd := m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, X: 10, Y: 10})
+	require.Nil(t, cmd)
+	require.Equal(t, initialCursor, m.cursor)
+	require.Equal(t, initialOffset, m.scrollOffset)
+
+	// Right click should be ignored
+	m, cmd = m.Update(tea.MouseMsg{Button: tea.MouseButtonRight, X: 10, Y: 10})
+	require.Nil(t, cmd)
+	require.Equal(t, initialCursor, m.cursor)
+	require.Equal(t, initialOffset, m.scrollOffset)
+
+	// Middle click should be ignored
+	m, cmd = m.Update(tea.MouseMsg{Button: tea.MouseButtonMiddle, X: 10, Y: 10})
+	require.Nil(t, cmd)
+	require.Equal(t, initialCursor, m.cursor)
+	require.Equal(t, initialOffset, m.scrollOffset)
+
+	// Mouse motion should be ignored
+	m, cmd = m.Update(tea.MouseMsg{Button: tea.MouseButtonNone, X: 20, Y: 20})
+	require.Nil(t, cmd)
+	require.Equal(t, initialCursor, m.cursor)
+	require.Equal(t, initialOffset, m.scrollOffset)
+}
