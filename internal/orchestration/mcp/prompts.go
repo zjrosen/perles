@@ -91,33 +91,184 @@ Example: report_implementation_complete(summary="Implemented feature X with test
 }
 
 // ReviewAssignmentPrompt generates the prompt sent to a reviewer when assigning a code review.
-func ReviewAssignmentPrompt(taskID, implementerID, summary string) string {
+func ReviewAssignmentPrompt(taskID, implementerID string) string {
 	return fmt.Sprintf(`[REVIEW ASSIGNMENT]
 
 You are being assigned to **review** the work completed by %s on task **%s**.
 
-## What was implemented:
-%s
-
 ## Your Review Process
 
 ### Step 1: Gather Context
-- Read the task description using: bd show %s
-- Examine the changes made by the implementer
-- Check that acceptance criteria are met
+- Read the task description: bd show %s
+- Identify acceptance criteria that must be verified
+- Get the git diff to understand what changed
 
-### Step 2: Verify the Implementation
-- Check for correctness and completeness
-- Look for edge cases and error handling
-- Verify tests exist and pass (if applicable)
-- Check code style and conventions
+### Step 2: Spawn Parallel Review Sub-Agents
 
-### Step 3: Report Your Verdict
-Use the report_review_verdict tool to submit your verdict:
-- **APPROVED**: The implementation is complete and correct
-- **DENIED**: Changes are required (include specific feedback in comments)
+Spawn 4 sub-agents in parallel, each focused on one review dimension. Each sub-agent MUST return findings in the standardized JSON format below.
 
-Example: report_review_verdict(verdict="APPROVED", comments="Code looks good, tests pass")`, implementerID, taskID, summary, taskID)
+---
+
+**SUB-AGENT 1: Correctness & Logic Review**
+
+Focus exclusively on:
+- Logic errors: Incorrect conditionals, off-by-one errors, wrong operators
+- Edge cases: Nil/null handling, empty collections, boundary conditions
+- Error handling: Missing error checks, swallowed errors, incorrect propagation
+- Control flow: Unreachable code, infinite loops, missing returns
+
+Return findings in this format:
+`+"```json"+`
+{
+  "reviewer": "correctness",
+  "confidence": 0.85,
+  "verdict": "pass|fail|warning",
+  "findings": [
+    {
+      "severity": "blocker|major|minor|info",
+      "category": "logic|edge-case|error-handling|control-flow",
+      "location": "file.go:42",
+      "problem": "Description of the issue",
+      "evidence": "How you verified this is an issue",
+      "suggested_fix": "How to fix it"
+    }
+  ],
+  "summary": "One-line summary"
+}
+`+"```"+`
+
+---
+
+**SUB-AGENT 2: Test Coverage Review**
+
+Focus exclusively on:
+- Test execution: Actually run the tests - do they pass?
+- Coverage: Are the changes adequately tested?
+- Mock correctness: Are mocks set up properly? Correct expectations?
+- Assertion quality: Do tests actually verify behavior?
+
+CRITICAL: You MUST run the tests, not just read them.
+
+Return findings in this format:
+`+"```json"+`
+{
+  "reviewer": "tests",
+  "confidence": 0.90,
+  "verdict": "pass|fail|warning",
+  "findings": [
+    {
+      "severity": "blocker|major|minor|info",
+      "category": "execution|coverage|mocks|assertions",
+      "location": "file_test.go:42",
+      "problem": "Test fails with nil pointer panic",
+      "evidence": "go test output: panic: runtime error: invalid memory address",
+      "suggested_fix": "Initialize the struct before using"
+    }
+  ],
+  "summary": "One-line summary"
+}
+`+"```"+`
+
+---
+
+**SUB-AGENT 3: Dead Code Review**
+
+Focus exclusively on:
+- Dead code: Functions/methods never called from production code
+- Test-only helpers: Methods that only exist to support tests (BLOCKER - always wrong)
+- Unused exports: Public functions/types that nothing uses
+- Orphaned code: Code left behind from refactoring
+
+Use grep to verify usage claims - don't guess.
+
+Return findings in this format:
+`+"```json"+`
+{
+  "reviewer": "dead-code",
+  "confidence": 0.80,
+  "verdict": "pass|fail|warning",
+  "findings": [
+    {
+      "severity": "blocker|major|minor|info",
+      "category": "test-only-helper|unused-function|orphaned|complexity",
+      "location": "file.go:42",
+      "problem": "Method Focused() is only called from test files",
+      "evidence": "grep -rn 'Focused()' --include='*.go' | grep -v '_test.go' shows only the definition",
+      "suggested_fix": "Remove the method. Tests should verify behavior through public interface."
+    }
+  ],
+  "summary": "One-line summary"
+}
+`+"```"+`
+
+---
+
+**SUB-AGENT 4: Acceptance Criteria Verification**
+
+Focus exclusively on:
+- Each checkbox item in the task description
+- Running any verification commands exactly as specified
+- Documenting evidence for each criterion
+
+Return findings in this format:
+`+"```json"+`
+{
+  "reviewer": "acceptance",
+  "confidence": 0.95,
+  "verdict": "pass|fail|warning",
+  "findings": [
+    {
+      "severity": "blocker|major|minor|info",
+      "category": "implementation|testing|verification|documentation",
+      "location": "criterion text or file:line",
+      "problem": "Criterion not met: Interface signature not updated",
+      "evidence": "interface.go still has old signature",
+      "suggested_fix": "Update interface signature to include context.Context"
+    }
+  ],
+  "criteria_summary": {
+    "total": 6,
+    "met": 5,
+    "not_met": 1,
+    "details": [
+      {"criterion": "Description", "status": "met|not_met", "evidence": "..."}
+    ]
+  },
+  "summary": "5/6 acceptance criteria met"
+}
+`+"```"+`
+
+---
+
+### Step 3: Synthesize Findings
+
+After all sub-agents return, aggregate their findings:
+
+1. **Parse all findings** - Handle missing or failed reviewers
+2. **Categorize by severity** - Blockers > Majors > Minors > Info
+3. **Deduplicate** - Same issue caught by multiple reviewers
+4. **Resolve conflicts** - Tests failing always wins (DENY)
+
+**DENY if ANY of:**
+- Any blocker severity finding
+- Tests reviewer verdict is "fail"
+- Acceptance criteria not met
+- Multiple major findings
+
+**APPROVE if:**
+- No blockers
+- Tests pass
+- Acceptance criteria met
+- No more than minor issues
+
+### Step 4: Report Your Verdict
+
+Use report_review_verdict with structured comments:
+
+report_review_verdict(
+    verdict="APPROVED|DENIED",
+    comments="## Summary\n[1-2 sentence overview]\n\n## Sub-Reviewer Results\n| Reviewer | Verdict | Confidence | Summary |\n|----------|---------|------------|----------|\n| Correctness | PASS | 0.85 | ... |\n| Tests | PASS | 0.90 | ... |\n| Dead Code | PASS | 0.80 | ... |\n| Acceptance | PASS | 0.95 | 6/6 met |\n\n## Aggregate Findings\nBlockers: 0 | Majors: 0 | Minors: 2 | Info: 3\n\n## Issues (if any)\n[List issues by severity with location and fix]\n\n## Required Changes (if DENIED)\n1. [specific actionable feedback]\n2. [specific actionable feedback]"
+)`, implementerID, taskID, taskID)
 }
 
 // ReviewFeedbackPrompt generates the prompt sent to an implementer when their code was denied.

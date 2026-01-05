@@ -290,7 +290,7 @@ func (h *AssignReviewHandler) Handle(ctx context.Context, cmd command.Command) (
 
 	// 7. Queue ReviewAssignmentPrompt to the reviewer (from coordinator)
 	// Note: Summary is not stored in TaskAssignment yet, so we use a placeholder
-	prompt := mcp.ReviewAssignmentPrompt(reviewCmd.TaskID, reviewCmd.ImplementerID, "Implementation complete - please review")
+	prompt := mcp.ReviewAssignmentPrompt(reviewCmd.TaskID, reviewCmd.ImplementerID)
 	queue := h.queueRepo.GetOrCreate(reviewCmd.ReviewerID)
 	if err := queue.Enqueue(prompt, repository.SenderCoordinator); err != nil {
 		return nil, fmt.Errorf("failed to queue review prompt: %w", err)
