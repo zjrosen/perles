@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // TestRealExecutor_NewRealExecutor tests the constructor.
@@ -14,12 +16,8 @@ func TestRealExecutor_NewRealExecutor(t *testing.T) {
 	workDir := "/some/path"
 	executor := NewRealExecutor(workDir)
 
-	if executor == nil {
-		t.Fatal("NewRealExecutor returned nil")
-	}
-	if executor.workDir != workDir {
-		t.Errorf("workDir = %q, want %q", executor.workDir, workDir)
-	}
+	require.NotNil(t, executor, "NewRealExecutor returned nil")
+	require.Equal(t, workDir, executor.workDir)
 }
 
 // TestRealExecutor_IsGitRepo tests the IsGitRepo method.
@@ -27,31 +25,23 @@ func TestRealExecutor_IsGitRepo(t *testing.T) {
 	t.Run("in git repo", func(t *testing.T) {
 		// Use the current repo (perles)
 		cwd, err := os.Getwd()
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 
 		executor := NewRealExecutor(cwd)
-		if !executor.IsGitRepo() {
-			t.Error("IsGitRepo() = false, want true (running in perles repo)")
-		}
+		require.True(t, executor.IsGitRepo(), "IsGitRepo() = false, want true (running in perles repo)")
 	})
 
 	t.Run("not in git repo", func(t *testing.T) {
 		// Use /tmp which should not be a git repo
 		executor := NewRealExecutor("/tmp")
-		if executor.IsGitRepo() {
-			t.Error("IsGitRepo() = true for /tmp, want false")
-		}
+		require.False(t, executor.IsGitRepo(), "IsGitRepo() = true for /tmp, want false")
 	})
 }
 
 // TestRealExecutor_GetCurrentBranch tests the GetCurrentBranch method.
 func TestRealExecutor_GetCurrentBranch(t *testing.T) {
 	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	executor := NewRealExecutor(cwd)
 	branch, err := executor.GetCurrentBranch()
@@ -62,145 +52,101 @@ func TestRealExecutor_GetCurrentBranch(t *testing.T) {
 		return
 	}
 
-	if err != nil {
-		t.Fatalf("GetCurrentBranch() error = %v", err)
-	}
-
-	if branch == "" {
-		t.Error("GetCurrentBranch() returned empty string")
-	}
+	require.NoError(t, err, "GetCurrentBranch() error")
+	require.NotEmpty(t, branch, "GetCurrentBranch() returned empty string")
 
 	// Branch should be a valid name (no refs/heads/ prefix)
-	if strings.HasPrefix(branch, "refs/") {
-		t.Errorf("GetCurrentBranch() = %q, should not have refs/ prefix", branch)
-	}
+	require.False(t, strings.HasPrefix(branch, "refs/"), "GetCurrentBranch() = %q, should not have refs/ prefix", branch)
 }
 
 // TestRealExecutor_GetMainBranch tests the GetMainBranch method.
 func TestRealExecutor_GetMainBranch(t *testing.T) {
 	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	executor := NewRealExecutor(cwd)
 	mainBranch, err := executor.GetMainBranch()
-	if err != nil {
-		t.Fatalf("GetMainBranch() error = %v", err)
-	}
+	require.NoError(t, err, "GetMainBranch() error")
 
 	// Should return either "main" or "master"
 	if mainBranch != "main" && mainBranch != "master" {
 		t.Logf("GetMainBranch() = %q (custom main branch)", mainBranch)
 	}
 
-	if mainBranch == "" {
-		t.Error("GetMainBranch() returned empty string")
-	}
+	require.NotEmpty(t, mainBranch, "GetMainBranch() returned empty string")
 }
 
 // TestRealExecutor_IsOnMainBranch tests the IsOnMainBranch method.
 func TestRealExecutor_IsOnMainBranch(t *testing.T) {
 	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	executor := NewRealExecutor(cwd)
 
 	// This should not error (regardless of whether we're on main)
 	_, err = executor.IsOnMainBranch()
-	if err != nil {
-		t.Fatalf("IsOnMainBranch() error = %v", err)
-	}
+	require.NoError(t, err, "IsOnMainBranch() error")
 }
 
 // TestRealExecutor_HasUncommittedChanges tests the HasUncommittedChanges method.
 func TestRealExecutor_HasUncommittedChanges(t *testing.T) {
 	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	executor := NewRealExecutor(cwd)
 
 	// This should not error
 	_, err = executor.HasUncommittedChanges()
-	if err != nil {
-		t.Fatalf("HasUncommittedChanges() error = %v", err)
-	}
+	require.NoError(t, err, "HasUncommittedChanges() error")
 }
 
 // TestRealExecutor_GetRepoRoot tests the GetRepoRoot method.
 func TestRealExecutor_GetRepoRoot(t *testing.T) {
 	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	executor := NewRealExecutor(cwd)
 	root, err := executor.GetRepoRoot()
-	if err != nil {
-		t.Fatalf("GetRepoRoot() error = %v", err)
-	}
-
-	if root == "" {
-		t.Error("GetRepoRoot() returned empty string")
-	}
+	require.NoError(t, err, "GetRepoRoot() error")
+	require.NotEmpty(t, root, "GetRepoRoot() returned empty string")
 
 	// Root should be an absolute path
-	if !filepath.IsAbs(root) {
-		t.Errorf("GetRepoRoot() = %q, want absolute path", root)
-	}
+	require.True(t, filepath.IsAbs(root), "GetRepoRoot() = %q, want absolute path", root)
 }
 
 // TestRealExecutor_IsBareRepo tests the IsBareRepo method.
 func TestRealExecutor_IsBareRepo(t *testing.T) {
 	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	executor := NewRealExecutor(cwd)
 	isBare, err := executor.IsBareRepo()
-	if err != nil {
-		t.Fatalf("IsBareRepo() error = %v", err)
-	}
+	require.NoError(t, err, "IsBareRepo() error")
 
 	// The perles repo should not be bare
-	if isBare {
-		t.Error("IsBareRepo() = true for perles repo, want false")
-	}
+	require.False(t, isBare, "IsBareRepo() = true for perles repo, want false")
 }
 
 // TestRealExecutor_IsDetachedHead tests the IsDetachedHead method.
 func TestRealExecutor_IsDetachedHead(t *testing.T) {
 	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	executor := NewRealExecutor(cwd)
 
 	// This should not error
 	_, err = executor.IsDetachedHead()
-	if err != nil {
-		t.Fatalf("IsDetachedHead() error = %v", err)
-	}
+	require.NoError(t, err, "IsDetachedHead() error")
 }
 
 // TestRealExecutor_IsWorktree tests the IsWorktree method.
 func TestRealExecutor_IsWorktree(t *testing.T) {
 	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	executor := NewRealExecutor(cwd)
 	isWorktree, err := executor.IsWorktree()
-	if err != nil {
-		t.Fatalf("IsWorktree() error = %v", err)
-	}
+	require.NoError(t, err, "IsWorktree() error")
 
 	// The main perles repo should not be a worktree
 	if isWorktree {
@@ -212,42 +158,27 @@ func TestRealExecutor_IsWorktree(t *testing.T) {
 func TestRealExecutor_DetermineWorktreePath(t *testing.T) {
 	t.Run("normal repo", func(t *testing.T) {
 		cwd, err := os.Getwd()
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 
 		executor := NewRealExecutor(cwd)
 		path, err := executor.DetermineWorktreePath("abc123def456")
-		if err != nil {
-			t.Fatalf("DetermineWorktreePath() error = %v", err)
-		}
-
-		if path == "" {
-			t.Error("DetermineWorktreePath() returned empty string")
-		}
+		require.NoError(t, err, "DetermineWorktreePath() error")
+		require.NotEmpty(t, path, "DetermineWorktreePath() returned empty string")
 
 		// Path should contain the short session ID
-		if !strings.Contains(path, "abc123de") {
-			t.Errorf("DetermineWorktreePath() = %q, should contain session ID prefix", path)
-		}
+		require.Contains(t, path, "abc123de", "DetermineWorktreePath() should contain session ID prefix")
 	})
 
 	t.Run("short session ID", func(t *testing.T) {
 		cwd, err := os.Getwd()
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 
 		executor := NewRealExecutor(cwd)
 		path, err := executor.DetermineWorktreePath("short")
-		if err != nil {
-			t.Fatalf("DetermineWorktreePath() error = %v", err)
-		}
+		require.NoError(t, err, "DetermineWorktreePath() error")
 
 		// Should handle short session ID without panic
-		if !strings.Contains(path, "short") {
-			t.Errorf("DetermineWorktreePath() = %q, should contain session ID", path)
-		}
+		require.Contains(t, path, "short", "DetermineWorktreePath() should contain session ID")
 	})
 }
 
@@ -275,9 +206,7 @@ func TestRealExecutor_DetermineWorktreePath_RestrictedParent(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.dir, func(t *testing.T) {
 			result := isSafeParentDir(tc.dir)
-			if result != tc.safe {
-				t.Errorf("isSafeParentDir(%q) = %v, want %v", tc.dir, result, tc.safe)
-			}
+			require.Equal(t, tc.safe, result, "isSafeParentDir(%q)", tc.dir)
 		})
 	}
 }
@@ -285,47 +214,33 @@ func TestRealExecutor_DetermineWorktreePath_RestrictedParent(t *testing.T) {
 // TestRealExecutor_ListWorktrees tests listing worktrees.
 func TestRealExecutor_ListWorktrees(t *testing.T) {
 	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	executor := NewRealExecutor(cwd)
 	worktrees, err := executor.ListWorktrees()
-	if err != nil {
-		t.Fatalf("ListWorktrees() error = %v", err)
-	}
+	require.NoError(t, err, "ListWorktrees() error")
 
 	// There should be at least one worktree (the main one)
-	if len(worktrees) == 0 {
-		t.Error("ListWorktrees() returned empty list, expected at least main worktree")
-	}
+	require.NotEmpty(t, worktrees, "ListWorktrees() returned empty list, expected at least main worktree")
 
 	// First worktree should be the main repo
 	if len(worktrees) > 0 {
 		main := worktrees[0]
-		if main.Path == "" {
-			t.Error("First worktree has empty Path")
-		}
-		if main.HEAD == "" {
-			t.Error("First worktree has empty HEAD")
-		}
+		require.NotEmpty(t, main.Path, "First worktree has empty Path")
+		require.NotEmpty(t, main.HEAD, "First worktree has empty HEAD")
 	}
 }
 
 // TestRealExecutor_PruneWorktrees tests pruning worktrees.
 func TestRealExecutor_PruneWorktrees(t *testing.T) {
 	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	executor := NewRealExecutor(cwd)
 
 	// Prune should succeed (even if nothing to prune)
 	err = executor.PruneWorktrees()
-	if err != nil {
-		t.Fatalf("PruneWorktrees() error = %v", err)
-	}
+	require.NoError(t, err, "PruneWorktrees() error")
 }
 
 // TestParseWorktreeList tests the worktree list parser.
@@ -393,20 +308,12 @@ branch refs/heads/main`,
 		t.Run(tc.name, func(t *testing.T) {
 			got := parseWorktreeList(tc.input)
 
-			if len(got) != len(tc.want) {
-				t.Fatalf("parseWorktreeList() returned %d worktrees, want %d", len(got), len(tc.want))
-			}
+			require.Len(t, got, len(tc.want), "parseWorktreeList() returned wrong number of worktrees")
 
 			for i := range got {
-				if got[i].Path != tc.want[i].Path {
-					t.Errorf("worktree[%d].Path = %q, want %q", i, got[i].Path, tc.want[i].Path)
-				}
-				if got[i].HEAD != tc.want[i].HEAD {
-					t.Errorf("worktree[%d].HEAD = %q, want %q", i, got[i].HEAD, tc.want[i].HEAD)
-				}
-				if got[i].Branch != tc.want[i].Branch {
-					t.Errorf("worktree[%d].Branch = %q, want %q", i, got[i].Branch, tc.want[i].Branch)
-				}
+				require.Equal(t, tc.want[i].Path, got[i].Path, "worktree[%d].Path", i)
+				require.Equal(t, tc.want[i].HEAD, got[i].HEAD, "worktree[%d].HEAD", i)
+				require.Equal(t, tc.want[i].Branch, got[i].Branch, "worktree[%d].Branch", i)
 			}
 		})
 	}
@@ -453,14 +360,10 @@ func TestParseGitError(t *testing.T) {
 			err := parseGitError(tc.stderr, originalErr)
 
 			if tc.wantError != nil {
-				if !errors.Is(err, tc.wantError) {
-					t.Errorf("parseGitError() = %v, want error containing %v", err, tc.wantError)
-				}
+				require.ErrorIs(t, err, tc.wantError, "parseGitError() should return expected error")
 			} else {
 				// For unknown errors, should still contain the stderr
-				if !strings.Contains(err.Error(), tc.stderr) {
-					t.Errorf("parseGitError() = %v, should contain stderr %q", err, tc.stderr)
-				}
+				require.Contains(t, err.Error(), tc.stderr, "parseGitError() should contain stderr")
 			}
 		})
 	}
@@ -471,9 +374,7 @@ func TestParseGitError(t *testing.T) {
 func TestRealExecutor_CreateWorktree_Integration(t *testing.T) {
 	// Skip if not in a git repo
 	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	executor := NewRealExecutor(cwd)
 	if !executor.IsGitRepo() {
@@ -487,20 +388,15 @@ func TestRealExecutor_CreateWorktree_Integration(t *testing.T) {
 
 	// Create worktree with new branch based on HEAD (empty baseBranch)
 	err = executor.CreateWorktree(worktreePath, branchName, "")
-	if err != nil {
-		t.Fatalf("CreateWorktree() error = %v", err)
-	}
+	require.NoError(t, err, "CreateWorktree() error")
 
 	// Verify worktree was created
-	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
-		t.Error("Worktree directory was not created")
-	}
+	_, err = os.Stat(worktreePath)
+	require.False(t, os.IsNotExist(err), "Worktree directory was not created")
 
 	// List worktrees and verify our new one exists
 	worktrees, err := executor.ListWorktrees()
-	if err != nil {
-		t.Fatalf("ListWorktrees() error = %v", err)
-	}
+	require.NoError(t, err, "ListWorktrees() error")
 
 	// Resolve symlinks for comparison (macOS uses /var -> /private/var)
 	worktreePathReal, _ := filepath.EvalSymlinks(worktreePath)
@@ -516,27 +412,20 @@ func TestRealExecutor_CreateWorktree_Integration(t *testing.T) {
 		}
 		if wtPathReal == worktreePathReal || wt.Path == worktreePath {
 			found = true
-			if wt.Branch != branchName {
-				t.Errorf("Worktree branch = %q, want %q", wt.Branch, branchName)
-			}
+			require.Equal(t, branchName, wt.Branch, "Worktree branch mismatch")
 			break
 		}
 	}
-	if !found {
-		t.Errorf("New worktree not found in ListWorktrees(). Expected path %q (real: %q), got worktrees: %+v",
-			worktreePath, worktreePathReal, worktrees)
-	}
+	require.True(t, found, "New worktree not found in ListWorktrees(). Expected path %q (real: %q), got worktrees: %+v",
+		worktreePath, worktreePathReal, worktrees)
 
 	// Remove worktree
 	err = executor.RemoveWorktree(worktreePath)
-	if err != nil {
-		t.Fatalf("RemoveWorktree() error = %v", err)
-	}
+	require.NoError(t, err, "RemoveWorktree() error")
 
 	// Verify worktree was removed
-	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
-		t.Error("Worktree directory still exists after removal")
-	}
+	_, err = os.Stat(worktreePath)
+	require.True(t, os.IsNotExist(err), "Worktree directory still exists after removal")
 
 	// Clean up the test branch
 	cmd := exec.Command("git", "branch", "-D", branchName)
@@ -548,25 +437,19 @@ func TestRealExecutor_CreateWorktree_Integration(t *testing.T) {
 func TestRealExecutor_ErrorParsing_BranchConflict(t *testing.T) {
 	// Test that the error is correctly wrapped
 	err := parseGitError("fatal: 'main' is already checked out at '/other/worktree'", errors.New("exit status 128"))
-	if !errors.Is(err, ErrBranchAlreadyCheckedOut) {
-		t.Errorf("Expected ErrBranchAlreadyCheckedOut, got %v", err)
-	}
+	require.ErrorIs(t, err, ErrBranchAlreadyCheckedOut)
 }
 
 // TestRealExecutor_ErrorParsing_PathExists tests error detection for path conflicts.
 func TestRealExecutor_ErrorParsing_PathExists(t *testing.T) {
 	err := parseGitError("fatal: '/path/to/worktree' already exists", errors.New("exit status 128"))
-	if !errors.Is(err, ErrPathAlreadyExists) {
-		t.Errorf("Expected ErrPathAlreadyExists, got %v", err)
-	}
+	require.ErrorIs(t, err, ErrPathAlreadyExists)
 }
 
 // TestRealExecutor_ErrorParsing_Locked tests error detection for locked worktrees.
 func TestRealExecutor_ErrorParsing_Locked(t *testing.T) {
 	err := parseGitError("fatal: '/path/to/worktree' is locked", errors.New("exit status 128"))
-	if !errors.Is(err, ErrWorktreeLocked) {
-		t.Errorf("Expected ErrWorktreeLocked, got %v", err)
-	}
+	require.ErrorIs(t, err, ErrWorktreeLocked)
 }
 
 // TestInterfaceCompliance verifies RealExecutor implements GitExecutor.
@@ -578,9 +461,7 @@ func TestInterfaceCompliance(t *testing.T) {
 func TestUnsafeParentDirs(t *testing.T) {
 	// These should all be in the unsafe map
 	for dir := range unsafeParentDirs {
-		if !unsafeParentDirs[dir] {
-			t.Errorf("unsafeParentDirs[%q] = false, want true", dir)
-		}
+		require.True(t, unsafeParentDirs[dir], "unsafeParentDirs[%q] should be true", dir)
 	}
 
 	// These should NOT be in the unsafe map
@@ -591,8 +472,6 @@ func TestUnsafeParentDirs(t *testing.T) {
 		"/opt",
 	}
 	for _, dir := range safeDirs {
-		if unsafeParentDirs[dir] {
-			t.Errorf("unsafeParentDirs[%q] = true, want false", dir)
-		}
+		require.False(t, unsafeParentDirs[dir], "unsafeParentDirs[%q] should be false", dir)
 	}
 }

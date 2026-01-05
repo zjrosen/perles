@@ -125,7 +125,7 @@ func TestCommandLogFlow_EndToEnd_Success(t *testing.T) {
 		// Process the event through handleV2Event
 		m, _ = m.handleV2Event(event)
 	case <-time.After(100 * time.Millisecond):
-		t.Fatal("timed out waiting for event")
+		require.FailNow(t, "timed out waiting for event")
 	}
 
 	// Step 7: Verify entry was added to command pane
@@ -188,7 +188,7 @@ func TestCommandLogFlow_EndToEnd_Failure(t *testing.T) {
 		// Process the event through handleV2Event
 		m, _ = m.handleV2Event(event)
 	case <-time.After(100 * time.Millisecond):
-		t.Fatal("timed out waiting for event")
+		require.FailNow(t, "timed out waiting for event")
 	}
 
 	// Step 7: Verify entry was added with failure status
@@ -241,7 +241,7 @@ func TestCommandLogFlow_EndToEnd_ResultError(t *testing.T) {
 	case event := <-sub:
 		m, _ = m.handleV2Event(event)
 	case <-time.After(100 * time.Millisecond):
-		t.Fatal("timed out waiting for event")
+		require.FailNow(t, "timed out waiting for event")
 	}
 
 	// Verify entry shows failure
@@ -291,7 +291,7 @@ func TestCommandLogFlow_MultipleCommands(t *testing.T) {
 		case event := <-sub:
 			m, _ = m.handleV2Event(event)
 		case <-time.After(100 * time.Millisecond):
-			t.Fatalf("timed out waiting for event %d", i)
+			require.FailNow(t, "timed out waiting for event", "event index: %d", i)
 		}
 	}
 
@@ -470,7 +470,7 @@ func TestCommandLogFlow_AccumulatesWhenHidden(t *testing.T) {
 		case event := <-sub:
 			m, _ = m.handleV2Event(event)
 		case <-time.After(100 * time.Millisecond):
-			t.Fatalf("timed out waiting for event %d", i)
+			require.FailNow(t, "timed out waiting for event", "event index: %d", i)
 		}
 	}
 
@@ -533,7 +533,7 @@ func TestCommandLogFlow_MixedSuccessFailure(t *testing.T) {
 		case event := <-sub:
 			m, _ = m.handleV2Event(event)
 		case <-time.After(100 * time.Millisecond):
-			t.Fatalf("timed out waiting for event %d", i)
+			require.FailNow(t, "timed out waiting for event", "event index: %d", i)
 		}
 	}
 
