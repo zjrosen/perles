@@ -2,6 +2,7 @@
 name: "Cook"
 description: "Sequential task execution with code review and worker cycling"
 category: "Work"
+workers: 4
 ---
 
 # Multi-Worker Orchestration Workflow

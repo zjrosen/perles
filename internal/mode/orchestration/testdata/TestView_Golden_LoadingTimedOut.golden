@@ -2,27 +2,27 @@
                                                                                                                         
                                                                                                                         
                                                                                                                         
-                                                                              \│/                                       
-                          ╔═══════╗   ╔═══════╗   ╔═══════╗   ╔═══════╗   ╔════╲   │   ╱════╗                           
-                          ║       ╠═══╣       ╠═══╣       ╠═══╣       ╠═══╣     ╲  │  ╱     ╠                           
-                          ║       ╠═══╣       ╠═══╣       ╠═══╣       ╠═══╣     ╱  │  ╲     ╠                           
-                          ╚═══════╝   ╚═══════╝   ╚═══════╝   ╚═══════╝   ╚════╱   │   ╲════╝                           
-                                                                              /│\                                       
+                                                                                                                        
+                                                                  \│/                                                   
+                          ╔═══════╗   ╔═══════╗   ╔═══════╗   ╔════╲   │   ╱════╗   ╔═══════╗                           
+                          ║       ╠═══╣       ╠═══╣       ╠═══╣     ╲  │  ╱     ╠═══╣       ║                           
+                          ║       ╠═══╣       ╠═══╣       ╠═══╣     ╱  │  ╲     ╠═══╣       ║                           
+                          ╚═══════╝   ╚═══════╝   ╚═══════╝   ╚════╱   │   ╲════╝   ╚═══════╝                           
+                                                                  /│\                                                   
                                                                                                                         
                                                Initialization Timed Out                                                 
                                                                                                                         
                                                   ✓ Creating Worktree                                                   
                                                  ✓ Creating Workspace                                                   
                                                 ✓ Spawning Coordinator                                                  
-                                                 ✓ Coordinator Loaded                                                   
-                                                  ✗ Spawning Workers                                                    
-                                               Workers Loaded (timed out)                                               
+                                                  ✗ Coordinator Ready                                                   
                                                                                                                         
-                                           The workers did not load in time.                                            
+                                         The coordinator did not load in time.                                          
                                       This may indicate an API or network issue.                                        
                                                                                                                         
                                                                                                                         
                                           [R] Retry     [ESC] Exit to Kanban                                            
+                                                                                                                        
                                                                                                                         
                                                                                                                         
                                                                                                                         

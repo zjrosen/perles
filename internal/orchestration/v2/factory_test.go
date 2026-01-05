@@ -23,11 +23,10 @@ func TestInfrastructureConfig_Validate(t *testing.T) {
 		mockClient.EXPECT().Type().Return("claude").Maybe()
 
 		cfg := InfrastructureConfig{
-			Port:            8080,
-			AIClient:        mockClient,
-			WorkDir:         "/tmp/test",
-			MessageRepo:     repository.NewMemoryMessageRepository(),
-			ExpectedWorkers: 4,
+			Port:        8080,
+			AIClient:    mockClient,
+			WorkDir:     "/tmp/test",
+			MessageRepo: repository.NewMemoryMessageRepository(),
 		}
 		err := cfg.Validate()
 		assert.NoError(t, err)
@@ -36,11 +35,10 @@ func TestInfrastructureConfig_Validate(t *testing.T) {
 	t.Run("missing port returns error", func(t *testing.T) {
 		mockClient := mocks.NewMockHeadlessClient(t)
 		cfg := InfrastructureConfig{
-			Port:            0, // Invalid: zero port
-			AIClient:        mockClient,
-			WorkDir:         "/tmp/test",
-			MessageRepo:     repository.NewMemoryMessageRepository(),
-			ExpectedWorkers: 4,
+			Port:        0, // Invalid: zero port
+			AIClient:    mockClient,
+			WorkDir:     "/tmp/test",
+			MessageRepo: repository.NewMemoryMessageRepository(),
 		}
 		err := cfg.Validate()
 		assert.Error(t, err)
@@ -49,11 +47,10 @@ func TestInfrastructureConfig_Validate(t *testing.T) {
 
 	t.Run("nil AIClient returns error", func(t *testing.T) {
 		cfg := InfrastructureConfig{
-			Port:            8080,
-			AIClient:        nil, // Invalid: nil client
-			WorkDir:         "/tmp/test",
-			MessageRepo:     repository.NewMemoryMessageRepository(),
-			ExpectedWorkers: 4,
+			Port:        8080,
+			AIClient:    nil, // Invalid: nil client
+			WorkDir:     "/tmp/test",
+			MessageRepo: repository.NewMemoryMessageRepository(),
 		}
 		err := cfg.Validate()
 		assert.Error(t, err)
@@ -63,11 +60,10 @@ func TestInfrastructureConfig_Validate(t *testing.T) {
 	t.Run("nil MessageRepo returns error", func(t *testing.T) {
 		mockClient := mocks.NewMockHeadlessClient(t)
 		cfg := InfrastructureConfig{
-			Port:            8080,
-			AIClient:        mockClient,
-			WorkDir:         "/tmp/test",
-			MessageRepo:     nil, // Invalid: nil message repo
-			ExpectedWorkers: 4,
+			Port:        8080,
+			AIClient:    mockClient,
+			WorkDir:     "/tmp/test",
+			MessageRepo: nil, // Invalid: nil message repo
 		}
 		err := cfg.Validate()
 		assert.Error(t, err)
@@ -77,31 +73,14 @@ func TestInfrastructureConfig_Validate(t *testing.T) {
 	t.Run("empty WorkDir returns error", func(t *testing.T) {
 		mockClient := mocks.NewMockHeadlessClient(t)
 		cfg := InfrastructureConfig{
-			Port:            8080,
-			AIClient:        mockClient,
-			WorkDir:         "", // Invalid: empty work dir
-			MessageRepo:     repository.NewMemoryMessageRepository(),
-			ExpectedWorkers: 4,
+			Port:        8080,
+			AIClient:    mockClient,
+			WorkDir:     "", // Invalid: empty work dir
+			MessageRepo: repository.NewMemoryMessageRepository(),
 		}
 		err := cfg.Validate()
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "work directory is required")
-	})
-
-	t.Run("zero ExpectedWorkers defaults to 4", func(t *testing.T) {
-		mockClient := mocks.NewMockHeadlessClient(t)
-		mockClient.EXPECT().Type().Return("claude").Maybe()
-
-		cfg := InfrastructureConfig{
-			Port:            8080,
-			AIClient:        mockClient,
-			WorkDir:         "/tmp/test",
-			MessageRepo:     repository.NewMemoryMessageRepository(),
-			ExpectedWorkers: 0, // Should default to 4
-		}
-		err := cfg.Validate()
-		require.NoError(t, err)
-		assert.Equal(t, 4, cfg.ExpectedWorkers)
 	})
 }
 
@@ -115,11 +94,10 @@ func TestNewInfrastructure(t *testing.T) {
 		mockClient.EXPECT().Type().Return("claude").Maybe()
 
 		cfg := InfrastructureConfig{
-			Port:            8080,
-			AIClient:        mockClient,
-			WorkDir:         "/tmp/test",
-			MessageRepo:     repository.NewMemoryMessageRepository(),
-			ExpectedWorkers: 4,
+			Port:        8080,
+			AIClient:    mockClient,
+			WorkDir:     "/tmp/test",
+			MessageRepo: repository.NewMemoryMessageRepository(),
 		}
 
 		infra, err := NewInfrastructure(cfg)
@@ -152,11 +130,10 @@ func TestNewInfrastructure(t *testing.T) {
 
 	t.Run("returns error for nil AIClient", func(t *testing.T) {
 		cfg := InfrastructureConfig{
-			Port:            8080,
-			AIClient:        nil,
-			WorkDir:         "/tmp/test",
-			MessageRepo:     repository.NewMemoryMessageRepository(),
-			ExpectedWorkers: 4,
+			Port:        8080,
+			AIClient:    nil,
+			WorkDir:     "/tmp/test",
+			MessageRepo: repository.NewMemoryMessageRepository(),
 		}
 
 		infra, err := NewInfrastructure(cfg)
@@ -168,11 +145,10 @@ func TestNewInfrastructure(t *testing.T) {
 	t.Run("returns error for nil MessageRepo", func(t *testing.T) {
 		mockClient := mocks.NewMockHeadlessClient(t)
 		cfg := InfrastructureConfig{
-			Port:            8080,
-			AIClient:        mockClient,
-			WorkDir:         "/tmp/test",
-			MessageRepo:     nil,
-			ExpectedWorkers: 4,
+			Port:        8080,
+			AIClient:    mockClient,
+			WorkDir:     "/tmp/test",
+			MessageRepo: nil,
 		}
 
 		infra, err := NewInfrastructure(cfg)
@@ -184,11 +160,10 @@ func TestNewInfrastructure(t *testing.T) {
 	t.Run("returns error for zero Port", func(t *testing.T) {
 		mockClient := mocks.NewMockHeadlessClient(t)
 		cfg := InfrastructureConfig{
-			Port:            0,
-			AIClient:        mockClient,
-			WorkDir:         "/tmp/test",
-			MessageRepo:     repository.NewMemoryMessageRepository(),
-			ExpectedWorkers: 4,
+			Port:        0,
+			AIClient:    mockClient,
+			WorkDir:     "/tmp/test",
+			MessageRepo: repository.NewMemoryMessageRepository(),
 		}
 
 		infra, err := NewInfrastructure(cfg)
@@ -208,11 +183,10 @@ func TestInfrastructure_Start(t *testing.T) {
 		mockClient.EXPECT().Type().Return("claude").Maybe()
 
 		cfg := InfrastructureConfig{
-			Port:            8080,
-			AIClient:        mockClient,
-			WorkDir:         "/tmp/test",
-			MessageRepo:     repository.NewMemoryMessageRepository(),
-			ExpectedWorkers: 4,
+			Port:        8080,
+			AIClient:    mockClient,
+			WorkDir:     "/tmp/test",
+			MessageRepo: repository.NewMemoryMessageRepository(),
 		}
 
 		infra, err := NewInfrastructure(cfg)
@@ -237,11 +211,10 @@ func TestInfrastructure_Start(t *testing.T) {
 		mockClient.EXPECT().Type().Return("claude").Maybe()
 
 		cfg := InfrastructureConfig{
-			Port:            8080,
-			AIClient:        mockClient,
-			WorkDir:         "/tmp/test",
-			MessageRepo:     repository.NewMemoryMessageRepository(),
-			ExpectedWorkers: 4,
+			Port:        8080,
+			AIClient:    mockClient,
+			WorkDir:     "/tmp/test",
+			MessageRepo: repository.NewMemoryMessageRepository(),
 		}
 
 		infra, err := NewInfrastructure(cfg)
@@ -263,11 +236,10 @@ func TestInfrastructure_Drain(t *testing.T) {
 		mockClient.EXPECT().Type().Return("claude").Maybe()
 
 		cfg := InfrastructureConfig{
-			Port:            8080,
-			AIClient:        mockClient,
-			WorkDir:         "/tmp/test",
-			MessageRepo:     repository.NewMemoryMessageRepository(),
-			ExpectedWorkers: 4,
+			Port:        8080,
+			AIClient:    mockClient,
+			WorkDir:     "/tmp/test",
+			MessageRepo: repository.NewMemoryMessageRepository(),
 		}
 
 		infra, err := NewInfrastructure(cfg)
@@ -292,11 +264,10 @@ func TestInfrastructure_Drain(t *testing.T) {
 		mockClient.EXPECT().Type().Return("claude").Maybe()
 
 		cfg := InfrastructureConfig{
-			Port:            8080,
-			AIClient:        mockClient,
-			WorkDir:         "/tmp/test",
-			MessageRepo:     repository.NewMemoryMessageRepository(),
-			ExpectedWorkers: 4,
+			Port:        8080,
+			AIClient:    mockClient,
+			WorkDir:     "/tmp/test",
+			MessageRepo: repository.NewMemoryMessageRepository(),
 		}
 
 		infra, err := NewInfrastructure(cfg)
@@ -318,11 +289,10 @@ func TestAllHandlersRegistered(t *testing.T) {
 	mockClient.EXPECT().Type().Return("claude").Maybe()
 
 	cfg := InfrastructureConfig{
-		Port:            8080,
-		AIClient:        mockClient,
-		WorkDir:         "/tmp/test",
-		MessageRepo:     repository.NewMemoryMessageRepository(),
-		ExpectedWorkers: 4,
+		Port:        8080,
+		AIClient:    mockClient,
+		WorkDir:     "/tmp/test",
+		MessageRepo: repository.NewMemoryMessageRepository(),
 	}
 
 	infra, err := NewInfrastructure(cfg)
@@ -362,12 +332,11 @@ func TestInfrastructure_Integration(t *testing.T) {
 			Maybe()
 
 		cfg := InfrastructureConfig{
-			Port:            8080,
-			AIClient:        mockClient,
-			WorkDir:         "/tmp/test",
-			MessageRepo:     repository.NewMemoryMessageRepository(),
-			ExpectedWorkers: 4,
-			Extensions:      map[string]any{"model": "claude-3"},
+			Port:        8080,
+			AIClient:    mockClient,
+			WorkDir:     "/tmp/test",
+			MessageRepo: repository.NewMemoryMessageRepository(),
+			Extensions:  map[string]any{"model": "claude-3"},
 		}
 
 		// Create

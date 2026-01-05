@@ -16,6 +16,7 @@ type frontmatter struct {
 	Name        string `yaml:"name"`
 	Description string `yaml:"description"`
 	Category    string `yaml:"category"`
+	Workers     int    `yaml:"workers"`
 }
 
 // frontmatterDelimiter is the standard YAML frontmatter delimiter.
@@ -72,6 +73,7 @@ func parseWorkflow(content, filename string, source Source) (Workflow, error) {
 		Name:        fm.Name,
 		Description: fm.Description,
 		Category:    fm.Category,
+		Workers:     fm.Workers,
 		Content:     content,
 		Source:      source,
 	}, nil

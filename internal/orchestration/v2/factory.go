@@ -44,8 +44,6 @@ type InfrastructureConfig struct {
 	Extensions map[string]any
 	// MessageRepo is the message repository for inter-agent messaging.
 	MessageRepo repository.MessageRepository
-	// ExpectedWorkers is the maximum number of workers to spawn.
-	ExpectedWorkers int
 	// SessionID is the session identifier for accountability summary generation.
 	SessionID string
 }
@@ -63,9 +61,6 @@ func (c *InfrastructureConfig) Validate() error {
 	}
 	if c.WorkDir == "" {
 		return fmt.Errorf("work directory is required")
-	}
-	if c.ExpectedWorkers == 0 {
-		c.ExpectedWorkers = 4 // Default
 	}
 	return nil
 }
@@ -164,7 +159,7 @@ func NewInfrastructure(cfg InfrastructureConfig) (*Infrastructure, error) {
 
 	// Register all command handlers
 	registerHandlers(cmdProcessor, processRepo, taskRepo, queueRepo, processRegistry, turnEnforcer,
-		cfg.AIClient, cfg.Extensions, beadsExec, cfg.Port, cfg.ExpectedWorkers, eventBus, cfg.WorkDir)
+		cfg.AIClient, cfg.Extensions, beadsExec, cfg.Port, eventBus, cfg.WorkDir)
 
 	// Create command submitter adapter
 	cmdSubmitter := handler.NewProcessorSubmitterAdapter(cmdProcessor)
@@ -251,7 +246,6 @@ func registerHandlers(
 	extensions map[string]any,
 	beadsExec beads.BeadsExecutor,
 	port int,
-	expectedWorkers int,
 	eventBus *pubsub.Broker[any],
 	workDir string,
 ) {
@@ -315,7 +309,6 @@ func registerHandlers(
 
 	cmdProcessor.RegisterHandler(command.CmdSpawnProcess,
 		handler.NewSpawnProcessHandler(processRepo, processRegistry,
-			handler.WithSpawnMaxWorkers(expectedWorkers),
 			handler.WithUnifiedSpawner(processSpawner),
 			handler.WithTurnEnforcer(turnEnforcer)))
 	cmdProcessor.RegisterHandler(command.CmdSendToProcess,

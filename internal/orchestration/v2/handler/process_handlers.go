@@ -773,24 +773,16 @@ type BroadcastResult struct {
 // SpawnProcessHandler handles CmdSpawnProcess commands.
 // This is one of the two handlers with role-specific branching:
 // - Coordinator: uses CoordinatorID, coordinator system prompt/MCP config, enforces singleton
-// - Worker: generates unique ID, worker system prompt/MCP config, enforces max limit
+// - Worker: generates unique ID, worker system prompt/MCP config
 type SpawnProcessHandler struct {
 	processRepo repository.ProcessRepository
 	registry    *process.ProcessRegistry
 	spawner     UnifiedProcessSpawner
-	maxWorkers  int
 	enforcer    TurnCompletionEnforcer
 }
 
 // SpawnProcessHandlerOption configures SpawnProcessHandler.
 type SpawnProcessHandlerOption func(*SpawnProcessHandler)
-
-// WithSpawnMaxWorkers sets the maximum number of workers allowed.
-func WithSpawnMaxWorkers(max int) SpawnProcessHandlerOption {
-	return func(h *SpawnProcessHandler) {
-		h.maxWorkers = max
-	}
-}
 
 // WithUnifiedSpawner sets the process spawner for unified architecture.
 func WithUnifiedSpawner(spawner UnifiedProcessSpawner) SpawnProcessHandlerOption {
@@ -816,7 +808,6 @@ func NewSpawnProcessHandler(
 	h := &SpawnProcessHandler{
 		processRepo: processRepo,
 		registry:    registry,
-		maxWorkers:  10, // Default max workers
 	}
 	for _, opt := range opts {
 		opt(h)
@@ -842,11 +833,6 @@ func (h *SpawnProcessHandler) Handle(ctx context.Context, cmd command.Command) (
 	} else {
 		// Worker-specific logic
 		processID = h.generateWorkerID()
-
-		// Enforce max worker limit
-		if h.registry.ActiveCount() >= h.maxWorkers {
-			return nil, ErrMaxProcessesReached
-		}
 	}
 
 	// Override with provided ProcessID if specified

@@ -3,6 +3,7 @@
                                                                                                                         
                                                                                                                         
                                                                                                                         
+                                                                                                                        
                                           \│/                                                                           
                           ╔═══════╗   ╔════╲   │   ╱════╗   ╔═══════╗   ╔═══════╗   ╔═══════╗                           
                           ║       ╠═══╣     ╲  │  ╱     ╠═══╣       ╠═══╣       ╠═══╣       ║                           
@@ -15,14 +16,13 @@
                                                   ✓ Creating Worktree                                                   
                                                  ✗ Creating Workspace                                                   
                                                   Spawning Coordinator                                                  
-                                                   Coordinator Loaded                                                   
-                                                    Spawning Workers                                                    
-                                                     Workers Loaded                                                     
+                                                    Coordinator Ready                                                   
                                                                                                                         
                                     Error: listen tcp :8765: address already in use                                     
                                                                                                                         
                                                                                                                         
                                           [R] Retry     [ESC] Exit to Kanban                                            
+                                                                                                                        
                                                                                                                         
                                                                                                                         
                                                                                                                         

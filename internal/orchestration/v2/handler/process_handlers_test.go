@@ -1623,33 +1623,6 @@ func TestSpawnProcessHandler_SpawnWorker_GeneratesUniqueID(t *testing.T) {
 	assert.Contains(t, id2, "worker-")
 }
 
-func TestSpawnProcessHandler_SpawnWorker_FailsIfMaxWorkersReached(t *testing.T) {
-	processRepo, _ := setupProcessRepos()
-	registry := process.NewProcessRegistry()
-
-	// Set max workers to 2
-	h := handler.NewSpawnProcessHandler(processRepo, registry, handler.WithSpawnMaxWorkers(2))
-
-	// Create 2 workers in registry to simulate active count
-	w1 := &repository.Process{ID: "worker-1", Role: repository.RoleWorker, Status: repository.StatusReady}
-	w2 := &repository.Process{ID: "worker-2", Role: repository.RoleWorker, Status: repository.StatusReady}
-	processRepo.AddProcess(w1)
-	processRepo.AddProcess(w2)
-
-	// Register them to bump ActiveCount
-	mockProc1 := &process.Process{ID: "worker-1", Role: repository.RoleWorker}
-	mockProc2 := &process.Process{ID: "worker-2", Role: repository.RoleWorker}
-	registry.Register(mockProc1)
-	registry.Register(mockProc2)
-
-	// Try to spawn third worker
-	cmd := command.NewSpawnProcessCommand(command.SourceInternal, repository.RoleWorker)
-	result, err := h.Handle(context.Background(), cmd)
-
-	assert.Nil(t, result)
-	assert.ErrorIs(t, err, handler.ErrMaxProcessesReached)
-}
-
 func TestSpawnProcessHandler_SavesProcessToRepository(t *testing.T) {
 	processRepo, _ := setupProcessRepos()
 	registry := process.NewProcessRegistry()

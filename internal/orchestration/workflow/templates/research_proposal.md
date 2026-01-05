@@ -2,6 +2,7 @@
 name: "Research Proposal"
 description: "Collaborative research with parallel exploration and structured synthesis for implementation plans"
 category: "Planning"
+workers: 4
 ---
 
 # Multi-Agent Research & Proposal Format

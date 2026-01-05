@@ -1460,8 +1460,7 @@ func TestModel_Cleanup_CancelsInitializer(t *testing.T) {
 
 	// Create a real initializer
 	m.initializer = NewInitializer(InitializerConfig{
-		WorkDir:         t.TempDir(),
-		ExpectedWorkers: 4,
+		WorkDir: t.TempDir(),
 	})
 
 	// Call Cleanup - should cancel initializer without panic

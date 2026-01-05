@@ -38,6 +38,11 @@ type Workflow struct {
 	// Category is an optional grouping category from frontmatter.
 	Category string
 
+	// Workers is the number of workers required by this workflow.
+	// A value of 0 (or omitted in frontmatter) indicates lazy spawn mode,
+	// where workers are spawned on-demand as needed by the workflow.
+	Workers int
+
 	// Content is the full markdown content (including frontmatter).
 	Content string
 

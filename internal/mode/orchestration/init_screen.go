@@ -19,9 +19,7 @@ var phaseLabels = map[InitPhase]string{
 	InitCreatingWorktree:     "Creating Worktree",
 	InitCreatingWorkspace:    "Creating Workspace",
 	InitSpawningCoordinator:  "Spawning Coordinator",
-	InitAwaitingFirstMessage: "Coordinator Loaded",
-	InitSpawningWorkers:      "Spawning Workers",
-	InitWorkersReady:         "Workers Loaded",
+	InitAwaitingFirstMessage: "Coordinator Ready",
 }
 
 // phaseOrder defines the order in which phases are displayed.
@@ -30,8 +28,6 @@ var phaseOrder = []InitPhase{
 	InitCreatingWorkspace,
 	InitSpawningCoordinator,
 	InitAwaitingFirstMessage,
-	InitSpawningWorkers,
-	InitWorkersReady,
 }
 
 // Phase status indicator styles.
@@ -63,14 +59,13 @@ var (
 			Foreground(styles.TextMutedColor)
 )
 
-// phaseToLinkIndex maps InitPhase to chain link index (0-5).
-// The 6 chain links map to the 6 loading phases:
+// phaseToLinkIndex maps InitPhase to chain link index (0-4).
+// The 5 chain links map to the 4 loading phases + final state:
 //   - Link 0: InitCreatingWorktree
 //   - Link 1: InitCreatingWorkspace
 //   - Link 2: InitSpawningCoordinator
 //   - Link 3: InitAwaitingFirstMessage
-//   - Link 4: InitSpawningWorkers
-//   - Link 5: InitWorkersReady
+//   - Link 4: InitReady (all phases complete)
 func phaseToLinkIndex(phase InitPhase) int {
 	switch phase {
 	case InitCreatingWorktree:
@@ -81,12 +76,8 @@ func phaseToLinkIndex(phase InitPhase) int {
 		return 2
 	case InitAwaitingFirstMessage:
 		return 3
-	case InitSpawningWorkers:
-		return 4
-	case InitWorkersReady:
-		return 5
 	case InitReady:
-		return 6 // All phases complete, show all links colored
+		return 4 // All phases complete, show all links colored
 	default:
 		return 0
 	}
@@ -154,24 +145,10 @@ func (m Model) renderInitScreen() string {
 		label := phaseLabels[phase]
 		indicator, style := m.getPhaseIndicatorAndStyle(phase, currentPhase)
 
-		// Append "(timed out)" suffix for the timeout case
-		if currentPhase == InitTimedOut && phase == InitWorkersReady {
-			label = label + " (timed out)"
-		}
-
 		// Show worktree path during CreatingWorktree phase
 		if phase == InitCreatingWorktree && currentPhase == InitCreatingWorktree {
 			if worktreePath := m.getWorktreePath(); worktreePath != "" {
 				label = fmt.Sprintf("%s: %s", label, worktreePath)
-			}
-		}
-
-		// Show worker loading progress for WorkersReady phase
-		if phase == InitWorkersReady && currentPhase >= InitSpawningWorkers {
-			_, _, expected, confirmed := m.getSpinnerData()
-			confirmedCount := len(confirmed)
-			if expected > 0 && confirmedCount > 0 && confirmedCount < expected {
-				label = fmt.Sprintf("%s (%d/%d)", label, confirmedCount, expected)
 			}
 		}
 
@@ -213,7 +190,7 @@ func (m Model) renderInitScreen() string {
 	// Timeout message
 	if currentPhase == InitTimedOut {
 		lines = append(lines, "") // Spacing
-		timeoutMsg := errorMessageStyle.Render("The workers did not load in time.")
+		timeoutMsg := errorMessageStyle.Render("The coordinator did not load in time.")
 		lines = append(lines, centerTextStyle.Render(timeoutMsg))
 		lines = append(lines, centerTextStyle.Render(errorMessageStyle.Render("This may indicate an API or network issue.")))
 	}
@@ -326,11 +303,11 @@ func (m Model) getInitError() error {
 
 // getSpinnerData returns spinner data from the Initializer.
 // Returns defaults if initializer is nil.
-func (m Model) getSpinnerData() (phase InitPhase, workersSpawned, expectedWorkers int, confirmedWorkers map[string]bool) {
+func (m Model) getSpinnerData() InitPhase {
 	if m.initializer != nil {
 		return m.initializer.SpinnerData()
 	}
-	return InitNotStarted, 0, 4, make(map[string]bool)
+	return InitNotStarted
 }
 
 // getFailedPhase determines which phase failed based on the current state.

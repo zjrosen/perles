@@ -1118,7 +1118,6 @@ func (m Model) handleStartCoordinator() (Model, tea.Cmd) {
 		CodexModel:         m.codexModel,
 		AmpModel:           m.ampModel,
 		AmpMode:            m.ampMode,
-		ExpectedWorkers:    4,
 		Timeout:            timeout,
 		WorktreeBaseBranch: m.worktreeBaseBranch,
 		GitExecutor:        m.gitExecutor,

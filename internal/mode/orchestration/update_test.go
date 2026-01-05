@@ -1203,8 +1203,6 @@ func TestQuitConfirmation_DuringInit_NoModal(t *testing.T) {
 		{"InitCreatingWorkspace", InitCreatingWorkspace},
 		{"InitSpawningCoordinator", InitSpawningCoordinator},
 		{"InitAwaitingFirstMessage", InitAwaitingFirstMessage},
-		{"InitSpawningWorkers", InitSpawningWorkers},
-		{"InitWorkersReady", InitWorkersReady},
 	}
 
 	for _, tt := range tests {

@@ -17,9 +17,7 @@ import (
 	"github.com/zjrosen/perles/internal/mocks"
 	"github.com/zjrosen/perles/internal/orchestration/amp"
 	"github.com/zjrosen/perles/internal/orchestration/client"
-	"github.com/zjrosen/perles/internal/orchestration/events"
 	"github.com/zjrosen/perles/internal/orchestration/v2/repository"
-	"github.com/zjrosen/perles/internal/pubsub"
 )
 
 func TestInitializer_CreatesSession(t *testing.T) {
@@ -28,9 +26,8 @@ func TestInitializer_CreatesSession(t *testing.T) {
 
 	// Create an initializer with minimal config
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
+		WorkDir:    workDir,
+		ClientType: "claude",
 	})
 
 	// Start initialization (this will fail because we don't have a real AI client,
@@ -79,9 +76,8 @@ func TestInitializer_Retry_ResetsSession(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
+		WorkDir:    workDir,
+		ClientType: "claude",
 	})
 
 	// Verify session is nil initially
@@ -94,9 +90,8 @@ func TestInitializer_Retry_ResetsSession(t *testing.T) {
 
 func TestNewInitializer(t *testing.T) {
 	cfg := InitializerConfig{
-		WorkDir:         "/test/dir",
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
+		WorkDir:    "/test/dir",
+		ClientType: "claude",
 	}
 
 	init := NewInitializer(cfg)
@@ -114,7 +109,7 @@ func TestNewInitializer_DefaultWorkers(t *testing.T) {
 
 	init := NewInitializer(cfg)
 	require.NotNil(t, init)
-	require.Equal(t, 4, init.cfg.ExpectedWorkers)
+	// With lazy spawning, default is 0 workers (coordinator spawns workers on-demand)
 }
 
 func TestInitializerPhase(t *testing.T) {
@@ -164,10 +159,9 @@ func TestInitializer_Retry_ResetsV2Infrastructure(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
-		Timeout:         100 * time.Millisecond, // Short timeout for test
+		WorkDir:    workDir,
+		ClientType: "claude",
+		Timeout:    100 * time.Millisecond, // Short timeout for test
 	})
 
 	// Verify v2 infrastructure is nil initially
@@ -196,9 +190,8 @@ func TestInitializer_V2FieldsExist(t *testing.T) {
 func TestInitializer_V2FieldsNilBeforeStart(t *testing.T) {
 	// Verify v2 infrastructure is nil before Start() is called
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         t.TempDir(),
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
+		WorkDir:    t.TempDir(),
+		ClientType: "claude",
 	})
 
 	// Before Start, v2Infra should be nil (accessed via getter)
@@ -224,9 +217,8 @@ func TestInitializer_CleanupDrainsProcessor(t *testing.T) {
 func TestInitializer_GetV2EventBus_NilBeforeStart(t *testing.T) {
 	// Verify GetV2EventBus() returns nil before Start() is called
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         t.TempDir(),
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
+		WorkDir:    t.TempDir(),
+		ClientType: "claude",
 	})
 
 	// Before Start, GetV2EventBus should return nil
@@ -236,9 +228,8 @@ func TestInitializer_GetV2EventBus_NilBeforeStart(t *testing.T) {
 func TestInitializer_GetV2EventBus_ThreadSafe(t *testing.T) {
 	// Verify GetV2EventBus() uses read lock for thread safety
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         t.TempDir(),
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
+		WorkDir:    t.TempDir(),
+		ClientType: "claude",
 	})
 
 	// Concurrent calls should not race (verified with -race flag)
@@ -269,10 +260,9 @@ func TestInitializer_V2EventBusFieldExists(t *testing.T) {
 func TestInitializer_Retry_ResetsV2EventBus(t *testing.T) {
 	// Verify v2EventBus is reset when Retry() is called (via v2Infra reset)
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         t.TempDir(),
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
-		Timeout:         100 * time.Millisecond,
+		WorkDir:    t.TempDir(),
+		ClientType: "claude",
+		Timeout:    100 * time.Millisecond,
 	})
 
 	// v2EventBus should be nil initially (via getter which checks v2Infra)
@@ -303,9 +293,8 @@ func TestInitializer_ProcessRepoFieldExists(t *testing.T) {
 func TestInitializer_ProcessRepoNilBeforeStart(t *testing.T) {
 	// Verify processRepo is nil before Start() is called (via getter)
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         t.TempDir(),
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
+		WorkDir:    t.TempDir(),
+		ClientType: "claude",
 	})
 
 	// Before Start, processRepo should be nil (accessed via getter which checks v2Infra)
@@ -315,10 +304,9 @@ func TestInitializer_ProcessRepoNilBeforeStart(t *testing.T) {
 func TestInitializer_Retry_ResetsProcessRepo(t *testing.T) {
 	// Verify processRepo is reset when Retry() is called (via v2Infra reset)
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         t.TempDir(),
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
-		Timeout:         100 * time.Millisecond,
+		WorkDir:    t.TempDir(),
+		ClientType: "claude",
+		Timeout:    100 * time.Millisecond,
 	})
 
 	// processRepo should be nil initially (via getter which checks v2Infra)
@@ -336,124 +324,6 @@ func TestInitializer_Retry_ResetsProcessRepo(t *testing.T) {
 // ProcessEvent Handling Tests (Phase 5)
 // ===========================================================================
 
-func TestInitializer_HandleProcessEventPayload_IgnoresCoordinatorEvents(t *testing.T) {
-	// Verify handleProcessEventPayload ignores coordinator events during initialization
-	init := NewInitializer(InitializerConfig{
-		WorkDir:         t.TempDir(),
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
-	})
-
-	// Set phase to one that tracks process events
-	init.mu.Lock()
-	init.phase = InitSpawningWorkers
-	init.mu.Unlock()
-
-	// Create a coordinator event (should be ignored)
-	event := pubsub.Event[any]{
-		Payload: events.ProcessEvent{
-			Type:      events.ProcessSpawned,
-			ProcessID: "coordinator",
-			Role:      events.RoleCoordinator,
-		},
-	}
-
-	// Should not count as a worker
-	init.handleV2Event(event)
-
-	// Workers spawned should still be 0
-	init.mu.RLock()
-	require.Equal(t, 0, init.workersSpawned, "coordinator event should not increment worker count")
-	init.mu.RUnlock()
-}
-
-func TestInitializer_HandleProcessEventPayload_HandlesWorkerSpawned(t *testing.T) {
-	// Verify handleProcessEventPayload routes worker ProcessSpawned events correctly
-	init := NewInitializer(InitializerConfig{
-		WorkDir:         t.TempDir(),
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
-	})
-
-	// Set phase to one that tracks process events
-	init.mu.Lock()
-	init.phase = InitSpawningWorkers
-	init.mu.Unlock()
-
-	// Create a worker spawned event
-	event := pubsub.Event[any]{
-		Payload: events.ProcessEvent{
-			Type:      events.ProcessSpawned,
-			ProcessID: "worker-1",
-			Role:      events.RoleWorker,
-		},
-	}
-
-	// Should handle the event
-	init.handleV2Event(event)
-
-	// Workers spawned should be incremented
-	init.mu.RLock()
-	require.Equal(t, 1, init.workersSpawned, "worker spawn event should increment worker count")
-	init.mu.RUnlock()
-}
-
-func TestInitializer_HandleProcessSpawned_IncrementsWorkerCount(t *testing.T) {
-	// Verify handleProcessSpawned increments workersSpawned count
-	init := NewInitializer(InitializerConfig{
-		WorkDir:         t.TempDir(),
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
-	})
-
-	init.mu.Lock()
-	init.phase = InitSpawningWorkers
-	init.mu.Unlock()
-
-	event := events.ProcessEvent{
-		Type:      events.ProcessSpawned,
-		ProcessID: "worker-1",
-		Role:      events.RoleWorker,
-	}
-
-	init.handleProcessSpawned(event)
-
-	init.mu.RLock()
-	require.Equal(t, 1, init.workersSpawned)
-	init.mu.RUnlock()
-}
-
-func TestInitializer_HandleProcessSpawned_TransitionsToWorkersReady(t *testing.T) {
-	// Verify handleProcessSpawned transitions to WorkersReady when all workers spawned
-	init := NewInitializer(InitializerConfig{
-		WorkDir:         t.TempDir(),
-		ClientType:      "claude",
-		ExpectedWorkers: 2, // Only need 2 workers
-	})
-
-	init.mu.Lock()
-	init.phase = InitSpawningWorkers
-	init.workersSpawned = 1 // Already have 1
-	init.mu.Unlock()
-
-	event := events.ProcessEvent{
-		Type:      events.ProcessSpawned,
-		ProcessID: "worker-2",
-		Role:      events.RoleWorker,
-	}
-
-	// Spawn the second worker (should trigger transition)
-	init.handleProcessSpawned(event)
-
-	init.mu.RLock()
-	require.Equal(t, InitWorkersReady, init.phase, "should transition to WorkersReady")
-	require.Equal(t, 2, init.workersSpawned)
-	init.mu.RUnlock()
-}
-
-// Note: Worker confirmation tests now use handleMessageEvent with MessageWorkerReady
-// instead of handleProcessReady (which has been removed). See the message event tests.
-
 // ===========================================================================
 // createSession() Method Tests (Task perles-oph9.1)
 // ===========================================================================
@@ -463,9 +333,8 @@ func TestInitializer_CreateSession_Success(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
+		WorkDir:    workDir,
+		ClientType: "claude",
 	})
 
 	// Set session ID (normally done by Start())
@@ -504,9 +373,8 @@ func TestInitializer_CreateSession_ReturnsErrorOnFailure(t *testing.T) {
 	require.NoError(t, err, "setup: should create blocking file")
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         invalidPath, // This will cause session.New to fail
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
+		WorkDir:    invalidPath, // This will cause session.New to fail
+		ClientType: "claude",
 	})
 
 	// Set session ID (normally done by Start())
@@ -530,9 +398,8 @@ func TestInitializer_CreateSession_UniqueIDs(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
+		WorkDir:    workDir,
+		ClientType: "claude",
 	})
 
 	// Create multiple sessions with different pre-set IDs
@@ -565,9 +432,8 @@ func TestInitializer_CreateSession_DirectoryStructure(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
+		WorkDir:    workDir,
+		ClientType: "claude",
 	})
 
 	// Set session ID (normally done by Start())
@@ -600,10 +466,9 @@ func TestInitializer_CreateAIClient_Claude(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ClaudeModel:     "opus",
-		ExpectedWorkers: 4,
+		WorkDir:     workDir,
+		ClientType:  "claude",
+		ClaudeModel: "opus",
 	})
 
 	result, err := init.createAIClient()
@@ -624,11 +489,10 @@ func TestInitializer_CreateAIClient_Amp(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "amp",
-		AmpModel:        "gpt-4",
-		AmpMode:         "smart",
-		ExpectedWorkers: 4,
+		WorkDir:    workDir,
+		ClientType: "amp",
+		AmpModel:   "gpt-4",
+		AmpMode:    "smart",
 	})
 
 	result, err := init.createAIClient()
@@ -651,9 +515,8 @@ func TestInitializer_CreateAIClient_DefaultsToClaude(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "", // Empty - should default to Claude
-		ExpectedWorkers: 4,
+		WorkDir:    workDir,
+		ClientType: "", // Empty - should default to Claude
 	})
 
 	result, err := init.createAIClient()
@@ -670,10 +533,9 @@ func TestInitializer_CreateAIClient_NoExtensionsWhenEmpty(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ClaudeModel:     "", // Empty - should not be in extensions
-		ExpectedWorkers: 4,
+		WorkDir:     workDir,
+		ClientType:  "claude",
+		ClaudeModel: "", // Empty - should not be in extensions
 	})
 
 	result, err := init.createAIClient()
@@ -690,9 +552,8 @@ func TestInitializer_CreateAIClient_InvalidClientType(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "unknown-client",
-		ExpectedWorkers: 4,
+		WorkDir:    workDir,
+		ClientType: "unknown-client",
 	})
 
 	result, err := init.createAIClient()
@@ -706,10 +567,9 @@ func TestInitializer_CreateAIClient_ResultStruct(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ClaudeModel:     "haiku",
-		ExpectedWorkers: 4,
+		WorkDir:     workDir,
+		ClientType:  "claude",
+		ClaudeModel: "haiku",
 	})
 
 	result, err := init.createAIClient()
@@ -726,11 +586,10 @@ func TestInitializer_CreateAIClient_AmpPartialExtensions(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "amp",
-		AmpModel:        "gpt-4",
-		AmpMode:         "", // Empty mode - should not be in extensions
-		ExpectedWorkers: 4,
+		WorkDir:    workDir,
+		ClientType: "amp",
+		AmpModel:   "gpt-4",
+		AmpMode:    "", // Empty mode - should not be in extensions
 	})
 
 	result, err := init.createAIClient()
@@ -751,9 +610,8 @@ func TestInitializer_CreateMCPListener_Success(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
+		WorkDir:    workDir,
+		ClientType: "claude",
 	})
 
 	// Call createMCPListener directly
@@ -786,9 +644,8 @@ func TestInitializer_CreateMCPListener_BindsToLocalhost(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
+		WorkDir:    workDir,
+		ClientType: "claude",
 	})
 
 	result, err := init.createMCPListener()
@@ -806,9 +663,8 @@ func TestInitializer_CreateMCPListener_UniquePortsOnMultipleCalls(t *testing.T) 
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
+		WorkDir:    workDir,
+		ClientType: "claude",
 	})
 
 	// Create multiple listeners
@@ -829,9 +685,8 @@ func TestInitializer_CreateMCPListener_ListenerAcceptsConnections(t *testing.T) 
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
+		WorkDir:    workDir,
+		ClientType: "claude",
 	})
 
 	result, err := init.createMCPListener()
@@ -853,9 +708,8 @@ func TestInitializer_CreateMCPServer_Success(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
+		WorkDir:    workDir,
+		ClientType: "claude",
 	})
 
 	// First create dependencies
@@ -904,9 +758,8 @@ func TestInitializer_CreateMCPServer_ConfiguresHTTPRoutes(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
+		WorkDir:    workDir,
+		ClientType: "claude",
 	})
 
 	// Create dependencies
@@ -965,9 +818,8 @@ func TestInitializer_CreateMCPServer_ReadHeaderTimeout(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
+		WorkDir:    workDir,
+		ClientType: "claude",
 	})
 
 	// Create dependencies
@@ -1061,9 +913,8 @@ func TestInitializer_CreateMCPServer_RequiresListener(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
+		WorkDir:    workDir,
+		ClientType: "claude",
 	})
 
 	clientResult, err := init.createAIClient()
@@ -1092,9 +943,8 @@ func TestInitializer_CreateMCPServer_RequiresAIClient(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
+		WorkDir:    workDir,
+		ClientType: "claude",
 	})
 
 	listenerResult, err := init.createMCPListener()
@@ -1124,9 +974,8 @@ func TestInitializer_CreateMCPServer_RequiresMsgRepo(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
+		WorkDir:    workDir,
+		ClientType: "claude",
 	})
 
 	clientResult, err := init.createAIClient()
@@ -1152,246 +1001,40 @@ func TestInitializer_CreateMCPServer_RequiresMsgRepo(t *testing.T) {
 	require.Contains(t, err.Error(), "message repository is required")
 }
 
-// ===========================================================================
-// handleWorkerReady Tests (ProcessReady-based worker confirmation)
-// ===========================================================================
-
-func TestInitializer_HandleWorkerReady_ConfirmsWorker(t *testing.T) {
-	// Unit test: handleWorkerReady confirms worker on ProcessReady event
+func TestInitializer_SpinnerData_ReturnsPhase(t *testing.T) {
+	// Verify SpinnerData returns current phase
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 3,
+		WorkDir:    workDir,
+		ClientType: "claude",
 	})
 
-	// Set phase to WorkersReady
-	init.mu.Lock()
-	init.phase = InitWorkersReady
-	init.mu.Unlock()
-
-	// Create ProcessReady event for first worker
-	event1 := events.ProcessEvent{
-		Type:      events.ProcessReady,
-		ProcessID: "worker-1",
-		Role:      events.RoleWorker,
-		Status:    events.ProcessStatusReady,
-	}
-
-	// Handle first event
-	init.handleWorkerReady(event1)
-	require.Equal(t, 1, init.workerConfirmation.Count(), "one worker should be confirmed")
-
-	// Create ProcessReady event for second worker
-	event2 := events.ProcessEvent{
-		Type:      events.ProcessReady,
-		ProcessID: "worker-2",
-		Role:      events.RoleWorker,
-		Status:    events.ProcessStatusReady,
-	}
-
-	// Handle second event
-	init.handleWorkerReady(event2)
-	require.Equal(t, 2, init.workerConfirmation.Count(), "two workers should be confirmed")
-}
-
-func TestInitializer_HandleWorkerReady_ClosesChannelWhenAllReady(t *testing.T) {
-	// Unit test: handleWorkerReady closes Done() channel when all workers ready
-	workDir := t.TempDir()
-
-	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 2,
-	})
-
-	// Set phase to WorkersReady
-	init.mu.Lock()
-	init.phase = InitWorkersReady
-	init.mu.Unlock()
-
-	// First worker ready
-	event1 := events.ProcessEvent{
-		Type:      events.ProcessReady,
-		ProcessID: "worker-1",
-		Role:      events.RoleWorker,
-		Status:    events.ProcessStatusReady,
-	}
-	init.handleWorkerReady(event1)
-
-	// Done channel should NOT be closed yet (only 1/2 workers)
-	select {
-	case <-init.workerConfirmation.Done():
-		require.Fail(t, "Done channel should not be closed yet")
-	default:
-		// Expected - channel not closed
-	}
-
-	// Second worker ready (last one)
-	event2 := events.ProcessEvent{
-		Type:      events.ProcessReady,
-		ProcessID: "worker-2",
-		Role:      events.RoleWorker,
-		Status:    events.ProcessStatusReady,
-	}
-	init.handleWorkerReady(event2)
-
-	// Done channel should now be closed
-	select {
-	case <-init.workerConfirmation.Done():
-		// Expected - channel is closed
-	default:
-		require.Fail(t, "Done channel should be closed after all workers confirmed")
-	}
-
-	// Verify all workers are confirmed
-	require.True(t, init.workerConfirmation.IsComplete())
-	require.Equal(t, 2, init.workerConfirmation.Count())
-}
-
-func TestInitializer_HandleWorkerReady_IdempotentConfirmation(t *testing.T) {
-	// Verify duplicate confirmations from same worker are handled correctly
-	workDir := t.TempDir()
-
-	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 2,
-	})
-
-	// Set phase to WorkersReady
-	init.mu.Lock()
-	init.phase = InitWorkersReady
-	init.mu.Unlock()
-
-	// Create ProcessReady event for worker-1
-	event := events.ProcessEvent{
-		Type:      events.ProcessReady,
-		ProcessID: "worker-1",
-		Role:      events.RoleWorker,
-		Status:    events.ProcessStatusReady,
-	}
-
-	// Handle first confirmation
-	init.handleWorkerReady(event)
-	require.Equal(t, 1, init.workerConfirmation.Count())
-
-	// Handle duplicate confirmation from same worker
-	init.handleWorkerReady(event)
-	require.Equal(t, 1, init.workerConfirmation.Count(), "duplicate should not increase count")
-
-	// Confirmed workers should only have one entry
-	confirmed := init.workerConfirmation.ConfirmedWorkers()
-	require.Len(t, confirmed, 1)
-	require.True(t, confirmed["worker-1"])
-}
-
-func TestInitializer_SpinnerData_UsesWorkerConfirmation(t *testing.T) {
-	// Verify SpinnerData returns data from workerConfirmation
-	workDir := t.TempDir()
-
-	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 3,
-	})
-
-	// Confirm some workers
-	init.workerConfirmation.Confirm("WORKER.1")
-	init.workerConfirmation.Confirm("WORKER.2")
-
-	// Get spinner data
-	phase, spawned, expected, confirmed := init.SpinnerData()
-
+	// Get spinner data - should return InitNotStarted
+	phase := init.SpinnerData()
 	require.Equal(t, InitNotStarted, phase)
-	require.Equal(t, 0, spawned)
-	require.Equal(t, 3, expected)
-	require.Len(t, confirmed, 2)
-	require.True(t, confirmed["WORKER.1"])
-	require.True(t, confirmed["WORKER.2"])
+
+	// Set a different phase
+	init.mu.Lock()
+	init.phase = InitSpawningCoordinator
+	init.mu.Unlock()
+
+	phase = init.SpinnerData()
+	require.Equal(t, InitSpawningCoordinator, phase)
 }
 
 // ===========================================================================
-// run() Channel-Based Waiting Tests (Task perles-oph9.12)
+// run() Tests
 // ===========================================================================
-
-func TestRun_CompletesWhenAllWorkersConfirm(t *testing.T) {
-	// Unit test: run() completes when workerConfirmation.Done() signals
-	workDir := t.TempDir()
-
-	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 2,
-		Timeout:         10 * time.Second, // Long timeout to ensure completion via channel
-	})
-
-	// Subscribe to events to verify InitEventReady is published
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	sub := init.Broker().Subscribe(ctx)
-
-	// Pre-confirm all workers BEFORE starting
-	// This simulates the scenario where workers confirm immediately
-	init.workerConfirmation.Confirm("WORKER.1")
-	init.workerConfirmation.Confirm("WORKER.2")
-
-	// Verify Done channel is already closed
-	select {
-	case <-init.workerConfirmation.Done():
-		// Expected
-	default:
-		require.Fail(t, "Done channel should be closed after all workers confirmed")
-	}
-
-	// The run() loop will immediately see Done() is closed and complete
-	// We can verify by checking that the workerConfirmation tracks the workers
-	require.True(t, init.workerConfirmation.IsComplete())
-	require.Equal(t, 2, init.workerConfirmation.Count())
-
-	// Note: We can't easily test the full run() without a mock AI client,
-	// but we can verify the confirmation mechanism works correctly.
-	// The integration test below tests the full flow.
-	_ = sub // Used to verify event subscription works
-}
-
-func TestRun_TimesOutWhenWorkersDoNotConfirm(t *testing.T) {
-	// Unit test: run() times out correctly if workers don't confirm
-	workDir := t.TempDir()
-
-	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
-		Timeout:         100 * time.Millisecond, // Short timeout
-	})
-
-	// Do NOT confirm any workers - they should stay unconfirmed
-	require.Equal(t, 0, init.workerConfirmation.Count())
-	require.False(t, init.workerConfirmation.IsComplete())
-
-	// Done channel should NOT be closed
-	select {
-	case <-init.workerConfirmation.Done():
-		require.Fail(t, "Done channel should not be closed without confirmations")
-	default:
-		// Expected
-	}
-
-	// Verify the timeout mechanism is properly configured
-	require.Equal(t, 100*time.Millisecond, init.cfg.Timeout)
-}
 
 func TestRun_CancelsOnContextCancellation(t *testing.T) {
 	// Unit test: run() cancels correctly on context cancellation
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
-		Timeout:         10 * time.Second, // Long timeout
+		WorkDir:    workDir,
+		ClientType: "claude",
+		Timeout:    10 * time.Second, // Long timeout
 	})
 
 	// Verify we can cancel the initializer
@@ -1414,123 +1057,6 @@ func TestRun_CancelsOnContextCancellation(t *testing.T) {
 	require.Equal(t, context.Canceled, init.ctx.Err())
 }
 
-func TestRun_WorkerConfirmationRaceCondition(t *testing.T) {
-	// Race test: Concurrent worker confirmations handled correctly
-	workDir := t.TempDir()
-
-	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 10,
-		Timeout:         5 * time.Second,
-	})
-
-	// Concurrently confirm workers from multiple goroutines
-	done := make(chan struct{})
-	for i := range 10 {
-		go func(workerNum int) {
-			defer func() { done <- struct{}{} }()
-			workerID := fmt.Sprintf("WORKER.%d", workerNum)
-			init.workerConfirmation.Confirm(workerID)
-		}(i + 1)
-	}
-
-	// Wait for all goroutines to complete
-	for range 10 {
-		<-done
-	}
-
-	// Verify all workers are confirmed
-	require.Equal(t, 10, init.workerConfirmation.Count())
-	require.True(t, init.workerConfirmation.IsComplete())
-
-	// Done channel should be closed
-	select {
-	case <-init.workerConfirmation.Done():
-		// Expected
-	default:
-		require.Fail(t, "Done channel should be closed")
-	}
-}
-
-func TestRun_WorkerConfirmationDuplicateRaceCondition(t *testing.T) {
-	// Race test: Duplicate confirmations handled correctly under concurrency
-	workDir := t.TempDir()
-
-	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 2,
-		Timeout:         5 * time.Second,
-	})
-
-	// Concurrently confirm the SAME workers multiple times
-	done := make(chan struct{})
-	for range 20 {
-		go func() {
-			defer func() { done <- struct{}{} }()
-			// Randomly confirm either worker 1 or 2
-			workerID := "WORKER.1"
-			if time.Now().UnixNano()%2 == 0 {
-				workerID = "WORKER.2"
-			}
-			init.workerConfirmation.Confirm(workerID)
-		}()
-	}
-
-	// Wait for all goroutines to complete
-	for range 20 {
-		<-done
-	}
-
-	// Should only have 2 unique workers confirmed (not 20)
-	require.LessOrEqual(t, init.workerConfirmation.Count(), 2)
-}
-
-func TestRun_SelectPriority(t *testing.T) {
-	// Verify that the Done() channel properly signals completion
-	// This tests the channel behavior independent of the full run() loop
-	workDir := t.TempDir()
-
-	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 3,
-		Timeout:         5 * time.Second,
-	})
-
-	// Set up a context
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	// Confirm workers one by one
-	init.workerConfirmation.Confirm("WORKER.1")
-	init.workerConfirmation.Confirm("WORKER.2")
-
-	// Done channel should NOT be ready (2/3 confirmed)
-	select {
-	case <-init.workerConfirmation.Done():
-		require.Fail(t, "Done channel should not be ready yet")
-	case <-ctx.Done():
-		require.Fail(t, "context timed out waiting")
-	default:
-		// Expected - channel not ready
-	}
-
-	// Confirm final worker
-	init.workerConfirmation.Confirm("WORKER.3")
-
-	// Now Done channel SHOULD be closed
-	select {
-	case <-init.workerConfirmation.Done():
-		// Expected - channel is closed
-	case <-ctx.Done():
-		require.Fail(t, "context timed out")
-	}
-
-	require.True(t, init.workerConfirmation.IsComplete())
-}
-
 // ===========================================================================
 // cleanupResources() Tests (Task perles-oph9.13)
 // ===========================================================================
@@ -1540,9 +1066,8 @@ func TestCleanupResources_Idempotent(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
+		WorkDir:    workDir,
+		ClientType: "claude",
 	})
 
 	// First call should not panic
@@ -1566,9 +1091,8 @@ func TestCleanupResources_ClearsFields(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
+		WorkDir:    workDir,
+		ClientType: "claude",
 	})
 
 	// Manually set fields to simulate initialized state
@@ -1591,9 +1115,8 @@ func TestCancel_StopsContextAndCleansUp(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
+		WorkDir:    workDir,
+		ClientType: "claude",
 	})
 
 	// Manually set up context like Start() does
@@ -1628,9 +1151,8 @@ func TestCancel_DoubleCallDoesNotPanic(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
+		WorkDir:    workDir,
+		ClientType: "claude",
 	})
 
 	// Manually set up context like Start() does
@@ -1659,9 +1181,8 @@ func TestCancel_Idempotent_CancelFuncCalledOnce(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
+		WorkDir:    workDir,
+		ClientType: "claude",
 	})
 
 	// Set up context
@@ -1683,9 +1204,8 @@ func TestCleanupResources_WithPartialInitialization(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
+		WorkDir:    workDir,
+		ClientType: "claude",
 	})
 
 	// Simulate partial initialization - only some fields set
@@ -1711,9 +1231,8 @@ func TestCleanupResources_WithNoInitialization(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
+		WorkDir:    workDir,
+		ClientType: "claude",
 	})
 
 	// All fields are nil by default - cleanup should handle this gracefully
@@ -1727,9 +1246,8 @@ func TestCleanupResources_ThreadSafe(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
+		WorkDir:    workDir,
+		ClientType: "claude",
 	})
 
 	// Simulate partial initialization
@@ -1819,9 +1337,8 @@ func TestRetry_CallsCancel(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ClientType:      "claude",
-		ExpectedWorkers: 4,
+		WorkDir:    workDir,
+		ClientType: "claude",
 	})
 
 	// Manually set up context like Start() does
@@ -1886,7 +1403,6 @@ func TestInitializer_WorktreePhase_Success(t *testing.T) {
 		WorkDir:            workDir,
 		WorktreeBaseBranch: "main",
 		GitExecutor:        mockGit,
-		ExpectedWorkers:    4,
 	})
 
 	// Start to generate session ID
@@ -1914,7 +1430,6 @@ func TestInitializer_WorktreePhase_NotGitRepo_Fails(t *testing.T) {
 		WorkDir:            workDir,
 		WorktreeBaseBranch: "main",
 		GitExecutor:        mockGit,
-		ExpectedWorkers:    4,
 	})
 
 	init.mu.Lock()
@@ -1941,7 +1456,6 @@ func TestInitializer_WorktreePhase_CreateFails_Fails(t *testing.T) {
 		WorkDir:            workDir,
 		WorktreeBaseBranch: "main",
 		GitExecutor:        mockGit,
-		ExpectedWorkers:    4,
 	})
 
 	init.mu.Lock()
@@ -1962,9 +1476,8 @@ func TestInitializer_WorktreePhase_Disabled_SkipsPhase(t *testing.T) {
 	// No expectations set - if any method is called, test will fail
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		GitExecutor:     mockGit,
-		ExpectedWorkers: 4,
+		WorkDir:     workDir,
+		GitExecutor: mockGit,
 	})
 
 	// Verify worktree path is empty
@@ -1980,7 +1493,6 @@ func TestInitializer_WorktreePath_PropagatedToWorkspace(t *testing.T) {
 	init := NewInitializer(InitializerConfig{
 		WorkDir:            workDir,
 		WorktreeBaseBranch: "main",
-		ExpectedWorkers:    4,
 	})
 
 	// Manually set worktree path (simulating successful createWorktree)
@@ -2028,7 +1540,6 @@ func TestInitializer_PruneWorktrees_CalledBeforeCreate(t *testing.T) {
 		WorkDir:            workDir,
 		WorktreeBaseBranch: "main",
 		GitExecutor:        mockGit,
-		ExpectedWorkers:    4,
 	})
 
 	init.mu.Lock()
@@ -2067,7 +1578,6 @@ func TestInitializer_BranchName_DefaultsToSessionID(t *testing.T) {
 		WorkDir:            workDir,
 		WorktreeBaseBranch: "", // Empty - uses current HEAD
 		GitExecutor:        mockGit,
-		ExpectedWorkers:    4,
 	})
 
 	init.mu.Lock()
@@ -2105,7 +1615,6 @@ func TestInitializer_BranchName_UsesConfiguredBaseBranch(t *testing.T) {
 		WorkDir:            workDir,
 		WorktreeBaseBranch: baseBranch, // Configured base branch
 		GitExecutor:        mockGit,
-		ExpectedWorkers:    4,
 	})
 
 	init.mu.Lock()
@@ -2134,7 +1643,6 @@ func TestInitializer_WorktreePhase_PruneFailsContinues(t *testing.T) {
 		WorkDir:            workDir,
 		WorktreeBaseBranch: "main",
 		GitExecutor:        mockGit,
-		ExpectedWorkers:    4,
 	})
 
 	init.mu.Lock()
@@ -2159,7 +1667,6 @@ func TestInitializer_WorktreePhase_DeterminePathFails(t *testing.T) {
 		WorkDir:            workDir,
 		WorktreeBaseBranch: "main",
 		GitExecutor:        mockGit,
-		ExpectedWorkers:    4,
 	})
 
 	init.mu.Lock()
@@ -2176,8 +1683,7 @@ func TestInitializer_Retry_ResetsWorktreeFields(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ExpectedWorkers: 4,
+		WorkDir: workDir,
 	})
 
 	// Manually set worktree fields

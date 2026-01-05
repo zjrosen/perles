@@ -148,7 +148,7 @@ func (m Model) renderInputBar() string {
 	inputHeight := m.calculateInputHeight()
 	// Navigation mode: show help instead of input
 	if m.navigationMode {
-		navHelp := "1-4=workers  5=coordinator  6=messages  7=commands  esc=exit"
+		navHelp := "1-N=workers  5=coordinator  6=messages  7=commands  esc=exit"
 		navStyle := lipgloss.NewStyle().
 			Foreground(styles.TextSecondaryColor)
 

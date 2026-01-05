@@ -34,6 +34,39 @@ category: "Testing"
 			},
 		},
 		{
+			name: "valid frontmatter with workers field",
+			content: `---
+name: "Test Workflow"
+description: "A test description"
+category: "Testing"
+workers: 4
+---
+
+# Content here
+`,
+			wantFM: frontmatter{
+				Name:        "Test Workflow",
+				Description: "A test description",
+				Category:    "Testing",
+				Workers:     4,
+			},
+		},
+		{
+			name: "workers defaults to zero when omitted",
+			content: `---
+name: "Test Workflow"
+description: "No workers field"
+---
+
+# Content here
+`,
+			wantFM: frontmatter{
+				Name:        "Test Workflow",
+				Description: "No workers field",
+				Workers:     0,
+			},
+		},
+		{
 			name: "valid frontmatter without category",
 			content: `---
 name: "Simple Workflow"
@@ -133,6 +166,32 @@ This is the content of the debate format.
 	assert.Equal(t, "Technical Debate", wf.Name)
 	assert.Equal(t, "Multi-perspective debate format", wf.Description)
 	assert.Equal(t, "Analysis", wf.Category)
+	assert.Equal(t, 0, wf.Workers) // Default when not specified
+	assert.Equal(t, content, wf.Content)
+	assert.Equal(t, SourceBuiltIn, wf.Source)
+	assert.Empty(t, wf.FilePath)
+}
+
+func TestParseWorkflowWithWorkers(t *testing.T) {
+	content := `---
+name: "Technical Debate"
+description: "Multi-perspective debate format"
+category: "Analysis"
+workers: 4
+---
+
+# Technical Debate Format
+
+This is the content of the debate format.
+`
+	wf, err := parseWorkflow(content, "debate.md", SourceBuiltIn)
+	require.NoError(t, err)
+
+	assert.Equal(t, "debate", wf.ID)
+	assert.Equal(t, "Technical Debate", wf.Name)
+	assert.Equal(t, "Multi-perspective debate format", wf.Description)
+	assert.Equal(t, "Analysis", wf.Category)
+	assert.Equal(t, 4, wf.Workers) // Explicit worker count
 	assert.Equal(t, content, wf.Content)
 	assert.Equal(t, SourceBuiltIn, wf.Source)
 	assert.Empty(t, wf.FilePath)
@@ -184,6 +243,27 @@ func TestLoadBuiltinWorkflows(t *testing.T) {
 
 	assert.True(t, foundDebate, "expected to find debate workflow")
 	assert.True(t, foundResearch, "expected to find research_proposal workflow")
+}
+
+func TestLoadBuiltinWorkflowsHaveCorrectWorkerCounts(t *testing.T) {
+	workflows, err := LoadBuiltinWorkflows()
+	require.NoError(t, err)
+
+	// Map workflow IDs to expected worker counts
+	expectedWorkers := map[string]int{
+		"debate":            4,
+		"cook":              4,
+		"quick_plan":        4,
+		"research_proposal": 4,
+		"research_to_tasks": 0, // Default when not specified
+	}
+
+	for _, wf := range workflows {
+		expected, hasExpectation := expectedWorkers[wf.ID]
+		if hasExpectation {
+			assert.Equal(t, expected, wf.Workers, "workflow %s should have %d workers", wf.ID, expected)
+		}
+	}
 }
 
 func TestLoadUserWorkflowsFromDir(t *testing.T) {

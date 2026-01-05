@@ -51,14 +51,13 @@ type InitializerEvent struct {
 
 // InitializerConfig holds configuration for creating an Initializer.
 type InitializerConfig struct {
-	WorkDir         string
-	ClientType      string
-	CodexModel      string
-	ClaudeModel     string
-	AmpModel        string
-	AmpMode         string
-	ExpectedWorkers int
-	Timeout         time.Duration
+	WorkDir     string
+	ClientType  string
+	CodexModel  string
+	ClaudeModel string
+	AmpModel    string
+	AmpMode     string
+	Timeout     time.Duration
 	// Worktree configuration
 	WorktreeBaseBranch string          // Branch to base worktree on. Empty = skip worktree creation
 	GitExecutor        git.GitExecutor // Injected for testability
@@ -83,12 +82,11 @@ type Initializer struct {
 	cfg InitializerConfig
 
 	// State (protected by mu)
-	phase              InitPhase
-	failedAtPhase      InitPhase // The phase we were in when failure/timeout occurred
-	workersSpawned     int
-	workerConfirmation *workerConfirmation // Thread-safe tracker for worker confirmations
-	startTime          time.Time
-	err                error
+	phase         InitPhase
+	failedAtPhase InitPhase // The phase we were in when failure/timeout occurred
+	startTime     time.Time
+	err           error
+	readyChan     chan struct{} // Closed when initialization completes successfully
 
 	// Worktree state (set during createWorktree phase)
 	worktreePath   string // Path to created worktree (empty if disabled)
@@ -120,18 +118,15 @@ type Initializer struct {
 
 // NewInitializer creates a new Initializer with the given configuration.
 func NewInitializer(cfg InitializerConfig) *Initializer {
-	if cfg.ExpectedWorkers == 0 {
-		cfg.ExpectedWorkers = 4
-	}
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 30 * time.Second
 	}
 
 	return &Initializer{
-		cfg:                cfg,
-		phase:              InitNotStarted,
-		workerConfirmation: newWorkerConfirmation(cfg.ExpectedWorkers),
-		broker:             pubsub.NewBroker[InitializerEvent](),
+		cfg:       cfg,
+		phase:     InitNotStarted,
+		readyChan: make(chan struct{}),
+		broker:    pubsub.NewBroker[InitializerEvent](),
 	}
 }
 
@@ -177,12 +172,10 @@ func (i *Initializer) WorktreeBranch() string {
 }
 
 // SpinnerData returns data needed for spinner rendering.
-func (i *Initializer) SpinnerData() (phase InitPhase, workersSpawned, expectedWorkers int, confirmedWorkers map[string]bool) {
+func (i *Initializer) SpinnerData() InitPhase {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
-
-	// workerConfirmation.ConfirmedWorkers() returns a copy to avoid races
-	return i.phase, i.workersSpawned, i.cfg.ExpectedWorkers, i.workerConfirmation.ConfirmedWorkers()
+	return i.phase
 }
 
 // Resources returns the initialized resources.
@@ -277,10 +270,9 @@ func (i *Initializer) Retry() error {
 	i.mu.Lock()
 	i.phase = InitNotStarted
 	i.failedAtPhase = InitNotStarted
-	i.workersSpawned = 0
-	i.workerConfirmation = newWorkerConfirmation(i.cfg.ExpectedWorkers)
 	i.err = nil
 	i.started = false
+	i.readyChan = make(chan struct{}) // Reset ready channel
 	i.messageRepo = nil
 	i.mcpPort = 0
 	i.mcpServer = nil
@@ -315,7 +307,7 @@ func (i *Initializer) Cancel() {
 }
 
 // run is the main initialization goroutine.
-// Uses channel-based waiting for worker confirmations via workerConfirmation.Done().
+// With lazy spawning, initialization completes when coordinator's first turn finishes.
 func (i *Initializer) run() {
 	// Start timeout timer
 	timeoutTimer := time.NewTimer(i.cfg.Timeout)
@@ -344,9 +336,8 @@ func (i *Initializer) run() {
 		return
 	}
 
-	// Phase 3+: Event-driven phases
-	// Subscribe to v2EventBus for all process events (coordinator and workers)
-	// ProcessReady events drive confirmation for both coordinator and workers
+	// Phase 3: Event-driven - wait for coordinator's first turn to complete
+	// Subscribe to v2EventBus for coordinator process events
 	v2Sub := i.v2Infra.Core.EventBus.Subscribe(i.ctx)
 
 	// Transition to awaiting first message
@@ -363,24 +354,15 @@ func (i *Initializer) run() {
 			i.timeout()
 			return
 
-		case <-i.workerConfirmation.Done():
-			// All workers confirmed - transition to ready and complete
-			log.Debug(log.CatOrch, "All workers confirmed via channel, transitioning to ready", "subsystem", "init")
-			i.transitionTo(InitReady)
-			i.publishEvent(InitializerEvent{
-				Type:  InitEventReady,
-				Phase: InitReady,
-			})
+		case <-i.readyChan:
+			// Initialization completed successfully
 			return
 
 		case event, ok := <-v2Sub:
 			if !ok {
 				return
 			}
-			// Process events drive phase transitions:
-			// - Coordinator ProcessReady triggers worker spawning
-			// - Worker ProcessSpawned tracks spawn count
-			// - Worker ProcessReady confirms workers as ready
+			// Coordinator ProcessReady triggers transition to InitReady
 			i.handleV2Event(event)
 		}
 	}
@@ -678,13 +660,12 @@ func (i *Initializer) createWorkspace() error {
 	// Step 5: Create V2 orchestration infrastructure using factory
 	// ============================================================
 	v2Infra, err := v2.NewInfrastructure(v2.InfrastructureConfig{
-		Port:            port,
-		AIClient:        aiClient,
-		WorkDir:         effectiveWorkDir, // Use worktree path when enabled
-		Extensions:      extensions,
-		MessageRepo:     msgRepo,
-		ExpectedWorkers: i.cfg.ExpectedWorkers,
-		SessionID:       sess.ID,
+		Port:        port,
+		AIClient:    aiClient,
+		WorkDir:     effectiveWorkDir, // Use worktree path when enabled
+		Extensions:  extensions,
+		MessageRepo: msgRepo,
+		SessionID:   sess.ID,
 	})
 	if err != nil {
 		_ = listenerResult.Listener.Close()
@@ -782,49 +763,13 @@ func (i *Initializer) spawnCoordinator() error {
 	return nil
 }
 
-// spawnWorkers spawns all workers programmatically.
-// This runs in a goroutine to not block the event loop.
-func (i *Initializer) spawnWorkers() {
-	i.mu.RLock()
-	mcpCoordServer := i.mcpCoordServer
-	expected := i.cfg.ExpectedWorkers
-	i.mu.RUnlock()
-
-	if mcpCoordServer == nil {
-		log.Error(log.CatOrch, "cannot spawn workers: MCP server not initialized", "subsystem", "init")
-		return
-	}
-
-	for j := range expected {
-		workerID, err := mcpCoordServer.SpawnIdleWorker()
-		if err != nil {
-			log.Error(log.CatOrch, "failed to spawn worker", "subsystem", "init", "index", j, "error", err)
-			// Continue trying to spawn remaining workers
-			continue
-		}
-		log.Debug(log.CatOrch, "spawned worker programmatically", "subsystem", "init", "workerID", workerID, "index", j)
-	}
-}
-
 // handleV2Event processes v2 orchestration events from the unified v2EventBus.
-// This drives phase transitions based on ProcessReady events:
-// - Coordinator's first turn completing (ProcessReady) triggers worker spawning
-// - Workers' first turn completing (ProcessReady) confirms them as ready
-// Completion is handled via workerConfirmation.Done() channel in run().
+// This drives phase transitions based on coordinator ProcessReady events.
+// With lazy spawning, initialization completes when coordinator's first turn finishes.
 func (i *Initializer) handleV2Event(event pubsub.Event[any]) {
 	if payload, ok := event.Payload.(events.ProcessEvent); ok {
 		if payload.Role == events.RoleCoordinator {
 			i.handleCoordinatorProcessEvent(payload)
-			return
-		}
-
-		// Handle worker events
-		switch payload.Type {
-		case events.ProcessSpawned:
-			i.handleProcessSpawned(payload)
-		case events.ProcessReady:
-			// Worker's first turn completed - use this for confirmation
-			i.handleWorkerReady(payload)
 		}
 	}
 }
@@ -851,56 +796,17 @@ func (i *Initializer) handleCoordinatorProcessEvent(payload events.ProcessEvent)
 	// Detect coordinator's first turn completing for phase transition
 	// ProcessReady is emitted when ProcessTurnCompleteHandler transitions status to Ready
 	// This is authoritative - the coordinator's first turn has fully completed
+	// With lazy spawning, we transition directly to InitReady (no workers spawn during init)
 	if phase == InitAwaitingFirstMessage && payload.Type == events.ProcessReady {
-		log.Debug(log.CatOrch, "coordinator first turn complete (ProcessReady), spawning workers", "subsystem", "init")
-		i.transitionTo(InitSpawningWorkers)
-
-		// Spawn workers programmatically (don't rely on coordinator LLM)
-		go i.spawnWorkers()
+		log.Debug(log.CatOrch, "coordinator first turn complete (ProcessReady), initialization ready", "subsystem", "init")
+		i.transitionTo(InitReady)
+		i.publishEvent(InitializerEvent{
+			Type:  InitEventReady,
+			Phase: InitReady,
+		})
+		// Signal run() loop to exit
+		close(i.readyChan)
 	}
-}
-
-// handleProcessSpawned processes unified ProcessSpawned events for workers.
-// Tracks spawn count and transitions to InitWorkersReady when all workers spawned.
-// and completion is signaled via workerConfirmation.Done() channel in run().
-func (i *Initializer) handleProcessSpawned(payload events.ProcessEvent) {
-	i.mu.Lock()
-	phase := i.phase
-	i.workersSpawned++
-	spawned := i.workersSpawned
-	expected := i.cfg.ExpectedWorkers
-	i.mu.Unlock()
-
-	log.Debug(log.CatOrch, "worker process spawned",
-		"subsystem", "init",
-		"processID", payload.ProcessID,
-		"spawned", spawned,
-		"expected", expected,
-		"status", payload.Status)
-
-	// Check if all workers spawned - transition to WorkersReady phase
-	// Completion (all workers confirmed) is handled via workerConfirmation.Done() in run()
-	if phase == InitSpawningWorkers && spawned >= expected {
-		i.transitionTo(InitWorkersReady)
-	}
-}
-
-// handleWorkerReady processes ProcessReady events for workers.
-// This is emitted when a worker's first turn completes (status transitions to Ready).
-// This is more reliable than MessageWorkerReady because it's triggered by the
-// authoritative status transition, not dependent on the LLM calling an MCP tool.
-func (i *Initializer) handleWorkerReady(payload events.ProcessEvent) {
-	// Use workerConfirmation tracker for thread-safe confirmation
-	// The tracker handles idempotency (duplicate confirmations are ignored)
-	// When all workers confirm, the Done() channel is closed, which is
-	// handled in the select loop in run()
-	i.workerConfirmation.Confirm(payload.ProcessID)
-
-	log.Debug(log.CatOrch, "Worker confirmed (ProcessReady)",
-		"subsystem", "init",
-		"workerID", payload.ProcessID,
-		"confirmed", i.workerConfirmation.Count(),
-		"expected", i.workerConfirmation.Expected())
 }
 
 // transitionTo updates the phase and publishes a phase change event.

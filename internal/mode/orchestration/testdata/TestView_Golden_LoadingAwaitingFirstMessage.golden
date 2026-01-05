@@ -5,6 +5,7 @@
                                                                                                                         
                                                                                                                         
                                                                                                                         
+                                                                                                                        
                                ╔═══════╗   ╔═══════╗   ╔═══════╗   ╔═══════╗   ╔═══════╗                                
                                ║       ╠═══╣       ╠═══╣       ╠═══╣       ╠═══╣       ║                                
                                ║       ╠═══╣       ╠═══╣       ╠═══╣       ╠═══╣       ║                                
@@ -15,12 +16,11 @@
                                                   ✓ Creating Worktree                                                   
                                                  ✓ Creating Workspace                                                   
                                                 ✓ Spawning Coordinator                                                  
-                                                 ⠸ Coordinator Loaded                                                   
-                                                    Spawning Workers                                                    
-                                                     Workers Loaded                                                     
+                                                  ⠸ Coordinator Ready                                                   
                                                                                                                         
                                                                                                                         
                                                      [ESC] Cancel                                                       
+                                                                                                                        
                                                                                                                         
                                                                                                                         
                                                                                                                         

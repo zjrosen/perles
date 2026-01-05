@@ -48,7 +48,6 @@ func TestWorktreeIntegration_AlreadyInWorktree_Detected(t *testing.T) {
 		WorkDir:            workDir,
 		WorktreeBaseBranch: "main",
 		GitExecutor:        mockGit,
-		ExpectedWorkers:    4,
 	})
 
 	// Check the IsWorktree result (this would be used in pre-flight checks)
@@ -67,9 +66,8 @@ func TestWorktreeIntegration_AlreadyInWorktree_ContinueInPlace(t *testing.T) {
 	// No IsGitRepo expected - worktree disabled means we skip createWorktree()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		GitExecutor:     mockGit,
-		ExpectedWorkers: 4,
+		WorkDir:     workDir,
+		GitExecutor: mockGit,
 	})
 
 	// Verify we don't attempt worktree creation
@@ -102,7 +100,6 @@ func TestWorktreeIntegration_BranchAlreadyCheckedOut_Error(t *testing.T) {
 		WorkDir:            workDir,
 		WorktreeBaseBranch: "main",
 		GitExecutor:        mockGit,
-		ExpectedWorkers:    4,
 	})
 
 	init.mu.Lock()
@@ -137,7 +134,6 @@ func TestWorktreeIntegration_BranchAlreadyCheckedOut_UniqueSessionBranch(t *test
 		WorkDir:            workDir,
 		WorktreeBaseBranch: "main",
 		GitExecutor:        mockGit,
-		ExpectedWorkers:    4,
 	})
 
 	init.mu.Lock()
@@ -189,7 +185,6 @@ func TestWorktreeIntegration_UncommittedChanges_OperationStillAllowed(t *testing
 		WorkDir:            workDir,
 		WorktreeBaseBranch: "main",
 		GitExecutor:        mockGit,
-		ExpectedWorkers:    4,
 	})
 
 	init.mu.Lock()
@@ -228,7 +223,6 @@ func TestWorktreeIntegration_WorktreePathExists_PruneFirst(t *testing.T) {
 		WorkDir:            workDir,
 		WorktreeBaseBranch: "main",
 		GitExecutor:        mockGit,
-		ExpectedWorkers:    4,
 	})
 
 	init.mu.Lock()
@@ -258,7 +252,6 @@ func TestWorktreeIntegration_WorktreePathExists_Error(t *testing.T) {
 		WorkDir:            workDir,
 		WorktreeBaseBranch: "main",
 		GitExecutor:        mockGit,
-		ExpectedWorkers:    4,
 	})
 
 	init.mu.Lock()
@@ -288,7 +281,6 @@ func TestWorktreeIntegration_WorktreePathExists_PruneThenSucceed(t *testing.T) {
 		WorkDir:            workDir,
 		WorktreeBaseBranch: "main",
 		GitExecutor:        mockGit,
-		ExpectedWorkers:    4,
 	})
 
 	init.mu.Lock()
@@ -328,7 +320,6 @@ func TestWorktreeIntegration_DetachedHead_AutoBranch(t *testing.T) {
 		WorkDir:            workDir,
 		WorktreeBaseBranch: "main", // Need non-empty to trigger worktree creation
 		GitExecutor:        mockGit,
-		ExpectedWorkers:    4,
 	})
 
 	init.mu.Lock()
@@ -376,7 +367,6 @@ func TestWorktreeIntegration_DetachedHead_ConfiguredBaseBranchPassedCorrectly(t 
 		WorkDir:            workDir,
 		WorktreeBaseBranch: configuredBaseBranch, // User selected base branch
 		GitExecutor:        mockGit,
-		ExpectedWorkers:    4,
 	})
 
 	init.mu.Lock()
@@ -407,7 +397,6 @@ func TestWorktreeIntegration_NotGitRepo_SkipWorktree(t *testing.T) {
 		WorkDir:            workDir,
 		WorktreeBaseBranch: "main",
 		GitExecutor:        mockGit,
-		ExpectedWorkers:    4,
 	})
 
 	init.mu.Lock()
@@ -428,9 +417,8 @@ func TestWorktreeIntegration_NotGitRepo_DisabledWorktree(t *testing.T) {
 	// No expectations set - nothing should be called when disabled
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		GitExecutor:     mockGit,
-		ExpectedWorkers: 4,
+		WorkDir:     workDir,
+		GitExecutor: mockGit,
 	})
 
 	// Verify worktree state is empty
@@ -497,7 +485,6 @@ func TestWorktreeIntegration_BareRepo_WorktreeCreationFails(t *testing.T) {
 		WorkDir:            workDir,
 		WorktreeBaseBranch: "main",
 		GitExecutor:        mockGit,
-		ExpectedWorkers:    4,
 	})
 
 	init.mu.Lock()
@@ -534,7 +521,6 @@ func TestWorktreeIntegration_GracefulDegradation_Skip(t *testing.T) {
 		WorkDir:            workDir,
 		WorktreeBaseBranch: "main",
 		GitExecutor:        mockGit,
-		ExpectedWorkers:    4,
 	})
 
 	init.mu.Lock()
@@ -547,9 +533,8 @@ func TestWorktreeIntegration_GracefulDegradation_Skip(t *testing.T) {
 
 	// User chooses to skip - simulate by creating new initializer with worktree disabled
 	initSkip := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		GitExecutor:     mockGit,
-		ExpectedWorkers: 4,
+		WorkDir:     workDir,
+		GitExecutor: mockGit,
 	})
 
 	// Verify skip works - no worktree attempted
@@ -576,7 +561,6 @@ func TestWorktreeIntegration_GracefulDegradation_RetryOption(t *testing.T) {
 		WorkDir:            workDir,
 		WorktreeBaseBranch: "main",
 		GitExecutor:        mockGitFail,
-		ExpectedWorkers:    4,
 	})
 
 	initFail.mu.Lock()
@@ -598,7 +582,6 @@ func TestWorktreeIntegration_GracefulDegradation_RetryOption(t *testing.T) {
 		WorkDir:            workDir,
 		WorktreeBaseBranch: "main",
 		GitExecutor:        mockGitSuccess,
-		ExpectedWorkers:    4,
 	})
 
 	initSuccess.mu.Lock()
@@ -629,7 +612,6 @@ func TestWorktreeIntegration_GracefulDegradation_ErrorPreserved(t *testing.T) {
 		WorkDir:            workDir,
 		WorktreeBaseBranch: "main",
 		GitExecutor:        mockGit,
-		ExpectedWorkers:    4,
 	})
 
 	init.mu.Lock()
@@ -663,7 +645,6 @@ func TestWorktreeIntegration_EndToEnd_Success(t *testing.T) {
 		WorkDir:            workDir,
 		WorktreeBaseBranch: "main", // Need non-empty to trigger worktree creation
 		GitExecutor:        mockGit,
-		ExpectedWorkers:    4,
 	})
 
 	init.mu.Lock()
@@ -697,7 +678,6 @@ func TestWorktreeIntegration_EndToEnd_WithCustomBaseBranch(t *testing.T) {
 		WorkDir:            workDir,
 		WorktreeBaseBranch: customBaseBranch, // Custom base branch
 		GitExecutor:        mockGit,
-		ExpectedWorkers:    4,
 	})
 
 	init.mu.Lock()
@@ -845,8 +825,7 @@ func TestWorktreeIntegration_ConcurrentAccess_WorktreePath(t *testing.T) {
 	// Test: Thread-safe access to WorktreePath
 	workDir := t.TempDir()
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ExpectedWorkers: 4,
+		WorkDir: workDir,
 	})
 
 	// Set a path
@@ -872,8 +851,7 @@ func TestWorktreeIntegration_ConcurrentAccess_WorktreeBranch(t *testing.T) {
 	// Test: Thread-safe access to WorktreeBranch
 	workDir := t.TempDir()
 	init := NewInitializer(InitializerConfig{
-		WorkDir:         workDir,
-		ExpectedWorkers: 4,
+		WorkDir: workDir,
 	})
 
 	// Set a branch

@@ -16,26 +16,18 @@ func newTestInitializer(phase InitPhase, err error) *Initializer {
 		failedAt = InitCreatingWorkspace // Default failed phase
 	}
 	return &Initializer{
-		phase:              phase,
-		failedAtPhase:      failedAt,
-		err:                err,
-		workerConfirmation: newWorkerConfirmation(4),
-		cfg: InitializerConfig{
-			ExpectedWorkers: 4,
-		},
+		phase:         phase,
+		failedAtPhase: failedAt,
+		err:           err,
 	}
 }
 
 // newTestInitializerWithFailedPhase creates an Initializer with specific failed phase.
 func newTestInitializerWithFailedPhase(phase InitPhase, failedAt InitPhase, err error) *Initializer {
 	return &Initializer{
-		phase:              phase,
-		failedAtPhase:      failedAt,
-		err:                err,
-		workerConfirmation: newWorkerConfirmation(4),
-		cfg: InitializerConfig{
-			ExpectedWorkers: 4,
-		},
+		phase:         phase,
+		failedAtPhase: failedAt,
+		err:           err,
 	}
 }
 
@@ -46,9 +38,8 @@ func TestInitPhase_PhaseOrdering(t *testing.T) {
 	require.Less(t, int(InitNotStarted), int(InitCreatingWorktree))
 	require.Less(t, int(InitCreatingWorktree), int(InitCreatingWorkspace))
 	require.Less(t, int(InitCreatingWorkspace), int(InitSpawningCoordinator))
-	require.Less(t, int(InitSpawningCoordinator), int(InitSpawningWorkers))
-	require.Less(t, int(InitSpawningWorkers), int(InitWorkersReady))
-	require.Less(t, int(InitWorkersReady), int(InitReady))
+	require.Less(t, int(InitSpawningCoordinator), int(InitAwaitingFirstMessage))
+	require.Less(t, int(InitAwaitingFirstMessage), int(InitReady))
 }
 
 // --- Unit tests for timeout handling ---
@@ -59,13 +50,13 @@ func TestInitPhase_PhaseOrdering(t *testing.T) {
 func TestInitPhase_Timeout(t *testing.T) {
 	m := New(Config{})
 	m = m.SetSize(120, 30)
-	m.initializer = newTestInitializer(InitSpawningWorkers, nil)
+	m.initializer = newTestInitializer(InitAwaitingFirstMessage, nil)
 
 	// Send timeout message - should be a no-op in the TUI layer
 	m, _ = m.Update(InitTimeoutMsg{})
 
 	// Phase unchanged - Initializer handles actual timeout
-	require.Equal(t, InitSpawningWorkers, m.getInitPhase())
+	require.Equal(t, InitAwaitingFirstMessage, m.getInitPhase())
 }
 
 func TestInitPhase_TimeoutIgnoredWhenReady(t *testing.T) {
@@ -177,8 +168,7 @@ func TestSpinnerTick_ContinuesDuringActivePhases(t *testing.T) {
 	activePhases := []InitPhase{
 		InitCreatingWorkspace,
 		InitSpawningCoordinator,
-		InitSpawningWorkers,
-		InitWorkersReady,
+		InitAwaitingFirstMessage,
 	}
 
 	for _, phase := range activePhases {
@@ -200,8 +190,7 @@ func TestInputBlocking_DuringLoading(t *testing.T) {
 	activePhases := []InitPhase{
 		InitCreatingWorkspace,
 		InitSpawningCoordinator,
-		InitSpawningWorkers,
-		InitWorkersReady,
+		InitAwaitingFirstMessage,
 	}
 
 	blockedKeys := []tea.KeyMsg{
@@ -372,7 +361,7 @@ func TestGetPhaseIndicatorAndStyle_Pending(t *testing.T) {
 	m.initializer = newTestInitializer(InitCreatingWorkspace, nil)
 
 	// Phases after current should show pending (space)
-	indicator, _ := m.getPhaseIndicatorAndStyle(InitSpawningWorkers, InitCreatingWorkspace)
+	indicator, _ := m.getPhaseIndicatorAndStyle(InitAwaitingFirstMessage, InitCreatingWorkspace)
 	require.NotContains(t, indicator, "✓")
 	require.NotContains(t, indicator, "✗")
 }
@@ -388,14 +377,14 @@ func TestGetPhaseIndicatorAndStyle_Failed(t *testing.T) {
 
 func TestGetPhaseIndicatorAndStyle_TimedOut(t *testing.T) {
 	m := New(Config{})
-	m.initializer = newTestInitializerWithFailedPhase(InitTimedOut, InitSpawningWorkers, nil)
+	m.initializer = newTestInitializerWithFailedPhase(InitTimedOut, InitAwaitingFirstMessage, nil)
 
-	// Phases before SpawningWorkers should be completed
-	indicator, _ := m.getPhaseIndicatorAndStyle(InitAwaitingFirstMessage, InitTimedOut)
+	// Phases before AwaitingFirstMessage should be completed
+	indicator, _ := m.getPhaseIndicatorAndStyle(InitSpawningCoordinator, InitTimedOut)
 	require.Contains(t, indicator, "✓")
 
-	// SpawningWorkers should show failed (that's where we timed out)
-	indicator, _ = m.getPhaseIndicatorAndStyle(InitSpawningWorkers, InitTimedOut)
+	// AwaitingFirstMessage should show failed (that's where we timed out)
+	indicator, _ = m.getPhaseIndicatorAndStyle(InitAwaitingFirstMessage, InitTimedOut)
 	require.Contains(t, indicator, "✗")
 }
 
@@ -445,28 +434,6 @@ func TestView_Golden_LoadingAwaitingFirstMessage(t *testing.T) {
 	teatest.RequireEqualOutput(t, []byte(view))
 }
 
-func TestView_Golden_LoadingSpawningWorkers(t *testing.T) {
-	m := New(Config{})
-	m = m.SetSize(120, 30)
-	m.initializer = newTestInitializer(InitSpawningWorkers, nil)
-	m.worktreeEnabled = true // Show worktree phase in loading screen
-	m.spinnerFrame = 4
-
-	view := m.View()
-	teatest.RequireEqualOutput(t, []byte(view))
-}
-
-func TestView_Golden_LoadingWorkersReady(t *testing.T) {
-	m := New(Config{})
-	m = m.SetSize(120, 30)
-	m.initializer = newTestInitializer(InitWorkersReady, nil)
-	m.worktreeEnabled = true // Show worktree phase in loading screen
-	m.spinnerFrame = 6
-
-	view := m.View()
-	teatest.RequireEqualOutput(t, []byte(view))
-}
-
 func TestView_Golden_LoadingFailed(t *testing.T) {
 	m := New(Config{})
 	m = m.SetSize(120, 30)
@@ -480,7 +447,7 @@ func TestView_Golden_LoadingFailed(t *testing.T) {
 func TestView_Golden_LoadingTimedOut(t *testing.T) {
 	m := New(Config{})
 	m = m.SetSize(120, 30)
-	m.initializer = newTestInitializerWithFailedPhase(InitTimedOut, InitSpawningWorkers, nil)
+	m.initializer = newTestInitializerWithFailedPhase(InitTimedOut, InitAwaitingFirstMessage, nil)
 	m.worktreeEnabled = true // Show worktree phase in loading screen
 
 	view := m.View()
@@ -501,7 +468,7 @@ func TestView_Golden_LoadingNarrow(t *testing.T) {
 func TestView_Golden_LoadingWide(t *testing.T) {
 	m := New(Config{})
 	m = m.SetSize(160, 40)
-	m.initializer = newTestInitializer(InitSpawningWorkers, nil)
+	m.initializer = newTestInitializer(InitAwaitingFirstMessage, nil)
 	m.worktreeEnabled = true // Show worktree phase in loading screen
 	m.spinnerFrame = 5
 
@@ -610,14 +577,10 @@ func TestRenderInitScreen_ShowsCorrectHints(t *testing.T) {
 // newTestInitializerWithWorktree creates an Initializer with worktree-specific state for testing.
 func newTestInitializerWithWorktree(phase InitPhase, failedAt InitPhase, err error, worktreePath string) *Initializer {
 	return &Initializer{
-		phase:              phase,
-		failedAtPhase:      failedAt,
-		err:                err,
-		worktreePath:       worktreePath,
-		workerConfirmation: newWorkerConfirmation(4),
-		cfg: InitializerConfig{
-			ExpectedWorkers: 4,
-		},
+		phase:         phase,
+		failedAtPhase: failedAt,
+		err:           err,
+		worktreePath:  worktreePath,
 	}
 }
 
@@ -790,9 +753,7 @@ func TestPhaseToLinkIndex_IncludesWorktree(t *testing.T) {
 	require.Equal(t, 1, phaseToLinkIndex(InitCreatingWorkspace))
 	require.Equal(t, 2, phaseToLinkIndex(InitSpawningCoordinator))
 	require.Equal(t, 3, phaseToLinkIndex(InitAwaitingFirstMessage))
-	require.Equal(t, 4, phaseToLinkIndex(InitSpawningWorkers))
-	require.Equal(t, 5, phaseToLinkIndex(InitWorkersReady))
-	require.Equal(t, 6, phaseToLinkIndex(InitReady))
+	require.Equal(t, 4, phaseToLinkIndex(InitReady))
 }
 
 func TestGetPhaseIndicatorAndStyle_Worktree_InProgress(t *testing.T) {

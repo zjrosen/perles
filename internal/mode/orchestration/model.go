@@ -70,8 +70,6 @@ const (
 	InitCreatingWorkspace              // Consolidates client, pool, message log, MCP server creation
 	InitSpawningCoordinator            // Coordinator process started
 	InitAwaitingFirstMessage           // Waiting for coordinator's first response
-	InitSpawningWorkers                // Workers are being spawned
-	InitWorkersReady                   // All workers have reported ready
 	InitReady
 	InitFailed
 	InitTimedOut
