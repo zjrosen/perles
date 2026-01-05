@@ -252,7 +252,7 @@ func TestLoadBuiltinWorkflowsHaveCorrectWorkerCounts(t *testing.T) {
 	// Map workflow IDs to expected worker counts
 	expectedWorkers := map[string]int{
 		"debate":            4,
-		"cook":              4,
+		"cook":              2,
 		"quick_plan":        4,
 		"research_proposal": 4,
 		"research_to_tasks": 0, // Default when not specified

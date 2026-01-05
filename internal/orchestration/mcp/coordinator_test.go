@@ -900,7 +900,7 @@ func TestReplaceWorker_Routing(t *testing.T) {
 func TestTaskAssignmentPrompt_WithSummary(t *testing.T) {
 	prompt := TaskAssignmentPrompt("perles-abc.1", "Test Task", "Focus on error handling.")
 
-	require.True(t, containsInternal(prompt, "Coordinator Instructions:"), "Prompt should contain 'Coordinator Instructions:' section when summary provided")
+	require.True(t, containsInternal(prompt, "## Coordinator Instructions"), "Prompt should contain 'Coordinator Instructions:' section when summary provided")
 	require.True(t, containsInternal(prompt, "Focus on error handling."), "Prompt should contain the summary content")
 }
 
@@ -908,7 +908,7 @@ func TestTaskAssignmentPrompt_WithSummary(t *testing.T) {
 func TestTaskAssignmentPrompt_WithoutSummary(t *testing.T) {
 	prompt := TaskAssignmentPrompt("perles-abc.1", "Test Task", "")
 
-	require.False(t, containsInternal(prompt, "Coordinator Instructions:"), "Prompt should NOT contain 'Coordinator Instructions:' section when summary is empty")
+	require.False(t, containsInternal(prompt, "## Coordinator Instructions"), "Prompt should NOT contain 'Coordinator Instructions:' section when summary is empty")
 }
 
 // TestTaskAssignmentPrompt_AllSections verifies TaskAssignmentPrompt includes all sections when provided.
@@ -922,9 +922,9 @@ func TestTaskAssignmentPrompt_AllSections(t *testing.T) {
 	// Verify all sections are present
 	sections := []string{
 		"[TASK ASSIGNMENT]",
-		"Task ID: perles-abc.1",
-		"Title: Implement Feature X",
-		"Coordinator Instructions:",
+		"**Task ID:** perles-abc.1",
+		"**Title:** Implement Feature X",
+		"## Coordinator Instructions",
 		"Important: Check existing patterns in module Y",
 		"report_implementation_complete",
 	}
