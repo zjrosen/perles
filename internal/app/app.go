@@ -3,6 +3,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -22,10 +23,11 @@ import (
 	"github.com/zjrosen/perles/internal/mode/shared"
 	"github.com/zjrosen/perles/internal/orchestration/workflow"
 	"github.com/zjrosen/perles/internal/pubsub"
-	"github.com/zjrosen/perles/internal/ui/styles"
 
+	"github.com/zjrosen/perles/internal/ui/shared/diffviewer"
 	"github.com/zjrosen/perles/internal/ui/shared/logoverlay"
 	"github.com/zjrosen/perles/internal/ui/shared/toaster"
+	"github.com/zjrosen/perles/internal/ui/styles"
 	"github.com/zjrosen/perles/internal/watcher"
 )
 
@@ -50,6 +52,9 @@ type Model struct {
 	debugMode    bool
 	logOverlay   logoverlay.Model
 	logListenCmd tea.Cmd
+
+	// Diff viewer overlay
+	diffViewer diffviewer.Model
 
 	// Cache Managers
 	bqlCache      cachemanager.CacheManager[string, []beads.Issue]
@@ -129,6 +134,15 @@ func NewWithConfig(
 		logListenCmd = overlay.StartListening()
 	}
 
+	// Create diff viewer with git executor factory for workDir
+	// Uses factory pattern to enable worktree switching
+	dv := diffviewer.NewWithGitExecutorFactory(
+		func(path string) git.GitExecutor {
+			return git.NewRealExecutor(path)
+		},
+		workDir,
+	).SetClipboard(services.Clipboard)
+
 	return Model{
 		currentMode:     mode.ModeKanban,
 		kanban:          kanban.New(services),
@@ -139,6 +153,7 @@ func NewWithConfig(
 		logOverlay:      overlay,
 		debugMode:       debugMode,
 		logListenCmd:    logListenCmd,
+		diffViewer:      dv,
 		watcherHandle:   watcherHandle,
 		watcherCtx:      watcherCtx,
 		watcherCancel:   watcherCancel,
@@ -177,6 +192,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.orchestration = m.orchestration.SetSize(msg.Width, msg.Height)
 		m.toaster = m.toaster.SetSize(msg.Width, msg.Height)
 		m.logOverlay.SetSize(msg.Width, msg.Height)
+		m.diffViewer = m.diffViewer.SetSize(msg.Width, msg.Height)
 
 		return m, nil
 
@@ -185,6 +201,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.logOverlay.Visible() {
 			var cmd tea.Cmd
 			m.logOverlay, cmd = m.logOverlay.Update(msg)
+			return m, cmd
+		}
+
+		// Route mouse events to diff viewer when visible
+		if m.diffViewer.Visible() {
+			var cmd tea.Cmd
+			m.diffViewer, cmd = m.diffViewer.Update(msg)
 			return m, cmd
 		}
 
@@ -205,6 +228,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			m.logOverlay, cmd = m.logOverlay.Update(msg)
 
+			return m, cmd
+		}
+
+		// Diff viewer takes precedence when visible
+		if m.diffViewer.Visible() {
+			var cmd tea.Cmd
+			m.diffViewer, cmd = m.diffViewer.Update(msg)
 			return m, cmd
 		}
 
@@ -333,6 +363,71 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.logOverlay.Hide()
 
 		return m, nil
+
+	case diffviewer.ShowDiffViewerMsg:
+		var cmd tea.Cmd
+		m.diffViewer, cmd = m.diffViewer.ShowAndLoad()
+		m.diffViewer = m.diffViewer.SetSize(m.width, m.height)
+		return m, cmd
+
+	case diffviewer.HideDiffViewerMsg:
+		m.diffViewer = m.diffViewer.Hide()
+		return m, nil
+
+	case diffviewer.CommitsLoadedMsg:
+		var cmd tea.Cmd
+		m.diffViewer, cmd = m.diffViewer.Update(msg)
+		return m, cmd
+
+	case diffviewer.WorkingDirDiffLoadedMsg:
+		var cmd tea.Cmd
+		m.diffViewer, cmd = m.diffViewer.Update(msg)
+		return m, cmd
+
+	case diffviewer.CommitFilesLoadedMsg:
+		var cmd tea.Cmd
+		m.diffViewer, cmd = m.diffViewer.Update(msg)
+		return m, cmd
+
+	case diffviewer.CommitPreviewLoadedMsg:
+		var cmd tea.Cmd
+		m.diffViewer, cmd = m.diffViewer.Update(msg)
+		return m, cmd
+
+	// Forward branch/worktree loaded messages to diffViewer
+	case diffviewer.WorktreesLoadedMsg:
+		var cmd tea.Cmd
+		m.diffViewer, cmd = m.diffViewer.Update(msg)
+		return m, cmd
+
+	case diffviewer.BranchesLoadedMsg:
+		var cmd tea.Cmd
+		m.diffViewer, cmd = m.diffViewer.Update(msg)
+		return m, cmd
+
+	case diffviewer.CommitsForBranchLoadedMsg:
+		var cmd tea.Cmd
+		m.diffViewer, cmd = m.diffViewer.Update(msg)
+		return m, cmd
+
+	case diffviewer.HunkCopiedMsg:
+		if msg.Err != nil {
+			return m, func() tea.Msg {
+				return mode.ShowToastMsg{Message: "Copy failed: " + msg.Err.Error(), Style: toaster.StyleError}
+			}
+		}
+		return m, func() tea.Msg {
+			return mode.ShowToastMsg{Message: fmt.Sprintf("Copied %d lines", msg.LineCount), Style: toaster.StyleSuccess}
+		}
+
+	case diffviewer.ViewModeConstrainedMsg:
+		// User tried to switch to side-by-side but terminal is too narrow
+		return m, func() tea.Msg {
+			return mode.ShowToastMsg{
+				Message: fmt.Sprintf("Terminal too narrow for side-by-side view (need %d cols, have %d)", msg.MinWidth, msg.CurrentWidth),
+				Style:   toaster.StyleInfo,
+			}
+		}
 	}
 
 	// Delegate all messages to active mode controller
@@ -523,6 +618,11 @@ func (m Model) View() string {
 	// Overlay toaster on top of active mode's view
 	if m.toaster.Visible() {
 		view = m.toaster.Overlay(view, m.width, m.height)
+	}
+
+	// Overlay diff viewer when visible
+	if m.diffViewer.Visible() {
+		view = m.diffViewer.Overlay(view)
 	}
 
 	// Overlay log viewer on top (only in debug mode when visible)

@@ -14,6 +14,7 @@ import (
 	"github.com/zjrosen/perles/internal/mode/shared"
 	"github.com/zjrosen/perles/internal/ui/board"
 	"github.com/zjrosen/perles/internal/ui/modals/issueeditor"
+	"github.com/zjrosen/perles/internal/ui/shared/diffviewer"
 	"github.com/zjrosen/perles/internal/ui/shared/modal"
 )
 
@@ -528,4 +529,25 @@ func TestKanban_CtrlE_CancelMsg_ReturnsToBoardView(t *testing.T) {
 	// Should return to board view
 	require.Equal(t, ViewBoard, m.view, "expected ViewBoard after cancel when opened from board")
 	require.Nil(t, cmd, "expected no command on cancel")
+}
+
+// =============================================================================
+// Diff Viewer Tests (Ctrl+G)
+// =============================================================================
+
+func TestKanban_CtrlG_OpensDiffViewer(t *testing.T) {
+	m := createTestModel(t)
+	m.view = ViewBoard
+
+	// Simulate Ctrl+G keypress
+	msg := tea.KeyMsg{Type: tea.KeyCtrlG}
+	_, cmd := m.handleBoardKey(msg)
+
+	// Execute the command to get the message
+	require.NotNil(t, cmd, "expected command from Ctrl+G key")
+	result := cmd()
+
+	// Verify it's a ShowDiffViewerMsg
+	_, ok := result.(diffviewer.ShowDiffViewerMsg)
+	require.True(t, ok, "expected diffviewer.ShowDiffViewerMsg, got %T", result)
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/zjrosen/perles/internal/mode/shared"
 	"github.com/zjrosen/perles/internal/ui/coleditor"
 	"github.com/zjrosen/perles/internal/ui/details"
+	"github.com/zjrosen/perles/internal/ui/shared/diffviewer"
 	"github.com/zjrosen/perles/internal/ui/shared/modal"
 	"github.com/zjrosen/perles/internal/ui/shared/picker"
 	"github.com/zjrosen/perles/internal/ui/shared/toaster"
@@ -322,6 +323,12 @@ func (m Model) handleBoardKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+
+	case key.Matches(msg, keys.DiffViewer.Open):
+		// Open diff viewer overlay
+		return m, func() tea.Msg {
+			return diffviewer.ShowDiffViewerMsg{}
+		}
 	}
 
 	// Delegate navigation to board

@@ -237,8 +237,8 @@ func TestGetTokenColor(t *testing.T) {
 func TestGetTokenCategories(t *testing.T) {
 	categories := GetTokenCategories()
 
-	// Should have 13 categories
-	require.Len(t, categories, 13, "Should have 13 token categories")
+	// Should have 14 categories
+	require.Len(t, categories, 14, "Should have 14 token categories")
 
 	// Count total tokens across categories
 	totalTokens := 0

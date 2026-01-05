@@ -14,6 +14,7 @@ import (
 	"github.com/zjrosen/perles/internal/mode"
 	"github.com/zjrosen/perles/internal/ui/details"
 	"github.com/zjrosen/perles/internal/ui/modals/issueeditor"
+	"github.com/zjrosen/perles/internal/ui/shared/diffviewer"
 	"github.com/zjrosen/perles/internal/ui/shared/formmodal"
 	"github.com/zjrosen/perles/internal/ui/shared/modal"
 )
@@ -1620,4 +1621,42 @@ func TestSearch_MouseScrollAtBoundary_DoesNotGoNegative(t *testing.T) {
 
 	// Offset should never go negative
 	require.GreaterOrEqual(t, m.details.YOffset(), 0, "offset should never be negative")
+}
+
+// =============================================================================
+// Diff Viewer Tests (Ctrl+G)
+// =============================================================================
+
+func TestSearch_CtrlG_OpensDiffViewer_FocusResults(t *testing.T) {
+	m := createTestModelWithResults(t)
+	m.focus = FocusResults
+
+	// Simulate Ctrl+G keypress
+	msg := tea.KeyMsg{Type: tea.KeyCtrlG}
+	_, cmd := m.handleKey(msg)
+
+	// Execute the command to get the message
+	require.NotNil(t, cmd, "expected command from Ctrl+G key")
+	result := cmd()
+
+	// Verify it's a ShowDiffViewerMsg
+	_, ok := result.(diffviewer.ShowDiffViewerMsg)
+	require.True(t, ok, "expected diffviewer.ShowDiffViewerMsg, got %T", result)
+}
+
+func TestSearch_CtrlG_OpensDiffViewer_FocusDetails(t *testing.T) {
+	m := createTestModelWithResults(t)
+	m.focus = FocusDetails
+
+	// Simulate Ctrl+G keypress
+	msg := tea.KeyMsg{Type: tea.KeyCtrlG}
+	_, cmd := m.handleKey(msg)
+
+	// Execute the command to get the message
+	require.NotNil(t, cmd, "expected command from Ctrl+G key")
+	result := cmd()
+
+	// Verify it's a ShowDiffViewerMsg
+	_, ok := result.(diffviewer.ShowDiffViewerMsg)
+	require.True(t, ok, "expected diffviewer.ShowDiffViewerMsg, got %T", result)
 }

@@ -1,0 +1,3 @@
+@@ -10,3 +10,3 @@ func example() {                         │                                                           
+  10     return oldValue                                   │  10     return newValue                                   
+  11 }                                                     │  11 }                                                     

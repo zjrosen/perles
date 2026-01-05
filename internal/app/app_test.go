@@ -11,6 +11,7 @@ import (
 	"github.com/zjrosen/perles/internal/mode"
 	"github.com/zjrosen/perles/internal/mode/kanban"
 	"github.com/zjrosen/perles/internal/mode/search"
+	"github.com/zjrosen/perles/internal/ui/shared/diffviewer"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -292,4 +293,95 @@ func TestApp_SaveSearchToNewView_Structure(t *testing.T) {
 	// The in-memory update happens after AddView, so it won't update on error
 	// This is correct behavior - don't partially update on error
 	require.NotNil(t, resultModel, "handler should return model")
+}
+
+func TestApp_ShowDiffViewer(t *testing.T) {
+	m := createTestModel(t)
+	require.False(t, m.diffViewer.Visible(), "diff viewer should start hidden")
+
+	// Send ShowDiffViewerMsg
+	newModel, cmd := m.Update(diffviewer.ShowDiffViewerMsg{})
+	m = newModel.(Model)
+
+	require.True(t, m.diffViewer.Visible(), "diff viewer should be visible after ShowDiffViewerMsg")
+	require.NotNil(t, cmd, "should return LoadDiff command")
+}
+
+func TestApp_HideDiffViewer(t *testing.T) {
+	m := createTestModel(t)
+
+	// First show the diff viewer
+	newModel, _ := m.Update(diffviewer.ShowDiffViewerMsg{})
+	m = newModel.(Model)
+	require.True(t, m.diffViewer.Visible(), "diff viewer should be visible")
+
+	// Send HideDiffViewerMsg
+	newModel, cmd := m.Update(diffviewer.HideDiffViewerMsg{})
+	m = newModel.(Model)
+
+	require.False(t, m.diffViewer.Visible(), "diff viewer should be hidden after HideDiffViewerMsg")
+	require.Nil(t, cmd, "should not return any command")
+}
+
+func TestApp_DiffViewerEventRouting(t *testing.T) {
+	m := createTestModel(t)
+
+	// Show diff viewer first
+	newModel, _ := m.Update(diffviewer.ShowDiffViewerMsg{})
+	m = newModel.(Model)
+	require.True(t, m.diffViewer.Visible(), "diff viewer should be visible")
+
+	// Send ESC key - should close diff viewer (not switch modes)
+	newModel, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m = newModel.(Model)
+
+	// The diff viewer handles ESC and emits HideDiffViewerMsg
+	// We need to process that message to verify the overlay closes
+	if cmd != nil {
+		msg := cmd()
+		if _, ok := msg.(diffviewer.HideDiffViewerMsg); ok {
+			newModel, _ = m.Update(msg)
+			m = newModel.(Model)
+		}
+	}
+
+	require.False(t, m.diffViewer.Visible(), "diff viewer should be hidden after ESC")
+	require.Equal(t, mode.ModeKanban, m.currentMode, "should remain in kanban mode")
+}
+
+func TestApp_DiffViewerOverlay(t *testing.T) {
+	m := createTestModel(t)
+
+	// Set size first
+	newModel, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = newModel.(Model)
+
+	// Show diff viewer
+	newModel, _ = m.Update(diffviewer.ShowDiffViewerMsg{})
+	m = newModel.(Model)
+
+	// Verify view includes diff viewer overlay
+	view := m.View()
+	require.NotEmpty(t, view, "view should render")
+	// Since diffViewer is visible and in loading state, the view should contain diff viewer content
+	require.True(t, m.diffViewer.Visible(), "diff viewer should be visible")
+}
+
+func TestApp_DiffViewerWindowResize(t *testing.T) {
+	m := createTestModel(t)
+
+	// Show diff viewer
+	newModel, _ := m.Update(diffviewer.ShowDiffViewerMsg{})
+	m = newModel.(Model)
+
+	// Resize window
+	newModel, _ = m.Update(tea.WindowSizeMsg{Width: 200, Height: 80})
+	m = newModel.(Model)
+
+	require.Equal(t, 200, m.width, "width should be updated")
+	require.Equal(t, 80, m.height, "height should be updated")
+	// The diff viewer should have received the size update (we can't easily verify internal state,
+	// but the View() should not panic)
+	view := m.View()
+	require.NotEmpty(t, view, "view should render after resize")
 }

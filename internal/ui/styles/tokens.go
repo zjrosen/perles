@@ -85,6 +85,12 @@ const (
 	TokenBQLParen    ColorToken = "bql.paren" //nolint:gosec // UI color token, not credentials
 	TokenBQLComma    ColorToken = "bql.comma"
 
+	// Diff syntax highlighting
+	TokenDiffAddition ColorToken = "diff.addition"
+	TokenDiffDeletion ColorToken = "diff.deletion" //nolint:gosec // UI color token, not credentials
+	TokenDiffContext  ColorToken = "diff.context"
+	TokenDiffHunk     ColorToken = "diff.hunk"
+
 	// Misc
 	TokenSpinner ColorToken = "spinner"
 )
@@ -169,6 +175,12 @@ func AllTokens() []ColorToken {
 		TokenBQLLiteral,
 		TokenBQLParen,
 		TokenBQLComma,
+
+		// Diff syntax highlighting
+		TokenDiffAddition,
+		TokenDiffDeletion,
+		TokenDiffContext,
+		TokenDiffHunk,
 
 		// Misc
 		TokenSpinner,

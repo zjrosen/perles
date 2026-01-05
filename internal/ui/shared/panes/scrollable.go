@@ -49,9 +49,22 @@ type ScrollableConfig struct {
 	// LeftTitle is the title shown on the left side of the border.
 	LeftTitle string
 
+	// RightTitle is the title shown on the right side of the top border.
+	// This is appended before metrics display.
+	RightTitle string
+
 	// BottomLeft is optional text shown on the bottom-left of the border.
 	// Useful for status indicators like queue counts.
 	BottomLeft string
+
+	// BottomRight is optional text shown on the bottom-right of the border.
+	// If empty and ShowScrollIndicator is true, the scroll indicator is shown here.
+	BottomRight string
+
+	// ShowScrollIndicator controls whether to show scroll position in bottom-right.
+	// When true and BottomRight is empty, displays "↑XX%" when scrolled up.
+	// Defaults to false for backward compatibility.
+	ShowScrollIndicator bool
 
 	// TitleColor is the color for the title text.
 	TitleColor lipgloss.AdaptiveColor
@@ -62,6 +75,15 @@ type ScrollableConfig struct {
 	// Focused indicates whether the pane has focus.
 	// Passed through to BorderedPane for border styling.
 	Focused bool
+
+	// FocusedBorderColor is the border color when focused.
+	// If not set, uses BorderColor even when focused.
+	FocusedBorderColor lipgloss.AdaptiveColor
+
+	// TopAligned disables the bottom-padding behavior.
+	// When true, content starts at the top of the viewport.
+	// When false (default), short content is padded to appear at the bottom.
+	TopAligned bool
 }
 
 // ScrollablePane handles the common viewport setup, content padding, auto-scroll,
@@ -89,14 +111,16 @@ func ScrollablePane(
 	// Build pre-wrapped content
 	content := contentFn(vpWidth)
 
-	// Pad content to push it to the bottom when it's shorter than viewport.
-	// CRITICAL: Padding must be PREPENDED to push content to bottom.
-	// This preserves the "latest content at bottom" behavior.
-	contentLines := strings.Split(content, "\n")
-	if len(contentLines) < vpHeight {
-		padding := make([]string, vpHeight-len(contentLines))
-		contentLines = append(padding, contentLines...) // Prepend padding
-		content = strings.Join(contentLines, "\n")
+	// Pad content when it's shorter than viewport.
+	// If TopAligned, skip padding (content starts at top).
+	// Otherwise, prepend padding to push content to bottom (chat-like behavior).
+	if !cfg.TopAligned {
+		contentLines := strings.Split(content, "\n")
+		if len(contentLines) < vpHeight {
+			padding := make([]string, vpHeight-len(contentLines))
+			contentLines = append(padding, contentLines...) // Prepend padding
+			content = strings.Join(contentLines, "\n")
+		}
 	}
 
 	// Capture scroll state BEFORE dimension/content changes for proportional preservation.
@@ -111,14 +135,10 @@ func ScrollablePane(
 
 	cfg.Viewport.SetContent(content)
 
-	// Scroll position restoration (order matters):
-	// 1. If at bottom, stay at bottom (live view experience)
-	// 2. If dimensions changed, restore proportional scroll position
-	// 3. Otherwise, scroll position is preserved by SetContent's internal offset handling
-	if wasAtBottom {
+	if wasAtBottom && !cfg.TopAligned {
 		cfg.Viewport.GotoBottom()
-	} else if dimensionsChanged && oldScrollPercent > 0 {
-		// Restore proportional scroll position after resize
+	} else if dimensionsChanged && oldScrollPercent > 0 && !cfg.TopAligned {
+		// Restore proportional scroll position after resize (only for chat-like views)
 		totalLines := cfg.Viewport.TotalLineCount()
 		scrollableRange := totalLines - cfg.Viewport.Height
 		if scrollableRange > 0 {
@@ -130,27 +150,35 @@ func ScrollablePane(
 	// Get viewport view (handles scrolling and clipping)
 	viewportContent := cfg.Viewport.View()
 
-	// Build right title with new content indicator, scroll indicator, and metrics
+	// Build right title with new content indicator and metrics (scroll indicator moved to bottom)
 	// This must happen AFTER SetContent so scroll indicator is accurate
-	rightTitle := buildRightTitle(*cfg.Viewport, cfg.HasNewContent, cfg.MetricsDisplay)
+	rightTitle := buildRightTitle(*cfg.Viewport, cfg.HasNewContent, cfg.RightTitle, cfg.MetricsDisplay, cfg.ShowScrollIndicator)
+
+	// Build bottom right with scroll indicator if enabled
+	bottomRight := cfg.BottomRight
+	if bottomRight == "" && cfg.ShowScrollIndicator {
+		bottomRight = BuildScrollIndicator(*cfg.Viewport)
+	}
 
 	// Render pane with bordered title using the BorderedPane API
 	return BorderedPane(BorderConfig{
-		Content:     viewportContent,
-		Width:       width,
-		Height:      height,
-		TopLeft:     cfg.LeftTitle,
-		TopRight:    rightTitle,
-		BottomLeft:  cfg.BottomLeft,
-		Focused:     cfg.Focused,
-		TitleColor:  cfg.TitleColor,
-		BorderColor: cfg.BorderColor,
+		Content:            viewportContent,
+		Width:              width,
+		Height:             height,
+		TopLeft:            cfg.LeftTitle,
+		TopRight:           rightTitle,
+		BottomLeft:         cfg.BottomLeft,
+		BottomRight:        bottomRight,
+		Focused:            cfg.Focused,
+		TitleColor:         cfg.TitleColor,
+		BorderColor:        cfg.BorderColor,
+		FocusedBorderColor: cfg.FocusedBorderColor,
 	})
 }
 
 // buildRightTitle constructs the right title section for pane borders.
-// It combines the new content indicator, scroll indicator, and optional metrics display.
-func buildRightTitle(vp viewport.Model, hasNewContent bool, metricsDisplay string) string {
+// It combines the new content indicator, scroll indicator (if not shown at bottom), right title, and optional metrics display.
+func buildRightTitle(vp viewport.Model, hasNewContent bool, rightTitle, metricsDisplay string, scrollIndicatorAtBottom bool) string {
 	var parts []string
 
 	// Add new content indicator if scrolled up and new content arrived
@@ -158,9 +186,16 @@ func buildRightTitle(vp viewport.Model, hasNewContent bool, metricsDisplay strin
 		parts = append(parts, NewContentIndicatorStyle.Render("↓New"))
 	}
 
-	// Add scroll indicator if scrolled up from bottom
-	if scrollIndicator := BuildScrollIndicator(vp); scrollIndicator != "" {
-		parts = append(parts, scrollIndicator)
+	// Add scroll indicator if scrolled up from bottom (only if not showing at bottom)
+	if !scrollIndicatorAtBottom {
+		if scrollIndicator := BuildScrollIndicator(vp); scrollIndicator != "" {
+			parts = append(parts, scrollIndicator)
+		}
+	}
+
+	// Add right title if provided (e.g., view mode indicator)
+	if rightTitle != "" {
+		parts = append(parts, rightTitle)
 	}
 
 	// Add metrics display if available (e.g., "27k/200k" for context usage)

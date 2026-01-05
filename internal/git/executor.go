@@ -1,9 +1,21 @@
 package git
 
+import "time"
+
 // BranchInfo holds information about a git branch.
 type BranchInfo struct {
 	Name      string // Branch name (e.g., "main", "feature/auth")
 	IsCurrent bool   // True if this is the currently checked out branch
+}
+
+// CommitInfo holds information about a git commit.
+type CommitInfo struct {
+	Hash      string    // Full 40-char SHA
+	ShortHash string    // 7-char abbreviated hash
+	Subject   string    // First line of commit message
+	Author    string    // Author name
+	Date      time.Time // Commit timestamp
+	IsPushed  bool      // True if commit exists on the remote tracking branch
 }
 
 // GitExecutor defines the interface for git worktree operations.
@@ -29,6 +41,31 @@ type GitExecutor interface {
 	GetRepoRoot() (string, error)
 	HasUncommittedChanges() (bool, error)
 	DetermineWorktreePath(sessionID string) (string, error)
+
+	// Diff operations for viewing git diffs
+	// GetDiff returns the unified diff output for the given ref (e.g., "HEAD~1", "main").
+	GetDiff(ref string) (string, error)
+	// GetDiffStat returns the --numstat output for the given ref.
+	GetDiffStat(ref string) (string, error)
+	// GetFileDiff returns the diff for a single file against the given ref.
+	GetFileDiff(ref, path string) (string, error)
+	// GetWorkingDirDiff returns the diff of uncommitted changes (staged + unstaged vs HEAD).
+	GetWorkingDirDiff() (string, error)
+	// GetUntrackedFiles returns the list of untracked files (new files not yet staged).
+	GetUntrackedFiles() ([]string, error)
+	// GetCommitDiff returns the diff for a specific commit (what changed in that commit).
+	GetCommitDiff(hash string) (string, error)
+	// GetFileContent returns the content of a file in the working directory.
+	// Used for displaying untracked files that have no diff.
+	GetFileContent(path string) (string, error)
+
+	// Commit log operations
+	// GetCommitLog returns the most recent commits, up to the specified limit.
+	// Returns an empty slice for empty repositories.
+	GetCommitLog(limit int) ([]CommitInfo, error)
+	// GetCommitLogForRef returns commit history for a specific ref (branch, tag, etc.).
+	// If ref is empty, returns commits for HEAD (same behavior as GetCommitLog).
+	GetCommitLogForRef(ref string, limit int) ([]CommitInfo, error)
 }
 
 // WorktreeInfo holds information about a git worktree.

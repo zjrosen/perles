@@ -24,6 +24,7 @@ import (
 	"github.com/zjrosen/perles/internal/ui/modals/help"
 	"github.com/zjrosen/perles/internal/ui/modals/issueeditor"
 	"github.com/zjrosen/perles/internal/ui/shared/colorpicker"
+	"github.com/zjrosen/perles/internal/ui/shared/diffviewer"
 	"github.com/zjrosen/perles/internal/ui/shared/formmodal"
 	"github.com/zjrosen/perles/internal/ui/shared/issuebadge"
 	"github.com/zjrosen/perles/internal/ui/shared/modal"
@@ -1039,6 +1040,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.help = m.help.SetMode(help.ModeSearch)
 		m.view = ViewHelp
 		return m, nil
+
+	case key.Matches(msg, keys.DiffViewer.Open):
+		// Open diff viewer overlay
+		return m, func() tea.Msg {
+			return diffviewer.ShowDiffViewerMsg{}
+		}
 
 	case key.Matches(msg, keys.Search.FocusSearch):
 		// Focus search input

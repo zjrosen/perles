@@ -1,0 +1,10 @@
+project (main)                                              
+project-feature (feature/auth)                              
+project-bugfix (bugfix/issue-42)                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            

@@ -348,6 +348,96 @@ var LogOverlay = struct {
 	),
 }
 
+// DiffViewer contains keybindings specific to the diff viewer overlay.
+var DiffViewer = struct {
+	Open           key.Binding // ctrl+g - opens diff viewer
+	Close          key.Binding // esc, q - closes diff viewer
+	NextFile       key.Binding // j, down - next file in list
+	PrevFile       key.Binding // k, up - previous file in list
+	ScrollUp       key.Binding // ctrl+u, pgup - scroll diff up
+	ScrollDown     key.Binding // ctrl+d, pgdn - scroll diff down
+	GotoTop        key.Binding // g - go to top of diff
+	GotoBottom     key.Binding // G - go to bottom of diff
+	FocusLeft      key.Binding // h - focus file list
+	FocusRight     key.Binding // l - focus diff pane
+	Tab            key.Binding // tab - cycle through panes
+	Select         key.Binding // enter - select item (load diff for commit)
+	Help           key.Binding // ? - show help overlay
+	NextHunk       key.Binding // ] - jump to next hunk
+	PrevHunk       key.Binding // [ - jump to previous hunk
+	CopyHunk       key.Binding // y - copy current hunk to clipboard
+	ToggleViewMode key.Binding // ctrl+v - toggle between unified and side-by-side
+}{
+	Open: key.NewBinding(
+		key.WithKeys("ctrl+g"),
+		key.WithHelp("ctrl+g", "git diff"),
+	),
+	Close: key.NewBinding(
+		key.WithKeys("esc", "q"),
+		key.WithHelp("esc/q", "close diff"),
+	),
+	NextFile: key.NewBinding(
+		key.WithKeys("j", "down"),
+		key.WithHelp("j/↓", "next file"),
+	),
+	PrevFile: key.NewBinding(
+		key.WithKeys("k", "up"),
+		key.WithHelp("k/↑", "prev file"),
+	),
+	ScrollUp: key.NewBinding(
+		key.WithKeys("ctrl+u", "pgup"),
+		key.WithHelp("ctrl+u", "scroll up"),
+	),
+	ScrollDown: key.NewBinding(
+		key.WithKeys("ctrl+d", "pgdown"),
+		key.WithHelp("ctrl+d", "scroll down"),
+	),
+	GotoTop: key.NewBinding(
+		key.WithKeys("g"),
+		key.WithHelp("g", "go to top"),
+	),
+	GotoBottom: key.NewBinding(
+		key.WithKeys("G"),
+		key.WithHelp("G", "go to bottom"),
+	),
+	FocusLeft: key.NewBinding(
+		key.WithKeys("h", "left"),
+		key.WithHelp("h/←", "file list"),
+	),
+	FocusRight: key.NewBinding(
+		key.WithKeys("l", "right"),
+		key.WithHelp("l/→", "diff pane"),
+	),
+	Tab: key.NewBinding(
+		key.WithKeys("tab"),
+		key.WithHelp("tab", "cycle panes"),
+	),
+	Select: key.NewBinding(
+		key.WithKeys("enter"),
+		key.WithHelp("enter", "select"),
+	),
+	Help: key.NewBinding(
+		key.WithKeys("?"),
+		key.WithHelp("?", "show help"),
+	),
+	NextHunk: key.NewBinding(
+		key.WithKeys("]"),
+		key.WithHelp("]", "next hunk"),
+	),
+	PrevHunk: key.NewBinding(
+		key.WithKeys("["),
+		key.WithHelp("[", "prev hunk"),
+	),
+	CopyHunk: key.NewBinding(
+		key.WithKeys("y"),
+		key.WithHelp("y", "copy hunk"),
+	),
+	ToggleViewMode: key.NewBinding(
+		key.WithKeys("ctrl+v"),
+		key.WithHelp("^v", "toggle view"),
+	),
+}
+
 // ShortHelp returns keybindings for the short help view (kanban mode).
 func ShortHelp() []key.Binding {
 	return []key.Binding{Common.Help, Kanban.QuitConfirm}
@@ -360,5 +450,23 @@ func FullHelp() [][]key.Binding {
 		{Common.Enter, Kanban.Refresh, Kanban.Yank, Kanban.Status, Kanban.Priority, Kanban.AddColumn, Kanban.EditColumn, Kanban.MoveColumnLeft, Kanban.MoveColumnRight},
 		{Kanban.NextView, Kanban.PrevView, Kanban.ViewMenu, Kanban.DeleteColumn},
 		{Common.Help, Kanban.ToggleStatus, Common.Escape, Kanban.QuitConfirm},
+	}
+}
+
+// DiffViewerShortHelp returns keybindings for the short help view (diff viewer).
+func DiffViewerShortHelp() []key.Binding {
+	return []key.Binding{
+		DiffViewer.Close,
+		DiffViewer.NextFile,
+		DiffViewer.PrevFile,
+	}
+}
+
+// DiffViewerFullHelp returns keybindings for the full help view (diff viewer).
+func DiffViewerFullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{DiffViewer.NextFile, DiffViewer.PrevFile, DiffViewer.FocusLeft, DiffViewer.FocusRight},
+		{DiffViewer.ScrollUp, DiffViewer.ScrollDown, DiffViewer.NextHunk, DiffViewer.PrevHunk},
+		{DiffViewer.CopyHunk, DiffViewer.ToggleViewMode, DiffViewer.Help, DiffViewer.Close},
 	}
 }

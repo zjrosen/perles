@@ -1,0 +1,13 @@
+commit single123
+Author: Test
+Date:   Wed Jan 15 12:00:00 2025 +0000 (now)
+
+    Single file
+
+main.go +10 -3
+@@ -5,4 +5,5 @@ package main
+   5 |  func main() {
+   6 | -    fmt.Println("old")
+   6 | +    fmt.Println("new")
+   7 | +    fmt.Println("extra")
+   8 |  }

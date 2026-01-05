@@ -1,0 +1,13 @@
+commit abc123def456789
+Author: Test Author <test@example.com>
+Date:   Wed Jan 15 10:30:00 2025 +0000 (1h ago)
+
+    refactor: Update handler function
+
+handler.go +15 -5
+@@ -1,3 +1,4 @@
+   1 |  package handler
+   2 | -func Old() {}
+   2 | +func New() error {
+   3 | +    return nil
+   4 | +}

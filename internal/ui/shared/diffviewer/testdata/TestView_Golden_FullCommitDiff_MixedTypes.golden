@@ -1,0 +1,28 @@
+commit mixed999abc
+Author: Multi Author
+Date:   Sun Jan 12 09:00:00 2025 +0000 (3d ago)
+
+    Mixed changes: add, modify, delete, binary, rename
+
+added.go +5
+@@ -0,0 +1,2 @@
+   1 | +package added
+   2 | +// new file
+
+modified.go +2 -1
+@@ -1,2 +1,3 @@
+   1 |  package mod
+   2 | -// old
+   2 | +// new
+   3 | +// extra
+
+deleted.go -3
+@@ -1,2 +0,0 @@
+   1 | -package deleted
+   2 | -// gone
+
+binary.dat binary
+Binary file
+
+renamed_new.txt
+No changes

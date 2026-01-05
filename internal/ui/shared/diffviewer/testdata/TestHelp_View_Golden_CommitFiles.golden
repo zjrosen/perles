@@ -1,0 +1,40 @@
+                                                                                                               
+                                                                                                               
+                                                                                                               
+                                                                                                               
+                                                                                                               
+                                                                                                               
+                                                                                                               
+                                                                                                               
+                                                                                                               
+                                                                                                               
+                                                                                                               
+                                                                                                               
+╭─────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│  Diff Viewer Help                                                                                           │
+│─────────────────────────────────────────────────────────────────────────────────────────────────────────────│
+│                                                                                                             │
+│  Navigation                Scrolling & View           Actions                        General                │
+│  j/↓        next file      ctrl+u     scroll up       Enter      toggle/view file    ?          show help   │
+│  k/↑        prev file      ctrl+d     scroll down     Esc        back to commits     esc/q      close diff  │
+│  h/←        file list      g          go to top       y          copy hunk                                  │
+│  l/→        diff pane      G          go to bottom                                                          │
+│  tab        cycle panes    [ / ]      tabs/hunks                                                            │
+│                            ^v         toggle view                                                           │
+│                                                                                                             │
+│                                                                                                             │
+│  Press ? or Esc to close                                                                                    │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+                                                                                                               
+                                                                                                               
+                                                                                                               
+                                                                                                               
+                                                                                                               
+                                                                                                               
+                                                                                                               
+                                                                                                               
+                                                                                                               
+                                                                                                               
+                                                                                                               
+                                                                                                               
+                                                                                                               

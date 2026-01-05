@@ -157,6 +157,16 @@ var (
 	VimInsertModeColor  = lipgloss.AdaptiveColor{Light: "#40A02B", Dark: "#A6E3A1"} // green
 	VimVisualModeColor  = lipgloss.AdaptiveColor{Light: "#8839EF", Dark: "#CBA6F7"} // mauve/purple
 	VimReplaceModeColor = lipgloss.AdaptiveColor{Light: "#FE640B", Dark: "#FAB387"} // peach/orange - danger/overwrite
+
+	// Diff syntax highlighting colors
+	DiffAdditionColor = lipgloss.AdaptiveColor{Light: "#40A02B", Dark: "#A6E3A1"} // green
+	DiffDeletionColor = lipgloss.AdaptiveColor{Light: "#D20F39", Dark: "#F38BA8"} // red
+	DiffContextColor  = lipgloss.AdaptiveColor{Light: "#666666", Dark: "#888888"} // gray
+	DiffHunkColor     = lipgloss.AdaptiveColor{Light: "#1E66F5", Dark: "#89B4FA"} // blue
+
+	// Word-level diff highlight background colors (from master plan v2 Appendix A)
+	DiffWordAdditionBgColor = lipgloss.AdaptiveColor{Light: "#2d4a2d", Dark: "#2d4a2d"} // green background
+	DiffWordDeletionBgColor = lipgloss.AdaptiveColor{Light: "#4a2d2d", Dark: "#4a2d2d"} // red background
 )
 
 // GetTypeIndicator returns the letter indicator for an issue type.

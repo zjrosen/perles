@@ -103,6 +103,12 @@ var DefaultPreset = Preset{
 		TokenBQLParen:    "#89B4FA",
 		TokenBQLComma:    "#6C7086",
 
+		// Diff syntax highlighting
+		TokenDiffAddition: "#A6E3A1", // green
+		TokenDiffDeletion: "#F38BA8", // red
+		TokenDiffContext:  "#888888", // gray
+		TokenDiffHunk:     "#89B4FA", // blue
+
 		// Misc
 		TokenSpinner: "#FFFFFF",
 	},
@@ -192,6 +198,12 @@ var CatppuccinMochaPreset = Preset{
 		TokenBQLLiteral:  "#FAB387", // peach
 		TokenBQLParen:    "#89B4FA", // blue
 		TokenBQLComma:    "#6C7086", // overlay0
+
+		// Diff syntax highlighting
+		TokenDiffAddition: "#A6E3A1", // green
+		TokenDiffDeletion: "#F38BA8", // red
+		TokenDiffContext:  "#6C7086", // overlay0
+		TokenDiffHunk:     "#89B4FA", // blue
 
 		// Misc
 		TokenSpinner: "#CBA6F7", // mauve
@@ -283,6 +295,12 @@ var CatppuccinLattePreset = Preset{
 		TokenBQLParen:    "#1E66F5", // blue
 		TokenBQLComma:    "#9CA0B0", // overlay0
 
+		// Diff syntax highlighting
+		TokenDiffAddition: "#40A02B", // green
+		TokenDiffDeletion: "#D20F39", // red
+		TokenDiffContext:  "#9CA0B0", // overlay0
+		TokenDiffHunk:     "#1E66F5", // blue
+
 		// Misc
 		TokenSpinner: "#8839EF", // mauve
 	},
@@ -372,6 +390,12 @@ var DraculaPreset = Preset{
 		TokenBQLLiteral:  "#FFB86C", // orange
 		TokenBQLParen:    "#BD93F9", // purple
 		TokenBQLComma:    "#6272A4", // comment
+
+		// Diff syntax highlighting
+		TokenDiffAddition: "#50FA7B", // green
+		TokenDiffDeletion: "#FF5555", // red
+		TokenDiffContext:  "#6272A4", // comment
+		TokenDiffHunk:     "#8BE9FD", // cyan
 
 		// Misc
 		TokenSpinner: "#BD93F9", // purple
@@ -467,6 +491,12 @@ var NordPreset = Preset{
 		TokenBQLParen:    "#5E81AC", // frost 4
 		TokenBQLComma:    "#4C566A", // polar night 4
 
+		// Diff syntax highlighting
+		TokenDiffAddition: "#A3BE8C", // aurora green
+		TokenDiffDeletion: "#BF616A", // aurora red
+		TokenDiffContext:  "#4C566A", // polar night 4
+		TokenDiffHunk:     "#81A1C1", // frost 3
+
 		// Misc
 		TokenSpinner: "#88C0D0", // frost 2
 	},
@@ -558,6 +588,12 @@ var HighContrastPreset = Preset{
 		TokenBQLParen:    "#FFFFFF", // white
 		TokenBQLComma:    "#FFFFFF", // white
 
+		// Diff syntax highlighting - high contrast
+		TokenDiffAddition: "#00FF00", // pure green
+		TokenDiffDeletion: "#FF0000", // pure red
+		TokenDiffContext:  "#808080", // gray (only muted - context is inactive)
+		TokenDiffHunk:     "#00FFFF", // cyan
+
 		// Misc
 		TokenSpinner: "#FFFF00", // yellow for visibility
 	},
@@ -646,6 +682,12 @@ var GruvboxPreset = Preset{
 		TokenBQLLiteral:  "#D3869B", // purple
 		TokenBQLParen:    "#83A598", // blue
 		TokenBQLComma:    "#928374", // gray
+
+		// Diff syntax highlighting
+		TokenDiffAddition: "#B8BB26", // green
+		TokenDiffDeletion: "#FB4934", // red
+		TokenDiffContext:  "#928374", // gray
+		TokenDiffHunk:     "#83A598", // blue
 
 		// Misc
 		TokenSpinner: "#FABD2F", // yellow

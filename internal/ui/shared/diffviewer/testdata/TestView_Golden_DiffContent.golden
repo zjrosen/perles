@@ -1,0 +1,8 @@
+@@ -10,6 +10,7 @@ func example() {
+  10 |      return nil
+  11 | -    // old comment
+  12 | -    oldCode()
+  11 | +    // new comment
+  12 | +    newCode()
+  13 | +    extraLine()
+  14 |  }

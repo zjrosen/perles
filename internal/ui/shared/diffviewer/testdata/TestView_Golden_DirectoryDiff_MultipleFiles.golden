@@ -1,0 +1,18 @@
+cmd/main.go +15 -5
+@@ -1,3 +1,4 @@
+   1 |  package main
+   2 | -import "fmt"
+   2 | +import (
+   3 | +    "fmt"
+   4 | +)
+
+pkg/utils.go +20
+@@ -0,0 +1,3 @@
+   1 | +package utils
+   2 | +
+   3 | +func Helper() {}
+
+deprecated.go -8
+@@ -1,2 +0,0 @@
+   1 | -package deprecated
+   2 | -// This is deprecated

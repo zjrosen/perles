@@ -1,0 +1,24 @@
+commit def456789abc123
+Author: Developer <dev@example.com>
+Date:   Tue Jan 14 14:00:00 2025 +0000 (22h ago)
+
+    feat: Add utils package and update imports
+
+cmd/main.go +15 -5
+@@ -1,3 +1,4 @@
+   1 |  package main
+   2 | -import "fmt"
+   2 | +import (
+   3 | +    "fmt"
+   4 | +)
+
+pkg/utils.go +20
+@@ -0,0 +1,3 @@
+   1 | +package utils
+   2 | +
+   3 | +func Helper() {}
+
+deprecated.go -8
+@@ -1,2 +0,0 @@
+   1 | -package deprecated
+   2 | -// This is deprecated

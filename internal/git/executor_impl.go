@@ -3,13 +3,16 @@ package git
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // Git-specific errors for worktree operations.
@@ -483,4 +486,253 @@ func (e *RealExecutor) ListBranches() ([]BranchInfo, error) {
 func (e *RealExecutor) BranchExists(name string) bool {
 	err := e.runGit("show-ref", "--verify", "--quiet", "refs/heads/"+name)
 	return err == nil
+}
+
+// ErrDiffTimeout is returned when a git diff operation times out.
+var ErrDiffTimeout = errors.New("git diff timed out")
+
+// diffTimeout is the maximum time allowed for diff operations to prevent hanging.
+const diffTimeout = 5 * time.Second
+
+// runGitOutputWithContext executes a git command with a context for timeout support.
+func (e *RealExecutor) runGitOutputWithContext(ctx context.Context, args ...string) (string, error) {
+	//nolint:gosec // G204: args come from controlled sources
+	cmd := exec.CommandContext(ctx, "git", args...)
+	if e.workDir != "" {
+		cmd.Dir = e.workDir
+	}
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		// Check if the error is due to context timeout/cancellation
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("%w: git %s", ErrDiffTimeout, strings.Join(args, " "))
+		}
+
+		stderrStr := strings.TrimSpace(stderr.String())
+		if stderrStr != "" {
+			return "", parseGitError(stderrStr, err)
+		}
+		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+	}
+
+	return strings.TrimSpace(stdout.String()), nil
+}
+
+// GetDiff returns the unified diff output for the given ref.
+// Uses a 5-second timeout to prevent hanging on large repos.
+func (e *RealExecutor) GetDiff(ref string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), diffTimeout)
+	defer cancel()
+	return e.runGitOutputWithContext(ctx, "diff", ref)
+}
+
+// GetDiffStat returns the --numstat output for the given ref.
+// Format: "additions\tdeletions\tpath" per line.
+// Uses a 5-second timeout to prevent hanging on large repos.
+func (e *RealExecutor) GetDiffStat(ref string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), diffTimeout)
+	defer cancel()
+	return e.runGitOutputWithContext(ctx, "diff", "--numstat", ref)
+}
+
+// GetFileDiff returns the diff for a single file against the given ref.
+// Uses a 5-second timeout to prevent hanging on large repos.
+func (e *RealExecutor) GetFileDiff(ref, path string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), diffTimeout)
+	defer cancel()
+	return e.runGitOutputWithContext(ctx, "diff", ref, "--", path)
+}
+
+// GetWorkingDirDiff returns the diff of uncommitted changes (staged + unstaged vs HEAD).
+// Uses a 5-second timeout to prevent hanging on large repos.
+func (e *RealExecutor) GetWorkingDirDiff() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), diffTimeout)
+	defer cancel()
+	return e.runGitOutputWithContext(ctx, "diff", "HEAD")
+}
+
+// GetUntrackedFiles returns the list of untracked files (new files not yet staged).
+// Uses a 5-second timeout to prevent hanging on large repos.
+func (e *RealExecutor) GetUntrackedFiles() ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), diffTimeout)
+	defer cancel()
+
+	output, err := e.runGitOutputWithContext(ctx, "ls-files", "--others", "--exclude-standard")
+	if err != nil {
+		return nil, err
+	}
+
+	if output == "" {
+		return nil, nil
+	}
+
+	// Split by newlines and filter empty strings
+	lines := strings.Split(output, "\n")
+	var files []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			files = append(files, line)
+		}
+	}
+	return files, nil
+}
+
+// GetCommitDiff returns the diff for a specific commit (what changed in that commit).
+// Uses git show to get the commit's patch.
+// Uses a 5-second timeout to prevent hanging on large repos.
+func (e *RealExecutor) GetCommitDiff(hash string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), diffTimeout)
+	defer cancel()
+	// Use --format= to suppress commit metadata, only show the diff
+	return e.runGitOutputWithContext(ctx, "show", "--format=", hash)
+}
+
+// GetFileContent returns the content of a file in the working directory.
+// Used for displaying untracked files that have no diff.
+func (e *RealExecutor) GetFileContent(path string) (string, error) {
+	fullPath := path
+	if e.workDir != "" && !filepath.IsAbs(path) {
+		fullPath = filepath.Join(e.workDir, path)
+	}
+
+	//nolint:gosec // G304: path comes from git ls-files output, not user input
+	content, err := os.ReadFile(fullPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file %s: %w", path, err)
+	}
+
+	return string(content), nil
+}
+
+// commitLogDelimiter is used to separate fields in git log output.
+// Using ASCII Record Separator (0x1E) which is extremely unlikely to appear in commit messages.
+const commitLogDelimiter = "\x1e"
+
+// GetCommitLog returns the most recent commits, up to the specified limit.
+// Uses a 5-second timeout to prevent hanging on large repos.
+// Returns an empty slice for empty repositories.
+// Also detects which commits have been pushed to the remote tracking branch.
+func (e *RealExecutor) GetCommitLog(limit int) ([]CommitInfo, error) {
+	return e.GetCommitLogForRef("", limit)
+}
+
+// GetCommitLogForRef returns commit history for a specific ref (branch, tag, etc.).
+// If ref is empty, returns commits for HEAD.
+// Uses a 5-second timeout to prevent hanging on large repos.
+// Returns an empty slice for empty repositories.
+// Also detects which commits have been pushed to the remote tracking branch.
+func (e *RealExecutor) GetCommitLogForRef(ref string, limit int) ([]CommitInfo, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), diffTimeout)
+	defer cancel()
+
+	// Format: full_hash<RS>short_hash<RS>subject<RS>author<RS>ISO_date
+	// Using ASCII Record Separator (0x1E) to avoid issues with commit messages
+	args := []string{"log", "--format=%H\x1e%h\x1e%s\x1e%an\x1e%aI", "-n", strconv.Itoa(limit)}
+	if ref != "" {
+		args = append(args, ref)
+	}
+
+	output, err := e.runGitOutputWithContext(ctx, args...)
+	if err != nil {
+		errStr := err.Error()
+		// Empty repo or no commits returns empty slice, not error
+		if strings.Contains(errStr, "does not have any commits") {
+			return nil, nil
+		}
+		// Invalid ref should return error (only treat as empty for HEAD/empty ref)
+		if ref == "" && (strings.Contains(errStr, "bad revision") || strings.Contains(errStr, "unknown revision")) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	if output == "" {
+		return nil, nil
+	}
+
+	commits := parseCommitLog(output)
+
+	// Determine which commits are pushed by finding the remote tracking branch tip
+	pushedHashes := e.getPushedCommitHashes(ctx)
+	for i := range commits {
+		_, commits[i].IsPushed = pushedHashes[commits[i].Hash]
+	}
+
+	return commits, nil
+}
+
+// getPushedCommitHashes returns a set of commit hashes that exist on the remote tracking branch.
+// Returns empty map if no remote tracking branch exists or on error.
+func (e *RealExecutor) getPushedCommitHashes(ctx context.Context) map[string]struct{} {
+	result := make(map[string]struct{})
+
+	// Get the upstream tracking branch (e.g., origin/main)
+	upstream, err := e.runGitOutputWithContext(ctx, "rev-parse", "--abbrev-ref", "@{upstream}")
+	if err != nil {
+		// No upstream configured - all commits are "unpushed"
+		return result
+	}
+
+	// Get commits that are on the remote (use merge-base to find common ancestor,
+	// then all commits from there back are "pushed")
+	// Alternative: list commits reachable from upstream
+	output, err := e.runGitOutputWithContext(ctx, "log", "--format=%H", upstream)
+	if err != nil {
+		return result
+	}
+
+	for line := range strings.SplitSeq(output, "\n") {
+		if line != "" {
+			result[line] = struct{}{}
+		}
+	}
+
+	return result
+}
+
+// parseCommitLog parses the output of git log --format='%H<RS>%h<RS>%s<RS>%an<RS>%aI'.
+func parseCommitLog(output string) []CommitInfo {
+	var commits []CommitInfo
+
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+
+		// Split on Record Separator delimiter: hash<RS>short<RS>subject<RS>author<RS>date
+		parts := strings.SplitN(line, commitLogDelimiter, 5)
+		if len(parts) < 5 {
+			continue // Invalid line format
+		}
+
+		hash := parts[0]
+		shortHash := parts[1]
+		subject := parts[2]
+		author := parts[3]
+		dateStr := parts[4]
+
+		// Parse ISO 8601 date (e.g., "2024-01-15T10:30:00-05:00")
+		date, err := time.Parse(time.RFC3339, dateStr)
+		if err != nil {
+			// Fallback to zero time if parsing fails
+			date = time.Time{}
+		}
+
+		commits = append(commits, CommitInfo{
+			Hash:      hash,
+			ShortHash: shortHash,
+			Subject:   subject,
+			Author:    author,
+			Date:      date,
+		})
+	}
+
+	return commits
 }

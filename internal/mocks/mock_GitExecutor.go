@@ -170,6 +170,179 @@ func (_c *MockGitExecutor_DetermineWorktreePath_Call) RunAndReturn(run func(stri
 	return _c
 }
 
+// GetCommitDiff provides a mock function with given fields: hash
+func (_m *MockGitExecutor) GetCommitDiff(hash string) (string, error) {
+	ret := _m.Called(hash)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetCommitDiff")
+	}
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (string, error)); ok {
+		return rf(hash)
+	}
+	if rf, ok := ret.Get(0).(func(string) string); ok {
+		r0 = rf(hash)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(hash)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockGitExecutor_GetCommitDiff_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCommitDiff'
+type MockGitExecutor_GetCommitDiff_Call struct {
+	*mock.Call
+}
+
+// GetCommitDiff is a helper method to define mock.On call
+//   - hash string
+func (_e *MockGitExecutor_Expecter) GetCommitDiff(hash interface{}) *MockGitExecutor_GetCommitDiff_Call {
+	return &MockGitExecutor_GetCommitDiff_Call{Call: _e.mock.On("GetCommitDiff", hash)}
+}
+
+func (_c *MockGitExecutor_GetCommitDiff_Call) Run(run func(hash string)) *MockGitExecutor_GetCommitDiff_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockGitExecutor_GetCommitDiff_Call) Return(_a0 string, _a1 error) *MockGitExecutor_GetCommitDiff_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockGitExecutor_GetCommitDiff_Call) RunAndReturn(run func(string) (string, error)) *MockGitExecutor_GetCommitDiff_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetCommitLog provides a mock function with given fields: limit
+func (_m *MockGitExecutor) GetCommitLog(limit int) ([]git.CommitInfo, error) {
+	ret := _m.Called(limit)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetCommitLog")
+	}
+
+	var r0 []git.CommitInfo
+	var r1 error
+	if rf, ok := ret.Get(0).(func(int) ([]git.CommitInfo, error)); ok {
+		return rf(limit)
+	}
+	if rf, ok := ret.Get(0).(func(int) []git.CommitInfo); ok {
+		r0 = rf(limit)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]git.CommitInfo)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(int) error); ok {
+		r1 = rf(limit)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockGitExecutor_GetCommitLog_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCommitLog'
+type MockGitExecutor_GetCommitLog_Call struct {
+	*mock.Call
+}
+
+// GetCommitLog is a helper method to define mock.On call
+//   - limit int
+func (_e *MockGitExecutor_Expecter) GetCommitLog(limit interface{}) *MockGitExecutor_GetCommitLog_Call {
+	return &MockGitExecutor_GetCommitLog_Call{Call: _e.mock.On("GetCommitLog", limit)}
+}
+
+func (_c *MockGitExecutor_GetCommitLog_Call) Run(run func(limit int)) *MockGitExecutor_GetCommitLog_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int))
+	})
+	return _c
+}
+
+func (_c *MockGitExecutor_GetCommitLog_Call) Return(_a0 []git.CommitInfo, _a1 error) *MockGitExecutor_GetCommitLog_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockGitExecutor_GetCommitLog_Call) RunAndReturn(run func(int) ([]git.CommitInfo, error)) *MockGitExecutor_GetCommitLog_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetCommitLogForRef provides a mock function with given fields: ref, limit
+func (_m *MockGitExecutor) GetCommitLogForRef(ref string, limit int) ([]git.CommitInfo, error) {
+	ret := _m.Called(ref, limit)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetCommitLogForRef")
+	}
+
+	var r0 []git.CommitInfo
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, int) ([]git.CommitInfo, error)); ok {
+		return rf(ref, limit)
+	}
+	if rf, ok := ret.Get(0).(func(string, int) []git.CommitInfo); ok {
+		r0 = rf(ref, limit)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]git.CommitInfo)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string, int) error); ok {
+		r1 = rf(ref, limit)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockGitExecutor_GetCommitLogForRef_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCommitLogForRef'
+type MockGitExecutor_GetCommitLogForRef_Call struct {
+	*mock.Call
+}
+
+// GetCommitLogForRef is a helper method to define mock.On call
+//   - ref string
+//   - limit int
+func (_e *MockGitExecutor_Expecter) GetCommitLogForRef(ref interface{}, limit interface{}) *MockGitExecutor_GetCommitLogForRef_Call {
+	return &MockGitExecutor_GetCommitLogForRef_Call{Call: _e.mock.On("GetCommitLogForRef", ref, limit)}
+}
+
+func (_c *MockGitExecutor_GetCommitLogForRef_Call) Run(run func(ref string, limit int)) *MockGitExecutor_GetCommitLogForRef_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(int))
+	})
+	return _c
+}
+
+func (_c *MockGitExecutor_GetCommitLogForRef_Call) Return(_a0 []git.CommitInfo, _a1 error) *MockGitExecutor_GetCommitLogForRef_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockGitExecutor_GetCommitLogForRef_Call) RunAndReturn(run func(string, int) ([]git.CommitInfo, error)) *MockGitExecutor_GetCommitLogForRef_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetCurrentBranch provides a mock function with no fields
 func (_m *MockGitExecutor) GetCurrentBranch() (string, error) {
 	ret := _m.Called()
@@ -221,6 +394,231 @@ func (_c *MockGitExecutor_GetCurrentBranch_Call) Return(_a0 string, _a1 error) *
 }
 
 func (_c *MockGitExecutor_GetCurrentBranch_Call) RunAndReturn(run func() (string, error)) *MockGitExecutor_GetCurrentBranch_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetDiff provides a mock function with given fields: ref
+func (_m *MockGitExecutor) GetDiff(ref string) (string, error) {
+	ret := _m.Called(ref)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetDiff")
+	}
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (string, error)); ok {
+		return rf(ref)
+	}
+	if rf, ok := ret.Get(0).(func(string) string); ok {
+		r0 = rf(ref)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(ref)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockGitExecutor_GetDiff_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetDiff'
+type MockGitExecutor_GetDiff_Call struct {
+	*mock.Call
+}
+
+// GetDiff is a helper method to define mock.On call
+//   - ref string
+func (_e *MockGitExecutor_Expecter) GetDiff(ref interface{}) *MockGitExecutor_GetDiff_Call {
+	return &MockGitExecutor_GetDiff_Call{Call: _e.mock.On("GetDiff", ref)}
+}
+
+func (_c *MockGitExecutor_GetDiff_Call) Run(run func(ref string)) *MockGitExecutor_GetDiff_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockGitExecutor_GetDiff_Call) Return(_a0 string, _a1 error) *MockGitExecutor_GetDiff_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockGitExecutor_GetDiff_Call) RunAndReturn(run func(string) (string, error)) *MockGitExecutor_GetDiff_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetDiffStat provides a mock function with given fields: ref
+func (_m *MockGitExecutor) GetDiffStat(ref string) (string, error) {
+	ret := _m.Called(ref)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetDiffStat")
+	}
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (string, error)); ok {
+		return rf(ref)
+	}
+	if rf, ok := ret.Get(0).(func(string) string); ok {
+		r0 = rf(ref)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(ref)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockGitExecutor_GetDiffStat_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetDiffStat'
+type MockGitExecutor_GetDiffStat_Call struct {
+	*mock.Call
+}
+
+// GetDiffStat is a helper method to define mock.On call
+//   - ref string
+func (_e *MockGitExecutor_Expecter) GetDiffStat(ref interface{}) *MockGitExecutor_GetDiffStat_Call {
+	return &MockGitExecutor_GetDiffStat_Call{Call: _e.mock.On("GetDiffStat", ref)}
+}
+
+func (_c *MockGitExecutor_GetDiffStat_Call) Run(run func(ref string)) *MockGitExecutor_GetDiffStat_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockGitExecutor_GetDiffStat_Call) Return(_a0 string, _a1 error) *MockGitExecutor_GetDiffStat_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockGitExecutor_GetDiffStat_Call) RunAndReturn(run func(string) (string, error)) *MockGitExecutor_GetDiffStat_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetFileContent provides a mock function with given fields: path
+func (_m *MockGitExecutor) GetFileContent(path string) (string, error) {
+	ret := _m.Called(path)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetFileContent")
+	}
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (string, error)); ok {
+		return rf(path)
+	}
+	if rf, ok := ret.Get(0).(func(string) string); ok {
+		r0 = rf(path)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(path)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockGitExecutor_GetFileContent_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetFileContent'
+type MockGitExecutor_GetFileContent_Call struct {
+	*mock.Call
+}
+
+// GetFileContent is a helper method to define mock.On call
+//   - path string
+func (_e *MockGitExecutor_Expecter) GetFileContent(path interface{}) *MockGitExecutor_GetFileContent_Call {
+	return &MockGitExecutor_GetFileContent_Call{Call: _e.mock.On("GetFileContent", path)}
+}
+
+func (_c *MockGitExecutor_GetFileContent_Call) Run(run func(path string)) *MockGitExecutor_GetFileContent_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockGitExecutor_GetFileContent_Call) Return(_a0 string, _a1 error) *MockGitExecutor_GetFileContent_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockGitExecutor_GetFileContent_Call) RunAndReturn(run func(string) (string, error)) *MockGitExecutor_GetFileContent_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetFileDiff provides a mock function with given fields: ref, path
+func (_m *MockGitExecutor) GetFileDiff(ref string, path string) (string, error) {
+	ret := _m.Called(ref, path)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetFileDiff")
+	}
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, string) (string, error)); ok {
+		return rf(ref, path)
+	}
+	if rf, ok := ret.Get(0).(func(string, string) string); ok {
+		r0 = rf(ref, path)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(string, string) error); ok {
+		r1 = rf(ref, path)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockGitExecutor_GetFileDiff_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetFileDiff'
+type MockGitExecutor_GetFileDiff_Call struct {
+	*mock.Call
+}
+
+// GetFileDiff is a helper method to define mock.On call
+//   - ref string
+//   - path string
+func (_e *MockGitExecutor_Expecter) GetFileDiff(ref interface{}, path interface{}) *MockGitExecutor_GetFileDiff_Call {
+	return &MockGitExecutor_GetFileDiff_Call{Call: _e.mock.On("GetFileDiff", ref, path)}
+}
+
+func (_c *MockGitExecutor_GetFileDiff_Call) Run(run func(ref string, path string)) *MockGitExecutor_GetFileDiff_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockGitExecutor_GetFileDiff_Call) Return(_a0 string, _a1 error) *MockGitExecutor_GetFileDiff_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockGitExecutor_GetFileDiff_Call) RunAndReturn(run func(string, string) (string, error)) *MockGitExecutor_GetFileDiff_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -331,6 +729,118 @@ func (_c *MockGitExecutor_GetRepoRoot_Call) Return(_a0 string, _a1 error) *MockG
 }
 
 func (_c *MockGitExecutor_GetRepoRoot_Call) RunAndReturn(run func() (string, error)) *MockGitExecutor_GetRepoRoot_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetUntrackedFiles provides a mock function with no fields
+func (_m *MockGitExecutor) GetUntrackedFiles() ([]string, error) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetUntrackedFiles")
+	}
+
+	var r0 []string
+	var r1 error
+	if rf, ok := ret.Get(0).(func() ([]string, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() []string); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]string)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockGitExecutor_GetUntrackedFiles_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetUntrackedFiles'
+type MockGitExecutor_GetUntrackedFiles_Call struct {
+	*mock.Call
+}
+
+// GetUntrackedFiles is a helper method to define mock.On call
+func (_e *MockGitExecutor_Expecter) GetUntrackedFiles() *MockGitExecutor_GetUntrackedFiles_Call {
+	return &MockGitExecutor_GetUntrackedFiles_Call{Call: _e.mock.On("GetUntrackedFiles")}
+}
+
+func (_c *MockGitExecutor_GetUntrackedFiles_Call) Run(run func()) *MockGitExecutor_GetUntrackedFiles_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockGitExecutor_GetUntrackedFiles_Call) Return(_a0 []string, _a1 error) *MockGitExecutor_GetUntrackedFiles_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockGitExecutor_GetUntrackedFiles_Call) RunAndReturn(run func() ([]string, error)) *MockGitExecutor_GetUntrackedFiles_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetWorkingDirDiff provides a mock function with no fields
+func (_m *MockGitExecutor) GetWorkingDirDiff() (string, error) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetWorkingDirDiff")
+	}
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func() (string, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() string); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockGitExecutor_GetWorkingDirDiff_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetWorkingDirDiff'
+type MockGitExecutor_GetWorkingDirDiff_Call struct {
+	*mock.Call
+}
+
+// GetWorkingDirDiff is a helper method to define mock.On call
+func (_e *MockGitExecutor_Expecter) GetWorkingDirDiff() *MockGitExecutor_GetWorkingDirDiff_Call {
+	return &MockGitExecutor_GetWorkingDirDiff_Call{Call: _e.mock.On("GetWorkingDirDiff")}
+}
+
+func (_c *MockGitExecutor_GetWorkingDirDiff_Call) Run(run func()) *MockGitExecutor_GetWorkingDirDiff_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockGitExecutor_GetWorkingDirDiff_Call) Return(_a0 string, _a1 error) *MockGitExecutor_GetWorkingDirDiff_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockGitExecutor_GetWorkingDirDiff_Call) RunAndReturn(run func() (string, error)) *MockGitExecutor_GetWorkingDirDiff_Call {
 	_c.Call.Return(run)
 	return _c
 }

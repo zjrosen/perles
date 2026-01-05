@@ -141,6 +141,16 @@ func GetTokenColor(token styles.ColorToken) string {
 	case styles.TokenBQLComma:
 		return styles.BQLCommaColor.Dark
 
+	// Diff syntax highlighting
+	case styles.TokenDiffAddition:
+		return styles.DiffAdditionColor.Dark
+	case styles.TokenDiffDeletion:
+		return styles.DiffDeletionColor.Dark
+	case styles.TokenDiffContext:
+		return styles.DiffContextColor.Dark
+	case styles.TokenDiffHunk:
+		return styles.DiffHunkColor.Dark
+
 	// Misc
 	case styles.TokenSpinner:
 		return styles.SpinnerColor.Dark
@@ -271,6 +281,15 @@ func GetTokenCategories() []TokenCategory {
 				styles.TokenBQLLiteral,
 				styles.TokenBQLParen,
 				styles.TokenBQLComma,
+			},
+		},
+		{
+			Name: "Diff",
+			Tokens: []styles.ColorToken{
+				styles.TokenDiffAddition,
+				styles.TokenDiffDeletion,
+				styles.TokenDiffContext,
+				styles.TokenDiffHunk,
 			},
 		},
 		{
