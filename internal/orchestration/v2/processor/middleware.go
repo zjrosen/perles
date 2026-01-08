@@ -389,6 +389,12 @@ func NewCommandLogMiddleware(cfg CommandLogMiddlewareConfig) Middleware {
 				source = hasSource.Source()
 			}
 
+			// Extract trace ID if available
+			var traceID string
+			if hasTraceID, ok := cmd.(interface{ TraceID() string }); ok {
+				traceID = hasTraceID.TraceID()
+			}
+
 			// Emit the event
 			event := CommandLogEvent{
 				CommandID:   cmd.ID(),
@@ -398,6 +404,7 @@ func NewCommandLogMiddleware(cfg CommandLogMiddlewareConfig) Middleware {
 				Error:       cmdErr,
 				Duration:    duration,
 				Timestamp:   time.Now(),
+				TraceID:     traceID,
 			}
 			cfg.EventBus.Publish("updated", event)
 

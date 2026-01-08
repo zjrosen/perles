@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/zjrosen/perles/internal/beads"
 	"github.com/zjrosen/perles/internal/log"
 	"github.com/zjrosen/perles/internal/orchestration/client"
@@ -88,6 +90,12 @@ const coordinatorInstructions = `Perles orchestrator MCP server providing worker
 // This is useful for testing and for setting up the adapter after initialization.
 func (cs *CoordinatorServer) SetV2Adapter(adapter *adapter.V2Adapter) {
 	cs.v2Adapter = adapter
+}
+
+// SetTracer sets the tracer for distributed tracing of MCP tool calls.
+// This delegates to the embedded Server's tracer field.
+func (cs *CoordinatorServer) SetTracer(tracer trace.Tracer) {
+	cs.tracer = tracer
 }
 
 // registerTools registers all coordinator tools with the MCP server.

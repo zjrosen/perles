@@ -129,3 +129,15 @@ func TestCommitApprovalPrompt_IncludesRetroStructure(t *testing.T) {
 	require.Contains(t, prompt, "friction", "Prompt should show friction in retro")
 	require.Contains(t, prompt, "patterns", "Prompt should show patterns in retro")
 }
+
+// TestWorkerSystemPrompt_ContainsTraceContextDocs verifies trace context documentation.
+func TestWorkerSystemPrompt_ContainsTraceContextDocs(t *testing.T) {
+	prompt := WorkerSystemPrompt("worker-1")
+
+	require.Contains(t, prompt, "Trace Context",
+		"Prompt should document trace context")
+	require.Contains(t, prompt, "trace_id",
+		"Prompt should mention trace_id field")
+	require.Contains(t, prompt, "backwards compatibility",
+		"Prompt should mention backwards compatibility")
+}

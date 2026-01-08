@@ -1,4 +1,4 @@
-.PHONY: all build run install test test-v test-update clean lint mocks mocks-clean playground
+.PHONY: all build run install test test-v test-update clean lint mocks mocks-clean playground up down jaeger
 
 # Version from git (tag or commit hash)
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -78,3 +78,15 @@ mocks-clean:
 clean:
 	rm -f perles
 	go clean ./...
+
+# Start docker-compose services (Jaeger for tracing)
+up:
+	docker-compose up -d
+
+# Stop docker-compose services
+down:
+	docker-compose down
+
+# Open Jaeger UI in browser
+jaeger:
+	open http://localhost:16686

@@ -810,3 +810,47 @@ func TestCommandLogMiddleware_ExtractsSource(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, command.SourceMCPTool, event.Source)
 }
+
+func TestCommandLogMiddleware_ExtractsTraceID(t *testing.T) {
+	publisher := newMockEventPublisher()
+	middleware := NewCommandLogMiddleware(CommandLogMiddlewareConfig{
+		EventBus: publisher,
+	})
+
+	handler := successHandler()
+	wrapped := middleware(handler)
+
+	// Create a command with a trace ID
+	base := command.NewBaseCommand("test_command", command.SourceMCPTool)
+	base.SetTraceID("test-trace-id-123")
+	cmd := &testCommand{BaseCommand: &base, value: 1}
+
+	_, err := wrapped.Handle(context.Background(), cmd)
+	require.NoError(t, err)
+
+	event, ok := publisher.LastEvent()
+	require.True(t, ok)
+	assert.Equal(t, "test-trace-id-123", event.TraceID, "TraceID should be extracted from command")
+}
+
+func TestCommandLogMiddleware_EmptyTraceID(t *testing.T) {
+	publisher := newMockEventPublisher()
+	middleware := NewCommandLogMiddleware(CommandLogMiddlewareConfig{
+		EventBus: publisher,
+	})
+
+	handler := successHandler()
+	wrapped := middleware(handler)
+
+	// Create a command without a trace ID
+	base := command.NewBaseCommand("test_command", command.SourceMCPTool)
+	// Don't set trace ID
+	cmd := &testCommand{BaseCommand: &base, value: 1}
+
+	_, err := wrapped.Handle(context.Background(), cmd)
+	require.NoError(t, err)
+
+	event, ok := publisher.LastEvent()
+	require.True(t, ok)
+	assert.Empty(t, event.TraceID, "TraceID should be empty when not set on command")
+}

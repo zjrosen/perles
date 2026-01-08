@@ -1,0 +1,30 @@
+# Docker Compose for local development tracing with Jaeger
+#
+# Usage:
+#   make up      # Start Jaeger in background
+#   make down    # Stop Jaeger
+#   make jaeger  # Open Jaeger UI in browser
+#
+# Then configure perles:
+#   orchestration:
+#     tracing:
+#       enabled: true
+#       exporter: otlp
+#       otlp_endpoint: localhost:4317
+#
+# Jaeger UI: http://localhost:16686
+
+services:
+  jaeger:
+    image: jaegertracing/all-in-one:1.54
+    container_name: perles-jaeger
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      # OTLP gRPC receiver
+      - "4317:4317"
+      # OTLP HTTP receiver
+      - "4318:4318"
+      # Jaeger UI
+      - "16686:16686"
+    restart: unless-stopped

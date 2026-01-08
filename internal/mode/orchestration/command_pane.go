@@ -24,6 +24,9 @@ const maxErrorDisplayLength = 200
 // commandIDDisplayLength is the number of characters to show from CommandID (last N chars).
 const commandIDDisplayLength = 8
 
+// traceIDDisplayLength is the number of characters to show from TraceID (first N chars).
+const traceIDDisplayLength = 8
+
 // Command pane styles
 var (
 	commandTimestampStyle = lipgloss.NewStyle().
@@ -46,6 +49,10 @@ var (
 
 	commandIDStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.AdaptiveColor{Light: "#555555", Dark: "#666666"})
+
+	// commandTraceIDStyle uses muted/secondary color for trace ID (per research doc)
+	commandTraceIDStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.AdaptiveColor{Light: "#777777", Dark: "#555555"})
 )
 
 // CommandLogEntry represents a single command in the log.
@@ -57,6 +64,7 @@ type CommandLogEntry struct {
 	Success     bool
 	Error       string // Converted from error for display
 	Duration    time.Duration
+	TraceID     string // Distributed trace ID for correlation (empty if tracing disabled)
 }
 
 // CommandPane shows the command processing log.
@@ -105,7 +113,8 @@ func renderCommandPane(pane *CommandPane, width, height int) string {
 }
 
 // renderCommandContent builds the pre-wrapped content string for the viewport.
-// Format: "15:04:05 [source] command_type (id) ✓/✗ (duration)"
+// Format: "15:04:05 [source] command_type (id) ✓/✗ [traceID] (duration)"
+// Trace ID is only shown when present (tracing enabled).
 func renderCommandContent(entries []CommandLogEntry, wrapWidth int) string {
 	if len(entries) == 0 {
 		return ""
@@ -147,11 +156,21 @@ func renderCommandContent(entries []CommandLogEntry, wrapWidth int) string {
 			}
 		}
 
+		// Format trace ID (abbreviated to first 8 chars, only show when present)
+		var traceIDDisplay string
+		if entry.TraceID != "" {
+			shortTraceID := entry.TraceID
+			if len(shortTraceID) > traceIDDisplayLength {
+				shortTraceID = shortTraceID[:traceIDDisplayLength]
+			}
+			traceIDDisplay = " " + commandTraceIDStyle.Render("["+shortTraceID+"]")
+		}
+
 		// Format duration
 		duration := commandDurationStyle.Render(fmt.Sprintf("(%s)", formatDuration(entry.Duration)))
 
 		// Build the line
-		line := fmt.Sprintf("%s %s %s %s %s %s", timestamp, source, cmdType, cmdID, status, duration)
+		line := fmt.Sprintf("%s %s %s %s %s%s %s", timestamp, source, cmdType, cmdID, status, traceIDDisplay, duration)
 
 		// Apply ANSI-aware truncation if line exceeds viewport width
 		if ansi.StringWidth(line) > wrapWidth {

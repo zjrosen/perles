@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/zjrosen/perles/internal/beads"
 	"github.com/zjrosen/perles/internal/orchestration/client"
+	"github.com/zjrosen/perles/internal/orchestration/tracing"
 	"github.com/zjrosen/perles/internal/orchestration/v2/adapter"
 	"github.com/zjrosen/perles/internal/orchestration/v2/command"
 	"github.com/zjrosen/perles/internal/orchestration/v2/handler"
@@ -46,6 +49,9 @@ type InfrastructureConfig struct {
 	MessageRepo repository.MessageRepository
 	// SessionID is the session identifier for accountability summary generation.
 	SessionID string
+	// Tracer is the OpenTelemetry tracer for distributed tracing (optional).
+	// When provided, TracingMiddleware will be registered in the command processor.
+	Tracer trace.Tracer
 }
 
 // Validate checks that all required configuration is provided.
@@ -138,6 +144,9 @@ func NewInfrastructure(cfg InfrastructureConfig) (*Infrastructure, error) {
 	timeoutMiddleware := processor.NewTimeoutMiddleware(processor.TimeoutMiddlewareConfig{
 		WarningThreshold: 500 * time.Millisecond,
 	})
+	tracingMiddleware := tracing.NewTracingMiddleware(tracing.TracingMiddlewareConfig{
+		Tracer: cfg.Tracer,
+	})
 
 	// Create command processor with event bus for TUI event propagation
 	cmdProcessor := processor.NewCommandProcessor(
@@ -145,7 +154,7 @@ func NewInfrastructure(cfg InfrastructureConfig) (*Infrastructure, error) {
 		processor.WithTaskRepository(taskRepo),
 		processor.WithQueueRepository(queueRepo),
 		processor.WithEventBus(eventBus),
-		processor.WithMiddleware(loggingMiddleware, commandLogMiddleware, timeoutMiddleware),
+		processor.WithMiddleware(tracingMiddleware, loggingMiddleware, commandLogMiddleware, timeoutMiddleware),
 	)
 
 	// Create unified ProcessRegistry for coordinator and workers
@@ -159,7 +168,7 @@ func NewInfrastructure(cfg InfrastructureConfig) (*Infrastructure, error) {
 
 	// Register all command handlers
 	registerHandlers(cmdProcessor, processRepo, taskRepo, queueRepo, processRegistry, turnEnforcer,
-		cfg.AIClient, cfg.Extensions, beadsExec, cfg.Port, eventBus, cfg.WorkDir)
+		cfg.AIClient, cfg.Extensions, beadsExec, cfg.Port, eventBus, cfg.WorkDir, cfg.Tracer)
 
 	// Create command submitter adapter
 	cmdSubmitter := handler.NewProcessorSubmitterAdapter(cmdProcessor)
@@ -248,6 +257,7 @@ func registerHandlers(
 	port int,
 	eventBus *pubsub.Broker[any],
 	workDir string,
+	tracer trace.Tracer,
 ) {
 	// Create shared infrastructure components
 	cmdSubmitter := handler.NewProcessorSubmitterAdapter(cmdProcessor)
@@ -258,7 +268,8 @@ func registerHandlers(
 	cmdProcessor.RegisterHandler(command.CmdAssignTask,
 		handler.NewAssignTaskHandler(processRepo, taskRepo,
 			handler.WithBDExecutor(beadsExec),
-			handler.WithQueueRepository(queueRepo)))
+			handler.WithQueueRepository(queueRepo),
+			handler.WithAssignTaskTracer(tracer)))
 	cmdProcessor.RegisterHandler(command.CmdAssignReview,
 		handler.NewAssignReviewHandler(processRepo, taskRepo, queueRepo))
 	cmdProcessor.RegisterHandler(command.CmdApproveCommit,
@@ -274,7 +285,8 @@ func registerHandlers(
 			handler.WithReportCompleteBDExecutor(beadsExec)))
 	cmdProcessor.RegisterHandler(command.CmdReportVerdict,
 		handler.NewReportVerdictHandler(processRepo, taskRepo, queueRepo,
-			handler.WithReportVerdictBDExecutor(beadsExec)))
+			handler.WithReportVerdictBDExecutor(beadsExec),
+			handler.WithReportVerdictTracer(tracer)))
 	cmdProcessor.RegisterHandler(command.CmdTransitionPhase,
 		handler.NewTransitionPhaseHandler(processRepo, queueRepo))
 	cmdProcessor.RegisterHandler(command.CmdProcessTurnComplete,
@@ -310,9 +322,11 @@ func registerHandlers(
 	cmdProcessor.RegisterHandler(command.CmdSpawnProcess,
 		handler.NewSpawnProcessHandler(processRepo, processRegistry,
 			handler.WithUnifiedSpawner(processSpawner),
-			handler.WithTurnEnforcer(turnEnforcer)))
+			handler.WithTurnEnforcer(turnEnforcer),
+			handler.WithSpawnProcessTracer(tracer)))
 	cmdProcessor.RegisterHandler(command.CmdSendToProcess,
-		handler.NewSendToProcessHandler(processRepo, queueRepo))
+		handler.NewSendToProcessHandler(processRepo, queueRepo,
+			handler.WithSendToProcessTracer(tracer)))
 	cmdProcessor.RegisterHandler(command.CmdDeliverProcessQueued,
 		handler.NewDeliverProcessQueuedHandler(processRepo, queueRepo, processRegistry,
 			handler.WithProcessDeliverer(messageDeliverer),

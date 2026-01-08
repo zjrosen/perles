@@ -152,8 +152,9 @@ func (ws *WorkerServer) registerTools() {
 		InputSchema: &InputSchema{
 			Type: "object",
 			Properties: map[string]*PropertySchema{
-				"to":      {Type: "string", Description: "Recipient: 'COORDINATOR', 'ALL', or a worker ID (e.g., 'WORKER.2')"},
-				"content": {Type: "string", Description: "Message content"},
+				"to":       {Type: "string", Description: "Recipient: 'COORDINATOR', 'ALL', or a worker ID (e.g., 'WORKER.2')"},
+				"content":  {Type: "string", Description: "Message content"},
+				"trace_id": {Type: "string", Description: "Optional trace ID for distributed tracing correlation"},
 			},
 			Required: []string{"to", "content"},
 		},
@@ -177,7 +178,8 @@ func (ws *WorkerServer) registerTools() {
 		InputSchema: &InputSchema{
 			Type: "object",
 			Properties: map[string]*PropertySchema{
-				"summary": {Type: "string", Description: "Brief summary of what was implemented"},
+				"summary":  {Type: "string", Description: "Brief summary of what was implemented"},
+				"trace_id": {Type: "string", Description: "Optional trace ID for distributed tracing correlation"},
 			},
 			Required: []string{"summary"},
 		},
@@ -192,6 +194,7 @@ func (ws *WorkerServer) registerTools() {
 			Properties: map[string]*PropertySchema{
 				"verdict":  {Type: "string", Description: "Review verdict: 'APPROVED' or 'DENIED'"},
 				"comments": {Type: "string", Description: "Review comments explaining the verdict"},
+				"trace_id": {Type: "string", Description: "Optional trace ID for distributed tracing correlation"},
 			},
 			Required: []string{"verdict", "comments"},
 		},

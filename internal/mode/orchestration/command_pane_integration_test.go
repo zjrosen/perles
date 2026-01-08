@@ -778,3 +778,128 @@ func TestHandleV2Event_CommandLogEvent_HasNewContent(t *testing.T) {
 			"hasNewContent should not be set when at bottom")
 	})
 }
+
+// ============================================================================
+// Trace ID Tests
+// ============================================================================
+
+// TestHandleV2Event_CommandLogEvent_TraceID verifies trace ID is extracted and stored.
+func TestHandleV2Event_CommandLogEvent_TraceID(t *testing.T) {
+	m := New(Config{})
+	m = m.SetSize(120, 40)
+
+	// Create a v2 listener
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	v2Broker := pubsub.NewBroker[any]()
+	m.v2Listener = pubsub.NewContinuousListener(ctx, v2Broker)
+
+	// Verify activeTraceID is initially empty
+	require.Empty(t, m.activeTraceID, "activeTraceID should be empty initially")
+
+	// Create a CommandLogEvent with a trace ID
+	traceID := "abc123def456789012345678901234ff"
+	event := pubsub.Event[any]{
+		Type: pubsub.UpdatedEvent,
+		Payload: processor.CommandLogEvent{
+			CommandID:   "test-cmd-123",
+			CommandType: command.CmdSpawnProcess,
+			Source:      command.SourceMCPTool,
+			Success:     true,
+			Error:       nil,
+			Duration:    100 * time.Millisecond,
+			Timestamp:   time.Now(),
+			TraceID:     traceID,
+		},
+	}
+
+	// Handle the event
+	m, _ = m.handleV2Event(event)
+
+	// Verify entry contains trace ID
+	require.Len(t, m.commandPane.entries, 1, "should have one entry")
+	entry := m.commandPane.entries[0]
+	require.Equal(t, traceID, entry.TraceID, "entry should contain trace ID")
+
+	// Verify activeTraceID was updated
+	require.Equal(t, traceID, m.activeTraceID, "activeTraceID should be updated from event")
+}
+
+// TestHandleV2Event_CommandLogEvent_EmptyTraceID verifies empty trace ID doesn't overwrite existing.
+func TestHandleV2Event_CommandLogEvent_EmptyTraceID(t *testing.T) {
+	m := New(Config{})
+	m = m.SetSize(120, 40)
+
+	// Create a v2 listener
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	v2Broker := pubsub.NewBroker[any]()
+	m.v2Listener = pubsub.NewContinuousListener(ctx, v2Broker)
+
+	// Set an initial activeTraceID
+	m.activeTraceID = "existing-trace-id"
+
+	// Create a CommandLogEvent with empty trace ID
+	event := pubsub.Event[any]{
+		Type: pubsub.UpdatedEvent,
+		Payload: processor.CommandLogEvent{
+			CommandID:   "test-cmd-123",
+			CommandType: command.CmdSpawnProcess,
+			Success:     true,
+			Timestamp:   time.Now(),
+			TraceID:     "", // Empty
+		},
+	}
+
+	// Handle the event
+	m, _ = m.handleV2Event(event)
+
+	// Verify activeTraceID was NOT overwritten
+	require.Equal(t, "existing-trace-id", m.activeTraceID,
+		"activeTraceID should not be overwritten by empty trace ID")
+}
+
+// TestHandleV2Event_CommandLogEvent_TraceIDUpdates verifies trace ID updates with new events.
+func TestHandleV2Event_CommandLogEvent_TraceIDUpdates(t *testing.T) {
+	m := New(Config{})
+	m = m.SetSize(120, 40)
+
+	// Create a v2 listener
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	v2Broker := pubsub.NewBroker[any]()
+	m.v2Listener = pubsub.NewContinuousListener(ctx, v2Broker)
+
+	// First event with trace ID
+	event1 := pubsub.Event[any]{
+		Type: pubsub.UpdatedEvent,
+		Payload: processor.CommandLogEvent{
+			CommandID:   "cmd-1",
+			CommandType: command.CmdSpawnProcess,
+			Success:     true,
+			Timestamp:   time.Now(),
+			TraceID:     "trace-id-one",
+		},
+	}
+	m, _ = m.handleV2Event(event1)
+	require.Equal(t, "trace-id-one", m.activeTraceID)
+
+	// Second event with different trace ID should update
+	event2 := pubsub.Event[any]{
+		Type: pubsub.UpdatedEvent,
+		Payload: processor.CommandLogEvent{
+			CommandID:   "cmd-2",
+			CommandType: command.CmdAssignTask,
+			Success:     true,
+			Timestamp:   time.Now(),
+			TraceID:     "trace-id-two",
+		},
+	}
+	m, _ = m.handleV2Event(event2)
+	require.Equal(t, "trace-id-two", m.activeTraceID, "activeTraceID should be updated to new trace ID")
+
+	// Verify both entries have their respective trace IDs
+	require.Len(t, m.commandPane.entries, 2)
+	require.Equal(t, "trace-id-one", m.commandPane.entries[0].TraceID)
+	require.Equal(t, "trace-id-two", m.commandPane.entries[1].TraceID)
+}

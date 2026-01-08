@@ -108,6 +108,7 @@ type OrchestrationConfig struct {
 	Codex            CodexClientConfig  `mapstructure:"codex"`
 	Amp              AmpClientConfig    `mapstructure:"amp"`
 	Workflows        []WorkflowConfig   `mapstructure:"workflows"` // Workflow template configurations
+	Tracing          TracingConfig      `mapstructure:"tracing"`   // Distributed tracing configuration
 }
 
 // ClaudeClientConfig holds Claude-specific settings.
@@ -133,9 +134,44 @@ type WorkflowConfig struct {
 	Enabled     *bool  `mapstructure:"enabled"`     // nil = true (default enabled)
 }
 
+// TracingConfig holds distributed tracing configuration for orchestration.
+type TracingConfig struct {
+	// Enabled controls whether distributed tracing is active.
+	// Default: false
+	Enabled bool `mapstructure:"enabled"`
+
+	// Exporter selects the trace export backend.
+	// Options: "none", "file", "stdout", "otlp"
+	// Default: "file"
+	Exporter string `mapstructure:"exporter"`
+
+	// FilePath is the output file for "file" exporter.
+	// Default: ~/.config/perles/traces/traces.jsonl
+	FilePath string `mapstructure:"file_path"`
+
+	// OTLPEndpoint is the collector endpoint for "otlp" exporter.
+	// Default: "localhost:4317"
+	OTLPEndpoint string `mapstructure:"otlp_endpoint"`
+
+	// SampleRate controls trace sampling (0.0 to 1.0).
+	// 1.0 = all traces, 0.1 = 10% of traces
+	// Default: 1.0
+	SampleRate float64 `mapstructure:"sample_rate"`
+}
+
 // IsEnabled returns whether the workflow is enabled (defaults to true if nil).
 func (w WorkflowConfig) IsEnabled() bool {
 	return w.Enabled == nil || *w.Enabled
+}
+
+// DefaultTracesFilePath returns the default path for trace file export.
+// Returns ~/.config/perles/traces/traces.jsonl or empty string if home dir unavailable.
+func DefaultTracesFilePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".config", "perles", "traces", "traces.jsonl")
 }
 
 // DefaultColumns returns the default column configuration matching current behavior.
@@ -248,6 +284,11 @@ func ValidateOrchestration(orch OrchestrationConfig) error {
 		return err
 	}
 
+	// Validate tracing
+	if err := ValidateTracing(orch.Tracing); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -256,6 +297,40 @@ func ValidateOrchestration(orch OrchestrationConfig) error {
 func ValidateWorkflows(workflows []WorkflowConfig) error {
 	// Currently no validation required - name is optional (used for matching)
 	// and enabled defaults to true
+	return nil
+}
+
+// ValidateTracing checks tracing configuration for errors.
+// Returns nil if the configuration is valid (empty values use defaults).
+func ValidateTracing(tracing TracingConfig) error {
+	// Validate SampleRate is in range [0.0, 1.0]
+	if tracing.SampleRate < 0.0 || tracing.SampleRate > 1.0 {
+		return fmt.Errorf("orchestration.tracing.sample_rate must be between 0.0 and 1.0, got %v", tracing.SampleRate)
+	}
+
+	// Validate Exporter is a valid option
+	if tracing.Exporter != "" {
+		switch tracing.Exporter {
+		case "none", "file", "stdout", "otlp":
+			// Valid
+		default:
+			return fmt.Errorf("orchestration.tracing.exporter must be \"none\", \"file\", \"stdout\", or \"otlp\", got %q", tracing.Exporter)
+		}
+	}
+
+	// Only validate path requirements when tracing is enabled
+	if tracing.Enabled {
+		// FilePath is required when Exporter is "file"
+		if tracing.Exporter == "file" && tracing.FilePath == "" {
+			return fmt.Errorf("orchestration.tracing.file_path is required when exporter is \"file\"")
+		}
+
+		// OTLPEndpoint is required when Exporter is "otlp"
+		if tracing.Exporter == "otlp" && tracing.OTLPEndpoint == "" {
+			return fmt.Errorf("orchestration.tracing.otlp_endpoint is required when exporter is \"otlp\"")
+		}
+	}
+
 	return nil
 }
 
@@ -325,6 +400,13 @@ func Defaults() Config {
 			Amp: AmpClientConfig{
 				Model: "opus",
 				Mode:  "smart",
+			},
+			Tracing: TracingConfig{
+				Enabled:      false,
+				Exporter:     "file",
+				FilePath:     "", // Derived from config dir at runtime
+				OTLPEndpoint: "localhost:4317",
+				SampleRate:   1.0,
 			},
 		},
 	}
@@ -453,6 +535,28 @@ orchestration:
   #   # Override name/description of a built-in workflow
   #   - name: "Research Proposal"
   #     description: "Custom description for research workflow"
+
+  # Distributed tracing configuration
+  # Enables end-to-end visibility into orchestration request flows
+  # tracing:
+  #   enabled: false                 # Enable/disable tracing (default: false)
+  #   exporter: file                 # Export backend: none, file, stdout, otlp (default: file)
+  #   file_path: ~/.config/perles/traces/traces.jsonl  # Output file for file exporter
+  #   otlp_endpoint: localhost:4317  # OTLP collector endpoint (for otlp exporter)
+  #   sample_rate: 1.0               # Trace sampling rate 0.0-1.0 (default: 1.0)
+  #
+  # Example: Enable tracing with file export
+  # tracing:
+  #   enabled: true
+  #   exporter: file
+  #   file_path: ~/.config/perles/traces/traces.jsonl
+  #
+  # Example: Send traces to Jaeger via OTLP
+  # tracing:
+  #   enabled: true
+  #   exporter: otlp
+  #   otlp_endpoint: jaeger.internal:4317
+  #   sample_rate: 0.1  # Sample 10% of traces
 `
 }
 

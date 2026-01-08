@@ -10,8 +10,13 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/zjrosen/perles/internal/log"
 	"github.com/zjrosen/perles/internal/orchestration/events"
+	"github.com/zjrosen/perles/internal/orchestration/tracing"
 	"github.com/zjrosen/perles/internal/pubsub"
 )
 
@@ -38,6 +43,19 @@ type Server struct {
 
 	// broker publishes MCPEvent for session logging
 	broker *pubsub.Broker[events.MCPEvent]
+
+	// tracer is used for distributed tracing of MCP tool calls.
+	// When set, spans are created for each tool call with attributes
+	// like mcp.tool.name, mcp.request.id, mcp.caller.role, mcp.caller.id.
+	tracer trace.Tracer
+
+	// callerRole identifies the role of the caller (coordinator or worker).
+	// Used as the mcp.caller.role span attribute.
+	callerRole string
+
+	// callerID identifies the specific caller (e.g., worker-1, coordinator).
+	// Used as the mcp.caller.id span attribute.
+	callerID string
 }
 
 // ServerOption configures a Server.
@@ -47,6 +65,23 @@ type ServerOption func(*Server)
 func WithInstructions(instructions string) ServerOption {
 	return func(s *Server) {
 		s.instructions = instructions
+	}
+}
+
+// WithTracer sets the tracer for distributed tracing of MCP tool calls.
+// When set, spans are created for each tool call with standard MCP attributes.
+func WithTracer(tracer trace.Tracer) ServerOption {
+	return func(s *Server) {
+		s.tracer = tracer
+	}
+}
+
+// WithCallerInfo sets the caller role and ID for span attributes.
+// Role should be "coordinator" or "worker", and ID should be the specific identifier.
+func WithCallerInfo(role, id string) ServerOption {
+	return func(s *Server) {
+		s.callerRole = role
+		s.callerID = id
 	}
 }
 
@@ -348,13 +383,61 @@ func (s *Server) handleToolsCall(params json.RawMessage) (any, *RPCError) {
 
 	log.Debug(log.CatMCP, "Calling tool", "name", p.Name)
 
+	// Extract trace context from arguments if present (backwards compatible)
+	traceID := s.extractTraceID(p.Arguments)
+
+	// Set up context with trace ID if available
+	ctx := s.ctx
+	if traceID != "" {
+		ctx = tracing.ContextWithTraceID(ctx, traceID)
+	}
+
+	// Create span for tool execution if tracer is configured
+	var span trace.Span
+	if s.tracer != nil {
+		spanName := tracing.SpanPrefixMCP + p.Name
+		var spanOpts []trace.SpanStartOption
+		spanOpts = append(spanOpts, trace.WithSpanKind(trace.SpanKindServer))
+
+		ctx, span = s.tracer.Start(ctx, spanName, spanOpts...)
+		defer span.End()
+
+		// Set span attributes using constants from tracing package
+		span.SetAttributes(
+			attribute.String(tracing.AttrMCPToolName, p.Name),
+		)
+
+		// Add caller info if available
+		if s.callerRole != "" {
+			span.SetAttributes(attribute.String(tracing.AttrMCPCallerRole, s.callerRole))
+		}
+		if s.callerID != "" {
+			span.SetAttributes(attribute.String(tracing.AttrMCPCallerID, s.callerID))
+		}
+
+		// Add trace ID to span attributes if available
+		if traceID != "" {
+			span.SetAttributes(attribute.String("trace_id", traceID))
+		}
+	}
+
 	// Capture start time for duration calculation
 	startTime := time.Now()
-	result, err := handler(s.ctx, p.Arguments)
+	result, err := handler(ctx, p.Arguments)
 	duration := time.Since(startTime)
 
+	// Record outcome in span if tracing is enabled
+	if span != nil {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		} else {
+			span.SetStatus(codes.Ok, "")
+		}
+	}
+
 	// Publish MCP event for session logging
-	s.publishToolEvent(p.Name, params, result, err, duration)
+	s.publishToolEvent(p.Name, params, result, err, duration, traceID)
 
 	if err != nil {
 		log.Debug(log.CatMCP, "Tool execution failed", "name", p.Name, "error", err)
@@ -362,11 +445,73 @@ func (s *Server) handleToolsCall(params json.RawMessage) (any, *RPCError) {
 		return ErrorResult(err.Error()), nil
 	}
 
+	// Include trace_id in result if one was active (for correlation)
+	if traceID != "" && result != nil {
+		result = s.includeTraceIDInResult(result, traceID)
+	}
+
 	return result, nil
 }
 
+// extractTraceID extracts the trace_id or trace_context from tool arguments.
+// This allows workers to propagate trace context back to the coordinator.
+// Returns empty string if no trace context is present (backwards compatible).
+func (s *Server) extractTraceID(args json.RawMessage) string {
+	if args == nil {
+		return ""
+	}
+
+	// Parse arguments to look for trace_id field
+	var argMap map[string]json.RawMessage
+	if err := json.Unmarshal(args, &argMap); err != nil {
+		return ""
+	}
+
+	// Check for trace_id first (simple string)
+	if traceIDRaw, ok := argMap["trace_id"]; ok {
+		var traceID string
+		if err := json.Unmarshal(traceIDRaw, &traceID); err == nil && traceID != "" {
+			return traceID
+		}
+	}
+
+	// Check for trace_context (object with trace_id field)
+	if tcRaw, ok := argMap["trace_context"]; ok {
+		var tc struct {
+			TraceID string `json:"trace_id"`
+		}
+		if err := json.Unmarshal(tcRaw, &tc); err == nil && tc.TraceID != "" {
+			return tc.TraceID
+		}
+	}
+
+	return ""
+}
+
+// includeTraceIDInResult adds the trace_id to the result content for correlation.
+// This allows workers to receive and propagate the trace context.
+func (s *Server) includeTraceIDInResult(result *ToolCallResult, traceID string) *ToolCallResult {
+	if result == nil || traceID == "" {
+		return result
+	}
+
+	// If there's structured content, add trace_id to it
+	if result.StructuredContent != nil {
+		// Try to add trace_id to structured content if it's a map
+		if m, ok := result.StructuredContent.(map[string]any); ok {
+			m["trace_id"] = traceID
+			return result
+		}
+	}
+
+	// For text-only results, append trace context info to the last content item
+	// We don't modify text content to avoid confusing the AI - trace_id is primarily
+	// for structured responses or can be extracted from context
+	return result
+}
+
 // publishToolEvent publishes an MCPEvent for the tool call.
-func (s *Server) publishToolEvent(toolName string, requestParams json.RawMessage, result *ToolCallResult, err error, duration time.Duration) {
+func (s *Server) publishToolEvent(toolName string, requestParams json.RawMessage, result *ToolCallResult, err error, duration time.Duration, traceID string) {
 	if s.broker == nil {
 		return
 	}
@@ -377,6 +522,7 @@ func (s *Server) publishToolEvent(toolName string, requestParams json.RawMessage
 		ToolName:    toolName,
 		RequestJSON: requestParams,
 		Duration:    duration,
+		TraceID:     traceID,
 	}
 
 	// Serialize response if present

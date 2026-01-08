@@ -639,3 +639,215 @@ func TestOrchestrationConfig_DisableWorktrees_ZeroValue(t *testing.T) {
 	cfg := OrchestrationConfig{}
 	require.False(t, cfg.DisableWorktrees, "DisableWorktrees zero value should be false")
 }
+
+// Tests for TracingConfig
+
+func TestTracingConfig_Defaults(t *testing.T) {
+	cfg := Defaults()
+	tracing := cfg.Orchestration.Tracing
+
+	require.False(t, tracing.Enabled, "Tracing should be disabled by default")
+	require.Equal(t, "file", tracing.Exporter, "Default exporter should be 'file'")
+	require.Empty(t, tracing.FilePath, "FilePath should be empty in defaults (derived at runtime)")
+	require.Equal(t, "localhost:4317", tracing.OTLPEndpoint, "Default OTLP endpoint should be localhost:4317")
+	require.Equal(t, 1.0, tracing.SampleRate, "Default sample rate should be 1.0")
+}
+
+func TestValidateTracing_Empty(t *testing.T) {
+	// Empty config should be valid (disabled by default)
+	err := ValidateTracing(TracingConfig{})
+	require.NoError(t, err)
+}
+
+func TestValidateTracing_DisabledWithEmptyFilePath(t *testing.T) {
+	// Disabled tracing with file exporter but no file path is valid
+	cfg := TracingConfig{
+		Enabled:  false,
+		Exporter: "file",
+		FilePath: "",
+	}
+	err := ValidateTracing(cfg)
+	require.NoError(t, err)
+}
+
+func TestValidateTracing_EnabledFileExporter_RequiresFilePath(t *testing.T) {
+	cfg := TracingConfig{
+		Enabled:    true,
+		Exporter:   "file",
+		FilePath:   "",
+		SampleRate: 1.0,
+	}
+	err := ValidateTracing(cfg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "file_path is required when exporter is \"file\"")
+}
+
+func TestValidateTracing_EnabledFileExporter_ValidWithFilePath(t *testing.T) {
+	cfg := TracingConfig{
+		Enabled:    true,
+		Exporter:   "file",
+		FilePath:   "/tmp/traces.jsonl",
+		SampleRate: 1.0,
+	}
+	err := ValidateTracing(cfg)
+	require.NoError(t, err)
+}
+
+func TestValidateTracing_EnabledOTLPExporter_RequiresEndpoint(t *testing.T) {
+	cfg := TracingConfig{
+		Enabled:      true,
+		Exporter:     "otlp",
+		OTLPEndpoint: "",
+		SampleRate:   1.0,
+	}
+	err := ValidateTracing(cfg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "otlp_endpoint is required when exporter is \"otlp\"")
+}
+
+func TestValidateTracing_EnabledOTLPExporter_ValidWithEndpoint(t *testing.T) {
+	cfg := TracingConfig{
+		Enabled:      true,
+		Exporter:     "otlp",
+		OTLPEndpoint: "localhost:4317",
+		SampleRate:   1.0,
+	}
+	err := ValidateTracing(cfg)
+	require.NoError(t, err)
+}
+
+func TestValidateTracing_InvalidSampleRate_TooLow(t *testing.T) {
+	cfg := TracingConfig{
+		SampleRate: -0.1,
+	}
+	err := ValidateTracing(cfg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "sample_rate must be between 0.0 and 1.0")
+}
+
+func TestValidateTracing_InvalidSampleRate_TooHigh(t *testing.T) {
+	cfg := TracingConfig{
+		SampleRate: 1.5,
+	}
+	err := ValidateTracing(cfg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "sample_rate must be between 0.0 and 1.0")
+}
+
+func TestValidateTracing_ValidSampleRate_Boundaries(t *testing.T) {
+	// Test boundary values
+	testCases := []float64{0.0, 0.5, 1.0}
+	for _, rate := range testCases {
+		cfg := TracingConfig{
+			SampleRate: rate,
+		}
+		err := ValidateTracing(cfg)
+		require.NoError(t, err, "sample rate %v should be valid", rate)
+	}
+}
+
+func TestValidateTracing_InvalidExporter(t *testing.T) {
+	cfg := TracingConfig{
+		Exporter: "invalid",
+	}
+	err := ValidateTracing(cfg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "exporter must be \"none\", \"file\", \"stdout\", or \"otlp\"")
+}
+
+func TestValidateTracing_ValidExporters(t *testing.T) {
+	exporters := []string{"none", "file", "stdout", "otlp"}
+	for _, exporter := range exporters {
+		cfg := TracingConfig{
+			Enabled:      false, // Disable to avoid path requirements
+			Exporter:     exporter,
+			SampleRate:   1.0,
+			FilePath:     "/tmp/traces.jsonl", // Provide just in case
+			OTLPEndpoint: "localhost:4317",
+		}
+		err := ValidateTracing(cfg)
+		require.NoError(t, err, "exporter %q should be valid", exporter)
+	}
+}
+
+func TestValidateTracing_StdoutExporter_NoPathRequired(t *testing.T) {
+	cfg := TracingConfig{
+		Enabled:    true,
+		Exporter:   "stdout",
+		SampleRate: 1.0,
+	}
+	err := ValidateTracing(cfg)
+	require.NoError(t, err)
+}
+
+func TestValidateTracing_NoneExporter_NoPathRequired(t *testing.T) {
+	cfg := TracingConfig{
+		Enabled:    true,
+		Exporter:   "none",
+		SampleRate: 1.0,
+	}
+	err := ValidateTracing(cfg)
+	require.NoError(t, err)
+}
+
+func TestValidateOrchestration_WithValidTracing(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Client: "claude",
+		Tracing: TracingConfig{
+			Enabled:    true,
+			Exporter:   "file",
+			FilePath:   "/tmp/traces.jsonl",
+			SampleRate: 1.0,
+		},
+	}
+	err := ValidateOrchestration(cfg)
+	require.NoError(t, err)
+}
+
+func TestValidateOrchestration_WithInvalidTracing(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Client: "claude",
+		Tracing: TracingConfig{
+			Enabled:    true,
+			Exporter:   "file",
+			FilePath:   "", // Missing required file path
+			SampleRate: 1.0,
+		},
+	}
+	err := ValidateOrchestration(cfg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "file_path is required")
+}
+
+func TestDefaultTracesFilePath(t *testing.T) {
+	// Just verify it returns a non-empty path (actual path depends on system)
+	path := DefaultTracesFilePath()
+	require.NotEmpty(t, path, "DefaultTracesFilePath should return a path")
+	require.Contains(t, path, "traces.jsonl", "Path should contain traces.jsonl")
+	require.Contains(t, path, "perles", "Path should contain perles")
+}
+
+func TestTracingConfig_ZeroValue(t *testing.T) {
+	// Test that zero value TracingConfig has expected defaults
+	cfg := TracingConfig{}
+	require.False(t, cfg.Enabled, "Enabled zero value should be false")
+	require.Empty(t, cfg.Exporter, "Exporter zero value should be empty")
+	require.Empty(t, cfg.FilePath, "FilePath zero value should be empty")
+	require.Empty(t, cfg.OTLPEndpoint, "OTLPEndpoint zero value should be empty")
+	require.Equal(t, 0.0, cfg.SampleRate, "SampleRate zero value should be 0.0")
+}
+
+func TestOrchestrationConfig_TracingField(t *testing.T) {
+	// Verify OrchestrationConfig includes Tracing field
+	cfg := OrchestrationConfig{
+		Client: "claude",
+		Tracing: TracingConfig{
+			Enabled:    true,
+			Exporter:   "stdout",
+			SampleRate: 0.5,
+		},
+	}
+	require.True(t, cfg.Tracing.Enabled)
+	require.Equal(t, "stdout", cfg.Tracing.Exporter)
+	require.Equal(t, 0.5, cfg.Tracing.SampleRate)
+}

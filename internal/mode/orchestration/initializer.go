@@ -11,7 +11,10 @@ import (
 
 	"github.com/google/uuid"
 
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/zjrosen/perles/internal/beads"
+	"github.com/zjrosen/perles/internal/config"
 	"github.com/zjrosen/perles/internal/git"
 	"github.com/zjrosen/perles/internal/log"
 	"github.com/zjrosen/perles/internal/orchestration/amp"
@@ -20,6 +23,7 @@ import (
 	"github.com/zjrosen/perles/internal/orchestration/events"
 	"github.com/zjrosen/perles/internal/orchestration/mcp"
 	"github.com/zjrosen/perles/internal/orchestration/session"
+	"github.com/zjrosen/perles/internal/orchestration/tracing"
 	v2 "github.com/zjrosen/perles/internal/orchestration/v2"
 	"github.com/zjrosen/perles/internal/orchestration/v2/adapter"
 	"github.com/zjrosen/perles/internal/orchestration/v2/command"
@@ -61,6 +65,8 @@ type InitializerConfig struct {
 	// Worktree configuration
 	WorktreeBaseBranch string          // Branch to base worktree on. Empty = skip worktree creation
 	GitExecutor        git.GitExecutor // Injected for testability
+	// Tracing configuration
+	TracingConfig config.TracingConfig // Distributed tracing settings
 }
 
 // InitializerResources holds the resources created during initialization.
@@ -103,6 +109,10 @@ type Initializer struct {
 	// V2 orchestration infrastructure (created by v2.NewInfrastructure factory)
 	// Contains Core.Processor, Core.EventBus, Core.CmdSubmitter, and Repositories.ProcessRepo
 	v2Infra *v2.Infrastructure
+
+	// Tracing infrastructure (created in createWorkspace when enabled)
+	tracingProvider *tracing.Provider // Manages tracer provider lifecycle
+	tracer          trace.Tracer      // Active tracer for span creation
 
 	// Event broker for publishing state changes to TUI
 	broker *pubsub.Broker[InitializerEvent]
@@ -283,6 +293,9 @@ func (i *Initializer) Retry() error {
 	i.worktreePath = ""
 	i.worktreeBranch = ""
 	i.sessionID = ""
+	// Reset tracing state
+	i.tracingProvider = nil
+	i.tracer = nil
 	i.mu.Unlock()
 
 	return i.Start()
@@ -549,6 +562,7 @@ type MCPServerConfig struct {
 	TurnEnforcer mcp.ToolCallRecorder                // Turn completion enforcer for workers
 	WorkDir      string                              // Working directory
 	Extensions   map[string]any                      // Provider-specific extensions
+	Tracer       trace.Tracer                        // Tracer for distributed tracing (optional)
 }
 
 // createMCPServer creates the MCP server with HTTP routes for coordinator and worker endpoints.
@@ -569,6 +583,11 @@ func (i *Initializer) createMCPServer(cfg MCPServerConfig) (*MCPServerResult, er
 	mcpCoordServer := mcp.NewCoordinatorServerWithV2Adapter(
 		cfg.AIClient, cfg.MsgRepo, cfg.WorkDir, cfg.Port, cfg.Extensions,
 		beads.NewRealExecutor(cfg.WorkDir), cfg.V2Adapter)
+
+	// Set tracer for distributed tracing if provided
+	if cfg.Tracer != nil {
+		mcpCoordServer.SetTracer(cfg.Tracer)
+	}
 
 	// Pass the session as the reflection writer so workers can save reflections
 	// Pass the v2Adapter so all worker servers route through v2
@@ -616,6 +635,42 @@ func (i *Initializer) createWorkspace() error {
 		effectiveWorkDir = i.worktreePath
 	}
 	i.mu.RUnlock()
+
+	// ============================================================
+	// Step 0: Create tracing provider (if enabled)
+	// Must happen first so tracer is available for all components
+	// ============================================================
+	var tracer trace.Tracer
+	tracingCfg := i.cfg.TracingConfig
+	if tracingCfg.Enabled {
+		// Convert config.TracingConfig to tracing.Config
+		// Apply default file path if not specified
+		filePath := tracingCfg.FilePath
+		if filePath == "" && tracingCfg.Exporter == "file" {
+			filePath = config.DefaultTracesFilePath()
+		}
+
+		provider, err := tracing.NewProvider(tracing.Config{
+			Enabled:      tracingCfg.Enabled,
+			Exporter:     tracingCfg.Exporter,
+			FilePath:     filePath,
+			OTLPEndpoint: tracingCfg.OTLPEndpoint,
+			SampleRate:   tracingCfg.SampleRate,
+			ServiceName:  "perles-orchestrator",
+		})
+		if err != nil {
+			return fmt.Errorf("creating tracing provider: %w", err)
+		}
+
+		// Store provider for cleanup and get tracer
+		i.mu.Lock()
+		i.tracingProvider = provider
+		i.tracer = provider.Tracer()
+		i.mu.Unlock()
+		tracer = provider.Tracer()
+
+		log.Debug(log.CatOrch, "Tracing provider created", "subsystem", "init", "exporter", tracingCfg.Exporter)
+	}
 
 	// ============================================================
 	// Step 1: Create AI client
@@ -666,6 +721,7 @@ func (i *Initializer) createWorkspace() error {
 		Extensions:  extensions,
 		MessageRepo: msgRepo,
 		SessionID:   sess.ID,
+		Tracer:      tracer, // nil when tracing disabled - middleware handles this gracefully
 	})
 	if err != nil {
 		_ = listenerResult.Listener.Close()
@@ -704,6 +760,7 @@ func (i *Initializer) createWorkspace() error {
 		TurnEnforcer: v2Infra.Internal.TurnEnforcer,
 		WorkDir:      effectiveWorkDir, // Use worktree path when enabled
 		Extensions:   extensions,
+		Tracer:       tracer, // nil when tracing disabled - server handles this gracefully
 	})
 	if err != nil {
 		_ = listenerResult.Listener.Close()
@@ -887,13 +944,17 @@ func (i *Initializer) publishEvent(event InitializerEvent) {
 //  1. Stop all processes and drain command processor (via v2Infra.Shutdown())
 //  2. Stop deduplication middleware (created with v2 infrastructure)
 //  3. Shutdown MCP server with timeout (HTTP server started last in createWorkspace)
+//  4. Shutdown tracing provider to flush pending spans
 func (i *Initializer) cleanupResources() {
 	i.mu.Lock()
 	mcpServer := i.mcpServer
 	v2Infra := i.v2Infra
+	tracingProvider := i.tracingProvider
 
 	i.mcpServer = nil
 	i.v2Infra = nil
+	i.tracingProvider = nil
+	i.tracer = nil
 	i.mu.Unlock()
 
 	if v2Infra != nil {
@@ -903,6 +964,13 @@ func (i *Initializer) cleanupResources() {
 	if mcpServer != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		_ = mcpServer.Shutdown(ctx)
+		cancel()
+	}
+
+	// Shutdown tracing provider last to ensure all spans are flushed
+	if tracingProvider != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = tracingProvider.Shutdown(ctx)
 		cancel()
 	}
 }

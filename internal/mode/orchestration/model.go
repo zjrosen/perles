@@ -19,6 +19,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/zjrosen/perles/internal/config"
 	"github.com/zjrosen/perles/internal/git"
 	"github.com/zjrosen/perles/internal/log"
 	"github.com/zjrosen/perles/internal/mode"
@@ -183,6 +184,11 @@ type Model struct {
 	// Exit state
 	exitMessage string // Message to display when exiting (e.g., worktree cleanup info)
 
+	// Tracing state
+	activeTraceID string               // Current trace ID for display (updated from command events)
+	debugMode     bool                 // Debug mode flag (enables full trace ID display)
+	tracingConfig config.TracingConfig // Tracing configuration (passed to Initializer)
+
 	// Dimensions
 	width  int
 	height int
@@ -239,6 +245,8 @@ type Config struct {
 	DebugMode bool // Show command pane by default when true
 	// Worktree settings
 	DisableWorktrees bool // Skip worktree prompt and always run in current directory
+	// Tracing settings
+	TracingConfig config.TracingConfig // Distributed tracing configuration
 }
 
 // New creates a new orchestration mode model with the given configuration.
@@ -261,6 +269,7 @@ func New(cfg Config) Model {
 		workerPane:            newWorkerPane(),
 		commandPane:           newCommandPane(),
 		showCommandPane:       cfg.DebugMode, // Command pane visible by default only in debug mode
+		debugMode:             cfg.DebugMode, // Store for trace ID display format
 		services:              cfg.Services,
 		workDir:               cfg.WorkDir,
 		disableWorktrees:      cfg.DisableWorktrees,
@@ -272,6 +281,7 @@ func New(cfg Config) Model {
 		ampModel:              cfg.AmpModel,
 		ampMode:               cfg.AmpMode,
 		workflowRegistry:      cfg.WorkflowRegistry,
+		tracingConfig:         cfg.TracingConfig,
 		quitModal: quitmodal.New(quitmodal.Config{
 			Title:   "Exit Orchestration Mode?",
 			Message: "Active workers will be stopped.",

@@ -886,3 +886,97 @@ func TestHideCommands_InvalidVariants(t *testing.T) {
 		require.False(t, handled, "%q should not be handled as /hide commands", cmd)
 	}
 }
+
+// ============================================================================
+// Trace ID Display Tests
+// ============================================================================
+
+func TestRenderCommandContent_WithTraceID(t *testing.T) {
+	entries := []CommandLogEntry{
+		{
+			Timestamp:   time.Date(2026, 1, 3, 15, 4, 5, 0, time.UTC),
+			CommandType: command.CmdSpawnProcess,
+			CommandID:   "12345678-1234-1234-1234-123456789abc",
+			Source:      command.SourceMCPTool,
+			Success:     true,
+			Duration:    50 * time.Millisecond,
+			TraceID:     "abc123def456789012345678901234ff",
+		},
+	}
+
+	content := renderCommandContent(entries, 200)
+
+	// Should contain abbreviated trace ID (first 8 chars)
+	require.Contains(t, content, "[abc123de]", "Should contain abbreviated trace ID")
+
+	// Should NOT contain full trace ID
+	require.NotContains(t, content, "abc123def456789012345678901234ff")
+}
+
+func TestRenderCommandContent_WithoutTraceID(t *testing.T) {
+	entries := []CommandLogEntry{
+		{
+			Timestamp:   time.Date(2026, 1, 3, 15, 4, 5, 0, time.UTC),
+			CommandType: command.CmdSpawnProcess,
+			CommandID:   "12345678-1234-1234-1234-123456789abc",
+			Source:      command.SourceMCPTool,
+			Success:     true,
+			Duration:    50 * time.Millisecond,
+			TraceID:     "", // Empty trace ID
+		},
+	}
+
+	content := renderCommandContent(entries, 200)
+
+	// Should NOT contain trace ID brackets (no empty brackets)
+	// Check that there's no extra brackets beyond the expected command ID and source
+	require.Contains(t, content, "[mcp_tool]")
+	require.Contains(t, content, "(56789abc)") // Command ID - last 8 chars
+	// Should not have empty trace ID brackets
+	require.NotContains(t, content, "[]")
+}
+
+func TestRenderCommandContent_ShortTraceID(t *testing.T) {
+	// Trace ID shorter than 8 chars - should show entire ID
+	shortTraceID := "abc123"
+
+	entries := []CommandLogEntry{
+		{
+			Timestamp:   time.Date(2026, 1, 3, 15, 4, 5, 0, time.UTC),
+			CommandType: command.CmdSpawnProcess,
+			CommandID:   "12345678",
+			Source:      command.SourceMCPTool,
+			Success:     true,
+			Duration:    50 * time.Millisecond,
+			TraceID:     shortTraceID,
+		},
+	}
+
+	content := renderCommandContent(entries, 200)
+
+	// Should contain the full short trace ID in brackets
+	require.Contains(t, content, "["+shortTraceID+"]")
+}
+
+func TestRenderCommandContent_TraceIDExactly8Chars(t *testing.T) {
+	// Trace ID exactly 8 chars - should show entire ID
+	exactTraceID := "abc12345"
+	require.Len(t, exactTraceID, 8)
+
+	entries := []CommandLogEntry{
+		{
+			Timestamp:   time.Date(2026, 1, 3, 15, 4, 5, 0, time.UTC),
+			CommandType: command.CmdSpawnProcess,
+			CommandID:   "12345678",
+			Source:      command.SourceMCPTool,
+			Success:     true,
+			Duration:    50 * time.Millisecond,
+			TraceID:     exactTraceID,
+		},
+	}
+
+	content := renderCommandContent(entries, 200)
+
+	// Should contain the full 8-char trace ID
+	require.Contains(t, content, "["+exactTraceID+"]")
+}

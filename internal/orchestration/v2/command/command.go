@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Command represents an explicit intent entering the orchestration system.
@@ -120,12 +121,13 @@ func (cs CommandSource) String() string {
 // BaseCommand provides common fields for all commands.
 // Concrete command types should embed this struct.
 type BaseCommand struct {
-	id        string
-	cmdType   CommandType
-	priority  int
-	createdAt time.Time
-	source    CommandSource
-	traceID   string
+	id          string
+	cmdType     CommandType
+	priority    int
+	createdAt   time.Time
+	source      CommandSource
+	traceID     string
+	spanContext trace.SpanContext // For OpenTelemetry trace propagation
 }
 
 // NewBaseCommand creates a BaseCommand with a generated UUID and current timestamp.
@@ -166,13 +168,31 @@ func (b *BaseCommand) Source() CommandSource {
 }
 
 // TraceID returns the correlation ID for related commands.
+// If a valid SpanContext is set, the trace ID is derived from it.
+// Otherwise, falls back to the manually set traceID string.
 func (b *BaseCommand) TraceID() string {
+	if b.spanContext.IsValid() {
+		return b.spanContext.TraceID().String()
+	}
 	return b.traceID
 }
 
 // SetTraceID sets the correlation ID for command tracing.
+// This is used when receiving trace IDs as strings (e.g., from MCP tool calls).
+// When a SpanContext is set, TraceID() will prefer the SpanContext's trace ID.
 func (b *BaseCommand) SetTraceID(traceID string) {
 	b.traceID = traceID
+}
+
+// SpanContext returns the OpenTelemetry span context for trace propagation.
+func (b *BaseCommand) SpanContext() trace.SpanContext {
+	return b.spanContext
+}
+
+// SetSpanContext sets the OpenTelemetry span context for trace propagation.
+// This also clears the manual traceID since it will be derived from SpanContext.
+func (b *BaseCommand) SetSpanContext(sc trace.SpanContext) {
+	b.spanContext = sc
 }
 
 // SetPriority sets the execution priority.

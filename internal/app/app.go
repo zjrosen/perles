@@ -288,6 +288,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			VimMode:          m.services.Config.UI.VimMode,
 			DebugMode:        m.debugMode,
 			DisableWorktrees: orchConfig.DisableWorktrees,
+			TracingConfig:    orchConfig.Tracing,
 		}).SetSize(m.width, m.height)
 		return m, m.orchestration.Init()
 

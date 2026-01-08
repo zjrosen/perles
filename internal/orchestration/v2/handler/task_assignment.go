@@ -9,9 +9,15 @@ import (
 	"fmt"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
+
 	"github.com/zjrosen/perles/internal/beads"
 	"github.com/zjrosen/perles/internal/orchestration/events"
 	"github.com/zjrosen/perles/internal/orchestration/mcp"
+	"github.com/zjrosen/perles/internal/orchestration/tracing"
 	"github.com/zjrosen/perles/internal/orchestration/v2/command"
 	"github.com/zjrosen/perles/internal/orchestration/v2/repository"
 	"github.com/zjrosen/perles/internal/orchestration/v2/types"
@@ -29,6 +35,7 @@ type AssignTaskHandler struct {
 	taskRepo    repository.TaskRepository
 	queueRepo   repository.QueueRepository
 	bdExecutor  beads.BeadsExecutor
+	tracer      trace.Tracer
 }
 
 // AssignTaskHandlerOption configures AssignTaskHandler.
@@ -49,6 +56,16 @@ func WithQueueRepository(queueRepo repository.QueueRepository) AssignTaskHandler
 	}
 }
 
+// WithAssignTaskTracer sets the tracer for span instrumentation.
+// If tracer is nil, the handler keeps its default noop tracer.
+func WithAssignTaskTracer(tracer trace.Tracer) AssignTaskHandlerOption {
+	return func(h *AssignTaskHandler) {
+		if tracer != nil {
+			h.tracer = tracer
+		}
+	}
+}
+
 // NewAssignTaskHandler creates a new AssignTaskHandler.
 // Panics if bdExecutor or queueRepo is not provided.
 func NewAssignTaskHandler(
@@ -59,6 +76,7 @@ func NewAssignTaskHandler(
 	h := &AssignTaskHandler{
 		processRepo: processRepo,
 		taskRepo:    taskRepo,
+		tracer:      noop.NewTracerProvider().Tracer("noop"),
 	}
 	for _, opt := range opts {
 		opt(h)
@@ -78,6 +96,39 @@ func NewAssignTaskHandler(
 // Status transition: Ready -> Working
 func (h *AssignTaskHandler) Handle(ctx context.Context, cmd command.Command) (*command.CommandResult, error) {
 	assignCmd := cmd.(*command.AssignTaskCommand)
+
+	// Create child span for handler-specific tracing
+	var span trace.Span
+	ctx, span = h.tracer.Start(ctx, tracing.SpanPrefixHandler+"assign_task",
+		trace.WithSpanKind(trace.SpanKindInternal),
+	)
+	defer span.End()
+
+	// Set handler-specific attributes
+	span.SetAttributes(
+		attribute.String(tracing.AttrTaskID, assignCmd.TaskID),
+		attribute.String(tracing.AttrWorkerID, assignCmd.WorkerID),
+	)
+
+	// Execute with span error recording
+	result, err := h.handleAssign(ctx, assignCmd, span)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+	} else {
+		span.SetStatus(codes.Ok, "")
+	}
+	return result, err
+}
+
+// handleAssign executes the assign task logic with optional span event recording.
+func (h *AssignTaskHandler) handleAssign(_ context.Context, assignCmd *command.AssignTaskCommand, span trace.Span) (*command.CommandResult, error) {
+	// Record worker lookup event
+	if span != nil {
+		span.AddEvent(tracing.EventWorkerLookup,
+			trace.WithAttributes(attribute.String(tracing.AttrWorkerID, assignCmd.WorkerID)),
+		)
+	}
 
 	// 1. Get process from repository
 	proc, err := h.processRepo.Get(assignCmd.WorkerID)
@@ -120,6 +171,13 @@ func (h *AssignTaskHandler) Handle(ctx context.Context, cmd command.Command) (*c
 		return nil, types.ErrProcessAlreadyAssigned
 	}
 
+	// Record task validated event
+	if span != nil {
+		span.AddEvent(tracing.EventTaskValidated,
+			trace.WithAttributes(attribute.String(tracing.AttrTaskID, assignCmd.TaskID)),
+		)
+	}
+
 	// 5. Create TaskAssignment with Implementer = workerID
 	task := &repository.TaskAssignment{
 		TaskID:      assignCmd.TaskID,
@@ -149,6 +207,16 @@ func (h *AssignTaskHandler) Handle(ctx context.Context, cmd command.Command) (*c
 	// 8. Update bd task status to in_progress synchronously
 	if err := h.bdExecutor.UpdateStatus(assignCmd.TaskID, beads.StatusInProgress); err != nil {
 		return nil, fmt.Errorf("failed to update BD task status: %w", err)
+	}
+
+	// Record task assigned event
+	if span != nil {
+		span.AddEvent(tracing.EventTaskAssigned,
+			trace.WithAttributes(
+				attribute.String(tracing.AttrTaskID, assignCmd.TaskID),
+				attribute.String(tracing.AttrWorkerID, assignCmd.WorkerID),
+			),
+		)
 	}
 
 	// 9. Queue TaskAssignmentPrompt to the worker

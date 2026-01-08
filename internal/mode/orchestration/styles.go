@@ -35,3 +35,8 @@ var TitleContextStyle = lipgloss.NewStyle().Foreground(styles.TextMutedColor)
 // Uses orange color to draw attention to pending queued messages.
 var QueuedCountStyle = lipgloss.NewStyle().
 	Foreground(lipgloss.AdaptiveColor{Light: "#FFA500", Dark: "#FFB347"})
+
+// TraceIDStyle is used for trace ID display in status bar and command log.
+// Uses muted/secondary color to avoid visual noise while still being visible.
+var TraceIDStyle = lipgloss.NewStyle().
+	Foreground(styles.TextMutedColor)

@@ -9,7 +9,13 @@ import (
 	"fmt"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
+
 	"github.com/zjrosen/perles/internal/orchestration/events"
+	"github.com/zjrosen/perles/internal/orchestration/tracing"
 	"github.com/zjrosen/perles/internal/orchestration/v2/command"
 	"github.com/zjrosen/perles/internal/orchestration/v2/process"
 	"github.com/zjrosen/perles/internal/orchestration/v2/prompt"
@@ -65,17 +71,37 @@ type UnifiedProcessSpawner interface {
 type SendToProcessHandler struct {
 	processRepo repository.ProcessRepository
 	queueRepo   repository.QueueRepository
+	tracer      trace.Tracer
+}
+
+// SendToProcessHandlerOption configures SendToProcessHandler.
+type SendToProcessHandlerOption func(*SendToProcessHandler)
+
+// WithSendToProcessTracer sets the tracer for span instrumentation.
+// If tracer is nil, the handler keeps its default noop tracer.
+func WithSendToProcessTracer(tracer trace.Tracer) SendToProcessHandlerOption {
+	return func(h *SendToProcessHandler) {
+		if tracer != nil {
+			h.tracer = tracer
+		}
+	}
 }
 
 // NewSendToProcessHandler creates a new SendToProcessHandler.
 func NewSendToProcessHandler(
 	processRepo repository.ProcessRepository,
 	queueRepo repository.QueueRepository,
+	opts ...SendToProcessHandlerOption,
 ) *SendToProcessHandler {
-	return &SendToProcessHandler{
+	h := &SendToProcessHandler{
 		processRepo: processRepo,
 		queueRepo:   queueRepo,
+		tracer:      noop.NewTracerProvider().Tracer("noop"),
 	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 // Handle processes a SendToProcessCommand.
@@ -83,6 +109,31 @@ func NewSendToProcessHandler(
 func (h *SendToProcessHandler) Handle(ctx context.Context, cmd command.Command) (*command.CommandResult, error) {
 	sendCmd := cmd.(*command.SendToProcessCommand)
 
+	// Create child span for handler-specific tracing
+	var span trace.Span
+	ctx, span = h.tracer.Start(ctx, tracing.SpanPrefixHandler+"send_to_process",
+		trace.WithSpanKind(trace.SpanKindInternal),
+	)
+	defer span.End()
+
+	// Set handler-specific attributes
+	span.SetAttributes(
+		attribute.String(tracing.AttrProcessID, sendCmd.ProcessID),
+	)
+
+	// Execute with span error recording
+	result, err := h.handleWithSpan(ctx, sendCmd, span)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+	} else {
+		span.SetStatus(codes.Ok, "")
+	}
+	return result, err
+}
+
+// handleWithSpan executes the SendToProcess logic with optional span event recording.
+func (h *SendToProcessHandler) handleWithSpan(_ context.Context, sendCmd *command.SendToProcessCommand, span trace.Span) (*command.CommandResult, error) {
 	// Get process from repository
 	proc, err := h.processRepo.Get(sendCmd.ProcessID)
 	if err != nil {
@@ -107,6 +158,16 @@ func (h *SendToProcessHandler) Handle(ctx context.Context, cmd command.Command) 
 	queue := h.queueRepo.GetOrCreate(sendCmd.ProcessID)
 	if err := queue.Enqueue(sendCmd.Content, sender); err != nil {
 		return nil, fmt.Errorf("failed to enqueue message: %w", err)
+	}
+
+	// Record message queued event
+	if span != nil {
+		span.AddEvent(tracing.EventMessageQueued,
+			trace.WithAttributes(
+				attribute.String(tracing.AttrProcessID, proc.ID),
+				attribute.Int("queue.size", queue.Size()),
+			),
+		)
 	}
 
 	// Build result
@@ -736,6 +797,7 @@ type SpawnProcessHandler struct {
 	registry    *process.ProcessRegistry
 	spawner     UnifiedProcessSpawner
 	enforcer    TurnCompletionEnforcer
+	tracer      trace.Tracer
 }
 
 // SpawnProcessHandlerOption configures SpawnProcessHandler.
@@ -756,6 +818,16 @@ func WithTurnEnforcer(enforcer TurnCompletionEnforcer) SpawnProcessHandlerOption
 	}
 }
 
+// WithSpawnProcessTracer sets the tracer for span instrumentation.
+// If tracer is nil, the handler keeps its default noop tracer.
+func WithSpawnProcessTracer(tracer trace.Tracer) SpawnProcessHandlerOption {
+	return func(h *SpawnProcessHandler) {
+		if tracer != nil {
+			h.tracer = tracer
+		}
+	}
+}
+
 // NewSpawnProcessHandler creates a new SpawnProcessHandler.
 func NewSpawnProcessHandler(
 	processRepo repository.ProcessRepository,
@@ -765,6 +837,7 @@ func NewSpawnProcessHandler(
 	h := &SpawnProcessHandler{
 		processRepo: processRepo,
 		registry:    registry,
+		tracer:      noop.NewTracerProvider().Tracer("noop"),
 	}
 	for _, opt := range opts {
 		opt(h)
@@ -777,6 +850,31 @@ func NewSpawnProcessHandler(
 func (h *SpawnProcessHandler) Handle(ctx context.Context, cmd command.Command) (*command.CommandResult, error) {
 	spawnCmd := cmd.(*command.SpawnProcessCommand)
 
+	// Create child span for handler-specific tracing
+	var span trace.Span
+	ctx, span = h.tracer.Start(ctx, tracing.SpanPrefixHandler+"spawn_process",
+		trace.WithSpanKind(trace.SpanKindInternal),
+	)
+	defer span.End()
+
+	// Set handler-specific attributes
+	span.SetAttributes(
+		attribute.String(tracing.AttrProcessRole, string(spawnCmd.Role)),
+	)
+
+	// Execute with span error recording
+	result, err := h.handleSpawn(ctx, spawnCmd, span)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+	} else {
+		span.SetStatus(codes.Ok, "")
+	}
+	return result, err
+}
+
+// handleSpawn executes the spawn process logic with optional span event recording.
+func (h *SpawnProcessHandler) handleSpawn(ctx context.Context, spawnCmd *command.SpawnProcessCommand, span trace.Span) (*command.CommandResult, error) {
 	var processID string
 
 	if spawnCmd.Role == repository.RoleCoordinator {
@@ -795,6 +893,11 @@ func (h *SpawnProcessHandler) Handle(ctx context.Context, cmd command.Command) (
 	// Override with provided ProcessID if specified
 	if spawnCmd.ProcessID != "" {
 		processID = spawnCmd.ProcessID
+	}
+
+	// Update span with resolved process ID
+	if span != nil {
+		span.SetAttributes(attribute.String(tracing.AttrProcessID, processID))
 	}
 
 	// Create process entity

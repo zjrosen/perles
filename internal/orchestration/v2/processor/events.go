@@ -26,4 +26,6 @@ type CommandLogEvent struct {
 	Duration time.Duration
 	// Timestamp is when the command finished processing.
 	Timestamp time.Time
+	// TraceID is the distributed trace ID for correlation (empty if tracing disabled).
+	TraceID string
 }

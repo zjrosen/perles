@@ -1309,6 +1309,80 @@ func TestView_Golden_CommandPaneHidden(t *testing.T) {
 }
 
 // ============================================================================
+// Trace ID Display Golden Tests
+// ============================================================================
+
+func TestView_Golden_WithTraceID(t *testing.T) {
+	m := newReadyModel(120, 30)
+
+	// Set an active trace ID (simulating tracing is enabled)
+	m.activeTraceID = "abc123def456789012345678901234ff"
+
+	view := m.View()
+	teatest.RequireEqualOutput(t, []byte(view))
+}
+
+func TestView_Golden_WithTraceID_DebugMode(t *testing.T) {
+	m := New(Config{DebugMode: true})
+	m = m.SetSize(120, 30)
+	m.input.Blur() // Blur input for consistent golden test
+
+	// Mark initialization as complete
+	m.initializer = &Initializer{phase: InitReady}
+
+	// Set an active trace ID (simulating tracing is enabled)
+	m.activeTraceID = "abc123def456789012345678901234ff"
+
+	view := m.View()
+	teatest.RequireEqualOutput(t, []byte(view))
+}
+
+func TestView_Golden_CommandPaneWithTraceID(t *testing.T) {
+	m := newReadyModel(120, 30)
+
+	// Show the command pane
+	m.showCommandPane = true
+
+	// Add sample command log entries with trace IDs
+	m.commandPane.entries = []CommandLogEntry{
+		{
+			Timestamp:   testNow,
+			CommandType: command.CmdSpawnProcess,
+			CommandID:   "aaaaaaaa-1234-1234-1234-123456789abc",
+			Source:      command.SourceMCPTool,
+			Success:     true,
+			Duration:    45 * time.Millisecond,
+			TraceID:     "trace1abc456789012345678901234ff",
+		},
+		{
+			Timestamp:   testNow.Add(1 * time.Second),
+			CommandType: command.CmdAssignTask,
+			CommandID:   "bbbbbbbb-1234-1234-1234-123456789abc",
+			Source:      command.SourceInternal,
+			Success:     true,
+			Duration:    120 * time.Millisecond,
+			TraceID:     "trace2abc456789012345678901234ff",
+		},
+		{
+			Timestamp:   testNow.Add(2 * time.Second),
+			CommandType: command.CmdSendToProcess,
+			CommandID:   "cccccccc-1234-1234-1234-123456789abc",
+			Source:      command.SourceUser,
+			Success:     true,
+			Duration:    8 * time.Millisecond,
+			TraceID:     "", // Entry without trace ID (tracing disabled for this command)
+		},
+	}
+	m.commandPane.contentDirty = true
+
+	// Also set active trace ID for status bar
+	m.activeTraceID = "trace2abc456789012345678901234ff"
+
+	view := m.View()
+	teatest.RequireEqualOutput(t, []byte(view))
+}
+
+// ============================================================================
 // Worktree Cleanup and Exit Message Tests
 // ============================================================================
 
@@ -1565,4 +1639,89 @@ func TestView_Golden_WithBranchSelectModal(t *testing.T) {
 
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))
+}
+
+// ============================================================================
+// Trace ID Display Tests
+// ============================================================================
+
+func TestFormatTraceIDDisplay_Empty(t *testing.T) {
+	m := New(Config{})
+	m.activeTraceID = ""
+
+	display := m.formatTraceIDDisplay()
+	require.Empty(t, display, "Empty trace ID should produce empty display")
+}
+
+func TestFormatTraceIDDisplay_NormalMode_Abbreviated(t *testing.T) {
+	m := New(Config{DebugMode: false})
+	m.activeTraceID = "abc123def456789012345678901234ff"
+
+	display := m.formatTraceIDDisplay()
+
+	// Should contain abbreviated trace ID (first 8 chars)
+	require.Contains(t, display, "trace:abc123de")
+
+	// Should NOT contain full trace ID
+	require.NotContains(t, display, "abc123def456789012345678901234ff")
+}
+
+func TestFormatTraceIDDisplay_DebugMode_Full(t *testing.T) {
+	m := New(Config{DebugMode: true})
+	m.activeTraceID = "abc123def456789012345678901234ff"
+
+	display := m.formatTraceIDDisplay()
+
+	// Should contain full trace ID (32 chars)
+	require.Contains(t, display, "trace:abc123def456789012345678901234ff")
+}
+
+func TestFormatTraceIDDisplay_ShortTraceID(t *testing.T) {
+	m := New(Config{DebugMode: false})
+	m.activeTraceID = "abc123" // Only 6 chars
+
+	display := m.formatTraceIDDisplay()
+
+	// Should contain full short trace ID (no truncation needed)
+	require.Contains(t, display, "trace:abc123")
+}
+
+func TestFormatTraceIDDisplay_Exactly8Chars(t *testing.T) {
+	m := New(Config{DebugMode: false})
+	m.activeTraceID = "abc12345" // Exactly 8 chars
+
+	display := m.formatTraceIDDisplay()
+
+	// Should contain full 8-char trace ID
+	require.Contains(t, display, "trace:abc12345")
+}
+
+func TestModel_DebugModePreserved(t *testing.T) {
+	// Verify debugMode is correctly set from config
+	m := New(Config{DebugMode: true})
+	require.True(t, m.debugMode, "debugMode should be true when DebugMode config is true")
+
+	m2 := New(Config{DebugMode: false})
+	require.False(t, m2.debugMode, "debugMode should be false when DebugMode config is false")
+
+	m3 := New(Config{}) // Default
+	require.False(t, m3.debugMode, "debugMode should be false by default")
+}
+
+func TestModel_ActiveTraceID_UpdatedFromEvent(t *testing.T) {
+	m := New(Config{})
+	m = m.SetSize(120, 30)
+
+	// Verify activeTraceID is initially empty
+	require.Empty(t, m.activeTraceID, "activeTraceID should be empty initially")
+
+	// Set activeTraceID (simulating what handleV2Event does)
+	m.activeTraceID = "test-trace-id-123"
+
+	// Verify it was set
+	require.Equal(t, "test-trace-id-123", m.activeTraceID)
+
+	// Verify formatTraceIDDisplay uses it
+	display := m.formatTraceIDDisplay()
+	require.Contains(t, display, "trace:test-tra") // First 8 chars
 }

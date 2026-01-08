@@ -208,16 +208,38 @@ func (m Model) renderInputBar() string {
 	// Build target label for left title - show who we're messaging (uppercase for consistency)
 	targetLabel := strings.ToUpper(m.messageTarget)
 
+	// Build trace ID display for bottom-right (only show when tracing is active)
+	var traceIDDisplay string
+	if m.activeTraceID != "" {
+		traceIDDisplay = m.formatTraceIDDisplay()
+	}
+
 	return panes.BorderedPane(panes.BorderConfig{
 		Content:            content,
 		Width:              m.width,
 		Height:             inputHeight,
 		TopLeft:            targetLabel,             // Left title shows target
 		BottomLeft:         m.input.ModeIndicator(), // Vim mode indicator (styled by component)
+		BottomRight:        traceIDDisplay,          // Trace ID display (only when active)
 		Focused:            m.input.Focused(),       // Highlight border when input is focused
 		TitleColor:         titleColor,
 		FocusedBorderColor: borderColor,
 	})
+}
+
+// formatTraceIDDisplay formats the trace ID for display in the status bar.
+// Returns abbreviated (first 8 chars) in normal mode, full 32-char in debug mode.
+// Format: "trace:a1b2c3d4" for abbreviated or "trace:full32chartraceidentifier" for debug.
+func (m Model) formatTraceIDDisplay() string {
+	if m.activeTraceID == "" {
+		return ""
+	}
+
+	displayID := m.activeTraceID
+	if !m.debugMode && len(displayID) > 8 {
+		displayID = displayID[:8]
+	}
+	return TraceIDStyle.Render("trace:" + displayID)
 }
 
 // Resume prompt styles

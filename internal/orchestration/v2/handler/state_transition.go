@@ -11,8 +11,14 @@ import (
 	"slices"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
+
 	"github.com/zjrosen/perles/internal/beads"
 	"github.com/zjrosen/perles/internal/orchestration/events"
+	"github.com/zjrosen/perles/internal/orchestration/tracing"
 	"github.com/zjrosen/perles/internal/orchestration/v2/command"
 	"github.com/zjrosen/perles/internal/orchestration/v2/repository"
 	"github.com/zjrosen/perles/internal/orchestration/v2/types"
@@ -214,6 +220,7 @@ type ReportVerdictHandler struct {
 	taskRepo    repository.TaskRepository
 	queueRepo   repository.QueueRepository
 	bdExecutor  beads.BeadsExecutor
+	tracer      trace.Tracer
 }
 
 // ReportVerdictHandlerOption configures ReportVerdictHandler.
@@ -224,6 +231,16 @@ type ReportVerdictHandlerOption func(*ReportVerdictHandler)
 func WithReportVerdictBDExecutor(executor beads.BeadsExecutor) ReportVerdictHandlerOption {
 	return func(h *ReportVerdictHandler) {
 		h.bdExecutor = executor
+	}
+}
+
+// WithReportVerdictTracer sets the tracer for span instrumentation.
+// If tracer is nil, the handler keeps its default noop tracer.
+func WithReportVerdictTracer(tracer trace.Tracer) ReportVerdictHandlerOption {
+	return func(h *ReportVerdictHandler) {
+		if tracer != nil {
+			h.tracer = tracer
+		}
 	}
 }
 
@@ -239,6 +256,7 @@ func NewReportVerdictHandler(
 		processRepo: processRepo,
 		taskRepo:    taskRepo,
 		queueRepo:   queueRepo,
+		tracer:      noop.NewTracerProvider().Tracer("noop"),
 	}
 	for _, opt := range opts {
 		opt(h)
@@ -256,6 +274,32 @@ func NewReportVerdictHandler(
 func (h *ReportVerdictHandler) Handle(ctx context.Context, cmd command.Command) (*command.CommandResult, error) {
 	verdictCmd := cmd.(*command.ReportVerdictCommand)
 
+	// Create child span for handler-specific tracing
+	var span trace.Span
+	ctx, span = h.tracer.Start(ctx, tracing.SpanPrefixHandler+"report_verdict",
+		trace.WithSpanKind(trace.SpanKindInternal),
+	)
+	defer span.End()
+
+	// Set handler-specific attributes
+	span.SetAttributes(
+		attribute.String(tracing.AttrVerdict, string(verdictCmd.Verdict)),
+		attribute.String(tracing.AttrReviewerID, verdictCmd.WorkerID),
+	)
+
+	// Execute with span error recording
+	result, err := h.handleVerdict(ctx, verdictCmd, span)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+	} else {
+		span.SetStatus(codes.Ok, "")
+	}
+	return result, err
+}
+
+// handleVerdict executes the report verdict logic with optional span event recording.
+func (h *ReportVerdictHandler) handleVerdict(_ context.Context, verdictCmd *command.ReportVerdictCommand, span trace.Span) (*command.CommandResult, error) {
 	// 1. Validate verdict value
 	if !verdictCmd.Verdict.IsValid() {
 		return nil, types.ErrInvalidVerdict
@@ -299,6 +343,14 @@ func (h *ReportVerdictHandler) Handle(ctx context.Context, cmd command.Command) 
 			return nil, fmt.Errorf("implementer not found: %s", task.Implementer)
 		}
 		return nil, fmt.Errorf("failed to get implementer: %w", err)
+	}
+
+	// Update span with additional attributes now that we have the task info
+	if span != nil {
+		span.SetAttributes(
+			attribute.String(tracing.AttrTaskID, task.TaskID),
+			attribute.String(tracing.AttrImplementerID, task.Implementer),
+		)
 	}
 
 	// Build events and follow-ups

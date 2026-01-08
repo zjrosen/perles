@@ -35,4 +35,6 @@ type MCPEvent struct {
 	Error string `json:"error,omitempty"`
 	// Duration is the time taken to execute the tool call.
 	Duration time.Duration `json:"duration"`
+	// TraceID is the distributed trace ID for correlation across processes.
+	TraceID string `json:"trace_id,omitempty"`
 }

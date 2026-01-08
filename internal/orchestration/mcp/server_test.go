@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/zjrosen/perles/internal/orchestration/tracing"
 )
 
 func TestNewServer(t *testing.T) {
@@ -584,4 +585,197 @@ func TestServer_MCPBroker_CapturesError(t *testing.T) {
 func TestServer_Broker_ReturnsNonNil(t *testing.T) {
 	s := NewServer("test", "1.0.0")
 	require.NotNil(t, s.Broker(), "Broker should not be nil")
+}
+
+func TestServer_ExtractsTraceIDFromArguments(t *testing.T) {
+	s := NewServer("test", "1.0.0")
+
+	// Register a tool that returns the context trace ID
+	var capturedTraceID string
+	s.RegisterTool(Tool{
+		Name:        "trace_test",
+		Description: "Test tool for trace ID extraction",
+		InputSchema: &InputSchema{Type: "object"},
+	}, func(ctx context.Context, _ json.RawMessage) (*ToolCallResult, error) {
+		// Extract trace ID from context using tracing helper
+		capturedTraceID = tracing.TraceIDFromContext(ctx)
+		return SuccessResult("ok"), nil
+	})
+
+	// Test with trace_id in arguments
+	params := json.RawMessage(`{"name": "trace_test", "arguments": {"trace_id": "test-trace-123"}}`)
+	_, rpcErr := s.handleToolsCall(params)
+	require.Nil(t, rpcErr, "Unexpected RPC error")
+	require.Equal(t, "test-trace-123", capturedTraceID, "Trace ID should be extracted from arguments")
+}
+
+func TestServer_ExtractsTraceContextFromArguments(t *testing.T) {
+	s := NewServer("test", "1.0.0")
+
+	// Register a tool that returns the context trace ID
+	var capturedTraceID string
+	s.RegisterTool(Tool{
+		Name:        "trace_context_test",
+		Description: "Test tool for trace context extraction",
+		InputSchema: &InputSchema{Type: "object"},
+	}, func(ctx context.Context, _ json.RawMessage) (*ToolCallResult, error) {
+		// Extract trace ID from context using tracing helper
+		capturedTraceID = tracing.TraceIDFromContext(ctx)
+		return SuccessResult("ok"), nil
+	})
+
+	// Test with trace_context object in arguments
+	params := json.RawMessage(`{"name": "trace_context_test", "arguments": {"trace_context": {"trace_id": "context-trace-456"}}}`)
+	_, rpcErr := s.handleToolsCall(params)
+	require.Nil(t, rpcErr, "Unexpected RPC error")
+	require.Equal(t, "context-trace-456", capturedTraceID, "Trace ID should be extracted from trace_context object")
+}
+
+func TestServer_WorksWithoutTraceID(t *testing.T) {
+	s := NewServer("test", "1.0.0")
+
+	// Register a tool
+	var handlerCalled bool
+	s.RegisterTool(Tool{
+		Name:        "no_trace_test",
+		Description: "Test tool without trace ID",
+		InputSchema: &InputSchema{Type: "object"},
+	}, func(_ context.Context, _ json.RawMessage) (*ToolCallResult, error) {
+		handlerCalled = true
+		return SuccessResult("ok"), nil
+	})
+
+	// Test without trace_id in arguments (backwards compatibility)
+	params := json.RawMessage(`{"name": "no_trace_test", "arguments": {"foo": "bar"}}`)
+	result, rpcErr := s.handleToolsCall(params)
+	require.Nil(t, rpcErr, "Unexpected RPC error")
+	require.NotNil(t, result, "Result should not be nil")
+	require.True(t, handlerCalled, "Handler should be called")
+}
+
+func TestServer_MCPBroker_CapturesTraceID(t *testing.T) {
+	s := NewServer("test", "1.0.0")
+
+	// Register a simple tool
+	s.RegisterTool(Tool{
+		Name:        "trace_event_test",
+		Description: "Test tool for trace ID in events",
+		InputSchema: &InputSchema{Type: "object"},
+	}, func(_ context.Context, _ json.RawMessage) (*ToolCallResult, error) {
+		return SuccessResult("ok"), nil
+	})
+
+	// Subscribe to the broker
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	eventCh := s.Broker().Subscribe(ctx)
+
+	// Make a tool call with trace_id
+	params := json.RawMessage(`{"name": "trace_event_test", "arguments": {"trace_id": "event-trace-789"}}`)
+	_, rpcErr := s.handleToolsCall(params)
+	require.Nil(t, rpcErr, "Unexpected RPC error")
+
+	// Wait for event and verify trace ID
+	select {
+	case event := <-eventCh:
+		require.Equal(t, "event-trace-789", event.Payload.TraceID, "TraceID should be captured in event")
+		require.Equal(t, "trace_event_test", event.Payload.ToolName, "ToolName should match")
+	case <-time.After(100 * time.Millisecond):
+		require.FailNow(t, "Timeout waiting for MCP event")
+	}
+}
+
+func TestServer_WithCallerInfo(t *testing.T) {
+	s := NewServer("test", "1.0.0", WithCallerInfo("worker", "worker-1"))
+
+	require.Equal(t, "worker", s.callerRole, "callerRole should be set")
+	require.Equal(t, "worker-1", s.callerID, "callerID should be set")
+}
+
+func TestServer_IncludesTraceIDInStructuredResult(t *testing.T) {
+	s := NewServer("test", "1.0.0")
+
+	// Register a tool that returns structured content
+	s.RegisterTool(Tool{
+		Name:        "structured_trace_test",
+		Description: "Test tool returning structured content",
+		InputSchema: &InputSchema{Type: "object"},
+	}, func(_ context.Context, _ json.RawMessage) (*ToolCallResult, error) {
+		return StructuredResult("ok", map[string]any{"data": "test"}), nil
+	})
+
+	// Make a tool call with trace_id
+	params := json.RawMessage(`{"name": "structured_trace_test", "arguments": {"trace_id": "structured-trace-001"}}`)
+	result, rpcErr := s.handleToolsCall(params)
+	require.Nil(t, rpcErr, "Unexpected RPC error")
+
+	// Verify trace_id is included in structured content
+	toolResult, ok := result.(*ToolCallResult)
+	require.True(t, ok, "Result should be ToolCallResult")
+	require.NotNil(t, toolResult.StructuredContent, "StructuredContent should not be nil")
+
+	structContent, ok := toolResult.StructuredContent.(map[string]any)
+	require.True(t, ok, "StructuredContent should be a map")
+	require.Equal(t, "structured-trace-001", structContent["trace_id"], "trace_id should be included in structured content")
+}
+
+func TestServer_SpanCreationWithTracer(t *testing.T) {
+	// Create a test tracer provider to capture spans
+	provider, err := tracing.NewProvider(tracing.Config{
+		Enabled:     true,
+		Exporter:    "none", // No export, just create spans
+		ServiceName: "test-mcp-server",
+	})
+	require.NoError(t, err, "Failed to create tracing provider")
+	defer func() { _ = provider.Shutdown(context.Background()) }()
+
+	s := NewServer("test", "1.0.0",
+		WithTracer(provider.Tracer()),
+		WithCallerInfo("worker", "worker-1"),
+	)
+
+	// Register a simple tool
+	s.RegisterTool(Tool{
+		Name:        "span_test",
+		Description: "Test tool for span creation",
+		InputSchema: &InputSchema{Type: "object"},
+	}, func(_ context.Context, _ json.RawMessage) (*ToolCallResult, error) {
+		return SuccessResult("ok"), nil
+	})
+
+	// Make a tool call
+	params := json.RawMessage(`{"name": "span_test", "arguments": {"trace_id": "span-test-trace-001"}}`)
+	result, rpcErr := s.handleToolsCall(params)
+	require.Nil(t, rpcErr, "Unexpected RPC error")
+	require.NotNil(t, result, "Result should not be nil")
+}
+
+func TestServer_SpanCreationOnError(t *testing.T) {
+	// Create a test tracer provider
+	provider, err := tracing.NewProvider(tracing.Config{
+		Enabled:     true,
+		Exporter:    "none",
+		ServiceName: "test-mcp-server",
+	})
+	require.NoError(t, err, "Failed to create tracing provider")
+	defer func() { _ = provider.Shutdown(context.Background()) }()
+
+	s := NewServer("test", "1.0.0", WithTracer(provider.Tracer()))
+
+	// Register a tool that fails
+	s.RegisterTool(Tool{
+		Name:        "failing_span_test",
+		Description: "Test tool that fails",
+		InputSchema: &InputSchema{Type: "object"},
+	}, func(_ context.Context, _ json.RawMessage) (*ToolCallResult, error) {
+		return nil, context.DeadlineExceeded
+	})
+
+	// Make a tool call that fails
+	params := json.RawMessage(`{"name": "failing_span_test", "arguments": {}}`)
+	result, rpcErr := s.handleToolsCall(params)
+	require.Nil(t, rpcErr, "RPC error should be nil (tool errors are returned as results)")
+	require.NotNil(t, result, "Result should not be nil")
+	toolResult := result.(*ToolCallResult)
+	require.True(t, toolResult.IsError, "Result should indicate error")
 }

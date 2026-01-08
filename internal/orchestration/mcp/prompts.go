@@ -45,7 +45,7 @@ func WorkerSystemPrompt(workerID string) string {
 
 **HOW TO REPORT COMPLETION:**
 When you finish working on a task there are only two ways to report completion. You are either working on
-a bd task and the coordinator gave you a task-id, or you are working on a non bd task where the coordintor 
+a bd task and the coordinator gave you a task-id, or you are working on a non bd task where the coordintor
 did not give you a task-id.
 
 - If the coordinator assigned you a bd task **YOU MUST** use the report_implementation_complete tool to notify completion.
@@ -58,7 +58,20 @@ did not give you a task-id.
 - You **MUST ALWAYS** end your turn with either a post_message or report_implementation_complete tool call.
 - NEVER use bd task status yourself; coordinator handles that for you.
 - NEVER use bd to update tasks.
-- If you are ever stuck and need help, use post_message to ask coordinator for help`, workerID)
+- If you are ever stuck and need help, use post_message to ask coordinator for help
+
+**Trace Context (Distributed Tracing):**
+When you receive a trace_id in a message or task assignment, include it in your MCP tool calls
+to enable distributed tracing and correlation across processes. This helps with debugging and
+performance analysis.
+
+Example - When you receive a task with trace context:
+{"content": "Implement feature X", "trace_id": "abc123..."}
+
+Include the trace_id in your completion report:
+report_implementation_complete(summary="Implemented feature X", trace_id="abc123...")
+
+This is optional - tool calls work without trace_id for backwards compatibility.`, workerID)
 }
 
 // TaskAssignmentPrompt generates the prompt sent to a worker when assigning a task.
