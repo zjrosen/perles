@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"syscall"
 	"time"
 
 	"github.com/zjrosen/perles/internal/orchestration/events"
@@ -16,11 +15,11 @@ import (
 )
 
 // GracefulStopTimeout is the maximum time to wait for graceful termination
-// before escalating to forceful termination (SIGKILL).
+// before escalating to forceful termination.
 const GracefulStopTimeout = 5 * time.Second
 
 // StopWorkerHandler handles CmdStopProcess commands.
-// It implements tiered termination: graceful (Cancel + timeout) then forceful (SIGKILL).
+// It implements tiered termination: graceful (Cancel + timeout) then forceful.
 // Follows the RetireProcessHandler pattern for lifecycle management.
 type StopWorkerHandler struct {
 	processRepo repository.ProcessRepository
@@ -126,12 +125,13 @@ func (h *StopWorkerHandler) gracefulStop(ctx context.Context, proc *repository.P
 	}
 }
 
-// forceStop immediately terminates the worker using SIGKILL.
+// forceStop immediately terminates the worker forcefully.
+// On Unix, this sends SIGKILL. On Windows, this calls TerminateProcess.
 func (h *StopWorkerHandler) forceStop(proc *repository.Process, liveProcess *process.Process) (*command.CommandResult, error) {
 	pid := liveProcess.PID()
 	if pid > 0 {
-		// Force kill the process using SIGKILL
-		_ = syscall.Kill(pid, syscall.SIGKILL)
+		// Force kill the process (platform-specific implementation)
+		_ = killProcess(pid)
 	}
 
 	return h.finishStop(proc, liveProcess, false)
