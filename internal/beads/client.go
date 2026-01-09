@@ -3,6 +3,9 @@ package beads
 import (
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/zjrosen/perles/internal/log"
 
@@ -21,9 +24,34 @@ type BeadsClient interface {
 	GetComments(issueID string) ([]Comment, error)
 }
 
+// resolveBeadsDir resolves the actual .beads directory, following redirect files
+// used by git worktrees. If a redirect file exists, it contains a relative path
+// to the actual .beads directory.
+func resolveBeadsDir(projectPath string) string {
+	beadsDir := filepath.Join(projectPath, ".beads")
+	redirectPath := filepath.Join(beadsDir, "redirect")
+
+	content, err := os.ReadFile(redirectPath) //nolint:gosec // redirect path is within .beads dir
+	if err != nil {
+		return beadsDir
+	}
+
+	redirectTarget := strings.TrimSpace(string(content))
+	if redirectTarget == "" {
+		return beadsDir
+	}
+
+	resolvedPath := filepath.Join(beadsDir, redirectTarget)
+	resolvedPath = filepath.Clean(resolvedPath)
+
+	log.Debug(log.CatDB, "Following beads redirect", "from", beadsDir, "to", resolvedPath)
+	return resolvedPath
+}
+
 // NewClient creates a client connected to the beads database.
 func NewClient(projectPath string) (*Client, error) {
-	dbPath := projectPath + "/.beads/beads.db"
+	beadsDir := resolveBeadsDir(projectPath)
+	dbPath := filepath.Join(beadsDir, "beads.db")
 	log.Debug(log.CatDB, "Opening database", "path", dbPath)
 	db, err := sql.Open("sqlite3", "file:"+dbPath+"?mode=ro")
 	if err != nil {
@@ -42,6 +70,11 @@ func NewClient(projectPath string) (*Client, error) {
 // Close closes the database connection.
 func (c *Client) Close() error {
 	return c.db.Close()
+}
+
+// DBPath returns the resolved path to the beads.db file.
+func (c *Client) DBPath() string {
+	return c.dbPath
 }
 
 // DB returns the underlying database connection.

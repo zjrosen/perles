@@ -198,7 +198,7 @@ func runApp(cmd *cobra.Command, args []string) error {
 		cfg,
 		bqlCache,
 		depGraphCache,
-		dbPath+"/.beads/beads.db",
+		client.DBPath(),
 		configFilePath,
 		workDir,
 		debug,
