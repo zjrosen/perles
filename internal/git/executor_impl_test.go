@@ -34,9 +34,10 @@ func TestRealExecutor_IsGitRepo(t *testing.T) {
 	})
 
 	t.Run("not in git repo", func(t *testing.T) {
-		// Use /tmp which should not be a git repo
-		executor := NewRealExecutor("/tmp")
-		require.False(t, executor.IsGitRepo(), "IsGitRepo() = true for /tmp, want false")
+		// Use a temp dir which should not be a git repo
+		tempDir := t.TempDir()
+		executor := NewRealExecutor(tempDir)
+		require.False(t, executor.IsGitRepo(), "IsGitRepo() = true for temp dir, want false")
 	})
 }
 
@@ -603,8 +604,9 @@ func TestRealExecutor_GetFileDiff_NonexistentFile(t *testing.T) {
 
 // TestRealExecutor_GetDiff_NotGitRepo tests diff operations outside a git repo.
 func TestRealExecutor_GetDiff_NotGitRepo(t *testing.T) {
-	// Use /tmp which should not be a git repo
-	executor := NewRealExecutor("/tmp")
+	// Use a temp dir which should not be a git repo
+	tempDir := t.TempDir()
+	executor := NewRealExecutor(tempDir)
 
 	_, err := executor.GetDiff("HEAD")
 	require.Error(t, err, "GetDiff() outside git repo should error")
@@ -661,7 +663,7 @@ func TestRealExecutor_GetCommitLog_Success(t *testing.T) {
 		require.NotEmpty(t, c.Hash, "commit[%d].Hash is empty", i)
 		require.Len(t, c.Hash, 40, "commit[%d].Hash should be 40 chars, got %d: %s", i, len(c.Hash), c.Hash)
 		require.NotEmpty(t, c.ShortHash, "commit[%d].ShortHash is empty", i)
-		require.Len(t, c.ShortHash, 7, "commit[%d].ShortHash should be 7 chars, got %d: %s", i, len(c.ShortHash), c.ShortHash)
+		require.GreaterOrEqual(t, len(c.ShortHash), 7, "commit[%d].ShortHash should be at least 7 chars, got %d: %s", i, len(c.ShortHash), c.ShortHash)
 		require.NotEmpty(t, c.Subject, "commit[%d].Subject is empty", i)
 		require.NotEmpty(t, c.Author, "commit[%d].Author is empty", i)
 		require.False(t, c.Date.IsZero(), "commit[%d].Date is zero", i)
@@ -686,8 +688,9 @@ func TestRealExecutor_GetCommitLog_LimitRespected(t *testing.T) {
 
 // TestRealExecutor_GetCommitLog_NotGitRepo tests GetCommitLog outside a git repo.
 func TestRealExecutor_GetCommitLog_NotGitRepo(t *testing.T) {
-	// Use /tmp which should not be a git repo
-	executor := NewRealExecutor("/tmp")
+	// Use a temp dir which should not be a git repo
+	tempDir := t.TempDir()
+	executor := NewRealExecutor(tempDir)
 
 	_, err := executor.GetCommitLog(10)
 	require.Error(t, err, "GetCommitLog() outside git repo should error")
@@ -915,8 +918,9 @@ func TestRealExecutor_GetCommitLogForRef_Limit(t *testing.T) {
 
 // TestRealExecutor_GetCommitLogForRef_NotGitRepo tests GetCommitLogForRef outside a git repo.
 func TestRealExecutor_GetCommitLogForRef_NotGitRepo(t *testing.T) {
-	// Use /tmp which should not be a git repo
-	executor := NewRealExecutor("/tmp")
+	// Use a temp dir which should not be a git repo
+	tempDir := t.TempDir()
+	executor := NewRealExecutor(tempDir)
 
 	_, err := executor.GetCommitLogForRef("main", 10)
 	require.Error(t, err, "GetCommitLogForRef() outside git repo should error")

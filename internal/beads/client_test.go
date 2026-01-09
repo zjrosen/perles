@@ -3,6 +3,7 @@ package beads
 import (
 	"database/sql"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/zjrosen/perles/internal/testutil"
@@ -125,7 +126,7 @@ func TestClient_DB(t *testing.T) {
 
 func TestResolveBeadsDir_NoRedirect(t *testing.T) {
 	tmpDir := t.TempDir()
-	beadsDir := tmpDir + "/.beads"
+	beadsDir := filepath.Join(tmpDir, ".beads")
 	require.NoError(t, os.MkdirAll(beadsDir, 0755))
 
 	result := resolveBeadsDir(tmpDir)
@@ -138,27 +139,27 @@ func TestResolveBeadsDir_WithRedirect(t *testing.T) {
 	// main/.beads/beads.db
 	tmpDir := t.TempDir()
 
-	mainBeadsDir := tmpDir + "/main/.beads"
+	mainBeadsDir := filepath.Join(tmpDir, "main", ".beads")
 	require.NoError(t, os.MkdirAll(mainBeadsDir, 0755))
 
-	worktreeBeadsDir := tmpDir + "/worktree/.beads"
+	worktreeBeadsDir := filepath.Join(tmpDir, "worktree", ".beads")
 	require.NoError(t, os.MkdirAll(worktreeBeadsDir, 0755))
 
 	// Create redirect file pointing to main beads dir
-	redirectPath := worktreeBeadsDir + "/redirect"
+	redirectPath := filepath.Join(worktreeBeadsDir, "redirect")
 	require.NoError(t, os.WriteFile(redirectPath, []byte("../../main/.beads"), 0644))
 
-	result := resolveBeadsDir(tmpDir + "/worktree")
+	result := resolveBeadsDir(filepath.Join(tmpDir, "worktree"))
 	require.Equal(t, mainBeadsDir, result)
 }
 
 func TestResolveBeadsDir_EmptyRedirect(t *testing.T) {
 	tmpDir := t.TempDir()
-	beadsDir := tmpDir + "/.beads"
+	beadsDir := filepath.Join(tmpDir, ".beads")
 	require.NoError(t, os.MkdirAll(beadsDir, 0755))
 
 	// Create empty redirect file
-	redirectPath := beadsDir + "/redirect"
+	redirectPath := filepath.Join(beadsDir, "redirect")
 	require.NoError(t, os.WriteFile(redirectPath, []byte(""), 0644))
 
 	result := resolveBeadsDir(tmpDir)
@@ -168,16 +169,16 @@ func TestResolveBeadsDir_EmptyRedirect(t *testing.T) {
 func TestResolveBeadsDir_RedirectWithWhitespace(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	mainBeadsDir := tmpDir + "/main/.beads"
+	mainBeadsDir := filepath.Join(tmpDir, "main", ".beads")
 	require.NoError(t, os.MkdirAll(mainBeadsDir, 0755))
 
-	worktreeBeadsDir := tmpDir + "/worktree/.beads"
+	worktreeBeadsDir := filepath.Join(tmpDir, "worktree", ".beads")
 	require.NoError(t, os.MkdirAll(worktreeBeadsDir, 0755))
 
 	// Create redirect file with trailing newline (common case)
-	redirectPath := worktreeBeadsDir + "/redirect"
+	redirectPath := filepath.Join(worktreeBeadsDir, "redirect")
 	require.NoError(t, os.WriteFile(redirectPath, []byte("../../main/.beads\n"), 0644))
 
-	result := resolveBeadsDir(tmpDir + "/worktree")
+	result := resolveBeadsDir(filepath.Join(tmpDir, "worktree"))
 	require.Equal(t, mainBeadsDir, result)
 }

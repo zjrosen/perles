@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -40,10 +41,11 @@ func loadWorkflowsFromFS(fsys fs.FS, dir string, source Source) ([]Workflow, err
 			continue
 		}
 
-		path := filepath.Join(dir, entry.Name())
-		content, err := fs.ReadFile(fsys, path)
+		// Use path.Join (not filepath.Join) for embedded filesystems which always use forward slashes
+		fsPath := path.Join(dir, entry.Name())
+		content, err := fs.ReadFile(fsys, fsPath)
 		if err != nil {
-			return nil, fmt.Errorf("reading workflow file %s: %w", path, err)
+			return nil, fmt.Errorf("reading workflow file %s: %w", fsPath, err)
 		}
 
 		wf, err := parseWorkflow(string(content), entry.Name(), source)

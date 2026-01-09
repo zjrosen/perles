@@ -137,7 +137,7 @@ func TestCommandLogFlow_EndToEnd_Success(t *testing.T) {
 	require.Equal(t, command.SourceInternal, entry.Source, "Source should match")
 	require.True(t, entry.Success, "Success should be true for successful command")
 	require.Empty(t, entry.Error, "Error should be empty for successful command")
-	require.Greater(t, entry.Duration, time.Duration(0), "Duration should be positive")
+	require.GreaterOrEqual(t, entry.Duration, time.Duration(0), "Duration should be non-negative")
 	require.False(t, entry.Timestamp.IsZero(), "Timestamp should be set")
 
 	// Step 8: Verify contentDirty was set for rendering

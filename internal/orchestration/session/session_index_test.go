@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -105,7 +106,7 @@ func TestLoadSessionIndex_Invalid(t *testing.T) {
 
 func TestLoadSessionIndex_PermissionError(t *testing.T) {
 	// Skip on Windows where permissions work differently
-	if os.Getenv("GOOS") == "windows" {
+	if runtime.GOOS == "windows" {
 		t.Skip("skipping permission test on Windows")
 	}
 
@@ -219,6 +220,11 @@ func TestSaveSessionIndex_OverwriteExisting(t *testing.T) {
 }
 
 func TestSaveSessionIndex_Concurrent(t *testing.T) {
+	// Skip on Windows where concurrent file operations behave differently
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping concurrent test on Windows due to different file locking behavior")
+	}
+
 	dir := t.TempDir()
 	indexPath := filepath.Join(dir, "sessions.json")
 

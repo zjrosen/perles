@@ -78,30 +78,11 @@ func TestNewFileExporter_AppendsToExistingFile(t *testing.T) {
 	require.NoError(t, err)
 
 	lines := 0
-	scanner := bufio.NewScanner(bufio.NewReader(
-		bufio.NewReader(
-			bufio.NewReader(
-				bufio.NewReader(
-					bufio.NewReader(
-						bufio.NewReaderSize(
-							func() *os.File {
-								f, _ := os.Open(tracePath)
-								return f
-							}(),
-							1024,
-						),
-					),
-				),
-			),
-		),
-	))
-
-	// Simpler approach
 	file, err := os.Open(tracePath)
 	require.NoError(t, err)
 	defer file.Close()
 
-	scanner = bufio.NewScanner(file)
+	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		lines++
 	}
