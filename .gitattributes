@@ -1,2 +1,5 @@
 # Use bd merge for beads JSONL files
 .beads/issues.jsonl merge=beads
+
+# Preserve line endings for golden test files (prevent CRLF conversion on Windows)
+*.golden binary

@@ -17,6 +17,7 @@ import (
 	"github.com/zjrosen/perles/internal/mocks"
 	"github.com/zjrosen/perles/internal/orchestration/amp"
 	"github.com/zjrosen/perles/internal/orchestration/client"
+	"github.com/zjrosen/perles/internal/orchestration/session"
 	"github.com/zjrosen/perles/internal/orchestration/v2/repository"
 )
 
@@ -348,6 +349,7 @@ func TestInitializer_CreateSession_Success(t *testing.T) {
 	// Verify no error
 	require.NoError(t, err, "createSession should not return an error")
 	require.NotNil(t, sess, "createSession should return a non-nil session")
+	t.Cleanup(func() { _ = sess.Close(session.StatusCompleted) })
 
 	// Verify session has an ID (UUID format)
 	require.NotEmpty(t, sess.ID, "session should have a non-empty ID")
@@ -408,18 +410,21 @@ func TestInitializer_CreateSession_UniqueIDs(t *testing.T) {
 	init.mu.Unlock()
 	sess1, err1 := init.createSession()
 	require.NoError(t, err1)
+	t.Cleanup(func() { _ = sess1.Close(session.StatusCompleted) })
 
 	init.mu.Lock()
 	init.sessionID = "session-id-22222222-2222-2222-2222-222222222222"
 	init.mu.Unlock()
 	sess2, err2 := init.createSession()
 	require.NoError(t, err2)
+	t.Cleanup(func() { _ = sess2.Close(session.StatusCompleted) })
 
 	init.mu.Lock()
 	init.sessionID = "session-id-33333333-3333-3333-3333-333333333333"
 	init.mu.Unlock()
 	sess3, err3 := init.createSession()
 	require.NoError(t, err3)
+	t.Cleanup(func() { _ = sess3.Close(session.StatusCompleted) })
 
 	// Verify all IDs are unique (because we set different IDs)
 	require.NotEqual(t, sess1.ID, sess2.ID, "session IDs should be unique")
@@ -443,6 +448,7 @@ func TestInitializer_CreateSession_DirectoryStructure(t *testing.T) {
 
 	sess, err := init.createSession()
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = sess.Close(session.StatusCompleted) })
 
 	// Verify the directory structure is: WorkDir/.perles/sessions/<sessionID>
 	expectedParent := filepath.Join(workDir, ".perles", "sessions")
@@ -718,6 +724,7 @@ func TestInitializer_CreateMCPServer_Success(t *testing.T) {
 
 	sess, err := init.createSession()
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = sess.Close(session.StatusCompleted) })
 
 	listenerResult, err := init.createMCPListener()
 	require.NoError(t, err)
@@ -768,6 +775,7 @@ func TestInitializer_CreateMCPServer_ConfiguresHTTPRoutes(t *testing.T) {
 
 	sess, err := init.createSession()
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = sess.Close(session.StatusCompleted) })
 
 	listenerResult, err := init.createMCPListener()
 	require.NoError(t, err)
@@ -828,6 +836,7 @@ func TestInitializer_CreateMCPServer_ReadHeaderTimeout(t *testing.T) {
 
 	sess, err := init.createSession()
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = sess.Close(session.StatusCompleted) })
 
 	listenerResult, err := init.createMCPListener()
 	require.NoError(t, err)

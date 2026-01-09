@@ -1499,7 +1499,11 @@ func compareGolden(t *testing.T, name, got string) {
 	want, err := os.ReadFile(goldenPath)
 	require.NoError(t, err, "failed to read golden file %s (run with UPDATE_GOLDEN=1 to create)", goldenPath)
 
-	require.Equal(t, string(want), got, "output does not match golden file %s", goldenPath)
+	// Normalize line endings for cross-platform compatibility
+	wantStr := strings.ReplaceAll(string(want), "\r\n", "\n")
+	gotStr := strings.ReplaceAll(got, "\r\n", "\n")
+
+	require.Equal(t, wantStr, gotStr, "output does not match golden file %s", goldenPath)
 }
 
 // --- Editable List Field Tests ---

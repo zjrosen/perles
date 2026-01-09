@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -273,6 +274,7 @@ func TestNew_CreatesDirectoryStructure(t *testing.T) {
 	session, err := New(sessionID, sessionDir)
 	require.NoError(t, err)
 	require.NotNil(t, session)
+	t.Cleanup(func() { _ = session.Close(StatusCompleted) })
 
 	// Verify session fields
 	require.Equal(t, sessionID, session.ID)
@@ -336,6 +338,7 @@ func TestNew_WritesInitialMetadata(t *testing.T) {
 	session, err := New(sessionID, sessionDir)
 	require.NoError(t, err)
 	require.NotNil(t, session)
+	t.Cleanup(func() { _ = session.Close(StatusCompleted) })
 
 	// Load and verify the metadata
 	meta, err := Load(sessionDir)
@@ -352,6 +355,11 @@ func TestNew_WritesInitialMetadata(t *testing.T) {
 }
 
 func TestNew_FailsOnInvalidDir(t *testing.T) {
+	// Skip on Windows where permissions work differently
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping permission test on Windows")
+	}
+
 	// Test 1: Non-existent parent with no write permission
 	// Create a directory and make it read-only
 	baseDir := t.TempDir()
@@ -371,6 +379,11 @@ func TestNew_FailsOnInvalidDir(t *testing.T) {
 }
 
 func TestNew_FailsOnExistingReadOnlyDir(t *testing.T) {
+	// Skip on Windows where permissions work differently
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping permission test on Windows")
+	}
+
 	// Create a session directory that's read-only
 	baseDir := t.TempDir()
 	sessionDir := filepath.Join(baseDir, "session")
@@ -394,6 +407,7 @@ func TestNew_SessionFieldsInitialized(t *testing.T) {
 	session, err := New(sessionID, sessionDir)
 	require.NoError(t, err)
 	require.NotNil(t, session)
+	t.Cleanup(func() { _ = session.Close(StatusCompleted) })
 
 	// Verify all session fields are properly initialized
 	require.Equal(t, sessionID, session.ID)
@@ -415,8 +429,9 @@ func TestNew_MetadataJSONFormat(t *testing.T) {
 	sessionID := "json-format-test"
 	sessionDir := filepath.Join(baseDir, "session")
 
-	_, err := New(sessionID, sessionDir)
+	session, err := New(sessionID, sessionDir)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = session.Close(StatusCompleted) })
 
 	// Read the raw JSON file
 	metadataPath := filepath.Join(sessionDir, "metadata.json")
@@ -763,6 +778,7 @@ func TestSession_WriteCoordinatorEvent(t *testing.T) {
 	session, err := New(sessionID, sessionDir)
 	require.NoError(t, err)
 	require.NotNil(t, session)
+	t.Cleanup(func() { _ = session.Close(StatusCompleted) })
 
 	// Write a coordinator event
 	timestamp := time.Date(2025, 1, 15, 10, 30, 45, 0, time.UTC)
@@ -803,6 +819,7 @@ func TestSession_WriteCoordinatorEvent_AfterClose(t *testing.T) {
 
 	session, err := New(sessionID, sessionDir)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = session.Close(StatusCompleted) })
 
 	err = session.Close(StatusCompleted)
 	require.NoError(t, err)
@@ -823,6 +840,7 @@ func TestSession_WriteWorkerEvent(t *testing.T) {
 	session, err := New(sessionID, sessionDir)
 	require.NoError(t, err)
 	require.NotNil(t, session)
+	t.Cleanup(func() { _ = session.Close(StatusCompleted) })
 
 	// Write events for different workers
 	timestamp := time.Date(2025, 1, 15, 10, 30, 45, 0, time.UTC)
@@ -870,6 +888,7 @@ func TestSession_WriteWorkerEvent_LazyCreatesDirectory(t *testing.T) {
 
 	session, err := New(sessionID, sessionDir)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = session.Close(StatusCompleted) })
 
 	// Worker directory shouldn't exist yet
 	worker3Path := filepath.Join(sessionDir, "workers", "worker-3")
@@ -903,6 +922,7 @@ func TestSession_WriteCoordinatorRawJSON(t *testing.T) {
 
 	session, err := New(sessionID, sessionDir)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = session.Close(StatusCompleted) })
 
 	// Write raw JSON entries
 	json1 := []byte(`{"type":"chat","content":"Hello"}`)
@@ -935,6 +955,7 @@ func TestSession_WriteCoordinatorRawJSON_AddsNewline(t *testing.T) {
 
 	session, err := New(sessionID, sessionDir)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = session.Close(StatusCompleted) })
 
 	// Write JSON without trailing newline
 	json1 := []byte(`{"type":"test"}`)
@@ -967,6 +988,7 @@ func TestSession_WriteWorkerRawJSON(t *testing.T) {
 
 	session, err := New(sessionID, sessionDir)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = session.Close(StatusCompleted) })
 
 	// Write raw JSON for a worker
 	json1 := []byte(`{"type":"output","content":"Working on task..."}`)
@@ -995,6 +1017,7 @@ func TestSession_WriteMessage(t *testing.T) {
 
 	session, err := New(sessionID, sessionDir)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = session.Close(StatusCompleted) })
 
 	// Write message entries
 	timestamp := time.Date(2025, 1, 15, 10, 30, 45, 123456789, time.UTC)
@@ -1058,6 +1081,7 @@ func TestSession_WriteMCPEvent(t *testing.T) {
 
 	session, err := New(sessionID, sessionDir)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = session.Close(StatusCompleted) })
 
 	// Write MCP events
 	timestamp := time.Date(2025, 1, 15, 10, 30, 45, 0, time.UTC)
@@ -1122,6 +1146,7 @@ func TestSession_Close(t *testing.T) {
 
 	session, err := New(sessionID, sessionDir)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = session.Close(StatusCompleted) })
 
 	// Write some events before closing
 	err = session.WriteCoordinatorEvent(time.Now(), "coordinator", "Starting...")
@@ -1156,6 +1181,7 @@ func TestSession_Close_FlushesBuffers(t *testing.T) {
 
 	session, err := New(sessionID, sessionDir)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = session.Close(StatusCompleted) })
 
 	// Write several events (below flush threshold)
 	for i := 0; i < 10; i++ {
@@ -1181,6 +1207,7 @@ func TestSession_Close_DoubleClose(t *testing.T) {
 
 	session, err := New(sessionID, sessionDir)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = session.Close(StatusCompleted) })
 
 	// First close should succeed
 	err = session.Close(StatusCompleted)
@@ -1203,6 +1230,7 @@ func TestSession_Close_DifferentStatuses(t *testing.T) {
 
 			session, err := New(sessionID, sessionDir)
 			require.NoError(t, err)
+			t.Cleanup(func() { _ = session.Close(StatusCompleted) })
 
 			err = session.Close(status)
 			require.NoError(t, err)
@@ -1228,6 +1256,7 @@ func TestSession_Close_GeneratesSummary(t *testing.T) {
 
 	session, err := New(sessionID, sessionDir)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = session.Close(StatusCompleted) })
 
 	err = session.Close(StatusCompleted)
 	require.NoError(t, err)
@@ -1256,6 +1285,7 @@ func TestSession_AttachToBrokers(t *testing.T) {
 	session, err := New(sessionID, sessionDir)
 	require.NoError(t, err)
 	require.NotNil(t, session)
+	t.Cleanup(func() { _ = session.Close(StatusCompleted) })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1291,6 +1321,7 @@ func TestSession_AttachToBrokers_NilBrokers(t *testing.T) {
 
 	session, err := New(sessionID, sessionDir)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = session.Close(StatusCompleted) })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1311,6 +1342,7 @@ func TestSession_CoordinatorSubscriber(t *testing.T) {
 
 	session, err := New(sessionID, sessionDir)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = session.Close(StatusCompleted) })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1378,6 +1410,7 @@ func TestSession_WorkerSubscriber(t *testing.T) {
 
 	session, err := New(sessionID, sessionDir)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = session.Close(StatusCompleted) })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1453,6 +1486,7 @@ func TestSession_MessageSubscriber(t *testing.T) {
 
 	session, err := New(sessionID, sessionDir)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = session.Close(StatusCompleted) })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1510,6 +1544,7 @@ func TestSession_MCPSubscriber(t *testing.T) {
 
 	session, err := New(sessionID, sessionDir)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = session.Close(StatusCompleted) })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1582,6 +1617,7 @@ func TestSession_ContextCancellation(t *testing.T) {
 
 	session, err := New(sessionID, sessionDir)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = session.Close(StatusCompleted) })
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -1630,6 +1666,7 @@ func TestSession_HighThroughput(t *testing.T) {
 
 	session, err := New(sessionID, sessionDir)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = session.Close(StatusCompleted) })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1683,6 +1720,7 @@ func TestSession_TokenUsageAggregation(t *testing.T) {
 
 	session, err := New(sessionID, sessionDir)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = session.Close(StatusCompleted) })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1754,6 +1792,7 @@ func TestSession_WorkerMetadataUpdates(t *testing.T) {
 
 	session, err := New(sessionID, sessionDir)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = session.Close(StatusCompleted) })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1852,6 +1891,7 @@ func TestSession_LateCoordinatorAttach(t *testing.T) {
 
 	session, err := New(sessionID, sessionDir)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = session.Close(StatusCompleted) })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1928,6 +1968,7 @@ func TestSession_MCPBrokerAttach(t *testing.T) {
 
 	session, err := New(sessionID, sessionDir)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = session.Close(StatusCompleted) })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -2238,6 +2279,11 @@ func TestWriteWorkerAccountabilitySummary_OverwritesExisting(t *testing.T) {
 }
 
 func TestWriteWorkerAccountabilitySummary_FilePermissions(t *testing.T) {
+	// Skip on Windows where file permissions work differently
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping permission test on Windows")
+	}
+
 	baseDir := t.TempDir()
 	sessionID := "test-accountability-permissions"
 	sessionDir := filepath.Join(baseDir, "session")

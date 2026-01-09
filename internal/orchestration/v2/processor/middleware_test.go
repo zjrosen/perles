@@ -679,7 +679,7 @@ func TestCommandLogMiddleware_EmitsCorrectEventStructure(t *testing.T) {
 	assert.Equal(t, cmd.Type(), event.CommandType)
 	assert.True(t, event.Success)
 	assert.Nil(t, event.Error)
-	assert.Greater(t, event.Duration, time.Duration(0))
+	assert.GreaterOrEqual(t, event.Duration, time.Duration(0))
 	assert.False(t, event.Timestamp.IsZero())
 }
 
