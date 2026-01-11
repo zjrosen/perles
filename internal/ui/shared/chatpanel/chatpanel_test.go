@@ -18,7 +18,6 @@ import (
 	v2 "github.com/zjrosen/perles/internal/orchestration/v2"
 	"github.com/zjrosen/perles/internal/orchestration/workflow"
 	"github.com/zjrosen/perles/internal/pubsub"
-	"github.com/zjrosen/perles/internal/ui/commandpalette"
 	"github.com/zjrosen/perles/internal/ui/shared/chatrender"
 	"github.com/zjrosen/perles/internal/ui/shared/vimtextarea"
 )
@@ -119,518 +118,14 @@ func TestNew_WorkflowRegistry_InitializedWhenProvided(t *testing.T) {
 	require.Same(t, registry, m.workflowRegistry, "workflowRegistry should reference the same registry")
 }
 
-func TestNew_WorkflowPicker_InitiallyHidden(t *testing.T) {
-	// Test with default config (no registry)
-	m := New(DefaultConfig())
-	require.False(t, m.showWorkflowPicker, "showWorkflowPicker should be false initially")
-	require.Nil(t, m.workflowPicker, "workflowPicker should be nil initially")
-
-	// Test with a registry provided
-	registry := workflow.NewRegistry()
-	cfg := Config{
-		ClientType:       "claude",
-		WorkDir:          "/test/dir",
-		SessionTimeout:   30 * time.Minute,
-		WorkflowRegistry: registry,
-	}
-	m = New(cfg)
-	require.False(t, m.showWorkflowPicker, "showWorkflowPicker should be false initially even with registry")
-	require.Nil(t, m.workflowPicker, "workflowPicker should be nil until opened")
-}
-
 // ============================================================================
-// openWorkflowPicker Tests (perles-yt25.6)
+// Ctrl+T Keybinding Tests (perles-f3tm.4 - Workflows Tab)
+// NOTE: The openWorkflowPicker and handleWorkflowSelected tests were removed
+// as part of the Workflows tab cleanup. The workflow picker modal has been
+// replaced by the Workflows tab navigation.
 // ============================================================================
 
-func TestChatPanel_openWorkflowPicker_CreatesItems(t *testing.T) {
-	// Create a registry with chat-targeted workflows
-	registry := workflow.NewRegistry()
-	registry.Add(workflow.Workflow{
-		ID:          "test-chat-1",
-		Name:        "Test Chat Workflow",
-		Description: "A test chat workflow",
-		Source:      workflow.SourceBuiltIn,
-		TargetMode:  workflow.TargetChat,
-	})
-	registry.Add(workflow.Workflow{
-		ID:          "test-user",
-		Name:        "User Workflow",
-		Description: "A user-defined workflow",
-		Source:      workflow.SourceUser,
-		TargetMode:  workflow.TargetChat,
-	})
-
-	cfg := Config{
-		ClientType:       "claude",
-		WorkDir:          "/test/dir",
-		SessionTimeout:   30 * time.Minute,
-		WorkflowRegistry: registry,
-	}
-	m := New(cfg).SetSize(80, 24)
-
-	// Open the workflow picker
-	m = m.openWorkflowPicker()
-
-	// Verify picker was created and shown
-	require.True(t, m.showWorkflowPicker, "showWorkflowPicker should be true after opening")
-	require.NotNil(t, m.workflowPicker, "workflowPicker should be initialized")
-
-	// Verify items were created correctly
-	items := m.workflowPicker.FilteredItems()
-	require.Len(t, items, 2, "should have 2 items")
-
-	// Items are sorted by name, so Test Chat Workflow comes after User Workflow alphabetically
-	// Actually let me check - "Test Chat Workflow" vs "User Workflow" - T comes before U
-	require.Equal(t, "test-chat-1", items[0].ID)
-	require.Equal(t, "Test Chat Workflow", items[0].Name)
-	require.Equal(t, "A test chat workflow", items[0].Description)
-
-	require.Equal(t, "test-user", items[1].ID)
-	require.Equal(t, "User Workflow", items[1].Name)
-	require.Equal(t, "A user-defined workflow", items[1].Description)
-}
-
-func TestChatPanel_openWorkflowPicker_FiltersToChat(t *testing.T) {
-	// Create a registry with mixed workflow types
-	registry := workflow.NewRegistry()
-	registry.Add(workflow.Workflow{
-		ID:          "orch-only",
-		Name:        "Orchestration Only",
-		Description: "For orchestration mode",
-		Source:      workflow.SourceBuiltIn,
-		TargetMode:  workflow.TargetOrchestration,
-	})
-	registry.Add(workflow.Workflow{
-		ID:          "chat-only",
-		Name:        "Chat Only",
-		Description: "For chat mode",
-		Source:      workflow.SourceBuiltIn,
-		TargetMode:  workflow.TargetChat,
-	})
-	registry.Add(workflow.Workflow{
-		ID:          "both-modes",
-		Name:        "Both Modes",
-		Description: "Works in both modes",
-		Source:      workflow.SourceUser,
-		TargetMode:  workflow.TargetBoth, // empty string = both
-	})
-
-	cfg := Config{
-		ClientType:       "claude",
-		WorkDir:          "/test/dir",
-		SessionTimeout:   30 * time.Minute,
-		WorkflowRegistry: registry,
-	}
-	m := New(cfg).SetSize(80, 24)
-
-	// Open the workflow picker
-	m = m.openWorkflowPicker()
-
-	// Verify picker was created
-	require.NotNil(t, m.workflowPicker)
-
-	// Verify only chat and both-modes workflows are included (not orchestration-only)
-	items := m.workflowPicker.FilteredItems()
-	require.Len(t, items, 2, "should have 2 items (chat + both, not orchestration)")
-
-	// Verify orchestration-only is NOT included
-	for _, item := range items {
-		require.NotEqual(t, "orch-only", item.ID, "orchestration-only workflow should not be included")
-	}
-
-	// Items are sorted by name: "Both Modes" comes before "Chat Only"
-	require.Equal(t, "both-modes", items[0].ID)
-	require.Equal(t, "chat-only", items[1].ID)
-}
-
-func TestChatPanel_openWorkflowPicker_NilRegistry(t *testing.T) {
-	// Create model without workflow registry
-	m := New(DefaultConfig()).SetSize(80, 24)
-
-	// Verify registry is nil
-	require.Nil(t, m.workflowRegistry)
-
-	// Open the workflow picker - should return early without error
-	m = m.openWorkflowPicker()
-
-	// Verify picker was NOT created
-	require.False(t, m.showWorkflowPicker, "showWorkflowPicker should remain false with nil registry")
-	require.Nil(t, m.workflowPicker, "workflowPicker should remain nil with nil registry")
-}
-
-func TestChatPanel_openWorkflowPicker_EmptyList(t *testing.T) {
-	// Create registry with only orchestration workflows (no chat workflows)
-	registry := workflow.NewRegistry()
-	registry.Add(workflow.Workflow{
-		ID:          "orch-only",
-		Name:        "Orchestration Only",
-		Description: "For orchestration mode",
-		Source:      workflow.SourceBuiltIn,
-		TargetMode:  workflow.TargetOrchestration,
-	})
-
-	cfg := Config{
-		ClientType:       "claude",
-		WorkDir:          "/test/dir",
-		SessionTimeout:   30 * time.Minute,
-		WorkflowRegistry: registry,
-	}
-	m := New(cfg).SetSize(80, 24)
-
-	// Open the workflow picker - should return early because no chat workflows
-	m = m.openWorkflowPicker()
-
-	// Verify picker was NOT created (empty list handled gracefully)
-	require.False(t, m.showWorkflowPicker, "showWorkflowPicker should remain false with empty chat workflow list")
-	require.Nil(t, m.workflowPicker, "workflowPicker should remain nil with empty chat workflow list")
-}
-
-func TestChatPanel_openWorkflowPicker_UserWorkflowsGreen_BuiltInBlue(t *testing.T) {
-	// Create a registry with one user and one built-in workflow
-	registry := workflow.NewRegistry()
-	registry.Add(workflow.Workflow{
-		ID:          "builtin",
-		Name:        "Built-in Workflow",
-		Description: "A built-in workflow",
-		Source:      workflow.SourceBuiltIn,
-		TargetMode:  workflow.TargetChat,
-	})
-	registry.Add(workflow.Workflow{
-		ID:          "user",
-		Name:        "User Workflow",
-		Description: "A user workflow",
-		Source:      workflow.SourceUser,
-		TargetMode:  workflow.TargetChat,
-	})
-
-	cfg := Config{
-		ClientType:       "claude",
-		WorkDir:          "/test/dir",
-		SessionTimeout:   30 * time.Minute,
-		WorkflowRegistry: registry,
-	}
-	m := New(cfg).SetSize(80, 24)
-
-	// Open the workflow picker
-	m = m.openWorkflowPicker()
-
-	require.NotNil(t, m.workflowPicker)
-	items := m.workflowPicker.FilteredItems()
-	require.Len(t, items, 2)
-
-	// Items are sorted by name: "Built-in Workflow" comes before "User Workflow"
-	builtInItem := items[0]
-	userItem := items[1]
-
-	require.Equal(t, "builtin", builtInItem.ID)
-	require.Equal(t, "user", userItem.ID)
-
-	// Verify colors are set (they should be non-nil)
-	require.NotNil(t, builtInItem.Color, "built-in item should have a color")
-	require.NotNil(t, userItem.Color, "user item should have a color")
-
-	// Note: We can't easily compare AdaptiveColor values directly,
-	// but we verify they are different by checking their types
-	// The actual colors are StatusInProgressColor (blue) for built-in
-	// and StatusSuccessColor (green) for user
-}
-
-func TestChatPanel_openWorkflowPicker_SetsSizeCorrectly(t *testing.T) {
-	// Create a registry with a chat workflow
-	registry := workflow.NewRegistry()
-	registry.Add(workflow.Workflow{
-		ID:         "test",
-		Name:       "Test Workflow",
-		Source:     workflow.SourceBuiltIn,
-		TargetMode: workflow.TargetChat,
-	})
-
-	cfg := Config{
-		ClientType:       "claude",
-		WorkDir:          "/test/dir",
-		SessionTimeout:   30 * time.Minute,
-		WorkflowRegistry: registry,
-	}
-	// Set specific dimensions
-	m := New(cfg).SetSize(100, 50)
-
-	// Open the workflow picker
-	m = m.openWorkflowPicker()
-
-	require.NotNil(t, m.workflowPicker)
-	// The picker should have been sized - we verify it was called by checking
-	// the picker exists and can render without error
-	view := m.workflowPicker.View()
-	require.NotEmpty(t, view, "picker should render a view")
-}
-
-// ============================================================================
-// handleWorkflowSelected Tests (perles-yt25.7)
-// ============================================================================
-
-func TestChatPanel_handleWorkflowSelected_ClosesPicker(t *testing.T) {
-	// Create a registry with a chat workflow
-	registry := workflow.NewRegistry()
-	registry.Add(workflow.Workflow{
-		ID:          "test-workflow",
-		Name:        "Test Workflow",
-		Description: "A test workflow",
-		Content:     "Workflow content here",
-		Source:      workflow.SourceBuiltIn,
-		TargetMode:  workflow.TargetChat,
-	})
-
-	cfg := Config{
-		ClientType:       "claude",
-		WorkDir:          "/test/dir",
-		SessionTimeout:   30 * time.Minute,
-		WorkflowRegistry: registry,
-	}
-	m := New(cfg).SetSize(80, 24)
-
-	// Open the picker first
-	m = m.openWorkflowPicker()
-	require.True(t, m.showWorkflowPicker, "picker should be open")
-	require.NotNil(t, m.workflowPicker, "picker should be initialized")
-
-	// Simulate workflow selection
-	item := commandpalette.Item{
-		ID:   "test-workflow",
-		Name: "Test Workflow",
-	}
-	m, _ = m.handleWorkflowSelected(item)
-
-	// Verify picker was closed
-	require.False(t, m.showWorkflowPicker, "showWorkflowPicker should be false after selection")
-	require.Nil(t, m.workflowPicker, "workflowPicker should be nil after selection")
-}
-
-func TestChatPanel_handleWorkflowSelected_FormatsContent(t *testing.T) {
-	// Create a registry with a chat workflow
-	registry := workflow.NewRegistry()
-	registry.Add(workflow.Workflow{
-		ID:          "format-test",
-		Name:        "Format Test Workflow",
-		Description: "Tests content formatting",
-		Content:     "This is the workflow content.",
-		Source:      workflow.SourceBuiltIn,
-		TargetMode:  workflow.TargetChat,
-	})
-
-	cfg := Config{
-		ClientType:       "claude",
-		WorkDir:          "/test/dir",
-		SessionTimeout:   30 * time.Minute,
-		WorkflowRegistry: registry,
-	}
-	m := New(cfg).SetSize(80, 24)
-
-	// Session is NOT ready, so content will be queued in pendingWorkflowContent
-	m.sessions[DefaultSessionID].Status = events.ProcessStatusPending
-
-	// Simulate workflow selection
-	item := commandpalette.Item{
-		ID:   "format-test",
-		Name: "Format Test Workflow",
-	}
-	m, _ = m.handleWorkflowSelected(item)
-
-	// Verify content is formatted correctly
-	expectedContent := "[WORKFLOW: Format Test Workflow]\n\nThis is the workflow content."
-	require.Equal(t, expectedContent, m.pendingWorkflowContent,
-		"content should be formatted as [WORKFLOW: Name]\\n\\n{content}")
-}
-
-func TestChatPanel_handleWorkflowSelected_SendsWhenReady(t *testing.T) {
-	// Create infrastructure with spawn expectation (needed for SendMessage)
-	infra := newTestInfrastructureWithSpawnExpectation(t)
-	defer infra.Shutdown()
-
-	// Create a registry with a chat workflow
-	registry := workflow.NewRegistry()
-	registry.Add(workflow.Workflow{
-		ID:          "ready-test",
-		Name:        "Ready Test Workflow",
-		Description: "Tests immediate send when ready",
-		Content:     "Ready workflow content.",
-		Source:      workflow.SourceBuiltIn,
-		TargetMode:  workflow.TargetChat,
-	})
-
-	cfg := Config{
-		ClientType:       "claude",
-		WorkDir:          "/test/dir",
-		SessionTimeout:   30 * time.Minute,
-		WorkflowRegistry: registry,
-	}
-	m := New(cfg).SetSize(80, 24)
-	m = m.SetInfrastructure(infra)
-
-	// Set session to Ready status
-	m.sessions[DefaultSessionID].Status = events.ProcessStatusReady
-	m.sessions[DefaultSessionID].ProcessID = ChatPanelProcessID
-
-	// Simulate workflow selection
-	item := commandpalette.Item{
-		ID:   "ready-test",
-		Name: "Ready Test Workflow",
-	}
-	m, cmd := m.handleWorkflowSelected(item)
-
-	// When session is Ready, handleWorkflowSelected calls SendMessage and returns its result.
-	// SendMessage returns a tea.Cmd (may be nil on success, or error cmd on failure).
-	// The key behavior is that pendingWorkflowContent is NOT set when session is ready.
-	// We don't care about the specific cmd - just that the message was sent immediately.
-
-	// Verify pendingWorkflowContent is empty (message was sent, not queued)
-	require.Empty(t, m.pendingWorkflowContent, "content should not be queued when session is ready")
-
-	// Verify activeWorkflow is set
-	require.NotNil(t, m.activeWorkflow, "activeWorkflow should be set")
-	require.Equal(t, "ready-test", m.activeWorkflow.ID)
-
-	// If cmd is not nil, verify it's from SendMessage (would be an error cmd)
-	// This is acceptable - what matters is the code path chose to send rather than queue
-	_ = cmd // cmd may or may not be nil depending on infra state
-}
-
-func TestChatPanel_handleWorkflowSelected_QueuesPending(t *testing.T) {
-	// Create a registry with a chat workflow
-	registry := workflow.NewRegistry()
-	registry.Add(workflow.Workflow{
-		ID:          "pending-test",
-		Name:        "Pending Test Workflow",
-		Description: "Tests queuing when not ready",
-		Content:     "Pending workflow content.",
-		Source:      workflow.SourceBuiltIn,
-		TargetMode:  workflow.TargetChat,
-	})
-
-	cfg := Config{
-		ClientType:       "claude",
-		WorkDir:          "/test/dir",
-		SessionTimeout:   30 * time.Minute,
-		WorkflowRegistry: registry,
-	}
-	m := New(cfg).SetSize(80, 24)
-
-	// Session is NOT ready (Pending status - initial state)
-	require.Equal(t, events.ProcessStatusPending, m.sessions[DefaultSessionID].Status)
-
-	// Simulate workflow selection
-	item := commandpalette.Item{
-		ID:   "pending-test",
-		Name: "Pending Test Workflow",
-	}
-	m, cmd := m.handleWorkflowSelected(item)
-
-	// Verify no command returned (message not sent)
-	require.Nil(t, cmd, "cmd should be nil when session is not ready")
-
-	// Verify content is queued
-	expectedContent := "[WORKFLOW: Pending Test Workflow]\n\nPending workflow content."
-	require.Equal(t, expectedContent, m.pendingWorkflowContent,
-		"content should be queued when session is not ready")
-
-	// Verify activeWorkflow is set
-	require.NotNil(t, m.activeWorkflow, "activeWorkflow should be set")
-	require.Equal(t, "pending-test", m.activeWorkflow.ID)
-}
-
-func TestChatPanel_handleWorkflowSelected_NilRegistry(t *testing.T) {
-	// Create model without workflow registry
-	m := New(DefaultConfig()).SetSize(80, 24)
-	require.Nil(t, m.workflowRegistry)
-
-	// Simulate workflow selection (shouldn't happen, but handle gracefully)
-	item := commandpalette.Item{
-		ID:   "nonexistent",
-		Name: "Nonexistent Workflow",
-	}
-	m, cmd := m.handleWorkflowSelected(item)
-
-	// Should return early without error
-	require.Nil(t, cmd)
-	require.Nil(t, m.activeWorkflow, "activeWorkflow should remain nil")
-	require.Empty(t, m.pendingWorkflowContent, "pendingWorkflowContent should remain empty")
-}
-
-func TestChatPanel_handleWorkflowSelected_WorkflowNotFound(t *testing.T) {
-	// Create a registry with a different workflow
-	registry := workflow.NewRegistry()
-	registry.Add(workflow.Workflow{
-		ID:         "other-workflow",
-		Name:       "Other Workflow",
-		Source:     workflow.SourceBuiltIn,
-		TargetMode: workflow.TargetChat,
-	})
-
-	cfg := Config{
-		ClientType:       "claude",
-		WorkDir:          "/test/dir",
-		SessionTimeout:   30 * time.Minute,
-		WorkflowRegistry: registry,
-	}
-	m := New(cfg).SetSize(80, 24)
-
-	// Simulate selection of a workflow that doesn't exist in registry
-	item := commandpalette.Item{
-		ID:   "nonexistent-workflow",
-		Name: "Nonexistent Workflow",
-	}
-	m, cmd := m.handleWorkflowSelected(item)
-
-	// Should return early without error
-	require.Nil(t, cmd)
-	require.Nil(t, m.activeWorkflow, "activeWorkflow should remain nil for nonexistent workflow")
-	require.Empty(t, m.pendingWorkflowContent, "pendingWorkflowContent should remain empty for nonexistent workflow")
-}
-
-func TestChatPanel_handleWorkflowSelected_SetsActiveWorkflow(t *testing.T) {
-	// Create a registry with a chat workflow
-	registry := workflow.NewRegistry()
-	expectedWorkflow := workflow.Workflow{
-		ID:          "active-test",
-		Name:        "Active Test Workflow",
-		Description: "Tests activeWorkflow field",
-		Content:     "Active workflow content.",
-		Source:      workflow.SourceUser,
-		TargetMode:  workflow.TargetChat,
-	}
-	registry.Add(expectedWorkflow)
-
-	cfg := Config{
-		ClientType:       "claude",
-		WorkDir:          "/test/dir",
-		SessionTimeout:   30 * time.Minute,
-		WorkflowRegistry: registry,
-	}
-	m := New(cfg).SetSize(80, 24)
-
-	// Initially no active workflow
-	require.Nil(t, m.activeWorkflow)
-
-	// Simulate workflow selection
-	item := commandpalette.Item{
-		ID:   "active-test",
-		Name: "Active Test Workflow",
-	}
-	m, _ = m.handleWorkflowSelected(item)
-
-	// Verify activeWorkflow is set correctly
-	require.NotNil(t, m.activeWorkflow, "activeWorkflow should be set")
-	require.Equal(t, expectedWorkflow.ID, m.activeWorkflow.ID)
-	require.Equal(t, expectedWorkflow.Name, m.activeWorkflow.Name)
-	require.Equal(t, expectedWorkflow.Description, m.activeWorkflow.Description)
-	require.Equal(t, expectedWorkflow.Content, m.activeWorkflow.Content)
-	require.Equal(t, expectedWorkflow.Source, m.activeWorkflow.Source)
-}
-
-// ============================================================================
-// Ctrl+T Keybinding and Picker Event Handling Tests (perles-yt25.8)
-// ============================================================================
-
-func TestChatPanel_CtrlT_OpensPicker(t *testing.T) {
+func TestChatPanel_CtrlT_SwitchesToWorkflowsTab(t *testing.T) {
 	// Create a registry with a chat workflow
 	registry := workflow.NewRegistry()
 	registry.Add(workflow.Workflow{
@@ -652,20 +147,18 @@ func TestChatPanel_CtrlT_OpensPicker(t *testing.T) {
 	m.visible = true
 	m.focused = true
 
-	// Picker should initially be hidden
-	require.False(t, m.showWorkflowPicker, "picker should be hidden initially")
-	require.Nil(t, m.workflowPicker, "picker should be nil initially")
+	// Should start on Chat tab
+	require.Equal(t, TabChat, m.activeTab, "should start on Chat tab")
 
 	// Send Ctrl+T
 	keyMsg := tea.KeyMsg{Type: tea.KeyCtrlT}
 	m, _ = m.Update(keyMsg)
 
-	// Picker should now be visible
-	require.True(t, m.showWorkflowPicker, "picker should be visible after Ctrl+T")
-	require.NotNil(t, m.workflowPicker, "picker should be created after Ctrl+T")
+	// Should now be on Workflows tab
+	require.Equal(t, TabWorkflows, m.activeTab, "should switch to Workflows tab after Ctrl+T")
 }
 
-func TestChatPanel_CtrlT_NoOpWithoutRegistry(t *testing.T) {
+func TestChatPanel_CtrlT_SwitchesToWorkflowsTabEvenWithoutRegistry(t *testing.T) {
 	// Create model without a workflow registry
 	cfg := Config{
 		ClientType:       "claude",
@@ -677,155 +170,16 @@ func TestChatPanel_CtrlT_NoOpWithoutRegistry(t *testing.T) {
 	m.visible = true
 	m.focused = true
 
-	// Picker should initially be hidden
-	require.False(t, m.showWorkflowPicker)
-	require.Nil(t, m.workflowPicker)
+	// Should start on Chat tab
+	require.Equal(t, TabChat, m.activeTab, "should start on Chat tab")
 
 	// Send Ctrl+T
 	keyMsg := tea.KeyMsg{Type: tea.KeyCtrlT}
 	m, _ = m.Update(keyMsg)
 
-	// Picker should still be hidden (no registry)
-	require.False(t, m.showWorkflowPicker, "picker should remain hidden without registry")
-	require.Nil(t, m.workflowPicker, "picker should remain nil without registry")
-}
-
-func TestChatPanel_Picker_SelectTriggersHandler(t *testing.T) {
-	// Create a registry with a chat workflow
-	registry := workflow.NewRegistry()
-	registry.Add(workflow.Workflow{
-		ID:          "selected-workflow",
-		Name:        "Selected Workflow",
-		Description: "Test description",
-		Content:     "Selected workflow content",
-		Source:      workflow.SourceUser,
-		TargetMode:  workflow.TargetChat,
-	})
-
-	cfg := Config{
-		ClientType:       "claude",
-		WorkDir:          "/test/dir",
-		SessionTimeout:   30 * time.Minute,
-		WorkflowRegistry: registry,
-	}
-	m := New(cfg).SetSize(80, 24)
-	m.visible = true
-	m.focused = true
-
-	// Open the picker
-	m = m.openWorkflowPicker()
-	require.True(t, m.showWorkflowPicker)
-	require.NotNil(t, m.workflowPicker)
-
-	// Simulate selection via commandpalette.SelectMsg
-	selectMsg := commandpalette.SelectMsg{
-		Item: commandpalette.Item{
-			ID:   "selected-workflow",
-			Name: "Selected Workflow",
-		},
-	}
-	m, _ = m.Update(selectMsg)
-
-	// Picker should be closed
-	require.False(t, m.showWorkflowPicker, "picker should be closed after selection")
-	require.Nil(t, m.workflowPicker, "picker should be nil after selection")
-
-	// Active workflow should be set
-	require.NotNil(t, m.activeWorkflow, "activeWorkflow should be set after selection")
-	require.Equal(t, "selected-workflow", m.activeWorkflow.ID)
-
-	// Content should be formatted and queued (session not ready)
-	expectedContent := "[WORKFLOW: Selected Workflow]\n\nSelected workflow content"
-	require.Equal(t, expectedContent, m.pendingWorkflowContent, "workflow content should be queued")
-}
-
-func TestChatPanel_Picker_EscapeCloses(t *testing.T) {
-	// Create a registry with a chat workflow
-	registry := workflow.NewRegistry()
-	registry.Add(workflow.Workflow{
-		ID:          "test-workflow",
-		Name:        "Test Workflow",
-		Description: "Test description",
-		Content:     "Test content",
-		Source:      workflow.SourceUser,
-		TargetMode:  workflow.TargetChat,
-	})
-
-	cfg := Config{
-		ClientType:       "claude",
-		WorkDir:          "/test/dir",
-		SessionTimeout:   30 * time.Minute,
-		WorkflowRegistry: registry,
-	}
-	m := New(cfg).SetSize(80, 24)
-	m.visible = true
-	m.focused = true
-
-	// Open the picker
-	m = m.openWorkflowPicker()
-	require.True(t, m.showWorkflowPicker)
-	require.NotNil(t, m.workflowPicker)
-
-	// Simulate cancel via commandpalette.CancelMsg
-	cancelMsg := commandpalette.CancelMsg{}
-	m, _ = m.Update(cancelMsg)
-
-	// Picker should be closed
-	require.False(t, m.showWorkflowPicker, "picker should be closed after escape")
-	require.Nil(t, m.workflowPicker, "picker should be nil after escape")
-
-	// No workflow should be active
-	require.Nil(t, m.activeWorkflow, "activeWorkflow should be nil after cancel")
-
-	// No content should be queued
-	require.Empty(t, m.pendingWorkflowContent, "no content should be queued after cancel")
-}
-
-func TestChatPanel_Picker_ConsumesKeyboardInput(t *testing.T) {
-	// Create a registry with workflows
-	registry := workflow.NewRegistry()
-	registry.Add(workflow.Workflow{
-		ID:          "workflow-a",
-		Name:        "Workflow A",
-		Description: "First workflow",
-		Content:     "Content A",
-		Source:      workflow.SourceUser,
-		TargetMode:  workflow.TargetChat,
-	})
-	registry.Add(workflow.Workflow{
-		ID:          "workflow-b",
-		Name:        "Workflow B",
-		Description: "Second workflow",
-		Content:     "Content B",
-		Source:      workflow.SourceUser,
-		TargetMode:  workflow.TargetChat,
-	})
-
-	cfg := Config{
-		ClientType:       "claude",
-		WorkDir:          "/test/dir",
-		SessionTimeout:   30 * time.Minute,
-		WorkflowRegistry: registry,
-	}
-	m := New(cfg).SetSize(80, 24)
-	m.visible = true
-	m.focused = true
-
-	// Open the picker
-	m = m.openWorkflowPicker()
-	require.True(t, m.showWorkflowPicker)
-
-	// Try pressing Ctrl+N (which normally cycles sessions)
-	// When picker is open, it should be consumed by picker, not cycle sessions
-	originalSession := m.activeSessionID
-	keyMsg := tea.KeyMsg{Type: tea.KeyCtrlN}
-	m, _ = m.Update(keyMsg)
-
-	// Session should NOT have changed (picker consumed the key)
-	require.Equal(t, originalSession, m.activeSessionID, "session should not change when picker is open")
-
-	// Picker should still be open
-	require.True(t, m.showWorkflowPicker, "picker should remain open")
+	// Should switch to Workflows tab even without a registry
+	// (the view will render an empty state)
+	require.Equal(t, TabWorkflows, m.activeTab, "should switch to Workflows tab even without registry")
 }
 
 func TestModel_Toggle(t *testing.T) {
@@ -902,7 +256,8 @@ func TestModel_View_ZeroDimensions(t *testing.T) {
 }
 
 func TestModel_View_Basic(t *testing.T) {
-	m := New(DefaultConfig()).SetSize(30, 10).Toggle()
+	// Width increased from 30 to 45 to accommodate 3 tabs (Chat|Sessions|Workflows)
+	m := New(DefaultConfig()).SetSize(45, 10).Toggle()
 
 	view := m.View()
 
@@ -1165,17 +520,17 @@ func TestModel_Update_CtrlH_WrapsAround(t *testing.T) {
 	// Start at TabChat (0)
 	require.Equal(t, TabChat, m.activeTab)
 
-	// Ctrl+H should wrap to last tab (TabSessions)
+	// Ctrl+H should wrap to last tab (TabWorkflows)
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlH})
 
-	require.Equal(t, TabSessions, m.activeTab, "Ctrl+H should wrap to last tab")
+	require.Equal(t, TabWorkflows, m.activeTab, "Ctrl+H should wrap to last tab")
 }
 
 func TestModel_Update_CtrlL_WrapsAround(t *testing.T) {
 	m := New(DefaultConfig()).SetSize(40, 20).Toggle().Focus()
 
-	// Start at TabSessions (1) - the last tab
-	m.activeTab = TabSessions
+	// Start at TabWorkflows (2) - the last tab
+	m.activeTab = TabWorkflows
 
 	// Ctrl+L should wrap to first tab (TabChat = 0)
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlL})
@@ -1212,11 +567,19 @@ func TestModel_TabNavigation_NextPrev(t *testing.T) {
 	m = m.NextTab()
 	require.Equal(t, TabSessions, m.activeTab)
 
+	// NextTab should go to Workflows
+	m = m.NextTab()
+	require.Equal(t, TabWorkflows, m.activeTab)
+
 	// NextTab should wrap back to Chat
 	m = m.NextTab()
 	require.Equal(t, TabChat, m.activeTab)
 
-	// PrevTab should go to Sessions (wrap around)
+	// PrevTab should go to Workflows (wrap around)
+	m = m.PrevTab()
+	require.Equal(t, TabWorkflows, m.activeTab)
+
+	// PrevTab should go to Sessions
 	m = m.PrevTab()
 	require.Equal(t, TabSessions, m.activeTab)
 
@@ -1334,120 +697,6 @@ func TestView_Golden_NarrowPanel(t *testing.T) {
 
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))
-}
-
-func TestView_Golden_WithWorkflowPickerVisible(t *testing.T) {
-	// Create a registry with chat workflows
-	registry := workflow.NewRegistry()
-	registry.Add(workflow.Workflow{
-		ID:          "test-wf-1",
-		Name:        "Quick Plan",
-		Description: "Plan quickly",
-		Source:      workflow.SourceBuiltIn,
-		TargetMode:  workflow.TargetChat,
-	})
-	registry.Add(workflow.Workflow{
-		ID:          "test-wf-2",
-		Name:        "Research",
-		Description: "Research a topic",
-		Source:      workflow.SourceUser,
-		TargetMode:  workflow.TargetChat,
-	})
-
-	cfg := Config{
-		ClientType:       "claude",
-		WorkDir:          "/test/dir",
-		SessionTimeout:   30 * time.Minute,
-		WorkflowRegistry: registry,
-	}
-	m := New(cfg).SetSize(60, 20).Toggle()
-
-	// Set session to ready status so we see the chat content underneath
-	m.sessions[DefaultSessionID].Status = events.ProcessStatusReady
-	m = m.AddMessage(chatrender.Message{Role: RoleUser, Content: "Hello"})
-	m = m.AddMessage(chatrender.Message{Role: RoleAssistant, Content: "Hi!"})
-
-	// Open the workflow picker
-	m = m.openWorkflowPicker()
-
-	// Verify picker is visible
-	require.True(t, m.showWorkflowPicker)
-	require.NotNil(t, m.workflowPicker)
-
-	view := m.View()
-	teatest.RequireEqualOutput(t, []byte(view))
-}
-
-func TestView_Golden_WithoutWorkflowPicker(t *testing.T) {
-	// Create a registry with chat workflows but don't open the picker
-	registry := workflow.NewRegistry()
-	registry.Add(workflow.Workflow{
-		ID:          "test-wf-1",
-		Name:        "Quick Plan",
-		Description: "Plan quickly",
-		Source:      workflow.SourceBuiltIn,
-		TargetMode:  workflow.TargetChat,
-	})
-
-	cfg := Config{
-		ClientType:       "claude",
-		WorkDir:          "/test/dir",
-		SessionTimeout:   30 * time.Minute,
-		WorkflowRegistry: registry,
-	}
-	m := New(cfg).SetSize(60, 20).Toggle()
-
-	// Set session to ready status
-	m.sessions[DefaultSessionID].Status = events.ProcessStatusReady
-	m = m.AddMessage(chatrender.Message{Role: RoleUser, Content: "Hello"})
-	m = m.AddMessage(chatrender.Message{Role: RoleAssistant, Content: "Hi!"})
-
-	// Ensure picker is NOT visible
-	require.False(t, m.showWorkflowPicker)
-	require.Nil(t, m.workflowPicker)
-
-	view := m.View()
-	teatest.RequireEqualOutput(t, []byte(view))
-}
-
-func TestView_WorkflowPickerOverlay_Unit(t *testing.T) {
-	// Unit test: View returns overlay when picker visible
-	registry := workflow.NewRegistry()
-	registry.Add(workflow.Workflow{
-		ID:          "test-wf",
-		Name:        "Test Workflow",
-		Description: "A test workflow",
-		Source:      workflow.SourceBuiltIn,
-		TargetMode:  workflow.TargetChat,
-	})
-
-	cfg := Config{
-		ClientType:       "claude",
-		WorkDir:          "/test/dir",
-		SessionTimeout:   30 * time.Minute,
-		WorkflowRegistry: registry,
-	}
-	m := New(cfg).SetSize(60, 20).Toggle()
-	m.sessions[DefaultSessionID].Status = events.ProcessStatusReady
-
-	// Get view without picker
-	viewWithoutPicker := m.View()
-
-	// Open picker
-	m = m.openWorkflowPicker()
-
-	// Get view with picker
-	viewWithPicker := m.View()
-
-	// Verify views are different (overlay was applied)
-	require.NotEqual(t, viewWithoutPicker, viewWithPicker,
-		"View should be different when workflow picker overlay is visible")
-
-	// Verify picker content is in the overlay
-	require.Contains(t, viewWithPicker, "Chat Workflows",
-		"Overlay should contain picker title")
-	require.Contains(t, viewWithPicker, "Test Workflow",
-		"Overlay should contain workflow name")
 }
 
 // ============================================================================
@@ -4653,4 +3902,1003 @@ func TestChatPanel_ProcessReady_ClearsPending(t *testing.T) {
 
 	// cmd2 should just be listener continuation (not batched with send)
 	require.NotNil(t, cmd2, "listener should continue")
+}
+
+// ============================================================================
+// Workflows Tab Helper Method Tests (perles-f3tm.1)
+// ============================================================================
+
+func TestGetWorkflowsForTab_NilRegistry(t *testing.T) {
+	// Create model with nil registry
+	m := New(DefaultConfig())
+	require.Nil(t, m.workflowRegistry)
+
+	// Should return empty slice (not nil) when registry is nil
+	workflows := m.getWorkflowsForTab()
+	require.NotNil(t, workflows, "should return empty slice, not nil")
+	require.Empty(t, workflows, "should return empty slice when registry is nil")
+}
+
+func TestGetWorkflowsForTab_FiltersTargetChat(t *testing.T) {
+	// Create registry with workflows of different target modes
+	registry := workflow.NewRegistry()
+
+	// Add a chat-targeted workflow
+	registry.Add(workflow.Workflow{
+		ID:         "chat-workflow",
+		Name:       "Chat Workflow",
+		TargetMode: workflow.TargetChat,
+	})
+
+	// Add an orchestration-targeted workflow (should NOT be returned)
+	registry.Add(workflow.Workflow{
+		ID:         "orch-workflow",
+		Name:       "Orchestration Workflow",
+		TargetMode: workflow.TargetOrchestration,
+	})
+
+	// Add a TargetBoth workflow (empty string, should be returned)
+	registry.Add(workflow.Workflow{
+		ID:         "both-workflow",
+		Name:       "Both Workflow",
+		TargetMode: workflow.TargetBoth,
+	})
+
+	cfg := Config{
+		ClientType:       "claude",
+		WorkDir:          "/test/dir",
+		SessionTimeout:   30 * time.Minute,
+		WorkflowRegistry: registry,
+	}
+	m := New(cfg)
+
+	workflows := m.getWorkflowsForTab()
+
+	// Should return chat and both workflows (sorted by name)
+	require.Len(t, workflows, 2, "should return 2 workflows (chat + both)")
+
+	// Verify sorted order and correct workflows
+	require.Equal(t, "Both Workflow", workflows[0].Name)
+	require.Equal(t, "Chat Workflow", workflows[1].Name)
+}
+
+func TestClampWorkflowListCursor_EmptyList(t *testing.T) {
+	// Create model with nil registry (empty workflow list)
+	m := New(DefaultConfig())
+	m.workflowListCursor = 5 // Set invalid cursor position
+
+	// Clamp should set cursor to 0 for empty list
+	m = m.clampWorkflowListCursor()
+	require.Equal(t, 0, m.workflowListCursor, "cursor should be 0 for empty list")
+}
+
+func TestClampWorkflowListCursor_CursorGreaterThanMax(t *testing.T) {
+	// Create registry with 2 workflows
+	registry := workflow.NewRegistry()
+	registry.Add(workflow.Workflow{
+		ID:         "wf-1",
+		Name:       "Workflow 1",
+		TargetMode: workflow.TargetChat,
+	})
+	registry.Add(workflow.Workflow{
+		ID:         "wf-2",
+		Name:       "Workflow 2",
+		TargetMode: workflow.TargetChat,
+	})
+
+	cfg := Config{
+		ClientType:       "claude",
+		WorkDir:          "/test/dir",
+		SessionTimeout:   30 * time.Minute,
+		WorkflowRegistry: registry,
+	}
+	m := New(cfg)
+	m.workflowListCursor = 10 // Set cursor way beyond max (max should be 1)
+
+	m = m.clampWorkflowListCursor()
+	require.Equal(t, 1, m.workflowListCursor, "cursor should be clamped to max valid index (len-1)")
+}
+
+func TestClampWorkflowListCursor_CursorNegative(t *testing.T) {
+	// Create registry with 2 workflows
+	registry := workflow.NewRegistry()
+	registry.Add(workflow.Workflow{
+		ID:         "wf-1",
+		Name:       "Workflow 1",
+		TargetMode: workflow.TargetChat,
+	})
+	registry.Add(workflow.Workflow{
+		ID:         "wf-2",
+		Name:       "Workflow 2",
+		TargetMode: workflow.TargetChat,
+	})
+
+	cfg := Config{
+		ClientType:       "claude",
+		WorkDir:          "/test/dir",
+		SessionTimeout:   30 * time.Minute,
+		WorkflowRegistry: registry,
+	}
+	m := New(cfg)
+	m.workflowListCursor = -5 // Set negative cursor
+
+	m = m.clampWorkflowListCursor()
+	require.Equal(t, 0, m.workflowListCursor, "cursor should be clamped to 0 for negative values")
+}
+
+func TestClampWorkflowListCursor_ValidCursorUnchanged(t *testing.T) {
+	// Create registry with 3 workflows
+	registry := workflow.NewRegistry()
+	registry.Add(workflow.Workflow{
+		ID:         "wf-1",
+		Name:       "Workflow 1",
+		TargetMode: workflow.TargetChat,
+	})
+	registry.Add(workflow.Workflow{
+		ID:         "wf-2",
+		Name:       "Workflow 2",
+		TargetMode: workflow.TargetChat,
+	})
+	registry.Add(workflow.Workflow{
+		ID:         "wf-3",
+		Name:       "Workflow 3",
+		TargetMode: workflow.TargetChat,
+	})
+
+	cfg := Config{
+		ClientType:       "claude",
+		WorkDir:          "/test/dir",
+		SessionTimeout:   30 * time.Minute,
+		WorkflowRegistry: registry,
+	}
+	m := New(cfg)
+	m.workflowListCursor = 1 // Set to middle of list (valid)
+
+	m = m.clampWorkflowListCursor()
+	require.Equal(t, 1, m.workflowListCursor, "valid cursor should remain unchanged")
+}
+
+// =============================================================================
+// Workflows Tab Key Handling Tests (Task 2)
+// =============================================================================
+
+func TestWorkflowsTab_JIncrementsCursor(t *testing.T) {
+	// Create registry with 3 workflows
+	registry := workflow.NewRegistry()
+	registry.Add(workflow.Workflow{
+		ID:         "wf-1",
+		Name:       "Workflow 1",
+		TargetMode: workflow.TargetChat,
+	})
+	registry.Add(workflow.Workflow{
+		ID:         "wf-2",
+		Name:       "Workflow 2",
+		TargetMode: workflow.TargetChat,
+	})
+	registry.Add(workflow.Workflow{
+		ID:         "wf-3",
+		Name:       "Workflow 3",
+		TargetMode: workflow.TargetChat,
+	})
+
+	cfg := Config{
+		ClientType:       "claude",
+		WorkDir:          "/test/dir",
+		SessionTimeout:   30 * time.Minute,
+		WorkflowRegistry: registry,
+	}
+	m := New(cfg).SetSize(60, 20).Toggle().Focus()
+	m.activeTab = TabWorkflows
+	m.workflowListCursor = 0
+
+	// Test 'j' moves cursor down
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	require.Equal(t, 1, m.workflowListCursor, "j should move cursor down")
+
+	// Test 'j' again
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	require.Equal(t, 2, m.workflowListCursor, "j should move cursor down again")
+}
+
+func TestWorkflowsTab_KDecrementsCursor(t *testing.T) {
+	// Create registry with 3 workflows
+	registry := workflow.NewRegistry()
+	registry.Add(workflow.Workflow{
+		ID:         "wf-1",
+		Name:       "Workflow 1",
+		TargetMode: workflow.TargetChat,
+	})
+	registry.Add(workflow.Workflow{
+		ID:         "wf-2",
+		Name:       "Workflow 2",
+		TargetMode: workflow.TargetChat,
+	})
+	registry.Add(workflow.Workflow{
+		ID:         "wf-3",
+		Name:       "Workflow 3",
+		TargetMode: workflow.TargetChat,
+	})
+
+	cfg := Config{
+		ClientType:       "claude",
+		WorkDir:          "/test/dir",
+		SessionTimeout:   30 * time.Minute,
+		WorkflowRegistry: registry,
+	}
+	m := New(cfg).SetSize(60, 20).Toggle().Focus()
+	m.activeTab = TabWorkflows
+	m.workflowListCursor = 2 // Start at last item
+
+	// Test 'k' moves cursor up
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+	require.Equal(t, 1, m.workflowListCursor, "k should move cursor up")
+
+	// Test 'k' again
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+	require.Equal(t, 0, m.workflowListCursor, "k should move cursor up again")
+}
+
+func TestWorkflowsTab_JAtEndStaysAtEnd(t *testing.T) {
+	// Create registry with 3 workflows
+	registry := workflow.NewRegistry()
+	registry.Add(workflow.Workflow{
+		ID:         "wf-1",
+		Name:       "Workflow 1",
+		TargetMode: workflow.TargetChat,
+	})
+	registry.Add(workflow.Workflow{
+		ID:         "wf-2",
+		Name:       "Workflow 2",
+		TargetMode: workflow.TargetChat,
+	})
+	registry.Add(workflow.Workflow{
+		ID:         "wf-3",
+		Name:       "Workflow 3",
+		TargetMode: workflow.TargetChat,
+	})
+
+	cfg := Config{
+		ClientType:       "claude",
+		WorkDir:          "/test/dir",
+		SessionTimeout:   30 * time.Minute,
+		WorkflowRegistry: registry,
+	}
+	m := New(cfg).SetSize(60, 20).Toggle().Focus()
+	m.activeTab = TabWorkflows
+	m.workflowListCursor = 2 // At last item (index 2)
+
+	// Test 'j' at bottom doesn't go past end
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	require.Equal(t, 2, m.workflowListCursor, "j at bottom should not go past end")
+}
+
+func TestWorkflowsTab_KAtStartStaysAtStart(t *testing.T) {
+	// Create registry with 3 workflows
+	registry := workflow.NewRegistry()
+	registry.Add(workflow.Workflow{
+		ID:         "wf-1",
+		Name:       "Workflow 1",
+		TargetMode: workflow.TargetChat,
+	})
+	registry.Add(workflow.Workflow{
+		ID:         "wf-2",
+		Name:       "Workflow 2",
+		TargetMode: workflow.TargetChat,
+	})
+	registry.Add(workflow.Workflow{
+		ID:         "wf-3",
+		Name:       "Workflow 3",
+		TargetMode: workflow.TargetChat,
+	})
+
+	cfg := Config{
+		ClientType:       "claude",
+		WorkDir:          "/test/dir",
+		SessionTimeout:   30 * time.Minute,
+		WorkflowRegistry: registry,
+	}
+	m := New(cfg).SetSize(60, 20).Toggle().Focus()
+	m.activeTab = TabWorkflows
+	m.workflowListCursor = 0 // At first item
+
+	// Test 'k' at top doesn't go negative
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+	require.Equal(t, 0, m.workflowListCursor, "k at top should not go negative")
+}
+
+func TestWorkflowsTab_DownArrowIncrementsCursor(t *testing.T) {
+	// Test arrow keys also work for navigation
+	registry := workflow.NewRegistry()
+	registry.Add(workflow.Workflow{
+		ID:         "wf-1",
+		Name:       "Workflow 1",
+		TargetMode: workflow.TargetChat,
+	})
+	registry.Add(workflow.Workflow{
+		ID:         "wf-2",
+		Name:       "Workflow 2",
+		TargetMode: workflow.TargetChat,
+	})
+
+	cfg := Config{
+		ClientType:       "claude",
+		WorkDir:          "/test/dir",
+		SessionTimeout:   30 * time.Minute,
+		WorkflowRegistry: registry,
+	}
+	m := New(cfg).SetSize(60, 20).Toggle().Focus()
+	m.activeTab = TabWorkflows
+	m.workflowListCursor = 0
+
+	// Test down arrow
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	require.Equal(t, 1, m.workflowListCursor, "down arrow should move cursor down")
+
+	// Test up arrow
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	require.Equal(t, 0, m.workflowListCursor, "up arrow should move cursor up")
+}
+
+func TestWorkflowsTab_EnterSelectsWorkflowAndSwitchesToChat(t *testing.T) {
+	// Create registry with workflows
+	// Note: Registry sorts by name alphabetically, so "Beta" comes before "Zebra"
+	registry := workflow.NewRegistry()
+	registry.Add(workflow.Workflow{
+		ID:         "wf-1",
+		Name:       "Zebra Workflow", // Will be second after sorting
+		Content:    "Workflow content here",
+		TargetMode: workflow.TargetChat,
+	})
+	registry.Add(workflow.Workflow{
+		ID:         "wf-2",
+		Name:       "Beta Workflow", // Will be first after sorting
+		Content:    "Another content",
+		TargetMode: workflow.TargetChat,
+	})
+
+	cfg := Config{
+		ClientType:       "claude",
+		WorkDir:          "/test/dir",
+		SessionTimeout:   30 * time.Minute,
+		WorkflowRegistry: registry,
+	}
+	m := New(cfg).SetSize(60, 20).Toggle().Focus()
+	m.activeTab = TabWorkflows
+	m.workflowListCursor = 1 // Select second workflow (Zebra after sort)
+
+	// Press Enter
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// Verify switched to Chat tab
+	require.Equal(t, TabChat, m.activeTab, "Enter should switch to Chat tab")
+
+	// Verify active workflow is set
+	require.NotNil(t, m.activeWorkflow, "activeWorkflow should be set")
+	require.Equal(t, "wf-1", m.activeWorkflow.ID, "correct workflow (Zebra, second after sort) should be selected")
+}
+
+func TestWorkflowsTab_EnterWithEmptyListDoesNothing(t *testing.T) {
+	// Create empty registry
+	registry := workflow.NewRegistry()
+
+	cfg := Config{
+		ClientType:       "claude",
+		WorkDir:          "/test/dir",
+		SessionTimeout:   30 * time.Minute,
+		WorkflowRegistry: registry,
+	}
+	m := New(cfg).SetSize(60, 20).Toggle().Focus()
+	m.activeTab = TabWorkflows
+	m.workflowListCursor = 0
+
+	// Press Enter on empty list
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// Should stay on Workflows tab
+	require.Equal(t, TabWorkflows, m.activeTab, "Enter on empty list should not switch tabs")
+	require.Nil(t, m.activeWorkflow, "activeWorkflow should remain nil")
+}
+
+func TestWorkflowsTab_NavigationWithSingleItemList(t *testing.T) {
+	// Create registry with single workflow
+	registry := workflow.NewRegistry()
+	registry.Add(workflow.Workflow{
+		ID:         "wf-1",
+		Name:       "Only Workflow",
+		TargetMode: workflow.TargetChat,
+	})
+
+	cfg := Config{
+		ClientType:       "claude",
+		WorkDir:          "/test/dir",
+		SessionTimeout:   30 * time.Minute,
+		WorkflowRegistry: registry,
+	}
+	m := New(cfg).SetSize(60, 20).Toggle().Focus()
+	m.activeTab = TabWorkflows
+	m.workflowListCursor = 0
+
+	// Test j doesn't move (already at end since only 1 item)
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	require.Equal(t, 0, m.workflowListCursor, "j with single item should stay at 0")
+
+	// Test k doesn't move (already at start)
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+	require.Equal(t, 0, m.workflowListCursor, "k with single item should stay at 0")
+}
+
+func TestWorkflowsTab_BlocksInputForwarding(t *testing.T) {
+	// Test that typing on Workflows tab doesn't go to the input field
+	registry := workflow.NewRegistry()
+	registry.Add(workflow.Workflow{
+		ID:         "wf-1",
+		Name:       "Workflow 1",
+		TargetMode: workflow.TargetChat,
+	})
+
+	cfg := Config{
+		ClientType:       "claude",
+		WorkDir:          "/test/dir",
+		SessionTimeout:   30 * time.Minute,
+		WorkflowRegistry: registry,
+	}
+	m := New(cfg).SetSize(60, 20).Toggle().Focus()
+	m.activeTab = TabWorkflows
+
+	// Type random letters that shouldn't affect anything
+	initialCursor := m.workflowListCursor
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("z")})
+
+	// Cursor should remain unchanged
+	require.Equal(t, initialCursor, m.workflowListCursor, "random keys should not affect cursor")
+
+	// Input should not have received the text (check by verifying input is still empty)
+	require.Equal(t, "", m.input.Value(), "input should not receive keys while on Workflows tab")
+}
+
+// =============================================================================
+// selectWorkflowFromTab Tests (Task 2)
+// =============================================================================
+
+func TestSelectWorkflowFromTab_FormatsContentCorrectly(t *testing.T) {
+	registry := workflow.NewRegistry()
+	registry.Add(workflow.Workflow{
+		ID:         "test-wf",
+		Name:       "Test Workflow",
+		Content:    "This is the workflow content.",
+		TargetMode: workflow.TargetChat,
+	})
+
+	cfg := Config{
+		ClientType:       "claude",
+		WorkDir:          "/test/dir",
+		SessionTimeout:   30 * time.Minute,
+		WorkflowRegistry: registry,
+	}
+	m := New(cfg).SetSize(60, 20).Toggle().Focus()
+	m.activeTab = TabWorkflows
+
+	// Get the workflow
+	workflows := m.getWorkflowsForTab()
+	require.Len(t, workflows, 1)
+
+	// Call selectWorkflowFromTab
+	m, _ = m.selectWorkflowFromTab(workflows[0])
+
+	// Verify content is formatted correctly
+	expectedContent := "[WORKFLOW: Test Workflow]\n\nThis is the workflow content."
+	require.Equal(t, expectedContent, m.pendingWorkflowContent, "content should be formatted as [WORKFLOW: name]\\n\\ncontent")
+}
+
+func TestSelectWorkflowFromTab_SwitchesToChatTab(t *testing.T) {
+	registry := workflow.NewRegistry()
+	registry.Add(workflow.Workflow{
+		ID:         "test-wf",
+		Name:       "Test Workflow",
+		Content:    "Content",
+		TargetMode: workflow.TargetChat,
+	})
+
+	cfg := Config{
+		ClientType:       "claude",
+		WorkDir:          "/test/dir",
+		SessionTimeout:   30 * time.Minute,
+		WorkflowRegistry: registry,
+	}
+	m := New(cfg).SetSize(60, 20).Toggle().Focus()
+	m.activeTab = TabWorkflows
+
+	workflows := m.getWorkflowsForTab()
+	m, _ = m.selectWorkflowFromTab(workflows[0])
+
+	require.Equal(t, TabChat, m.activeTab, "should switch to Chat tab")
+}
+
+func TestSelectWorkflowFromTab_SetsActiveWorkflow(t *testing.T) {
+	registry := workflow.NewRegistry()
+	registry.Add(workflow.Workflow{
+		ID:         "test-wf",
+		Name:       "Test Workflow",
+		Content:    "Content",
+		TargetMode: workflow.TargetChat,
+	})
+
+	cfg := Config{
+		ClientType:       "claude",
+		WorkDir:          "/test/dir",
+		SessionTimeout:   30 * time.Minute,
+		WorkflowRegistry: registry,
+	}
+	m := New(cfg).SetSize(60, 20).Toggle().Focus()
+
+	workflows := m.getWorkflowsForTab()
+	m, _ = m.selectWorkflowFromTab(workflows[0])
+
+	require.NotNil(t, m.activeWorkflow)
+	require.Equal(t, "test-wf", m.activeWorkflow.ID)
+}
+
+func TestSelectWorkflowFromTab_QueuesContentWhenSessionNotReady(t *testing.T) {
+	registry := workflow.NewRegistry()
+	registry.Add(workflow.Workflow{
+		ID:         "test-wf",
+		Name:       "Test Workflow",
+		Content:    "Content",
+		TargetMode: workflow.TargetChat,
+	})
+
+	cfg := Config{
+		ClientType:       "claude",
+		WorkDir:          "/test/dir",
+		SessionTimeout:   30 * time.Minute,
+		WorkflowRegistry: registry,
+	}
+	m := New(cfg).SetSize(60, 20).Toggle().Focus()
+
+	// Session is Pending (not ready)
+	session := m.ActiveSession()
+	require.NotNil(t, session)
+	require.Equal(t, events.ProcessStatusPending, session.Status)
+
+	workflows := m.getWorkflowsForTab()
+	m, cmd := m.selectWorkflowFromTab(workflows[0])
+
+	// Should queue content, not return a send command
+	require.Nil(t, cmd, "should not return send command when session not ready")
+	require.NotEmpty(t, m.pendingWorkflowContent, "should queue pending content")
+	require.Contains(t, m.pendingWorkflowContent, "[WORKFLOW: Test Workflow]")
+}
+
+func TestSelectWorkflowFromTab_SendsImmediatelyWhenSessionReady(t *testing.T) {
+	registry := workflow.NewRegistry()
+	registry.Add(workflow.Workflow{
+		ID:         "test-wf",
+		Name:       "Test Workflow",
+		Content:    "Content",
+		TargetMode: workflow.TargetChat,
+	})
+
+	cfg := Config{
+		ClientType:       "claude",
+		WorkDir:          "/test/dir",
+		SessionTimeout:   30 * time.Minute,
+		WorkflowRegistry: registry,
+	}
+	m := New(cfg).SetSize(60, 20).Toggle().Focus()
+
+	// Set session to Ready and set up infrastructure
+	session := m.ActiveSession()
+	session.Status = events.ProcessStatusReady
+
+	// Note: Without infrastructure, SendMessage returns an error command
+	// We're testing that it TRIES to send (returns a command)
+	workflows := m.getWorkflowsForTab()
+	m, cmd := m.selectWorkflowFromTab(workflows[0])
+
+	// Should return a command (SendMessage attempt)
+	require.NotNil(t, cmd, "should return send command when session is ready")
+	// Pending content should be empty since we're sending immediately
+	require.Empty(t, m.pendingWorkflowContent, "should not queue content when sending immediately")
+}
+
+// =============================================================================
+// Ctrl+T Switches to Workflows Tab Tests (Task 2)
+// =============================================================================
+
+func TestCtrlT_SwitchesToWorkflowsTab(t *testing.T) {
+	registry := workflow.NewRegistry()
+	registry.Add(workflow.Workflow{
+		ID:         "wf-1",
+		Name:       "Workflow 1",
+		TargetMode: workflow.TargetChat,
+	})
+
+	cfg := Config{
+		ClientType:       "claude",
+		WorkDir:          "/test/dir",
+		SessionTimeout:   30 * time.Minute,
+		WorkflowRegistry: registry,
+	}
+	m := New(cfg).SetSize(60, 20).Toggle().Focus()
+
+	// Start on Chat tab (default)
+	require.Equal(t, TabChat, m.activeTab)
+
+	// Press Ctrl+T
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+
+	// Should be on Workflows tab
+	require.Equal(t, TabWorkflows, m.activeTab, "Ctrl+T should switch to Workflows tab")
+}
+
+func TestCtrlT_WorksFromSessionsTab(t *testing.T) {
+	registry := workflow.NewRegistry()
+	registry.Add(workflow.Workflow{
+		ID:         "wf-1",
+		Name:       "Workflow 1",
+		TargetMode: workflow.TargetChat,
+	})
+
+	cfg := Config{
+		ClientType:       "claude",
+		WorkDir:          "/test/dir",
+		SessionTimeout:   30 * time.Minute,
+		WorkflowRegistry: registry,
+	}
+	m := New(cfg).SetSize(60, 20).Toggle().Focus()
+	m.activeTab = TabSessions // Start on Sessions tab
+
+	// Press Ctrl+T
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+
+	// Should be on Workflows tab
+	require.Equal(t, TabWorkflows, m.activeTab, "Ctrl+T should switch to Workflows tab from Sessions tab")
+}
+
+func TestCtrlT_WorksWithEmptyRegistry(t *testing.T) {
+	// Create empty registry
+	registry := workflow.NewRegistry()
+
+	cfg := Config{
+		ClientType:       "claude",
+		WorkDir:          "/test/dir",
+		SessionTimeout:   30 * time.Minute,
+		WorkflowRegistry: registry,
+	}
+	m := New(cfg).SetSize(60, 20).Toggle().Focus()
+
+	// Press Ctrl+T
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+
+	// Should still switch to Workflows tab (even if empty)
+	require.Equal(t, TabWorkflows, m.activeTab, "Ctrl+T should switch to Workflows tab even with empty registry")
+}
+
+func TestCtrlT_WorksWithNilRegistry(t *testing.T) {
+	// Config without workflow registry
+	cfg := Config{
+		ClientType:     "claude",
+		WorkDir:        "/test/dir",
+		SessionTimeout: 30 * time.Minute,
+		// WorkflowRegistry is nil
+	}
+	m := New(cfg).SetSize(60, 20).Toggle().Focus()
+
+	// Press Ctrl+T
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+
+	// Should switch to Workflows tab (view will handle empty state)
+	require.Equal(t, TabWorkflows, m.activeTab, "Ctrl+T should switch to Workflows tab even with nil registry")
+}
+
+// =============================================================================
+// Tab Switching Keys Still Work on Workflows Tab (Task 2)
+// =============================================================================
+
+func TestWorkflowsTab_TabSwitchingKeysStillWork(t *testing.T) {
+	registry := workflow.NewRegistry()
+	registry.Add(workflow.Workflow{
+		ID:         "wf-1",
+		Name:       "Workflow 1",
+		TargetMode: workflow.TargetChat,
+	})
+
+	cfg := Config{
+		ClientType:       "claude",
+		WorkDir:          "/test/dir",
+		SessionTimeout:   30 * time.Minute,
+		WorkflowRegistry: registry,
+	}
+	m := New(cfg).SetSize(60, 20).Toggle().Focus()
+	m.activeTab = TabWorkflows
+
+	// Test Ctrl+H (previous tab)
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlH})
+	require.Equal(t, TabSessions, m.activeTab, "Ctrl+H should go to previous tab")
+
+	// Go back to Workflows tab
+	m.activeTab = TabWorkflows
+
+	// Test Ctrl+L (next tab)
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlL})
+	require.Equal(t, TabChat, m.activeTab, "Ctrl+L should go to next tab (wraps to Chat)")
+
+	// Go back to Workflows tab
+	m.activeTab = TabWorkflows
+
+	// Test Ctrl+] (cycle to next tab)
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlCloseBracket})
+	require.Equal(t, TabChat, m.activeTab, "Ctrl+] should cycle to next tab")
+}
+
+// =============================================================================
+// Workflows Tab Rendering Tests (Task 3)
+// =============================================================================
+
+func TestWorkflowsTabLayout_Golden(t *testing.T) {
+	// Create registry with multiple workflows (mixed sources)
+	registry := workflow.NewRegistry()
+	registry.Add(workflow.Workflow{
+		ID:          "builtin-1",
+		Name:        "Quick Plan",
+		Description: "A quick planning workflow",
+		Source:      workflow.SourceBuiltIn,
+		TargetMode:  workflow.TargetChat,
+	})
+	registry.Add(workflow.Workflow{
+		ID:          "user-1",
+		Name:        "My Custom Workflow",
+		Description: "User-defined workflow",
+		Source:      workflow.SourceUser,
+		TargetMode:  workflow.TargetChat,
+	})
+	registry.Add(workflow.Workflow{
+		ID:          "builtin-2",
+		Name:        "Research",
+		Description: "Research workflow for exploring topics",
+		Source:      workflow.SourceBuiltIn,
+		TargetMode:  workflow.TargetChat,
+	})
+
+	cfg := Config{
+		ClientType:       "claude",
+		WorkDir:          "/test/dir",
+		SessionTimeout:   30 * time.Minute,
+		WorkflowRegistry: registry,
+	}
+	m := New(cfg).SetSize(60, 25).Toggle()
+
+	// Set session to Ready so the view doesn't show loading
+	m.sessions[DefaultSessionID].Status = events.ProcessStatusReady
+
+	// Switch to Workflows tab with cursor on first item
+	m.activeTab = TabWorkflows
+	m.workflowListCursor = 0
+
+	view := m.View()
+	teatest.RequireEqualOutput(t, []byte(view))
+}
+
+func TestWorkflowsTabMiddleSelected_Golden(t *testing.T) {
+	// Create registry with multiple workflows
+	registry := workflow.NewRegistry()
+	registry.Add(workflow.Workflow{
+		ID:          "wf-1",
+		Name:        "Workflow A",
+		Description: "First workflow",
+		Source:      workflow.SourceBuiltIn,
+		TargetMode:  workflow.TargetChat,
+	})
+	registry.Add(workflow.Workflow{
+		ID:          "wf-2",
+		Name:        "Workflow B",
+		Description: "Second workflow",
+		Source:      workflow.SourceUser,
+		TargetMode:  workflow.TargetChat,
+	})
+	registry.Add(workflow.Workflow{
+		ID:          "wf-3",
+		Name:        "Workflow C",
+		Description: "Third workflow",
+		Source:      workflow.SourceBuiltIn,
+		TargetMode:  workflow.TargetChat,
+	})
+
+	cfg := Config{
+		ClientType:       "claude",
+		WorkDir:          "/test/dir",
+		SessionTimeout:   30 * time.Minute,
+		WorkflowRegistry: registry,
+	}
+	m := New(cfg).SetSize(60, 20).Toggle()
+
+	// Set session to Ready
+	m.sessions[DefaultSessionID].Status = events.ProcessStatusReady
+
+	// Switch to Workflows tab with cursor on middle item
+	m.activeTab = TabWorkflows
+	m.workflowListCursor = 1 // Second item
+
+	view := m.View()
+	teatest.RequireEqualOutput(t, []byte(view))
+}
+
+func TestWorkflowsTabEmpty_Golden(t *testing.T) {
+	// Create registry with only orchestration workflows (no chat workflows)
+	registry := workflow.NewRegistry()
+	registry.Add(workflow.Workflow{
+		ID:          "orch-only",
+		Name:        "Orchestration Workflow",
+		Description: "For orchestration mode only",
+		Source:      workflow.SourceBuiltIn,
+		TargetMode:  workflow.TargetOrchestration,
+	})
+
+	cfg := Config{
+		ClientType:       "claude",
+		WorkDir:          "/test/dir",
+		SessionTimeout:   30 * time.Minute,
+		WorkflowRegistry: registry,
+	}
+	m := New(cfg).SetSize(60, 20).Toggle()
+
+	// Set session to Ready
+	m.sessions[DefaultSessionID].Status = events.ProcessStatusReady
+
+	// Switch to Workflows tab (should show empty state)
+	m.activeTab = TabWorkflows
+
+	view := m.View()
+	teatest.RequireEqualOutput(t, []byte(view))
+}
+
+func TestWorkflowsTab_TabBarShowsAllThreeTabs_Golden(t *testing.T) {
+	// Test that the tab bar correctly shows all three tabs
+	cfg := Config{
+		ClientType:     "claude",
+		WorkDir:        "/test/dir",
+		SessionTimeout: 30 * time.Minute,
+	}
+	m := New(cfg).SetSize(80, 20).Toggle()
+
+	// Set session to Ready
+	m.sessions[DefaultSessionID].Status = events.ProcessStatusReady
+
+	// Stay on Chat tab, but verify tab bar shows all three
+	m.activeTab = TabChat
+
+	view := m.View()
+	teatest.RequireEqualOutput(t, []byte(view))
+}
+
+// =============================================================================
+// Workflows Tab Rendering Unit Tests (Task 3)
+// =============================================================================
+
+func TestRenderWorkflowsTab_LongNameTruncation(t *testing.T) {
+	// Create a workflow with a very long name
+	registry := workflow.NewRegistry()
+	registry.Add(workflow.Workflow{
+		ID:          "long-name",
+		Name:        "This Is A Very Long Workflow Name That Should Be Displayed",
+		Description: "Short desc",
+		Source:      workflow.SourceBuiltIn,
+		TargetMode:  workflow.TargetChat,
+	})
+
+	cfg := Config{
+		ClientType:       "claude",
+		WorkDir:          "/test/dir",
+		SessionTimeout:   30 * time.Minute,
+		WorkflowRegistry: registry,
+	}
+	// Use narrow width to trigger truncation behavior
+	m := New(cfg).SetSize(40, 15).Toggle()
+	m.activeTab = TabWorkflows
+
+	// This should not panic and should render within width
+	output := m.renderWorkflowsTab(10)
+	require.NotEmpty(t, output, "should render something")
+	// Verify the output doesn't exceed expected width bounds
+	lines := strings.Split(output, "\n")
+	require.Greater(t, len(lines), 0, "should have at least one line")
+}
+
+func TestRenderWorkflowsTab_LongDescriptionWrapping(t *testing.T) {
+	// Create a workflow with a very long description
+	registry := workflow.NewRegistry()
+	registry.Add(workflow.Workflow{
+		ID:          "long-desc",
+		Name:        "Short",
+		Description: "This is a very long description that should be wrapped because it exceeds the available width for rendering",
+		Source:      workflow.SourceBuiltIn,
+		TargetMode:  workflow.TargetChat,
+	})
+
+	cfg := Config{
+		ClientType:       "claude",
+		WorkDir:          "/test/dir",
+		SessionTimeout:   30 * time.Minute,
+		WorkflowRegistry: registry,
+	}
+	m := New(cfg).SetSize(60, 15).Toggle()
+	m.activeTab = TabWorkflows
+
+	output := m.renderWorkflowsTab(10)
+	require.NotEmpty(t, output, "should render something")
+
+	// Verify the description wraps to multiple lines (multi-line layout)
+	lines := strings.Split(output, "\n")
+	require.GreaterOrEqual(t, len(lines), 3, "long description should wrap to multiple lines")
+
+	// First line should be the name
+	require.Contains(t, lines[0], "Short", "first line should contain workflow name")
+
+	// Description should appear on subsequent lines (indented)
+	hasDescContent := false
+	for i := 1; i < len(lines); i++ {
+		if strings.Contains(lines[i], "very long description") || strings.Contains(lines[i], "wrapped") {
+			hasDescContent = true
+			break
+		}
+	}
+	require.True(t, hasDescContent, "description should appear on subsequent lines")
+}
+
+func TestRenderWorkflowsTab_SourceIndicatorColors(t *testing.T) {
+	// Create workflows with different sources
+	registry := workflow.NewRegistry()
+	registry.Add(workflow.Workflow{
+		ID:          "builtin",
+		Name:        "Built-in Workflow",
+		Description: "A built-in workflow",
+		Source:      workflow.SourceBuiltIn,
+		TargetMode:  workflow.TargetChat,
+	})
+	registry.Add(workflow.Workflow{
+		ID:          "user",
+		Name:        "User Workflow",
+		Description: "A user workflow",
+		Source:      workflow.SourceUser,
+		TargetMode:  workflow.TargetChat,
+	})
+
+	cfg := Config{
+		ClientType:       "claude",
+		WorkDir:          "/test/dir",
+		SessionTimeout:   30 * time.Minute,
+		WorkflowRegistry: registry,
+	}
+	m := New(cfg).SetSize(60, 15).Toggle()
+	m.activeTab = TabWorkflows
+
+	output := m.renderWorkflowsTab(10)
+	require.NotEmpty(t, output, "should render something")
+
+	// Both workflows should have the ● indicator
+	require.Contains(t, output, "●", "should contain source indicator")
+
+	// The actual color verification is done via golden tests since ANSI codes are complex to parse
+	// Here we just verify the structure is correct
+	lines := strings.Split(output, "\n")
+	require.GreaterOrEqual(t, len(lines), 2, "should have at least 2 workflow lines")
+}
+
+func TestRenderEmptyWorkflowsState(t *testing.T) {
+	cfg := Config{
+		ClientType:     "claude",
+		WorkDir:        "/test/dir",
+		SessionTimeout: 30 * time.Minute,
+	}
+	m := New(cfg).SetSize(60, 15).Toggle()
+	m.activeTab = TabWorkflows
+
+	// Call renderEmptyWorkflowsState directly
+	output := m.renderEmptyWorkflowsState(10)
+
+	require.NotEmpty(t, output, "should render something")
+	require.Contains(t, output, "No workflows available", "should show no workflows message")
+	require.Contains(t, output, "~/.config/perles/workflows/", "should show guidance for adding workflows")
 }

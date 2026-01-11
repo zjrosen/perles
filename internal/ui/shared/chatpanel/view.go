@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/zjrosen/perles/internal/orchestration/events"
+	"github.com/zjrosen/perles/internal/orchestration/workflow"
 	"github.com/zjrosen/perles/internal/ui/shared/chatrender"
 	"github.com/zjrosen/perles/internal/ui/shared/panes"
 	"github.com/zjrosen/perles/internal/ui/styles"
@@ -92,12 +93,15 @@ func (m Model) View() string {
 
 	case TabSessions:
 		tabContent = m.renderSessionsTab(contentHeight)
+	case TabWorkflows:
+		tabContent = m.renderWorkflowsTab(contentHeight)
 	}
 
 	// Build tabs for the top pane
 	tabs := []panes.Tab{
 		{Label: "Chat", Content: tabContent},
 		{Label: "Sessions", Content: tabContent},
+		{Label: "Workflows", Content: tabContent},
 	}
 
 	// Determine border color based on assistant status
@@ -163,17 +167,10 @@ func (m Model) View() string {
 	})
 
 	// Stack message pane and input pane vertically
-	mainView := lipgloss.JoinVertical(lipgloss.Left,
+	return lipgloss.JoinVertical(lipgloss.Left,
 		tabbedPane,
 		inputPane,
 	)
-
-	// Render workflow picker overlay if visible
-	if m.showWorkflowPicker && m.workflowPicker != nil {
-		return m.workflowPicker.Overlay(mainView)
-	}
-
-	return mainView
 }
 
 // splitLines splits a string into lines.
@@ -256,7 +253,7 @@ func (m Model) renderErrorState(width, height int) string {
 		Foreground(styles.TextPrimaryColor)
 
 	helpStyle := lipgloss.NewStyle().
-		Foreground(styles.TextMutedColor)
+		Foreground(styles.TextSecondaryColor)
 
 	keyStyle := lipgloss.NewStyle().
 		Foreground(styles.StatusInProgressColor)
@@ -329,7 +326,7 @@ func (m Model) renderSessionsTab(contentHeight int) string {
 			indicatorStyle = lipgloss.NewStyle().Foreground(styles.StatusSuccessColor)
 		} else {
 			indicatorChar = "○"
-			indicatorStyle = lipgloss.NewStyle().Foreground(styles.TextMutedColor)
+			indicatorStyle = lipgloss.NewStyle().Foreground(styles.TextSecondaryColor)
 		}
 
 		// Build status display
@@ -352,19 +349,19 @@ func (m Model) renderSessionsTab(contentHeight int) string {
 				statusStyle = lipgloss.NewStyle().Foreground(styles.StatusSuccessColor)
 			case events.ProcessStatusPending:
 				statusText = "Pending"
-				statusStyle = lipgloss.NewStyle().Foreground(styles.TextMutedColor)
+				statusStyle = lipgloss.NewStyle().Foreground(styles.TextSecondaryColor)
 			case events.ProcessStatusStarting:
 				statusText = "Starting"
-				statusStyle = lipgloss.NewStyle().Foreground(styles.TextMutedColor)
+				statusStyle = lipgloss.NewStyle().Foreground(styles.TextSecondaryColor)
 			case events.ProcessStatusPaused:
 				statusText = "Paused"
-				statusStyle = lipgloss.NewStyle().Foreground(styles.TextMutedColor)
+				statusStyle = lipgloss.NewStyle().Foreground(styles.TextSecondaryColor)
 			case events.ProcessStatusStopped:
 				statusText = "Stopped"
 				statusStyle = lipgloss.NewStyle().Foreground(styles.StatusErrorColor)
 			default:
 				statusText = string(session.Status)
-				statusStyle = lipgloss.NewStyle().Foreground(styles.TextMutedColor)
+				statusStyle = lipgloss.NewStyle().Foreground(styles.TextSecondaryColor)
 			}
 		}
 
@@ -427,4 +424,180 @@ func (m Model) renderSessionsTab(contentHeight int) string {
 	}
 
 	return content
+}
+
+// renderWorkflowsTab renders the Workflows tab content with a selectable workflow list.
+// Shows each workflow in multi-line format:
+//   - Line 1: ● Name
+//   - Line 2+: Indented description (wrapped if long)
+//
+// ● is colored by source: green for user, blue for built-in.
+func (m Model) renderWorkflowsTab(contentHeight int) string {
+	workflows := m.getWorkflowsForTab()
+
+	// Handle empty state
+	if len(workflows) == 0 {
+		return m.renderEmptyWorkflowsState(contentHeight)
+	}
+
+	var lines []string
+	innerWidth := max(m.width-2, 1)
+	bgColor := styles.SelectionBackgroundColor
+	descIndent := "  " // 2 spaces to align description under name
+
+	for i, wf := range workflows {
+		isSelected := i == m.workflowListCursor && m.activeTab == TabWorkflows
+
+		// Source indicator: green for user, blue for built-in
+		var indicatorColor lipgloss.TerminalColor
+		if wf.Source == workflow.SourceUser {
+			indicatorColor = styles.StatusSuccessColor // green
+		} else {
+			indicatorColor = styles.StatusInProgressColor // blue
+		}
+
+		// Line 1: ● Name
+		plainLine1 := fmt.Sprintf("● %s", wf.Name)
+		line1Padding := max(innerWidth-lipgloss.Width(plainLine1), 0)
+
+		// Description lines (wrapped)
+		descWidth := innerWidth - len(descIndent)
+		var descLines []string
+		if wf.Description != "" {
+			descLines = wrapText(wf.Description, descWidth)
+		}
+
+		if isSelected {
+			// Render with full-width background on all lines
+			spaceStyle := lipgloss.NewStyle().Background(bgColor)
+			indicatorStyle := lipgloss.NewStyle().Foreground(indicatorColor).Background(bgColor)
+			nameStyle := lipgloss.NewStyle().Foreground(styles.TextPrimaryColor).Bold(true).Background(bgColor)
+			descStyle := lipgloss.NewStyle().Foreground(styles.TextDescriptionColor).Background(bgColor)
+
+			// Line 1: ● Name with full-width background
+			var line1 strings.Builder
+			line1.WriteString(indicatorStyle.Render("●"))
+			line1.WriteString(spaceStyle.Render(" "))
+			line1.WriteString(nameStyle.Render(wf.Name))
+			line1.WriteString(spaceStyle.Render(strings.Repeat(" ", line1Padding)))
+			lines = append(lines, line1.String())
+
+			// Description lines with full-width background
+			for _, desc := range descLines {
+				plainDesc := descIndent + desc
+				descPadding := max(innerWidth-lipgloss.Width(plainDesc), 0)
+				var descLine strings.Builder
+				descLine.WriteString(spaceStyle.Render(descIndent))
+				descLine.WriteString(descStyle.Render(desc))
+				descLine.WriteString(spaceStyle.Render(strings.Repeat(" ", descPadding)))
+				lines = append(lines, descLine.String())
+			}
+		} else {
+			// Normal rendering without background
+			indicatorStyle := lipgloss.NewStyle().Foreground(indicatorColor)
+			nameStyle := lipgloss.NewStyle().Foreground(styles.TextPrimaryColor)
+			descStyle := lipgloss.NewStyle().Foreground(styles.TextDescriptionColor)
+
+			// Line 1: ● Name
+			var line1 strings.Builder
+			line1.WriteString(indicatorStyle.Render("●"))
+			line1.WriteString(" ")
+			line1.WriteString(nameStyle.Render(wf.Name))
+			lines = append(lines, line1.String())
+
+			// Description lines
+			for _, desc := range descLines {
+				lines = append(lines, descStyle.Render(descIndent+desc))
+			}
+		}
+	}
+
+	// Join lines and pad to content height if needed
+	content := strings.Join(lines, "\n")
+	contentLines := len(lines)
+	if contentLines < contentHeight {
+		// Pad with empty lines at bottom using strings.Builder for efficiency
+		var sb strings.Builder
+		sb.WriteString(content)
+		for i := 0; i < contentHeight-contentLines; i++ {
+			sb.WriteString("\n")
+		}
+		content = sb.String()
+	}
+
+	return content
+}
+
+// wrapText wraps text to fit within maxWidth characters using simple word wrapping.
+// Returns a slice of lines, each fitting within maxWidth.
+func wrapText(text string, maxWidth int) []string {
+	if maxWidth <= 0 || text == "" {
+		return nil
+	}
+
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return nil
+	}
+
+	var lines []string
+	var currentLine strings.Builder
+
+	for _, word := range words {
+		wordLen := lipgloss.Width(word)
+
+		// If word is longer than maxWidth, add it as its own line (truncated)
+		if wordLen > maxWidth {
+			if currentLine.Len() > 0 {
+				lines = append(lines, currentLine.String())
+				currentLine.Reset()
+			}
+			lines = append(lines, styles.TruncateString(word, maxWidth))
+			continue
+		}
+
+		// Check if adding this word would exceed maxWidth
+		if currentLine.Len() > 0 {
+			testLen := lipgloss.Width(currentLine.String()) + 1 + wordLen // +1 for space
+			if testLen > maxWidth {
+				lines = append(lines, currentLine.String())
+				currentLine.Reset()
+			}
+		}
+
+		if currentLine.Len() > 0 {
+			currentLine.WriteString(" ")
+		}
+		currentLine.WriteString(word)
+	}
+
+	// Add remaining content
+	if currentLine.Len() > 0 {
+		lines = append(lines, currentLine.String())
+	}
+
+	return lines
+}
+
+// renderEmptyWorkflowsState renders a centered message when no workflows are available.
+func (m Model) renderEmptyWorkflowsState(contentHeight int) string {
+	innerWidth := max(m.width-2, 1)
+
+	messageStyle := lipgloss.NewStyle().
+		Foreground(styles.TextSecondaryColor)
+
+	var lines []string
+	lines = append(lines, "")
+	lines = append(lines, messageStyle.Render("No workflows available"))
+	lines = append(lines, "")
+	lines = append(lines, messageStyle.Render("Add workflows to ~/.config/perles/workflows/"))
+
+	content := strings.Join(lines, "\n")
+
+	style := lipgloss.NewStyle().
+		Width(innerWidth).
+		Height(contentHeight).
+		Align(lipgloss.Center, lipgloss.Center)
+
+	return style.Render(content)
 }

@@ -19,10 +19,8 @@ import (
 	"github.com/zjrosen/perles/internal/orchestration/v2/repository"
 	"github.com/zjrosen/perles/internal/orchestration/workflow"
 	"github.com/zjrosen/perles/internal/pubsub"
-	"github.com/zjrosen/perles/internal/ui/commandpalette"
 	"github.com/zjrosen/perles/internal/ui/shared/chatrender"
 	"github.com/zjrosen/perles/internal/ui/shared/vimtextarea"
-	"github.com/zjrosen/perles/internal/ui/styles"
 )
 
 // ErrNoInfrastructure is returned when attempting to use infrastructure before it's set.
@@ -35,9 +33,10 @@ const viewportKey = "main"
 
 // Tab indices for the chat panel.
 const (
-	TabChat     = 0
-	TabSessions = 1
-	tabCount    = 2
+	TabChat      = 0
+	TabSessions  = 1
+	TabWorkflows = 2
+	tabCount     = 3
 )
 
 // ChatPanelProcessID is the well-known ID for the chat panel's AI process.
@@ -110,12 +109,11 @@ type Model struct {
 	// Spinner animation
 	spinnerFrame int // Current spinner frame index
 
-	// Workflow picker state
-	workflowRegistry       *workflow.Registry    // Workflow template registry (from config)
-	workflowPicker         *commandpalette.Model // Command palette for workflow selection
-	showWorkflowPicker     bool                  // Whether the workflow picker is visible
-	activeWorkflow         *workflow.Workflow    // Currently active workflow (if any)
-	pendingWorkflowContent string                // Workflow content waiting to be sent when session ready
+	// Workflow state
+	workflowRegistry       *workflow.Registry // Workflow template registry (from config)
+	activeWorkflow         *workflow.Workflow // Currently active workflow (if any)
+	pendingWorkflowContent string             // Workflow content waiting to be sent when session ready
+	workflowListCursor     int                // Cursor position in Workflows tab list
 
 	// Clock is the time source for testing. If nil, uses time.Now().
 	Clock func() time.Time
@@ -166,8 +164,7 @@ func New(cfg Config) Model {
 		activeSessionID:  DefaultSessionID,
 		processToSession: map[string]string{ChatPanelProcessID: DefaultSessionID},
 		// Initialize workflow state from config
-		workflowRegistry:   cfg.WorkflowRegistry,
-		showWorkflowPicker: false, // Initially hidden
+		workflowRegistry: cfg.WorkflowRegistry,
 	}
 }
 
@@ -279,34 +276,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case pubsub.Event[any]:
 		return m.handlePubSubEvent(msg)
 
-	// Handle workflow picker selection
-	case commandpalette.SelectMsg:
-		if m.showWorkflowPicker {
-			return m.handleWorkflowSelected(msg.Item)
-		}
-		return m, nil
-
-	// Handle workflow picker cancel
-	case commandpalette.CancelMsg:
-		if m.showWorkflowPicker {
-			m.showWorkflowPicker = false
-			m.workflowPicker = nil
-		}
-		return m, nil
-
 	case tea.KeyMsg:
 		// Only process key input if visible and focused
 		if !m.visible || !m.focused {
 			return m, nil
-		}
-
-		// When workflow picker is visible, route all key events to it
-		if m.showWorkflowPicker && m.workflowPicker != nil {
-			var pickerCmd tea.Cmd
-			picker := *m.workflowPicker
-			picker, pickerCmd = picker.Update(msg)
-			m.workflowPicker = &picker
-			return m, pickerCmd
 		}
 
 		// Handle tab switching with Ctrl+] (cycles through tabs)
@@ -342,11 +315,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Handle Ctrl+T for workflow picker
+		// Handle Ctrl+T to jump to Workflows tab
 		if msg.Type == tea.KeyCtrlT {
-			if m.workflowRegistry != nil {
-				m = m.openWorkflowPicker()
-			}
+			m.activeTab = TabWorkflows
 			return m, nil
 		}
 
@@ -415,6 +386,36 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			// Block all other keys when Sessions tab is active (don't forward to input)
 			// Also clear pending retire on any other key
 			m.pendingRetireSessionID = ""
+			return m, nil
+		}
+
+		// Handle Workflows tab navigation when Workflows tab is active
+		if m.activeTab == TabWorkflows {
+			// Clamp cursor to valid range (handles case where workflows changed)
+			m = m.clampWorkflowListCursor()
+			workflows := m.getWorkflowsForTab()
+
+			switch msg.String() {
+			case "j", "down":
+				// Move cursor down in workflow list
+				if m.workflowListCursor < len(workflows)-1 {
+					m.workflowListCursor++
+				}
+				return m, nil
+			case "k", "up":
+				// Move cursor up in workflow list
+				if m.workflowListCursor > 0 {
+					m.workflowListCursor--
+				}
+				return m, nil
+			case "enter":
+				// Select workflow and switch to Chat tab
+				if len(workflows) > 0 && m.workflowListCursor < len(workflows) {
+					return m.selectWorkflowFromTab(workflows[m.workflowListCursor])
+				}
+				return m, nil
+			}
+			// Block all other keys when Workflows tab is active (don't forward to input)
 			return m, nil
 		}
 
@@ -914,6 +915,53 @@ func (m Model) clampSessionListCursor() Model {
 	return m
 }
 
+// getWorkflowsForTab returns workflows filtered for chat mode.
+// Returns empty slice (not nil) if registry is nil or no workflows match.
+func (m Model) getWorkflowsForTab() []workflow.Workflow {
+	if m.workflowRegistry == nil {
+		return []workflow.Workflow{}
+	}
+	return m.workflowRegistry.ListByTargetMode(workflow.TargetChat)
+}
+
+// clampWorkflowListCursor ensures the cursor is within valid bounds.
+// Called when navigating the Workflows tab to handle cases where workflows changed.
+func (m Model) clampWorkflowListCursor() Model {
+	workflows := m.getWorkflowsForTab()
+	maxCursor := max(len(workflows)-1, 0)
+	if m.workflowListCursor > maxCursor {
+		m.workflowListCursor = maxCursor
+	}
+	if m.workflowListCursor < 0 {
+		m.workflowListCursor = 0
+	}
+	return m
+}
+
+// selectWorkflowFromTab handles selection of a workflow from the Workflows tab.
+// Formats workflow content, sends it (or queues if session not ready), and switches to Chat tab.
+func (m Model) selectWorkflowFromTab(wf workflow.Workflow) (Model, tea.Cmd) {
+	// Store as active workflow (matches existing behavior)
+	m.activeWorkflow = &wf
+
+	// Format content with workflow header (matches existing format)
+	content := fmt.Sprintf("[WORKFLOW: %s]\n\n%s", wf.Name, wf.Content)
+
+	// Switch to Chat tab to show the conversation
+	m.activeTab = TabChat
+
+	// Check if session is ready to receive messages
+	session := m.ActiveSession()
+	if session != nil && session.Status == events.ProcessStatusReady {
+		// Session ready - send immediately
+		return m, m.SendMessage(content)
+	}
+
+	// Session not ready - queue for later (existing mechanism)
+	m.pendingWorkflowContent = content
+	return m, nil
+}
+
 // NextSession cycles to the next session in the session order.
 // Wraps around to the first session after the last one.
 func (m Model) NextSession() Model {
@@ -1125,93 +1173,6 @@ func (m Model) appendToSession(session *SessionData, event events.ProcessEvent) 
 
 	// Update last activity timestamp for all event types
 	session.LastActivity = m.now()
-
-	return m
-}
-
-// handleWorkflowSelected handles selection of a workflow from the picker.
-// Closes the picker, formats the workflow content, and either sends it immediately
-// (if session is ready) or queues it for later (if session is still initializing).
-func (m Model) handleWorkflowSelected(item commandpalette.Item) (Model, tea.Cmd) {
-	// Close the picker
-	m.showWorkflowPicker = false
-	m.workflowPicker = nil
-
-	// Guard: return early if no workflow registry (shouldn't happen if picker was open)
-	if m.workflowRegistry == nil {
-		return m, nil
-	}
-
-	// Get workflow from registry by ID
-	wf, found := m.workflowRegistry.Get(item.ID)
-	if !found {
-		// Workflow not found - shouldn't happen, but handle gracefully
-		return m, nil
-	}
-
-	// Store as active workflow
-	m.activeWorkflow = &wf
-
-	// Format content with workflow header
-	content := fmt.Sprintf("[WORKFLOW: %s]\n\n%s", wf.Name, wf.Content)
-
-	// Check if session is ready to receive messages
-	session := m.ActiveSession()
-	if session != nil && session.Status == events.ProcessStatusReady {
-		// Session is ready - send immediately
-		return m, m.SendMessage(content)
-	}
-
-	// Session not ready - queue for later
-	m.pendingWorkflowContent = content
-	return m, nil
-}
-
-// openWorkflowPicker opens the workflow picker modal with chat-targeted workflows.
-// Returns early if workflowRegistry is nil or no chat workflows are available.
-func (m Model) openWorkflowPicker() Model {
-	// Guard: return early if no workflow registry
-	if m.workflowRegistry == nil {
-		return m
-	}
-
-	// Get workflows filtered to chat mode (includes TargetBoth)
-	workflows := m.workflowRegistry.ListByTargetMode(workflow.TargetChat)
-
-	// Handle empty list gracefully - return early without opening picker
-	if len(workflows) == 0 {
-		return m
-	}
-
-	// Build command palette items from workflows
-	items := make([]commandpalette.Item, len(workflows))
-	for i, wf := range workflows {
-		// Color: green for user workflows, blue for built-in
-		var color = styles.StatusInProgressColor // blue for built-in
-		if wf.Source == workflow.SourceUser {
-			color = styles.StatusSuccessColor // green for user
-		}
-
-		items[i] = commandpalette.Item{
-			ID:          wf.ID,
-			Name:        wf.Name,
-			Description: wf.Description,
-			Color:       color,
-		}
-	}
-
-	// Create command palette with chat workflow config
-	picker := commandpalette.New(commandpalette.Config{
-		Title:       "Chat Workflows",
-		Placeholder: "Search workflows...",
-		Items:       items,
-	})
-
-	// Set size with current dimensions
-	picker = picker.SetSize(m.width, m.height)
-
-	m.workflowPicker = &picker
-	m.showWorkflowPicker = true
 
 	return m
 }
