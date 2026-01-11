@@ -814,8 +814,8 @@ func (m Model) openWorkflowPicker() Model {
 		return m
 	}
 
-	// Build items from workflow registry
-	workflows := m.workflowRegistry.List()
+	// Build items from workflow registry - only show orchestration-targeted workflows
+	workflows := m.workflowRegistry.ListByTargetMode(workflow.TargetOrchestration)
 	items := make([]commandpalette.Item, 0, len(workflows))
 	for _, wf := range workflows {
 		// Color based on source: blue for built-in, green for user-defined
