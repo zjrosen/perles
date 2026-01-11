@@ -344,6 +344,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case kanban.SwitchToSearchMsg:
 		m.currentMode = mode.ModeSearch
 		log.Info(log.CatMode, "Switching mode", "from", "kanban", "to", "search", "subMode", msg.SubMode, "query", msg.Query, "issue", msg.IssueID)
+
+		// Calculate main content width based on chatpanel state and set size
+		// BEFORE emitting EnterMsg so search has correct dimensions when processing
+		mainWidth := m.width
+		if m.chatPanel.Visible() {
+			mainWidth = m.width - m.chatPanelWidth()
+		}
+		m.search = m.search.SetSize(mainWidth, m.height)
+
 		return m, func() tea.Msg {
 			return search.EnterMsg{SubMode: msg.SubMode, Query: msg.Query, IssueID: msg.IssueID}
 		}
@@ -352,6 +361,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Switch back to kanban mode from search
 		log.Info(log.CatMode, "Switching mode", "from", "search", "to", "kanban")
 		m.currentMode = mode.ModeKanban
+
+		// Calculate main content width based on chatpanel state and set size
+		// BEFORE RefreshFromConfig() so kanban has correct dimensions before layout recalculation
+		mainWidth := m.width
+		if m.chatPanel.Visible() {
+			mainWidth = m.width - m.chatPanelWidth()
+		}
+		m.kanban = m.kanban.SetSize(mainWidth, m.height)
 
 		// Rebuild kanban from config to reflect any column changes made in search mode
 		var cmd tea.Cmd
@@ -413,6 +430,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		m.currentMode = mode.ModeKanban
+
+		// Calculate main content width based on chatpanel state and set size
+		// BEFORE RefreshFromConfig() so kanban has correct dimensions before layout recalculation
+		// Note: Panel is always hidden after orchestration (closed on entry), but this is defensive
+		mainWidth := m.width
+		if m.chatPanel.Visible() {
+			mainWidth = m.width - m.chatPanelWidth()
+		}
+		m.kanban = m.kanban.SetSize(mainWidth, m.height)
+
 		// Refresh kanban to show any changes made during orchestration
 		var cmd tea.Cmd
 		m.kanban, cmd = m.kanban.RefreshFromConfig()
@@ -631,10 +658,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // switchMode toggles between Kanban and Search modes.
 func (m Model) switchMode() (tea.Model, tea.Cmd) {
+	// Calculate main content width based on chatpanel state
+	mainWidth := m.width
+	if m.chatPanel.Visible() {
+		mainWidth = m.width - m.chatPanelWidth()
+	}
+
 	switch m.currentMode {
 	case mode.ModeKanban:
 		log.Info(log.CatMode, "Switching mode", "from", "kanban", "to", "search", "subMode", "list")
 		m.currentMode = mode.ModeSearch
+		m.search = m.search.SetSize(mainWidth, m.height)
 
 		return m, func() tea.Msg {
 			return search.EnterMsg{SubMode: mode.SubModeList, Query: ""}
@@ -642,6 +676,7 @@ func (m Model) switchMode() (tea.Model, tea.Cmd) {
 	case mode.ModeSearch:
 		log.Info(log.CatMode, "Switching mode", "from", "search", "to", "kanban")
 		m.currentMode = mode.ModeKanban
+		m.kanban = m.kanban.SetSize(mainWidth, m.height)
 		// Rebuild kanban from config to reflect any column changes made in search mode
 		var cmd tea.Cmd
 		m.kanban, cmd = m.kanban.RefreshFromConfig()
