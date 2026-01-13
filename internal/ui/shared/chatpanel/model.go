@@ -126,9 +126,9 @@ const DefaultSessionID = "session-1"
 
 // New creates a new chat panel model with the given configuration.
 func New(cfg Config) Model {
-	// Create vimtextarea input with vim mode enabled by default
+	// Create vimtextarea input with vim mode from config
 	input := vimtextarea.New(vimtextarea.Config{
-		VimEnabled:  true,
+		VimEnabled:  cfg.VimMode,
 		DefaultMode: vimtextarea.ModeInsert,
 		CharLimit:   0, // No limit
 		MaxHeight:   4, // Allow up to 4 lines for input (matches input pane height)

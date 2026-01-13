@@ -119,6 +119,47 @@ func TestNew_WorkflowRegistry_InitializedWhenProvided(t *testing.T) {
 }
 
 // ============================================================================
+// VimMode Config Propagation Tests
+// ============================================================================
+
+func TestNew_VimModeDisabled_InputHasVimDisabled(t *testing.T) {
+	cfg := Config{
+		ClientType:     "claude",
+		WorkDir:        "/test/dir",
+		SessionTimeout: 30 * time.Minute,
+		VimMode:        false,
+	}
+	m := New(cfg)
+
+	// When VimMode is false, the vimtextarea ModeIndicator should return empty string
+	require.Equal(t, "", m.input.ModeIndicator(), "mode indicator should be empty when VimMode is false")
+}
+
+func TestNew_VimModeEnabled_InputHasVimEnabled(t *testing.T) {
+	cfg := Config{
+		ClientType:     "claude",
+		WorkDir:        "/test/dir",
+		SessionTimeout: 30 * time.Minute,
+		VimMode:        true,
+	}
+	m := New(cfg)
+
+	// When VimMode is true, the vimtextarea ModeIndicator should return a mode string
+	indicator := m.input.ModeIndicator()
+	require.NotEmpty(t, indicator, "mode indicator should not be empty when VimMode is true")
+	require.Contains(t, indicator, "INSERT", "mode indicator should show INSERT mode (default)")
+}
+
+func TestNew_DefaultConfig_VimModeDisabled(t *testing.T) {
+	// DefaultConfig should have VimMode=false (matching the app default)
+	cfg := DefaultConfig()
+	require.False(t, cfg.VimMode, "DefaultConfig should have VimMode=false")
+
+	m := New(cfg)
+	require.Equal(t, "", m.input.ModeIndicator(), "mode indicator should be empty with default config")
+}
+
+// ============================================================================
 // Ctrl+T Keybinding Tests (perles-f3tm.4 - Workflows Tab)
 // NOTE: The openWorkflowPicker and handleWorkflowSelected tests were removed
 // as part of the Workflows tab cleanup. The workflow picker modal has been

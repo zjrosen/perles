@@ -21,6 +21,10 @@ type Config struct {
 	// WorkflowRegistry provides access to workflow templates for the chat panel.
 	// When nil, the workflow picker feature is disabled.
 	WorkflowRegistry *workflow.Registry
+
+	// VimMode enables vim keybindings in the text input area.
+	// When false, the input behaves as a standard textarea.
+	VimMode bool
 }
 
 // DefaultConfig returns a Config with sensible defaults.
