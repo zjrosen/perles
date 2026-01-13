@@ -567,6 +567,8 @@ func newDefaultRegistry() *CommandRegistry {
 	r.registerWithModeKeys(ModeVisualLine, &VisualDeleteCommand{mode: ModeVisualLine}) // 'd', 'x'
 	r.registerWithModeKeys(ModeVisual, &VisualYankCommand{mode: ModeVisual})           // 'y'
 	r.registerWithModeKeys(ModeVisualLine, &VisualYankCommand{mode: ModeVisualLine})   // 'y'
+	r.registerWithModeKeys(ModeVisual, &VisualPasteCommand{mode: ModeVisual})          // 'p'
+	r.registerWithModeKeys(ModeVisualLine, &VisualPasteCommand{mode: ModeVisualLine})  // 'p'
 	r.registerWithModeKeys(ModeVisual, &VisualChangeCommand{mode: ModeVisual})         // 'c'
 	r.registerWithModeKeys(ModeVisualLine, &VisualChangeCommand{mode: ModeVisualLine}) // 'c'
 

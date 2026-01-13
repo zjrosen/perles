@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"pgregory.net/rapid"
 )
 
@@ -1150,4 +1151,68 @@ func TestDefaultRegistry_HasVisualModeToggleCommands(t *testing.T) {
 	assert.True(t, okEscVisualLine, "DefaultRegistry should have '<escape>' command for VisualLine mode")
 	assert.NotNil(t, cmdEscVisualLine)
 	assert.Equal(t, "mode.visual_escape", cmdEscVisualLine.ID())
+}
+
+// ============================================================================
+// Visual Paste Integration Tests
+// ============================================================================
+
+// TestIntegration_VisualPaste_KeyDispatch verifies v + motion + p replaces selection via key dispatch
+func TestIntegration_VisualPaste_KeyDispatch(t *testing.T) {
+	m := newTestModelWithContent("hello world")
+	m.mode = ModeNormal
+	m.cursorRow = 0
+	m.cursorCol = 0
+	m.lastYankedText = "XX"
+	m.lastYankWasLinewise = false
+
+	// Enter visual mode: 'V' for line-wise (simpler for dispatch test)
+	cmdV, ok := DefaultRegistry.Get(ModeNormal, "V")
+	require.True(t, ok)
+	cmdV.Execute(m)
+	assert.Equal(t, ModeVisualLine, m.mode)
+
+	// Press 'p' to paste (replace entire line)
+	cmdP, ok := DefaultRegistry.Get(ModeVisualLine, "p")
+	require.True(t, ok)
+	result := cmdP.Execute(m)
+
+	assert.Equal(t, Executed, result)
+	assert.Equal(t, ModeNormal, m.mode, "should exit visual mode after paste")
+	assert.Equal(t, "XX", m.content[0], "line should be replaced with pasted text")
+}
+
+// TestIntegration_VisualPaste_Emoji verifies visual paste with emoji preserves UTF-8 integrity
+func TestIntegration_VisualPaste_Emoji(t *testing.T) {
+	m := newTestModelWithContent("hello 👋 world")
+	m.mode = ModeVisual
+	m.visualAnchor = Position{Row: 0, Col: 6} // Start of emoji
+	m.cursorRow = 0
+	m.cursorCol = 6 // Select just the emoji (single grapheme)
+	m.lastYankedText = "🎉"
+	m.lastYankWasLinewise = false
+
+	cmd := &VisualPasteCommand{mode: ModeVisual}
+	result := cmd.Execute(m)
+
+	assert.Equal(t, Executed, result)
+	assert.Equal(t, "hello 🎉 world", m.content[0], "emoji should be replaced without corruption")
+	assert.Equal(t, ModeNormal, m.mode)
+}
+
+// TestIntegration_VisualPaste_MultiGraphemeEmoji verifies ZWJ emoji paste integrity
+func TestIntegration_VisualPaste_MultiGraphemeEmoji(t *testing.T) {
+	m := newTestModelWithContent("test 👨‍👩‍👧 end")
+	m.mode = ModeVisual
+	m.visualAnchor = Position{Row: 0, Col: 5} // Start of family emoji
+	m.cursorRow = 0
+	m.cursorCol = 5 // Select the family emoji (single grapheme cluster)
+	m.lastYankedText = "🏠"
+	m.lastYankWasLinewise = false
+
+	cmd := &VisualPasteCommand{mode: ModeVisual}
+	result := cmd.Execute(m)
+
+	assert.Equal(t, Executed, result)
+	assert.Equal(t, "test 🏠 end", m.content[0], "ZWJ emoji should be replaced cleanly")
 }

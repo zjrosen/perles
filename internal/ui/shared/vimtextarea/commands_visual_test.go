@@ -659,6 +659,143 @@ func TestDefaultRegistry_HasVisualYankCommands(t *testing.T) {
 }
 
 // ============================================================================
+// VisualPasteCommand Unit Tests
+// ============================================================================
+
+// TestVisualPasteCommand_Execute_Characterwise tests replacing selection with yanked text
+func TestVisualPasteCommand_Execute_Characterwise(t *testing.T) {
+	m := newTestModelWithContent("hello world")
+	m.mode = ModeVisual
+	m.visualAnchor = Position{Row: 0, Col: 3}
+	m.cursorRow = 0
+	m.cursorCol = 4
+	m.lastYankedText = "XX"
+	m.lastYankWasLinewise = false
+
+	cmd := &VisualPasteCommand{mode: ModeVisual}
+	result := cmd.Execute(m)
+
+	assert.Equal(t, Executed, result)
+	assert.Equal(t, "helXX world", m.content[0])
+	assert.Equal(t, ModeNormal, m.mode)
+	assert.Equal(t, Position{}, m.visualAnchor)
+	assert.Equal(t, 0, m.cursorRow)
+	assert.Equal(t, 4, m.cursorCol, "cursor should be at last pasted grapheme")
+}
+
+// TestVisualPasteCommand_Execute_Linewise tests replacing line-wise selection with linewise yank
+func TestVisualPasteCommand_Execute_Linewise(t *testing.T) {
+	m := newTestModelWithContent("line1", "line2", "line3")
+	m.mode = ModeVisualLine
+	m.visualAnchor = Position{Row: 0, Col: 0}
+	m.cursorRow = 1
+	m.cursorCol = 3
+	m.lastYankedText = "new1\nnew2"
+	m.lastYankWasLinewise = true
+
+	cmd := &VisualPasteCommand{mode: ModeVisualLine}
+	result := cmd.Execute(m)
+
+	assert.Equal(t, Executed, result)
+	assert.Len(t, m.content, 3)
+	assert.Equal(t, "new1", m.content[0])
+	assert.Equal(t, "new2", m.content[1])
+	assert.Equal(t, "line3", m.content[2])
+	assert.Equal(t, ModeNormal, m.mode)
+	assert.Equal(t, 1, m.cursorRow)
+	assert.Equal(t, 3, m.cursorCol, "cursor should be at last pasted grapheme")
+}
+
+// TestDefaultRegistry_HasVisualPasteCommands verifies paste commands are registered for visual modes
+func TestDefaultRegistry_HasVisualPasteCommands(t *testing.T) {
+	cmdP, okP := DefaultRegistry.Get(ModeVisual, "p")
+	assert.True(t, okP, "ModeVisual should have 'p' command")
+	assert.NotNil(t, cmdP)
+	assert.Equal(t, "visual.paste", cmdP.ID())
+
+	cmdPLine, okPLine := DefaultRegistry.Get(ModeVisualLine, "p")
+	assert.True(t, okPLine, "ModeVisualLine should have 'p' command")
+	assert.NotNil(t, cmdPLine)
+	assert.Equal(t, "visual.paste", cmdPLine.ID())
+}
+
+// TestVisualPasteCommand_RegisterUpdate verifies lastYankedText becomes replaced selection after paste
+func TestVisualPasteCommand_RegisterUpdate(t *testing.T) {
+	m := newTestModelWithContent("hello world")
+	m.mode = ModeVisual
+	m.visualAnchor = Position{Row: 0, Col: 0}
+	m.cursorRow = 0
+	m.cursorCol = 4 // Select "hello"
+	m.lastYankedText = "XX"
+	m.lastYankWasLinewise = false
+
+	cmd := &VisualPasteCommand{mode: ModeVisual}
+	cmd.Execute(m)
+
+	// After paste, register should contain replaced selection
+	assert.Equal(t, "hello", m.lastYankedText, "register should contain replaced selection")
+	assert.False(t, m.lastYankWasLinewise, "linewise flag should match selection mode")
+}
+
+// TestVisualPasteCommand_RegisterUpdate_Linewise verifies linewise register update
+func TestVisualPasteCommand_RegisterUpdate_Linewise(t *testing.T) {
+	m := newTestModelWithContent("line1", "line2", "line3")
+	m.mode = ModeVisualLine
+	m.visualAnchor = Position{Row: 0, Col: 0}
+	m.cursorRow = 1
+	m.cursorCol = 0 // Select lines 0 and 1
+	m.lastYankedText = "new"
+	m.lastYankWasLinewise = true
+
+	cmd := &VisualPasteCommand{mode: ModeVisualLine}
+	cmd.Execute(m)
+
+	assert.Equal(t, "line1\nline2", m.lastYankedText, "register should contain replaced lines")
+	assert.True(t, m.lastYankWasLinewise, "linewise flag should be true for line-wise selection")
+}
+
+// TestVisualPasteCommand_Undo restores original content and removes pasted text
+func TestVisualPasteCommand_Undo(t *testing.T) {
+	m := newTestModelWithContent("hello world")
+	m.mode = ModeVisual
+	m.visualAnchor = Position{Row: 0, Col: 0}
+	m.cursorRow = 0
+	m.cursorCol = 4 // Select "hello"
+	m.lastYankedText = "XX"
+	m.lastYankWasLinewise = false
+
+	cmd := &VisualPasteCommand{mode: ModeVisual}
+	cmd.Execute(m)
+
+	assert.Equal(t, "XX world", m.content[0])
+
+	err := cmd.Undo(m)
+	assert.NoError(t, err)
+	assert.Equal(t, "hello world", m.content[0], "undo should restore original content")
+	assert.Equal(t, ModeNormal, m.mode)
+}
+
+// TestVisualPasteCommand_Redo reapplies replacement after undo
+func TestVisualPasteCommand_Redo(t *testing.T) {
+	m := newTestModelWithContent("hello world")
+	m.mode = ModeVisual
+	m.visualAnchor = Position{Row: 0, Col: 0}
+	m.cursorRow = 0
+	m.cursorCol = 4 // Select "hello"
+	m.lastYankedText = "XX"
+	m.lastYankWasLinewise = false
+
+	cmd := &VisualPasteCommand{mode: ModeVisual}
+	cmd.Execute(m)
+	cmd.Undo(m)
+
+	// Redo (execute again with executed=true)
+	result := cmd.Execute(m)
+	assert.Equal(t, Executed, result)
+	assert.Equal(t, "XX world", m.content[0], "redo should reapply paste")
+}
+
+// ============================================================================
 // VisualChangeCommand Unit Tests
 // ============================================================================
 

@@ -324,6 +324,316 @@ func (c *VisualYankCommand) String() string {
 }
 
 // ============================================================================
+// VisualPasteCommand
+// ============================================================================
+
+// VisualPasteCommand replaces the selected text in visual modes ('p').
+// After paste, exits to normal mode with cursor on last pasted grapheme.
+type VisualPasteCommand struct {
+	InsertBase
+	deletedContent       []string // Captured selection for undo/redo
+	startPos             Position // Normalized start position of selection
+	wasLinewiseSelection bool     // Whether selection was line-wise
+	pastedText           string   // Text that was pasted
+	pasteWasLinewise     bool     // Whether pasted text was line-wise
+	mode                 Mode     // Which mode this command operates in
+	executed             bool     // True after first execution (for redo detection)
+}
+
+// Execute replaces the selected text with the last yanked text.
+// On redo (when executed flag is set), re-applies the replacement
+// using captured state without requiring visual mode.
+func (c *VisualPasteCommand) Execute(m *Model) ExecuteResult {
+	// Skip if nothing to paste
+	if m.lastYankedText == "" {
+		return Skipped
+	}
+
+	// Check if this is a redo (command was already executed, so has captured state)
+	if c.executed {
+		if c.startPos.Row >= len(m.content) {
+			return Skipped
+		}
+
+		// Re-delete the original selection using captured state
+		m.deleteSelection(c.startPos, c.computeEndPos(), c.wasLinewiseSelection)
+		c.applyPaste(m)
+
+		// Ensure we're in normal mode
+		m.mode = ModeNormal
+		m.visualAnchor = Position{}
+		return Executed
+	}
+
+	// First execution: only operate in visual modes
+	if m.mode != ModeVisual && m.mode != ModeVisualLine {
+		return Skipped
+	}
+
+	// Capture selection and paste metadata
+	c.wasLinewiseSelection = m.mode == ModeVisualLine
+	c.pastedText = m.lastYankedText
+	c.pasteWasLinewise = m.lastYankWasLinewise
+
+	// Get normalized selection bounds
+	start, end := m.SelectionBounds()
+	c.startPos = start
+
+	// Validate bounds
+	if start.Row >= len(m.content) || end.Row >= len(m.content) {
+		// Invalid bounds - exit visual mode without changing
+		m.mode = ModeNormal
+		m.visualAnchor = Position{}
+		return Skipped
+	}
+
+	// Delete the selection
+	c.deletedContent = m.deleteSelection(start, end, c.wasLinewiseSelection)
+
+	// Paste at the selection start (cursor is already at startPos)
+	c.applyPaste(m)
+
+	// Update register: replaced selection becomes new yank content (Vim behavior)
+	m.lastYankedText = strings.Join(c.deletedContent, "\n")
+	m.lastYankWasLinewise = c.wasLinewiseSelection
+
+	// Mark as executed for redo detection
+	c.executed = true
+
+	// Exit visual mode
+	m.mode = ModeNormal
+	m.visualAnchor = Position{}
+	m.pendingBuilder.Clear()
+
+	return Executed
+}
+
+// applyPaste inserts the captured pasted text before the cursor.
+func (c *VisualPasteCommand) applyPaste(m *Model) {
+	if c.pasteWasLinewise {
+		// Line-wise: insert lines above current line
+		insertAt := m.cursorRow
+		lines := strings.Split(c.pastedText, "\n")
+		newContent := make([]string, len(m.content)+len(lines))
+		copy(newContent[:insertAt], m.content[:insertAt])
+		for i, line := range lines {
+			newContent[insertAt+i] = line
+		}
+		copy(newContent[insertAt+len(lines):], m.content[insertAt:])
+		m.content = newContent
+
+		// Cursor on last pasted grapheme
+		lastRow := insertAt + len(lines) - 1
+		m.cursorRow = lastRow
+		lastLineGraphemeCount := GraphemeCount(m.content[lastRow])
+		if lastLineGraphemeCount > 0 {
+			m.cursorCol = lastLineGraphemeCount - 1
+		} else {
+			m.cursorCol = 0
+		}
+		return
+	}
+
+	// Character-wise paste before cursor
+	row := m.cursorRow
+	line := m.content[row]
+	insertCol := m.cursorCol
+	lineGraphemeCount := GraphemeCount(line)
+
+	if !strings.Contains(c.pastedText, "\n") {
+		// Single-line paste
+		beforePaste := SliceByGraphemes(line, 0, insertCol)
+		afterPaste := SliceByGraphemes(line, insertCol, lineGraphemeCount)
+		m.content[row] = beforePaste + c.pastedText + afterPaste
+
+		// Cursor on last pasted grapheme
+		pastedGraphemeCount := GraphemeCount(c.pastedText)
+		m.cursorCol = max(insertCol+pastedGraphemeCount-1, 0)
+		return
+	}
+
+	// Multi-line character-wise paste
+	lines := strings.Split(c.pastedText, "\n")
+	beforeCursor := SliceByGraphemes(line, 0, insertCol)
+	afterCursor := SliceByGraphemes(line, insertCol, lineGraphemeCount)
+
+	// First line: text before cursor + first pasted line
+	m.content[row] = beforeCursor + lines[0]
+
+	// Insert middle and last lines
+	newContent := make([]string, len(m.content)+len(lines)-1)
+	copy(newContent[:row+1], m.content[:row+1])
+
+	for i := 1; i < len(lines); i++ {
+		if i == len(lines)-1 {
+			// Last line: last pasted line + text after cursor
+			newContent[row+i] = lines[i] + afterCursor
+		} else {
+			newContent[row+i] = lines[i]
+		}
+	}
+
+	copy(newContent[row+len(lines):], m.content[row+1:])
+	m.content = newContent
+
+	m.cursorRow = row + len(lines) - 1
+	lastLineGraphemeCount := GraphemeCount(lines[len(lines)-1])
+	m.cursorCol = max(lastLineGraphemeCount-1, 0)
+}
+
+// computeEndPos calculates the end position from captured state for redo.
+// Note: Position.Col values are grapheme indices, not byte offsets.
+func (c *VisualPasteCommand) computeEndPos() Position {
+	if c.wasLinewiseSelection {
+		numLines := len(c.deletedContent)
+		endRow := c.startPos.Row + numLines - 1
+		return Position{Row: endRow, Col: 0}
+	}
+
+	if len(c.deletedContent) == 1 {
+		return Position{Row: c.startPos.Row, Col: c.startPos.Col + GraphemeCount(c.deletedContent[0]) - 1}
+	}
+
+	numLines := len(c.deletedContent)
+	endRow := c.startPos.Row + numLines - 1
+	lastLineGraphemeCount := GraphemeCount(c.deletedContent[numLines-1])
+	return Position{Row: endRow, Col: lastLineGraphemeCount - 1}
+}
+
+// Undo restores the deleted selection and removes pasted text.
+func (c *VisualPasteCommand) Undo(m *Model) error {
+	if c.pastedText == "" && len(c.deletedContent) == 0 {
+		return nil
+	}
+
+	// Remove pasted text
+	if c.pasteWasLinewise {
+		lines := strings.Split(c.pastedText, "\n")
+		linesAdded := len(lines)
+		if linesAdded > 0 && c.startPos.Row < len(m.content) {
+			newContent := make([]string, len(m.content)-linesAdded)
+			copy(newContent[:c.startPos.Row], m.content[:c.startPos.Row])
+			copy(newContent[c.startPos.Row:], m.content[c.startPos.Row+linesAdded:])
+			m.content = newContent
+		}
+	} else {
+		if !strings.Contains(c.pastedText, "\n") {
+			line := m.content[c.startPos.Row]
+			lineGraphemeCount := GraphemeCount(line)
+			pastedGraphemeCount := GraphemeCount(c.pastedText)
+			if c.startPos.Col+pastedGraphemeCount <= lineGraphemeCount {
+				beforePaste := SliceByGraphemes(line, 0, c.startPos.Col)
+				afterPaste := SliceByGraphemes(line, c.startPos.Col+pastedGraphemeCount, lineGraphemeCount)
+				m.content[c.startPos.Row] = beforePaste + afterPaste
+			}
+		} else {
+			lines := strings.Split(c.pastedText, "\n")
+			firstLine := m.content[c.startPos.Row]
+			beforeCursor := SliceByGraphemes(firstLine, 0, c.startPos.Col)
+
+			lastLine := m.content[c.startPos.Row+len(lines)-1]
+			lastPastedLineGraphemeCount := GraphemeCount(lines[len(lines)-1])
+			lastLineGraphemeCount := GraphemeCount(lastLine)
+			afterCursor := SliceByGraphemes(lastLine, lastPastedLineGraphemeCount, lastLineGraphemeCount)
+
+			originalLine := beforeCursor + afterCursor
+
+			newContent := make([]string, len(m.content)-(len(lines)-1))
+			copy(newContent[:c.startPos.Row], m.content[:c.startPos.Row])
+			newContent[c.startPos.Row] = originalLine
+			copy(newContent[c.startPos.Row+1:], m.content[c.startPos.Row+len(lines):])
+			m.content = newContent
+		}
+	}
+
+	if len(m.content) == 0 {
+		m.content = []string{""}
+	}
+
+	// Restore deleted selection
+	if len(c.deletedContent) == 0 {
+		return nil
+	}
+
+	if c.wasLinewiseSelection {
+		insertRow := min(c.startPos.Row, len(m.content))
+
+		if len(m.content) == 1 && m.content[0] == "" && insertRow == 0 {
+			m.content[0] = c.deletedContent[0]
+			if len(c.deletedContent) > 1 {
+				newContent := make([]string, len(c.deletedContent))
+				copy(newContent, c.deletedContent)
+				m.content = newContent
+			}
+		} else {
+			newContent := make([]string, 0, len(m.content)+len(c.deletedContent))
+			newContent = append(newContent, m.content[:insertRow]...)
+			newContent = append(newContent, c.deletedContent...)
+			newContent = append(newContent, m.content[insertRow:]...)
+			m.content = newContent
+		}
+
+		m.cursorRow = c.startPos.Row
+		m.cursorCol = 0
+	} else {
+		if len(c.deletedContent) == 1 {
+			line := m.content[c.startPos.Row]
+			lineGraphemeCount := GraphemeCount(line)
+			prefix := SliceByGraphemes(line, 0, c.startPos.Col)
+			suffix := SliceByGraphemes(line, c.startPos.Col, lineGraphemeCount)
+			m.content[c.startPos.Row] = prefix + c.deletedContent[0] + suffix
+		} else {
+			currentLine := m.content[c.startPos.Row]
+			currentLineGraphemeCount := GraphemeCount(currentLine)
+			prefix := SliceByGraphemes(currentLine, 0, c.startPos.Col)
+			suffix := SliceByGraphemes(currentLine, c.startPos.Col, currentLineGraphemeCount)
+			lastDeletedLine := c.deletedContent[len(c.deletedContent)-1]
+
+			newContent := make([]string, 0, len(m.content)+len(c.deletedContent)-1)
+			newContent = append(newContent, m.content[:c.startPos.Row]...)
+			newContent = append(newContent, prefix+c.deletedContent[0])
+			for i := 1; i < len(c.deletedContent)-1; i++ {
+				newContent = append(newContent, c.deletedContent[i])
+			}
+			newContent = append(newContent, lastDeletedLine+suffix)
+			if c.startPos.Row+1 < len(m.content) {
+				newContent = append(newContent, m.content[c.startPos.Row+1:]...)
+			}
+			m.content = newContent
+		}
+
+		m.cursorRow = c.startPos.Row
+		m.cursorCol = c.startPos.Col
+	}
+
+	// Ensure we're in normal mode after undo
+	m.mode = ModeNormal
+	m.visualAnchor = Position{}
+
+	return nil
+}
+
+// Keys returns the trigger key for this command.
+func (c *VisualPasteCommand) Keys() []string {
+	return []string{"p"}
+}
+
+// Mode returns the mode this command operates in.
+func (c *VisualPasteCommand) Mode() Mode {
+	return c.mode
+}
+
+// ID returns the hierarchical identifier for this command.
+func (c *VisualPasteCommand) ID() string {
+	return "visual.paste"
+}
+
+// String representation for debugging
+func (c *VisualPasteCommand) String() string {
+	return "VisualPasteCommand{pasted:" + c.pastedText + "}"
+}
+
+// ============================================================================
 // VisualChangeCommand
 // ============================================================================
 
