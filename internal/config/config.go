@@ -33,6 +33,7 @@ type Config struct {
 	Theme         ThemeConfig         `mapstructure:"theme"`
 	Views         []ViewConfig        `mapstructure:"views"`
 	Orchestration OrchestrationConfig `mapstructure:"orchestration"`
+	Flags         map[string]bool     `mapstructure:"flags"`
 }
 
 // UIConfig holds user interface configuration options.

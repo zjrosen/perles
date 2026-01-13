@@ -7,6 +7,7 @@ import (
 	"github.com/zjrosen/perles/internal/beads"
 	"github.com/zjrosen/perles/internal/bql"
 	"github.com/zjrosen/perles/internal/config"
+	"github.com/zjrosen/perles/internal/flags"
 	"github.com/zjrosen/perles/internal/git"
 	"github.com/zjrosen/perles/internal/mode/shared"
 	"github.com/zjrosen/perles/internal/ui/shared/toaster"
@@ -54,6 +55,7 @@ type Services struct {
 	WorkDir    string // Application root directory (where perles was invoked)
 	Clipboard  shared.Clipboard
 	Clock      shared.Clock
+	Flags      *flags.Registry
 	// GitExecutorFactory creates git executors for a given path.
 	// Used by orchestration mode to check uncommitted changes in worktrees.
 	GitExecutorFactory func(path string) git.GitExecutor
