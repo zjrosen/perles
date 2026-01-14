@@ -939,6 +939,7 @@ func TestFindExecutable(t *testing.T) {
 		tempHome := t.TempDir()
 		originalHome := os.Getenv("HOME")
 		t.Setenv("HOME", tempHome)
+		t.Setenv("USERPROFILE", tempHome) // Windows uses USERPROFILE
 		defer func() { _ = os.Setenv("HOME", originalHome) }()
 
 		// Create the expected path
@@ -958,6 +959,7 @@ func TestFindExecutable(t *testing.T) {
 		tempHome := t.TempDir()
 		originalHome := os.Getenv("HOME")
 		t.Setenv("HOME", tempHome)
+		t.Setenv("USERPROFILE", tempHome) // Windows uses USERPROFILE
 		defer func() { _ = os.Setenv("HOME", originalHome) }()
 
 		// Create the expected path (not in local, just in .claude)
@@ -977,6 +979,7 @@ func TestFindExecutable(t *testing.T) {
 		tempHome := t.TempDir()
 		originalHome := os.Getenv("HOME")
 		t.Setenv("HOME", tempHome)
+		t.Setenv("USERPROFILE", tempHome) // Windows uses USERPROFILE
 		defer func() { _ = os.Setenv("HOME", originalHome) }()
 
 		// Create both paths
@@ -999,6 +1002,7 @@ func TestFindExecutable(t *testing.T) {
 		tempHome := t.TempDir()
 		originalHome := os.Getenv("HOME")
 		t.Setenv("HOME", tempHome)
+		t.Setenv("USERPROFILE", tempHome) // Windows uses USERPROFILE
 		defer func() { _ = os.Setenv("HOME", originalHome) }()
 
 		// Create a directory named "claude" instead of a file
