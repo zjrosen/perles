@@ -31,7 +31,7 @@ func configFromClient(cfg client.Config) Config {
 		WorkDir:         cfg.WorkDir,
 		Prompt:          prompt,
 		ThreadID:        cfg.SessionID, // Map session to thread
-		Model:           cfg.GetExtensionString(client.ExtAmpModel),
+		Model:           cfg.AmpModel(),
 		Mode:            cfg.GetExtensionString(ExtAmpMode),
 		SkipPermissions: cfg.SkipPermissions,
 		Timeout:         cfg.Timeout,

@@ -10,8 +10,21 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/zjrosen/perles/internal/mocks"
+	"github.com/zjrosen/perles/internal/orchestration/client"
 	"github.com/zjrosen/perles/internal/orchestration/v2/repository"
 )
+
+// createTestAgentProvider creates an AgentProvider mock for testing.
+func createTestAgentProvider(t *testing.T) client.AgentProvider {
+	mockClient := mocks.NewMockHeadlessClient(t)
+	mockClient.EXPECT().Type().Return(client.ClientClaude).Maybe()
+
+	mockProvider := mocks.NewMockAgentProvider(t)
+	mockProvider.EXPECT().Client().Return(mockClient, nil).Maybe()
+	mockProvider.EXPECT().Extensions().Return(map[string]any{}).Maybe()
+	mockProvider.EXPECT().Type().Return(client.ClientClaude).Maybe()
+	return mockProvider
+}
 
 // ===========================================================================
 // Config Validation Tests
@@ -19,51 +32,46 @@ import (
 
 func TestInfrastructureConfig_Validate(t *testing.T) {
 	t.Run("valid config", func(t *testing.T) {
-		mockClient := mocks.NewMockHeadlessClient(t)
-		mockClient.EXPECT().Type().Return("claude").Maybe()
-
 		cfg := InfrastructureConfig{
-			Port:        8080,
-			AIClient:    mockClient,
-			WorkDir:     "/tmp/test",
-			MessageRepo: repository.NewMemoryMessageRepository(),
+			Port:          8080,
+			AgentProvider: createTestAgentProvider(t),
+			WorkDir:       "/tmp/test",
+			MessageRepo:   repository.NewMemoryMessageRepository(),
 		}
 		err := cfg.Validate()
 		assert.NoError(t, err)
 	})
 
 	t.Run("missing port returns error", func(t *testing.T) {
-		mockClient := mocks.NewMockHeadlessClient(t)
 		cfg := InfrastructureConfig{
-			Port:        0, // Invalid: zero port
-			AIClient:    mockClient,
-			WorkDir:     "/tmp/test",
-			MessageRepo: repository.NewMemoryMessageRepository(),
+			Port:          0, // Invalid: zero port
+			AgentProvider: createTestAgentProvider(t),
+			WorkDir:       "/tmp/test",
+			MessageRepo:   repository.NewMemoryMessageRepository(),
 		}
 		err := cfg.Validate()
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "port is required")
 	})
 
-	t.Run("nil AIClient returns error", func(t *testing.T) {
+	t.Run("nil AgentProvider returns error", func(t *testing.T) {
 		cfg := InfrastructureConfig{
-			Port:        8080,
-			AIClient:    nil, // Invalid: nil client
-			WorkDir:     "/tmp/test",
-			MessageRepo: repository.NewMemoryMessageRepository(),
+			Port:          8080,
+			AgentProvider: nil, // Invalid: nil provider
+			WorkDir:       "/tmp/test",
+			MessageRepo:   repository.NewMemoryMessageRepository(),
 		}
 		err := cfg.Validate()
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "AI client is required")
+		assert.Contains(t, err.Error(), "AgentProvider is required")
 	})
 
 	t.Run("nil MessageRepo returns error", func(t *testing.T) {
-		mockClient := mocks.NewMockHeadlessClient(t)
 		cfg := InfrastructureConfig{
-			Port:        8080,
-			AIClient:    mockClient,
-			WorkDir:     "/tmp/test",
-			MessageRepo: nil, // Invalid: nil message repo
+			Port:          8080,
+			AgentProvider: createTestAgentProvider(t),
+			WorkDir:       "/tmp/test",
+			MessageRepo:   nil, // Invalid: nil message repo
 		}
 		err := cfg.Validate()
 		assert.Error(t, err)
@@ -71,12 +79,11 @@ func TestInfrastructureConfig_Validate(t *testing.T) {
 	})
 
 	t.Run("empty WorkDir returns error", func(t *testing.T) {
-		mockClient := mocks.NewMockHeadlessClient(t)
 		cfg := InfrastructureConfig{
-			Port:        8080,
-			AIClient:    mockClient,
-			WorkDir:     "", // Invalid: empty work dir
-			MessageRepo: repository.NewMemoryMessageRepository(),
+			Port:          8080,
+			AgentProvider: createTestAgentProvider(t),
+			WorkDir:       "", // Invalid: empty work dir
+			MessageRepo:   repository.NewMemoryMessageRepository(),
 		}
 		err := cfg.Validate()
 		assert.Error(t, err)
@@ -90,14 +97,11 @@ func TestInfrastructureConfig_Validate(t *testing.T) {
 
 func TestNewInfrastructure(t *testing.T) {
 	t.Run("creates infrastructure with valid config", func(t *testing.T) {
-		mockClient := mocks.NewMockHeadlessClient(t)
-		mockClient.EXPECT().Type().Return("claude").Maybe()
-
 		cfg := InfrastructureConfig{
-			Port:        8080,
-			AIClient:    mockClient,
-			WorkDir:     "/tmp/test",
-			MessageRepo: repository.NewMemoryMessageRepository(),
+			Port:          8080,
+			AgentProvider: createTestAgentProvider(t),
+			WorkDir:       "/tmp/test",
+			MessageRepo:   repository.NewMemoryMessageRepository(),
 		}
 
 		infra, err := NewInfrastructure(cfg)
@@ -128,27 +132,26 @@ func TestNewInfrastructure(t *testing.T) {
 		assert.Contains(t, err.Error(), "invalid infrastructure config")
 	})
 
-	t.Run("returns error for nil AIClient", func(t *testing.T) {
+	t.Run("returns error for nil AgentProvider", func(t *testing.T) {
 		cfg := InfrastructureConfig{
-			Port:        8080,
-			AIClient:    nil,
-			WorkDir:     "/tmp/test",
-			MessageRepo: repository.NewMemoryMessageRepository(),
+			Port:          8080,
+			AgentProvider: nil,
+			WorkDir:       "/tmp/test",
+			MessageRepo:   repository.NewMemoryMessageRepository(),
 		}
 
 		infra, err := NewInfrastructure(cfg)
 		assert.Error(t, err)
 		assert.Nil(t, infra)
-		assert.Contains(t, err.Error(), "AI client is required")
+		assert.Contains(t, err.Error(), "AgentProvider is required")
 	})
 
 	t.Run("returns error for nil MessageRepo", func(t *testing.T) {
-		mockClient := mocks.NewMockHeadlessClient(t)
 		cfg := InfrastructureConfig{
-			Port:        8080,
-			AIClient:    mockClient,
-			WorkDir:     "/tmp/test",
-			MessageRepo: nil,
+			Port:          8080,
+			AgentProvider: createTestAgentProvider(t),
+			WorkDir:       "/tmp/test",
+			MessageRepo:   nil,
 		}
 
 		infra, err := NewInfrastructure(cfg)
@@ -158,12 +161,11 @@ func TestNewInfrastructure(t *testing.T) {
 	})
 
 	t.Run("returns error for zero Port", func(t *testing.T) {
-		mockClient := mocks.NewMockHeadlessClient(t)
 		cfg := InfrastructureConfig{
-			Port:        0,
-			AIClient:    mockClient,
-			WorkDir:     "/tmp/test",
-			MessageRepo: repository.NewMemoryMessageRepository(),
+			Port:          0,
+			AgentProvider: createTestAgentProvider(t),
+			WorkDir:       "/tmp/test",
+			MessageRepo:   repository.NewMemoryMessageRepository(),
 		}
 
 		infra, err := NewInfrastructure(cfg)
@@ -179,14 +181,11 @@ func TestNewInfrastructure(t *testing.T) {
 
 func TestInfrastructure_Start(t *testing.T) {
 	t.Run("starts processor and waits for ready", func(t *testing.T) {
-		mockClient := mocks.NewMockHeadlessClient(t)
-		mockClient.EXPECT().Type().Return("claude").Maybe()
-
 		cfg := InfrastructureConfig{
-			Port:        8080,
-			AIClient:    mockClient,
-			WorkDir:     "/tmp/test",
-			MessageRepo: repository.NewMemoryMessageRepository(),
+			Port:          8080,
+			AgentProvider: createTestAgentProvider(t),
+			WorkDir:       "/tmp/test",
+			MessageRepo:   repository.NewMemoryMessageRepository(),
 		}
 
 		infra, err := NewInfrastructure(cfg)
@@ -207,14 +206,11 @@ func TestInfrastructure_Start(t *testing.T) {
 	})
 
 	t.Run("returns error when context is cancelled during start", func(t *testing.T) {
-		mockClient := mocks.NewMockHeadlessClient(t)
-		mockClient.EXPECT().Type().Return("claude").Maybe()
-
 		cfg := InfrastructureConfig{
-			Port:        8080,
-			AIClient:    mockClient,
-			WorkDir:     "/tmp/test",
-			MessageRepo: repository.NewMemoryMessageRepository(),
+			Port:          8080,
+			AgentProvider: createTestAgentProvider(t),
+			WorkDir:       "/tmp/test",
+			MessageRepo:   repository.NewMemoryMessageRepository(),
 		}
 
 		infra, err := NewInfrastructure(cfg)
@@ -232,14 +228,11 @@ func TestInfrastructure_Start(t *testing.T) {
 
 func TestInfrastructure_Drain(t *testing.T) {
 	t.Run("gracefully shuts down processor", func(t *testing.T) {
-		mockClient := mocks.NewMockHeadlessClient(t)
-		mockClient.EXPECT().Type().Return("claude").Maybe()
-
 		cfg := InfrastructureConfig{
-			Port:        8080,
-			AIClient:    mockClient,
-			WorkDir:     "/tmp/test",
-			MessageRepo: repository.NewMemoryMessageRepository(),
+			Port:          8080,
+			AgentProvider: createTestAgentProvider(t),
+			WorkDir:       "/tmp/test",
+			MessageRepo:   repository.NewMemoryMessageRepository(),
 		}
 
 		infra, err := NewInfrastructure(cfg)
@@ -260,14 +253,11 @@ func TestInfrastructure_Drain(t *testing.T) {
 	})
 
 	t.Run("handles drain on unstarted infrastructure", func(t *testing.T) {
-		mockClient := mocks.NewMockHeadlessClient(t)
-		mockClient.EXPECT().Type().Return("claude").Maybe()
-
 		cfg := InfrastructureConfig{
-			Port:        8080,
-			AIClient:    mockClient,
-			WorkDir:     "/tmp/test",
-			MessageRepo: repository.NewMemoryMessageRepository(),
+			Port:          8080,
+			AgentProvider: createTestAgentProvider(t),
+			WorkDir:       "/tmp/test",
+			MessageRepo:   repository.NewMemoryMessageRepository(),
 		}
 
 		infra, err := NewInfrastructure(cfg)
@@ -285,14 +275,11 @@ func TestInfrastructure_Drain(t *testing.T) {
 // ===========================================================================
 
 func TestAllHandlersRegistered(t *testing.T) {
-	mockClient := mocks.NewMockHeadlessClient(t)
-	mockClient.EXPECT().Type().Return("claude").Maybe()
-
 	cfg := InfrastructureConfig{
-		Port:        8080,
-		AIClient:    mockClient,
-		WorkDir:     "/tmp/test",
-		MessageRepo: repository.NewMemoryMessageRepository(),
+		Port:          8080,
+		AgentProvider: createTestAgentProvider(t),
+		WorkDir:       "/tmp/test",
+		MessageRepo:   repository.NewMemoryMessageRepository(),
 	}
 
 	infra, err := NewInfrastructure(cfg)
@@ -325,18 +312,24 @@ func TestAllHandlersRegistered(t *testing.T) {
 func TestInfrastructure_Integration(t *testing.T) {
 	t.Run("full lifecycle: create, start, drain", func(t *testing.T) {
 		mockClient := mocks.NewMockHeadlessClient(t)
-		mockClient.EXPECT().Type().Return("claude").Maybe()
+		mockClient.EXPECT().Type().Return(client.ClientClaude).Maybe()
 		// Allow Spawn to be called if needed during tests
 		mockClient.On("Spawn", mock.Anything, mock.Anything).
 			Return(nil, nil).
 			Maybe()
 
+		// Create provider mock with extensions
+		mockProvider := mocks.NewMockAgentProvider(t)
+		mockProvider.EXPECT().Client().Return(mockClient, nil).Maybe()
+		mockProvider.EXPECT().Extensions().Return(map[string]any{"model": "claude-3"}).Maybe()
+		mockProvider.EXPECT().Type().Return(client.ClientClaude).Maybe()
+		provider := mockProvider
+
 		cfg := InfrastructureConfig{
-			Port:        8080,
-			AIClient:    mockClient,
-			WorkDir:     "/tmp/test",
-			MessageRepo: repository.NewMemoryMessageRepository(),
-			Extensions:  map[string]any{"model": "claude-3"},
+			Port:          8080,
+			AgentProvider: provider,
+			WorkDir:       "/tmp/test",
+			MessageRepo:   repository.NewMemoryMessageRepository(),
 		}
 
 		// Create

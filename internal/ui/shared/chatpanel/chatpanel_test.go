@@ -22,15 +22,23 @@ import (
 	"github.com/zjrosen/perles/internal/ui/shared/vimtextarea"
 )
 
-// newTestInfrastructure creates a v2.SimpleInfrastructure with a mock client for testing.
-// The mock client doesn't need to spawn processes; we just need the infra to function.
+// newTestInfrastructure creates a v2.SimpleInfrastructure with a mock provider for testing.
+// The mock provider doesn't need to spawn processes; we just need the infra to function.
 func newTestInfrastructure(t *testing.T) *v2.SimpleInfrastructure {
 	t.Helper()
+	// Mock HeadlessClient
 	mockClient := mocks.NewMockHeadlessClient(t)
+	mockClient.EXPECT().Spawn(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
+	mockProvider := mocks.NewMockAgentProvider(t)
+	mockProvider.EXPECT().Client().Return(mockClient, nil).Maybe()
+	mockProvider.EXPECT().Extensions().Return(map[string]any{}).Maybe()
+	mockProvider.EXPECT().Type().Return(client.ClientClaude).Maybe()
+
 	infra, err := v2.NewSimpleInfrastructure(v2.SimpleInfrastructureConfig{
-		AIClient:     mockClient,
-		WorkDir:      "/tmp/test",
-		SystemPrompt: "test prompt",
+		AgentProvider: mockProvider,
+		WorkDir:       "/tmp/test",
+		SystemPrompt:  "test prompt",
 	})
 	require.NoError(t, err)
 	return infra
@@ -40,7 +48,6 @@ func newTestInfrastructure(t *testing.T) *v2.SimpleInfrastructure {
 // that expects Spawn to be called. Used for tests that actually submit spawn commands.
 func newTestInfrastructureWithSpawnExpectation(t *testing.T) *v2.SimpleInfrastructure {
 	t.Helper()
-	mockClient := mocks.NewMockHeadlessClient(t)
 	mockProcess := mocks.NewMockHeadlessProcess(t)
 
 	// Set up mock process expectations - use correct method names from HeadlessProcess interface
@@ -55,13 +62,20 @@ func newTestInfrastructureWithSpawnExpectation(t *testing.T) *v2.SimpleInfrastru
 	mockProcess.EXPECT().Cancel().Return(nil).Maybe()
 	mockProcess.EXPECT().IsRunning().Return(false).Maybe()
 
-	// Set up mock client to return the mock process
+	// Mock HeadlessClient that returns the mock process
+	mockClient := mocks.NewMockHeadlessClient(t)
 	mockClient.EXPECT().Spawn(mock.Anything, mock.Anything).Return(mockProcess, nil).Maybe()
 
+	// Set up mock provider to return the mock client
+	mockProvider := mocks.NewMockAgentProvider(t)
+	mockProvider.EXPECT().Client().Return(mockClient, nil).Maybe()
+	mockProvider.EXPECT().Extensions().Return(map[string]any{}).Maybe()
+	mockProvider.EXPECT().Type().Return(client.ClientClaude).Maybe()
+
 	infra, err := v2.NewSimpleInfrastructure(v2.SimpleInfrastructureConfig{
-		AIClient:     mockClient,
-		WorkDir:      "/tmp/test",
-		SystemPrompt: "test prompt",
+		AgentProvider: mockProvider,
+		WorkDir:       "/tmp/test",
+		SystemPrompt:  "test prompt",
 	})
 	require.NoError(t, err)
 	return infra

@@ -20,10 +20,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// newTestChatInfrastructure creates a v2.SimpleInfrastructure with mock client for testing.
+// newTestChatInfrastructure creates a v2.SimpleInfrastructure with mock provider for testing.
 func newTestChatInfrastructure(t *testing.T) *v2.SimpleInfrastructure {
 	t.Helper()
-	mockClient := mocks.NewMockHeadlessClient(t)
 	mockProcess := mocks.NewMockHeadlessProcess(t)
 
 	// Set up mock process expectations
@@ -37,12 +36,19 @@ func newTestChatInfrastructure(t *testing.T) *v2.SimpleInfrastructure {
 	mockProcess.EXPECT().Cancel().Return(nil).Maybe()
 	mockProcess.EXPECT().IsRunning().Return(false).Maybe()
 
+	// Mock HeadlessClient that returns the mock process
+	mockClient := mocks.NewMockHeadlessClient(t)
 	mockClient.EXPECT().Spawn(mock.Anything, mock.Anything).Return(mockProcess, nil).Maybe()
 
+	mockProvider := mocks.NewMockAgentProvider(t)
+	mockProvider.EXPECT().Client().Return(mockClient, nil).Maybe()
+	mockProvider.EXPECT().Extensions().Return(map[string]any{}).Maybe()
+	mockProvider.EXPECT().Type().Return(client.ClientClaude).Maybe()
+
 	infra, err := v2.NewSimpleInfrastructure(v2.SimpleInfrastructureConfig{
-		AIClient:     mockClient,
-		WorkDir:      "/tmp/test",
-		SystemPrompt: "test prompt",
+		AgentProvider: mockProvider,
+		WorkDir:       "/tmp/test",
+		SystemPrompt:  "test prompt",
 	})
 	require.NoError(t, err)
 	return infra

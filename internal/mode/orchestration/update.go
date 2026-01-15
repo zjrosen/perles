@@ -14,6 +14,7 @@ import (
 	"github.com/zjrosen/perles/internal/flags"
 	"github.com/zjrosen/perles/internal/git"
 	"github.com/zjrosen/perles/internal/log"
+	"github.com/zjrosen/perles/internal/orchestration/client"
 	"github.com/zjrosen/perles/internal/orchestration/events"
 	"github.com/zjrosen/perles/internal/orchestration/mcp"
 	"github.com/zjrosen/perles/internal/orchestration/message"
@@ -1063,28 +1064,29 @@ func (m Model) handleStartCoordinator() (Model, tea.Cmd) {
 	// Determine timeout based on client type.
 	// Codex workers take longer to boot due to more reasoning steps.
 	timeout := 20 * time.Second
-	if m.clientType == "codex" {
+	if m.agentProvider.Type() == client.ClientCodex {
 		timeout = 60 * time.Second
 	}
 
+	// Create InitializerConfig using builder pattern.
+	// The builder centralizes Model→InitializerConfig transformation while
+	// allowing runtime-only fields (Timeout, GitExecutor, etc.) to be set separately.
+	initConfig := NewInitializerConfigFromModel(
+		m.workDir,
+		m.agentProvider,
+		m.worktreeBaseBranch,
+		m.worktreeCustomBranch,
+		m.tracingConfig,
+		m.sessionStorageConfig,
+	).
+		WithTimeout(timeout).
+		WithGitExecutor(m.gitExecutor).
+		WithRestoredSession(m.resumedSession).
+		WithSoundService(m.services.Sounds).
+		Build()
+
 	// Create and start the Initializer
-	m.initializer = NewInitializer(InitializerConfig{
-		WorkDir:            m.workDir,
-		ClientType:         m.clientType,
-		ClaudeModel:        m.claudeModel,
-		CodexModel:         m.codexModel,
-		AmpModel:           m.ampModel,
-		AmpMode:            m.ampMode,
-		GeminiModel:        m.geminiModel,
-		Timeout:            timeout,
-		WorktreeBaseBranch: m.worktreeBaseBranch,
-		WorktreeBranchName: m.worktreeCustomBranch,
-		GitExecutor:        m.gitExecutor,
-		TracingConfig:      m.tracingConfig,
-		SessionStorage:     m.sessionStorageConfig,
-		RestoredSession:    m.resumedSession, // Set for session restoration (nil for normal start)
-		SoundService:       m.services.Sounds,
-	})
+	m.initializer = NewInitializer(initConfig)
 
 	// Create context for subscriptions
 	m.ctx, m.cancel = context.WithCancel(context.Background())

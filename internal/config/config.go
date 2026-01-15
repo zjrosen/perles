@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/zjrosen/perles/internal/log"
+	"github.com/zjrosen/perles/internal/orchestration/client"
 )
 
 // ColumnConfig defines a single kanban column.
@@ -145,6 +146,23 @@ type AmpClientConfig struct {
 // GeminiClientConfig holds Gemini-specific settings.
 type GeminiClientConfig struct {
 	Model string `mapstructure:"model"` // gemini-3-pro-preview (default), gemini-2.5-flash
+}
+
+// AgentProvider returns an AgentProvider configured from user settings.
+// This is the preferred way to get an AI client for orchestration or chat.
+func (o OrchestrationConfig) AgentProvider() client.AgentProvider {
+	clientType := client.ClientType(o.Client)
+	if clientType == "" {
+		clientType = client.ClientClaude
+	}
+	extensions := client.NewFromClientConfigs(clientType, client.ClientConfigs{
+		ClaudeModel: o.Claude.Model,
+		CodexModel:  o.Codex.Model,
+		AmpModel:    o.Amp.Model,
+		AmpMode:     o.Amp.Mode,
+		GeminiModel: o.Gemini.Model,
+	})
+	return client.NewAgentProvider(clientType, extensions)
 }
 
 // WorkflowConfig defines configuration for a workflow template.

@@ -28,8 +28,8 @@ func TestInitializer_CreatesSession(t *testing.T) {
 
 	// Create an initializer with minimal config
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 	})
 
 	// Start initialization (this will fail because we don't have a real AI client,
@@ -78,8 +78,8 @@ func TestInitializer_Retry_ResetsSession(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 	})
 
 	// Verify session is nil initially
@@ -92,8 +92,8 @@ func TestInitializer_Retry_ResetsSession(t *testing.T) {
 
 func TestNewInitializer(t *testing.T) {
 	cfg := InitializerConfig{
-		WorkDir:    "/test/dir",
-		ClientType: "claude",
+		WorkDir:       "/test/dir",
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 	}
 
 	init := NewInitializer(cfg)
@@ -105,8 +105,8 @@ func TestNewInitializer(t *testing.T) {
 
 func TestNewInitializer_DefaultWorkers(t *testing.T) {
 	cfg := InitializerConfig{
-		WorkDir:    "/test/dir",
-		ClientType: "claude",
+		WorkDir:       "/test/dir",
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 	}
 
 	init := NewInitializer(cfg)
@@ -114,9 +114,260 @@ func TestNewInitializer_DefaultWorkers(t *testing.T) {
 	// With lazy spawning, default is 0 workers (coordinator spawns workers on-demand)
 }
 
+// Tests for InitializerConfigBuilder
+
+func TestNewInitializerConfigFromModel_AllFields(t *testing.T) {
+	// Test the builder constructs InitializerConfig with all static fields
+	provider := client.NewAgentProvider(client.ClientClaude, map[string]any{
+		client.ExtClaudeModel: "opus",
+	})
+
+	builder := NewInitializerConfigFromModel(
+		"/work/dir",
+		provider,
+		"main",                              // worktreeBaseBranch
+		"custom-branch",                     // worktreeCustomBranch
+		config.TracingConfig{Enabled: true}, // tracingConfig
+		config.SessionStorageConfig{BaseDir: "/tmp"}, // sessionStorageConfig
+	)
+
+	cfg := builder.Build()
+
+	require.Equal(t, "/work/dir", cfg.WorkDir)
+	require.Equal(t, client.ClientClaude, cfg.AgentProvider.Type())
+	require.Equal(t, "opus", cfg.AgentProvider.Extensions()[client.ExtClaudeModel])
+	require.Equal(t, "main", cfg.WorktreeBaseBranch)
+	require.Equal(t, "custom-branch", cfg.WorktreeBranchName)
+	require.True(t, cfg.TracingConfig.Enabled)
+	require.Equal(t, "/tmp", cfg.SessionStorage.BaseDir)
+}
+
+func TestNewInitializerConfigFromModel_EmptyExtensions(t *testing.T) {
+	// Test builder handles empty/nil extensions
+	provider := client.NewAgentProvider(client.ClientCodex, nil)
+
+	builder := NewInitializerConfigFromModel(
+		"/work/dir",
+		provider,
+		"",                            // no worktree
+		"",                            // no custom branch
+		config.TracingConfig{},        // disabled
+		config.SessionStorageConfig{}, // default
+	)
+
+	cfg := builder.Build()
+
+	require.Equal(t, "/work/dir", cfg.WorkDir)
+	require.Equal(t, client.ClientCodex, cfg.AgentProvider.Type())
+	require.Empty(t, cfg.AgentProvider.Extensions()) // Empty map, not nil
+	require.Empty(t, cfg.WorktreeBaseBranch)
+	require.Empty(t, cfg.WorktreeBranchName)
+}
+
+func TestInitializerConfigBuilder_WithTimeout(t *testing.T) {
+	provider := client.NewAgentProvider(client.ClientClaude, nil)
+	builder := NewInitializerConfigFromModel(
+		"/work/dir", provider,
+		"", "", config.TracingConfig{}, config.SessionStorageConfig{},
+	)
+
+	cfg := builder.WithTimeout(60 * time.Second).Build()
+
+	require.Equal(t, 60*time.Second, cfg.Timeout)
+}
+
+func TestInitializerConfigBuilder_WithGitExecutor(t *testing.T) {
+	mockExecutor := &mocks.MockGitExecutor{}
+	provider := client.NewAgentProvider(client.ClientClaude, nil)
+
+	builder := NewInitializerConfigFromModel(
+		"/work/dir", provider,
+		"", "", config.TracingConfig{}, config.SessionStorageConfig{},
+	)
+
+	cfg := builder.WithGitExecutor(mockExecutor).Build()
+
+	require.Same(t, mockExecutor, cfg.GitExecutor)
+}
+
+func TestInitializerConfigBuilder_WithRestoredSession(t *testing.T) {
+	resumableSession := &session.ResumableSession{
+		Metadata: &session.Metadata{
+			SessionID: "test-session-id",
+		},
+	}
+	provider := client.NewAgentProvider(client.ClientClaude, nil)
+
+	builder := NewInitializerConfigFromModel(
+		"/work/dir", provider,
+		"", "", config.TracingConfig{}, config.SessionStorageConfig{},
+	)
+
+	cfg := builder.WithRestoredSession(resumableSession).Build()
+
+	require.Same(t, resumableSession, cfg.RestoredSession)
+}
+
+func TestInitializerConfigBuilder_WithSoundService(t *testing.T) {
+	mockSound := &mocks.MockSoundService{}
+	provider := client.NewAgentProvider(client.ClientClaude, nil)
+
+	builder := NewInitializerConfigFromModel(
+		"/work/dir", provider,
+		"", "", config.TracingConfig{}, config.SessionStorageConfig{},
+	)
+
+	cfg := builder.WithSoundService(mockSound).Build()
+
+	require.Same(t, mockSound, cfg.SoundService)
+}
+
+func TestInitializerConfigBuilder_Chaining(t *testing.T) {
+	// Test that all builder methods can be chained together
+	mockExecutor := &mocks.MockGitExecutor{}
+	mockSound := &mocks.MockSoundService{}
+	resumableSession := &session.ResumableSession{
+		Metadata: &session.Metadata{
+			SessionID: "test-session-id",
+		},
+	}
+
+	provider := client.NewAgentProvider(client.ClientGemini, map[string]any{
+		client.ExtGeminiModel: "gemini-2.5-flash",
+	})
+
+	cfg := NewInitializerConfigFromModel(
+		"/work/dir",
+		provider,
+		"develop",
+		"feature-branch",
+		config.TracingConfig{Enabled: true, Exporter: "file"},
+		config.SessionStorageConfig{BaseDir: "/sessions"},
+	).
+		WithTimeout(45 * time.Second).
+		WithGitExecutor(mockExecutor).
+		WithRestoredSession(resumableSession).
+		WithSoundService(mockSound).
+		Build()
+
+	// Verify all static fields
+	require.Equal(t, "/work/dir", cfg.WorkDir)
+	require.Equal(t, client.ClientGemini, cfg.AgentProvider.Type())
+	require.Equal(t, "gemini-2.5-flash", cfg.AgentProvider.Extensions()[client.ExtGeminiModel])
+	require.Equal(t, "develop", cfg.WorktreeBaseBranch)
+	require.Equal(t, "feature-branch", cfg.WorktreeBranchName)
+	require.True(t, cfg.TracingConfig.Enabled)
+	require.Equal(t, "file", cfg.TracingConfig.Exporter)
+	require.Equal(t, "/sessions", cfg.SessionStorage.BaseDir)
+
+	// Verify all runtime fields
+	require.Equal(t, 45*time.Second, cfg.Timeout)
+	require.Same(t, mockExecutor, cfg.GitExecutor)
+	require.Same(t, resumableSession, cfg.RestoredSession)
+	require.Same(t, mockSound, cfg.SoundService)
+}
+
+func TestInitializerConfigBuilder_RuntimeFieldsDefaultToZero(t *testing.T) {
+	// Test that runtime-only fields are zero by default when not set via builder
+	provider := client.NewAgentProvider(client.ClientClaude, map[string]any{
+		client.ExtClaudeModel: "opus",
+	})
+
+	cfg := NewInitializerConfigFromModel(
+		"/work/dir", provider,
+		"", "", config.TracingConfig{}, config.SessionStorageConfig{},
+	).Build()
+
+	// Runtime-only fields should be zero/nil
+	require.Equal(t, time.Duration(0), cfg.Timeout)
+	require.Nil(t, cfg.GitExecutor)
+	require.Nil(t, cfg.RestoredSession)
+	require.Nil(t, cfg.SoundService)
+
+	// Static fields should be set
+	require.Equal(t, "/work/dir", cfg.WorkDir)
+	require.Equal(t, client.ClientClaude, cfg.AgentProvider.Type())
+	require.Equal(t, "opus", cfg.AgentProvider.Extensions()[client.ExtClaudeModel])
+}
+
+func TestInitializerConfigBuilder_PartialModelState(t *testing.T) {
+	// Test builder with partial state (simulating edge case where only some fields are set)
+	// AgentProvider must have a type, but can have extensions without a type being explicitly named
+	provider := client.NewAgentProvider("", map[string]any{
+		client.ExtClaudeModel: "haiku",
+	})
+
+	cfg := NewInitializerConfigFromModel(
+		"", // empty workDir
+		provider,
+		"main", // worktree branch set
+		"",     // no custom branch
+		config.TracingConfig{},
+		config.SessionStorageConfig{},
+	).
+		WithTimeout(30 * time.Second).
+		Build()
+
+	require.Empty(t, cfg.WorkDir)
+	require.Empty(t, cfg.AgentProvider.Type())
+	require.Equal(t, "haiku", cfg.AgentProvider.Extensions()[client.ExtClaudeModel])
+	require.Equal(t, "main", cfg.WorktreeBaseBranch)
+	require.Equal(t, 30*time.Second, cfg.Timeout)
+}
+
+func TestInitializerConfigBuilder_ProducesEquivalentConfig(t *testing.T) {
+	// Test that builder produces identical results to inline construction
+	timeout := 20 * time.Second
+	mockExecutor := &mocks.MockGitExecutor{}
+	mockSound := &mocks.MockSoundService{}
+	provider := client.NewAgentProvider(client.ClientClaude, map[string]any{
+		client.ExtClaudeModel: "opus",
+	})
+
+	// Build config using inline construction
+	inlineConfig := InitializerConfig{
+		WorkDir:            "/work/dir",
+		AgentProvider:      provider,
+		Timeout:            timeout,
+		WorktreeBaseBranch: "main",
+		WorktreeBranchName: "custom",
+		GitExecutor:        mockExecutor,
+		TracingConfig:      config.TracingConfig{Enabled: true},
+		SessionStorage:     config.SessionStorageConfig{BaseDir: "/tmp"},
+		SoundService:       mockSound,
+	}
+
+	// Build config using builder pattern
+	builderConfig := NewInitializerConfigFromModel(
+		"/work/dir",
+		provider,
+		"main",
+		"custom",
+		config.TracingConfig{Enabled: true},
+		config.SessionStorageConfig{BaseDir: "/tmp"},
+	).
+		WithTimeout(timeout).
+		WithGitExecutor(mockExecutor).
+		WithSoundService(mockSound).
+		Build()
+
+	// Compare all fields
+	require.Equal(t, inlineConfig.WorkDir, builderConfig.WorkDir)
+	require.Equal(t, inlineConfig.AgentProvider.Type(), builderConfig.AgentProvider.Type())
+	require.Equal(t, inlineConfig.Timeout, builderConfig.Timeout)
+	require.Equal(t, inlineConfig.AgentProvider.Extensions(), builderConfig.AgentProvider.Extensions())
+	require.Equal(t, inlineConfig.WorktreeBaseBranch, builderConfig.WorktreeBaseBranch)
+	require.Equal(t, inlineConfig.WorktreeBranchName, builderConfig.WorktreeBranchName)
+	require.Same(t, inlineConfig.GitExecutor, builderConfig.GitExecutor)
+	require.Equal(t, inlineConfig.TracingConfig, builderConfig.TracingConfig)
+	require.Equal(t, inlineConfig.SessionStorage, builderConfig.SessionStorage)
+	require.Same(t, inlineConfig.SoundService, builderConfig.SoundService)
+}
+
 func TestInitializerPhase(t *testing.T) {
 	init := NewInitializer(InitializerConfig{
-		WorkDir: "/test/dir",
+		WorkDir:       "/test/dir",
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 	})
 
 	require.Equal(t, InitNotStarted, init.Phase())
@@ -161,9 +412,9 @@ func TestInitializer_Retry_ResetsV2Infrastructure(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
-		Timeout:    100 * time.Millisecond, // Short timeout for test
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		Timeout:       100 * time.Millisecond, // Short timeout for test
 	})
 
 	// Verify v2 infrastructure is nil initially
@@ -182,7 +433,8 @@ func TestInitializer_Retry_ResetsV2Infrastructure(t *testing.T) {
 func TestInitializer_V2FieldsExist(t *testing.T) {
 	// Compile-time check that v2Infra field exists and getter works
 	init := NewInitializer(InitializerConfig{
-		WorkDir: "/test/dir",
+		WorkDir:       "/test/dir",
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 	})
 
 	// GetV2Infra should exist and return nil before Start
@@ -192,8 +444,8 @@ func TestInitializer_V2FieldsExist(t *testing.T) {
 func TestInitializer_V2FieldsNilBeforeStart(t *testing.T) {
 	// Verify v2 infrastructure is nil before Start() is called
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    t.TempDir(),
-		ClientType: "claude",
+		WorkDir:       t.TempDir(),
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 	})
 
 	// Before Start, v2Infra should be nil (accessed via getter)
@@ -203,7 +455,8 @@ func TestInitializer_V2FieldsNilBeforeStart(t *testing.T) {
 func TestInitializer_CleanupDrainsProcessor(t *testing.T) {
 	// This test verifies that cleanupResources() properly handles nil cmdProcessor
 	init := NewInitializer(InitializerConfig{
-		WorkDir: t.TempDir(),
+		WorkDir:       t.TempDir(),
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 	})
 
 	// cleanupResources() should not panic when cmdProcessor is nil
@@ -219,8 +472,8 @@ func TestInitializer_CleanupDrainsProcessor(t *testing.T) {
 func TestInitializer_GetV2EventBus_NilBeforeStart(t *testing.T) {
 	// Verify GetV2EventBus() returns nil before Start() is called
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    t.TempDir(),
-		ClientType: "claude",
+		WorkDir:       t.TempDir(),
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 	})
 
 	// Before Start, GetV2EventBus should return nil
@@ -230,8 +483,8 @@ func TestInitializer_GetV2EventBus_NilBeforeStart(t *testing.T) {
 func TestInitializer_GetV2EventBus_ThreadSafe(t *testing.T) {
 	// Verify GetV2EventBus() uses read lock for thread safety
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    t.TempDir(),
-		ClientType: "claude",
+		WorkDir:       t.TempDir(),
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 	})
 
 	// Concurrent calls should not race (verified with -race flag)
@@ -252,7 +505,8 @@ func TestInitializer_GetV2EventBus_ThreadSafe(t *testing.T) {
 func TestInitializer_V2EventBusFieldExists(t *testing.T) {
 	// Compile-time check that GetV2EventBus getter exists
 	init := NewInitializer(InitializerConfig{
-		WorkDir: t.TempDir(),
+		WorkDir:       t.TempDir(),
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 	})
 
 	// GetV2EventBus should exist and return nil before Start
@@ -262,9 +516,9 @@ func TestInitializer_V2EventBusFieldExists(t *testing.T) {
 func TestInitializer_Retry_ResetsV2EventBus(t *testing.T) {
 	// Verify v2EventBus is reset when Retry() is called (via v2Infra reset)
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    t.TempDir(),
-		ClientType: "claude",
-		Timeout:    100 * time.Millisecond,
+		WorkDir:       t.TempDir(),
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		Timeout:       100 * time.Millisecond,
 	})
 
 	// v2EventBus should be nil initially (via getter which checks v2Infra)
@@ -295,8 +549,8 @@ func TestInitializer_ProcessRepoFieldExists(t *testing.T) {
 func TestInitializer_ProcessRepoNilBeforeStart(t *testing.T) {
 	// Verify processRepo is nil before Start() is called (via getter)
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    t.TempDir(),
-		ClientType: "claude",
+		WorkDir:       t.TempDir(),
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 	})
 
 	// Before Start, processRepo should be nil (accessed via getter which checks v2Infra)
@@ -306,9 +560,9 @@ func TestInitializer_ProcessRepoNilBeforeStart(t *testing.T) {
 func TestInitializer_Retry_ResetsProcessRepo(t *testing.T) {
 	// Verify processRepo is reset when Retry() is called (via v2Infra reset)
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    t.TempDir(),
-		ClientType: "claude",
-		Timeout:    100 * time.Millisecond,
+		WorkDir:       t.TempDir(),
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		Timeout:       100 * time.Millisecond,
 	})
 
 	// processRepo should be nil initially (via getter which checks v2Infra)
@@ -336,8 +590,8 @@ func TestInitializer_CreateSession_Success(t *testing.T) {
 	sessionsBaseDir := t.TempDir() // Centralized sessions directory
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 		SessionStorage: config.SessionStorageConfig{
 			BaseDir:         sessionsBaseDir,
 			ApplicationName: "test-app",
@@ -386,8 +640,8 @@ func TestInitializer_CreateSession_ReturnsErrorOnFailure(t *testing.T) {
 	require.NoError(t, err, "setup: should create blocking file")
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 		SessionStorage: config.SessionStorageConfig{
 			BaseDir:         sessionsBaseDir,
 			ApplicationName: "test-app", // This will try to create under the blocking file
@@ -416,8 +670,8 @@ func TestInitializer_CreateSession_UniqueIDs(t *testing.T) {
 	sessionsBaseDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 		SessionStorage: config.SessionStorageConfig{
 			BaseDir:         sessionsBaseDir,
 			ApplicationName: "test-app",
@@ -458,8 +712,8 @@ func TestInitializer_CreateSession_DirectoryStructure(t *testing.T) {
 	sessionsBaseDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 		SessionStorage: config.SessionStorageConfig{
 			BaseDir:         sessionsBaseDir,
 			ApplicationName: "test-app",
@@ -501,147 +755,80 @@ func TestInitializer_CreateSession_DirectoryStructure(t *testing.T) {
 }
 
 // ===========================================================================
-// createAIClient() Method Tests (Task perles-oph9.2)
+// AgentProvider Tests (Replaced createAIClient tests after AgentProvider refactor)
 // ===========================================================================
 
-func TestInitializer_CreateAIClient_Claude(t *testing.T) {
-	// Verify createAIClient() with Claude client type returns correct extensions
-	workDir := t.TempDir()
-
-	init := NewInitializer(InitializerConfig{
-		WorkDir:     workDir,
-		ClientType:  "claude",
-		ClaudeModel: "opus",
+func TestInitializer_AgentProvider_Claude(t *testing.T) {
+	// Verify AgentProvider with Claude client type has correct extensions
+	provider := client.NewAgentProvider(client.ClientClaude, map[string]any{
+		client.ExtClaudeModel: "opus",
 	})
 
-	result, err := init.createAIClient()
-	require.NoError(t, err, "createAIClient should not return an error for claude type")
-	require.NotNil(t, result, "result should not be nil")
-	require.NotNil(t, result.Client, "client should not be nil")
-
 	// Verify client type
-	require.Equal(t, client.ClientClaude, result.Client.Type(), "client should be Claude type")
+	require.Equal(t, client.ClientClaude, provider.Type(), "provider should be Claude type")
 
 	// Verify extensions map contains Claude model
-	require.Contains(t, result.Extensions, client.ExtClaudeModel, "extensions should contain Claude model key")
-	require.Equal(t, "opus", result.Extensions[client.ExtClaudeModel], "Claude model should be 'opus'")
+	require.Contains(t, provider.Extensions(), client.ExtClaudeModel, "extensions should contain Claude model key")
+	require.Equal(t, "opus", provider.Extensions()[client.ExtClaudeModel], "Claude model should be 'opus'")
+
+	// Verify Client() returns valid client
+	c, err := provider.Client()
+	require.NoError(t, err, "Client() should not return an error for claude type")
+	require.NotNil(t, c, "client should not be nil")
+	require.Equal(t, client.ClientClaude, c.Type(), "client should be Claude type")
 }
 
-func TestInitializer_CreateAIClient_Amp(t *testing.T) {
-	// Verify createAIClient() with Amp client type returns correct extensions
-	workDir := t.TempDir()
-
-	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "amp",
-		AmpModel:   "gpt-4",
-		AmpMode:    "smart",
+func TestInitializer_AgentProvider_Amp(t *testing.T) {
+	// Verify AgentProvider with Amp client type has correct extensions
+	provider := client.NewAgentProvider(client.ClientAmp, map[string]any{
+		client.ExtAmpModel: "gpt-4",
+		amp.ExtAmpMode:     "smart",
 	})
-
-	result, err := init.createAIClient()
-	require.NoError(t, err, "createAIClient should not return an error for amp type")
-	require.NotNil(t, result, "result should not be nil")
-	require.NotNil(t, result.Client, "client should not be nil")
 
 	// Verify client type
-	require.Equal(t, client.ClientAmp, result.Client.Type(), "client should be Amp type")
+	require.Equal(t, client.ClientAmp, provider.Type(), "provider should be Amp type")
 
 	// Verify extensions map contains Amp model and mode
-	require.Contains(t, result.Extensions, client.ExtAmpModel, "extensions should contain Amp model key")
-	require.Equal(t, "gpt-4", result.Extensions[client.ExtAmpModel], "Amp model should be 'gpt-4'")
-	require.Contains(t, result.Extensions, amp.ExtAmpMode, "extensions should contain Amp mode key")
-	require.Equal(t, "smart", result.Extensions[amp.ExtAmpMode], "Amp mode should be 'smart'")
+	require.Contains(t, provider.Extensions(), client.ExtAmpModel, "extensions should contain Amp model key")
+	require.Equal(t, "gpt-4", provider.Extensions()[client.ExtAmpModel], "Amp model should be 'gpt-4'")
+	require.Contains(t, provider.Extensions(), amp.ExtAmpMode, "extensions should contain Amp mode key")
+	require.Equal(t, "smart", provider.Extensions()[amp.ExtAmpMode], "Amp mode should be 'smart'")
+
+	// Verify Client() returns valid client
+	c, err := provider.Client()
+	require.NoError(t, err, "Client() should not return an error for amp type")
+	require.NotNil(t, c, "client should not be nil")
+	require.Equal(t, client.ClientAmp, c.Type(), "client should be Amp type")
 }
 
-func TestInitializer_CreateAIClient_DefaultsToClaude(t *testing.T) {
-	// Verify createAIClient() defaults to Claude when ClientType is empty
-	workDir := t.TempDir()
+func TestInitializer_AgentProvider_NoExtensionsWhenNil(t *testing.T) {
+	// Verify AgentProvider with nil extensions returns empty map
+	provider := client.NewAgentProvider(client.ClientClaude, nil)
 
-	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "", // Empty - should default to Claude
-	})
-
-	result, err := init.createAIClient()
-	require.NoError(t, err, "createAIClient should not return an error with empty client type")
-	require.NotNil(t, result, "result should not be nil")
-	require.NotNil(t, result.Client, "client should not be nil")
-
-	// Verify client type defaults to Claude
-	require.Equal(t, client.ClientClaude, result.Client.Type(), "client should default to Claude type")
+	// Extensions are always non-nil (empty map) with AgentProvider
+	require.NotNil(t, provider.Extensions(), "extensions should not be nil")
+	require.Empty(t, provider.Extensions(), "extensions should be empty when none configured")
 }
 
-func TestInitializer_CreateAIClient_NoExtensionsWhenEmpty(t *testing.T) {
-	// Verify createAIClient() returns empty extensions when no model is configured
-	workDir := t.TempDir()
+func TestInitializer_AgentProvider_InvalidClientType(t *testing.T) {
+	// Verify AgentProvider.Client() returns error for unknown client type
+	provider := client.NewAgentProvider("unknown-client", nil)
 
-	init := NewInitializer(InitializerConfig{
-		WorkDir:     workDir,
-		ClientType:  "claude",
-		ClaudeModel: "", // Empty - should not be in extensions
-	})
-
-	result, err := init.createAIClient()
-	require.NoError(t, err, "createAIClient should not return an error")
-	require.NotNil(t, result, "result should not be nil")
-	require.NotNil(t, result.Extensions, "extensions should not be nil")
-
-	// Verify extensions map is empty when no model configured
-	require.Empty(t, result.Extensions, "extensions should be empty when no model configured")
+	c, err := provider.Client()
+	require.Error(t, err, "Client() should return error for unknown client type")
+	require.Nil(t, c, "client should be nil on error")
 }
 
-func TestInitializer_CreateAIClient_InvalidClientType(t *testing.T) {
-	// Verify createAIClient() returns error for unknown client type
-	workDir := t.TempDir()
-
-	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "unknown-client",
+func TestInitializer_AgentProvider_AmpPartialExtensions(t *testing.T) {
+	// Verify AgentProvider with Amp type handles partial extensions (only model, no mode)
+	provider := client.NewAgentProvider(client.ClientAmp, map[string]any{
+		client.ExtAmpModel: "gpt-4",
+		// No mode - should not be in extensions
 	})
-
-	result, err := init.createAIClient()
-	require.Error(t, err, "createAIClient should return error for unknown client type")
-	require.Nil(t, result, "result should be nil on error")
-	require.Contains(t, err.Error(), "failed to create AI client", "error should indicate client creation failure")
-}
-
-func TestInitializer_CreateAIClient_ResultStruct(t *testing.T) {
-	// Verify AIClientResult struct fields are properly populated
-	workDir := t.TempDir()
-
-	init := NewInitializer(InitializerConfig{
-		WorkDir:     workDir,
-		ClientType:  "claude",
-		ClaudeModel: "haiku",
-	})
-
-	result, err := init.createAIClient()
-	require.NoError(t, err)
-
-	// Verify both fields of AIClientResult are populated
-	require.NotNil(t, result.Client, "AIClientResult.Client should be populated")
-	require.NotNil(t, result.Extensions, "AIClientResult.Extensions should be populated")
-	require.Equal(t, "haiku", result.Extensions[client.ExtClaudeModel])
-}
-
-func TestInitializer_CreateAIClient_AmpPartialExtensions(t *testing.T) {
-	// Verify createAIClient() with Amp type handles partial extensions (only model, no mode)
-	workDir := t.TempDir()
-
-	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "amp",
-		AmpModel:   "gpt-4",
-		AmpMode:    "", // Empty mode - should not be in extensions
-	})
-
-	result, err := init.createAIClient()
-	require.NoError(t, err, "createAIClient should not return an error")
-	require.NotNil(t, result)
 
 	// Verify extensions only contain model, not mode
-	require.Contains(t, result.Extensions, client.ExtAmpModel, "extensions should contain Amp model")
-	require.NotContains(t, result.Extensions, amp.ExtAmpMode, "extensions should not contain empty Amp mode")
+	require.Contains(t, provider.Extensions(), client.ExtAmpModel, "extensions should contain Amp model")
+	require.NotContains(t, provider.Extensions(), amp.ExtAmpMode, "extensions should not contain empty Amp mode")
 }
 
 // ===========================================================================
@@ -653,8 +840,8 @@ func TestInitializer_CreateMCPListener_Success(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 	})
 
 	// Call createMCPListener directly
@@ -687,8 +874,8 @@ func TestInitializer_CreateMCPListener_BindsToLocalhost(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 	})
 
 	result, err := init.createMCPListener()
@@ -706,8 +893,8 @@ func TestInitializer_CreateMCPListener_UniquePortsOnMultipleCalls(t *testing.T) 
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 	})
 
 	// Create multiple listeners
@@ -728,8 +915,8 @@ func TestInitializer_CreateMCPListener_ListenerAcceptsConnections(t *testing.T) 
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 	})
 
 	result, err := init.createMCPListener()
@@ -751,8 +938,8 @@ func TestInitializer_CreateMCPServer_Success(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 		SessionStorage: config.SessionStorageConfig{
 			BaseDir:         t.TempDir(),
 			ApplicationName: "test-app",
@@ -760,9 +947,6 @@ func TestInitializer_CreateMCPServer_Success(t *testing.T) {
 	})
 
 	// First create dependencies
-	clientResult, err := init.createAIClient()
-	require.NoError(t, err)
-
 	sess, err := init.createSession()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sess.Close(session.StatusCompleted) })
@@ -779,14 +963,13 @@ func TestInitializer_CreateMCPServer_Success(t *testing.T) {
 
 	// Call createMCPServer (v2Adapter can be nil for this test since we're just testing structure)
 	result, err := init.createMCPServer(MCPServerConfig{
-		Listener:   listenerResult.Listener,
-		Port:       listenerResult.Port,
-		AIClient:   clientResult.Client,
-		MsgRepo:    msgRepo,
-		Session:    sess,
-		V2Adapter:  nil, // Worker cache handles nil v2Adapter
-		WorkDir:    workDir,
-		Extensions: clientResult.Extensions,
+		Listener:      listenerResult.Listener,
+		Port:          listenerResult.Port,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		MsgRepo:       msgRepo,
+		Session:       sess,
+		V2Adapter:     nil, // Worker cache handles nil v2Adapter
+		WorkDir:       workDir,
 	})
 
 	// Verify no error
@@ -806,8 +989,8 @@ func TestInitializer_CreateMCPServer_ConfiguresHTTPRoutes(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 		SessionStorage: config.SessionStorageConfig{
 			BaseDir:         t.TempDir(),
 			ApplicationName: "test-app",
@@ -815,9 +998,6 @@ func TestInitializer_CreateMCPServer_ConfiguresHTTPRoutes(t *testing.T) {
 	})
 
 	// Create dependencies
-	clientResult, err := init.createAIClient()
-	require.NoError(t, err)
-
 	sess, err := init.createSession()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sess.Close(session.StatusCompleted) })
@@ -829,14 +1009,13 @@ func TestInitializer_CreateMCPServer_ConfiguresHTTPRoutes(t *testing.T) {
 	msgRepo := repository.NewMemoryMessageRepository()
 
 	result, err := init.createMCPServer(MCPServerConfig{
-		Listener:   listenerResult.Listener,
-		Port:       listenerResult.Port,
-		AIClient:   clientResult.Client,
-		MsgRepo:    msgRepo,
-		Session:    sess,
-		V2Adapter:  nil,
-		WorkDir:    workDir,
-		Extensions: clientResult.Extensions,
+		Listener:      listenerResult.Listener,
+		Port:          listenerResult.Port,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		MsgRepo:       msgRepo,
+		Session:       sess,
+		V2Adapter:     nil,
+		WorkDir:       workDir,
 	})
 
 	// Verify the HTTP server has a handler
@@ -871,8 +1050,8 @@ func TestInitializer_CreateMCPServer_ReadHeaderTimeout(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 		SessionStorage: config.SessionStorageConfig{
 			BaseDir:         t.TempDir(),
 			ApplicationName: "test-app",
@@ -880,9 +1059,6 @@ func TestInitializer_CreateMCPServer_ReadHeaderTimeout(t *testing.T) {
 	})
 
 	// Create dependencies
-	clientResult, err := init.createAIClient()
-	require.NoError(t, err)
-
 	sess, err := init.createSession()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sess.Close(session.StatusCompleted) })
@@ -894,14 +1070,13 @@ func TestInitializer_CreateMCPServer_ReadHeaderTimeout(t *testing.T) {
 	msgRepo := repository.NewMemoryMessageRepository()
 
 	result, err := init.createMCPServer(MCPServerConfig{
-		Listener:   listenerResult.Listener,
-		Port:       listenerResult.Port,
-		AIClient:   clientResult.Client,
-		MsgRepo:    msgRepo,
-		Session:    sess,
-		V2Adapter:  nil,
-		WorkDir:    workDir,
-		Extensions: clientResult.Extensions,
+		Listener:      listenerResult.Listener,
+		Port:          listenerResult.Port,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		MsgRepo:       msgRepo,
+		Session:       sess,
+		V2Adapter:     nil,
+		WorkDir:       workDir,
 	})
 
 	// Verify ReadHeaderTimeout is set (should be 10 seconds)
@@ -943,27 +1118,29 @@ func TestInitializer_MCPListenerResult_ContainsAllComponents(t *testing.T) {
 
 func TestInitializer_MCPServerConfig_ContainsAllFields(t *testing.T) {
 	// Verify MCPServerConfig struct has all expected fields accessible
-	config := MCPServerConfig{}
+	cfg := MCPServerConfig{}
 
 	// These should compile - verifies the struct fields exist
-	_ = config.Listener
-	_ = config.Port
-	_ = config.AIClient
-	_ = config.MsgRepo
-	_ = config.Session
-	_ = config.V2Adapter
-	_ = config.WorkDir
-	_ = config.Extensions
+	_ = cfg.Listener
+	_ = cfg.Port
+	_ = cfg.AgentProvider
+	_ = cfg.MsgRepo
+	_ = cfg.Session
+	_ = cfg.V2Adapter
+	_ = cfg.TurnEnforcer
+	_ = cfg.WorkDir
+	_ = cfg.Tracer
 
 	// Verify they are nil/zero by default
-	require.Nil(t, config.Listener)
-	require.Equal(t, 0, config.Port)
-	require.Nil(t, config.AIClient)
-	require.Nil(t, config.MsgRepo)
-	require.Nil(t, config.Session)
-	require.Nil(t, config.V2Adapter)
-	require.Empty(t, config.WorkDir)
-	require.Nil(t, config.Extensions)
+	require.Nil(t, cfg.Listener)
+	require.Equal(t, 0, cfg.Port)
+	require.Nil(t, cfg.AgentProvider)
+	require.Nil(t, cfg.MsgRepo)
+	require.Nil(t, cfg.Session)
+	require.Nil(t, cfg.V2Adapter)
+	require.Nil(t, cfg.TurnEnforcer)
+	require.Empty(t, cfg.WorkDir)
+	require.Nil(t, cfg.Tracer)
 }
 
 func TestInitializer_CreateMCPServer_RequiresListener(t *testing.T) {
@@ -971,24 +1148,20 @@ func TestInitializer_CreateMCPServer_RequiresListener(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 	})
-
-	clientResult, err := init.createAIClient()
-	require.NoError(t, err)
 
 	msgRepo := repository.NewMemoryMessageRepository()
 
 	result, err := init.createMCPServer(MCPServerConfig{
-		Listener:   nil, // Missing listener
-		Port:       8080,
-		AIClient:   clientResult.Client,
-		MsgRepo:    msgRepo,
-		Session:    nil,
-		V2Adapter:  nil,
-		WorkDir:    workDir,
-		Extensions: nil,
+		Listener:      nil, // Missing listener
+		Port:          8080,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		MsgRepo:       msgRepo,
+		Session:       nil,
+		V2Adapter:     nil,
+		WorkDir:       workDir,
 	})
 
 	require.Error(t, err, "createMCPServer should return error when listener is nil")
@@ -996,13 +1169,13 @@ func TestInitializer_CreateMCPServer_RequiresListener(t *testing.T) {
 	require.Contains(t, err.Error(), "listener is required")
 }
 
-func TestInitializer_CreateMCPServer_RequiresAIClient(t *testing.T) {
-	// Verify createMCPServer() returns error when AIClient is nil
+func TestInitializer_CreateMCPServer_RequiresAgentProvider(t *testing.T) {
+	// Verify createMCPServer() returns error when AgentProvider is nil
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 	})
 
 	listenerResult, err := init.createMCPListener()
@@ -1012,19 +1185,18 @@ func TestInitializer_CreateMCPServer_RequiresAIClient(t *testing.T) {
 	msgRepo := repository.NewMemoryMessageRepository()
 
 	result, err := init.createMCPServer(MCPServerConfig{
-		Listener:   listenerResult.Listener,
-		Port:       listenerResult.Port,
-		AIClient:   nil, // Missing AIClient
-		MsgRepo:    msgRepo,
-		Session:    nil,
-		V2Adapter:  nil,
-		WorkDir:    workDir,
-		Extensions: nil,
+		Listener:      listenerResult.Listener,
+		Port:          listenerResult.Port,
+		AgentProvider: nil, // Missing AgentProvider
+		MsgRepo:       msgRepo,
+		Session:       nil,
+		V2Adapter:     nil,
+		WorkDir:       workDir,
 	})
 
-	require.Error(t, err, "createMCPServer should return error when AIClient is nil")
+	require.Error(t, err, "createMCPServer should return error when AgentProvider is nil")
 	require.Nil(t, result, "result should be nil on error")
-	require.Contains(t, err.Error(), "AI client is required")
+	require.Contains(t, err.Error(), "AgentProvider is required")
 }
 
 func TestInitializer_CreateMCPServer_RequiresMsgRepo(t *testing.T) {
@@ -1032,26 +1204,22 @@ func TestInitializer_CreateMCPServer_RequiresMsgRepo(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 	})
-
-	clientResult, err := init.createAIClient()
-	require.NoError(t, err)
 
 	listenerResult, err := init.createMCPListener()
 	require.NoError(t, err)
 	defer listenerResult.Listener.Close()
 
 	result, err := init.createMCPServer(MCPServerConfig{
-		Listener:   listenerResult.Listener,
-		Port:       listenerResult.Port,
-		AIClient:   clientResult.Client,
-		MsgRepo:    nil, // Missing MsgRepo
-		Session:    nil,
-		V2Adapter:  nil,
-		WorkDir:    workDir,
-		Extensions: nil,
+		Listener:      listenerResult.Listener,
+		Port:          listenerResult.Port,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		MsgRepo:       nil, // Missing MsgRepo
+		Session:       nil,
+		V2Adapter:     nil,
+		WorkDir:       workDir,
 	})
 
 	require.Error(t, err, "createMCPServer should return error when MsgRepo is nil")
@@ -1064,8 +1232,8 @@ func TestInitializer_SpinnerData_ReturnsPhase(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 	})
 
 	// Get spinner data - should return InitNotStarted
@@ -1090,9 +1258,9 @@ func TestRun_CancelsOnContextCancellation(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
-		Timeout:    10 * time.Second, // Long timeout
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		Timeout:       10 * time.Second, // Long timeout
 	})
 
 	// Verify we can cancel the initializer
@@ -1124,8 +1292,8 @@ func TestCleanupResources_Idempotent(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 	})
 
 	// First call should not panic
@@ -1149,8 +1317,8 @@ func TestCleanupResources_ClearsFields(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 	})
 
 	// Manually set fields to simulate initialized state
@@ -1173,8 +1341,8 @@ func TestCancel_StopsContextAndCleansUp(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 	})
 
 	// Manually set up context like Start() does
@@ -1209,8 +1377,8 @@ func TestCancel_DoubleCallDoesNotPanic(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 	})
 
 	// Manually set up context like Start() does
@@ -1239,8 +1407,8 @@ func TestCancel_Idempotent_CancelFuncCalledOnce(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 	})
 
 	// Set up context
@@ -1262,8 +1430,8 @@ func TestCleanupResources_WithPartialInitialization(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 	})
 
 	// Simulate partial initialization - only some fields set
@@ -1289,8 +1457,8 @@ func TestCleanupResources_WithNoInitialization(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 	})
 
 	// All fields are nil by default - cleanup should handle this gracefully
@@ -1304,8 +1472,8 @@ func TestCleanupResources_ThreadSafe(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 	})
 
 	// Simulate partial initialization
@@ -1395,8 +1563,8 @@ func TestRetry_CallsCancel(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 	})
 
 	// Manually set up context like Start() does
@@ -1959,8 +2127,8 @@ func TestInitializer_WithoutRestoredSession_UsesNew(t *testing.T) {
 	sessionsBaseDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 		SessionStorage: config.SessionStorageConfig{
 			BaseDir:         sessionsBaseDir,
 			ApplicationName: "test-app",
@@ -2024,8 +2192,8 @@ func TestInitializer_WithRestoredSession_UsesReopen(t *testing.T) {
 	}
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 		SessionStorage: config.SessionStorageConfig{
 			BaseDir:         sessionsBaseDir,
 			ApplicationName: "test-app",
@@ -2165,8 +2333,8 @@ func TestInitializer_RestoredSessionWithNoWorkers(t *testing.T) {
 	}
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 		SessionStorage: config.SessionStorageConfig{
 			BaseDir:         sessionsBaseDir,
 			ApplicationName: "test-app",
@@ -2201,8 +2369,8 @@ func TestInitializer_ReopenSession_PropagatesError(t *testing.T) {
 	}
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 		SessionStorage: config.SessionStorageConfig{
 			BaseDir:         t.TempDir(),
 			ApplicationName: "test-app",
@@ -2249,8 +2417,8 @@ func TestInitializer_ReopenSession_SetsSessionIDAndDir(t *testing.T) {
 	}
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:    workDir,
-		ClientType: "claude",
+		WorkDir:       workDir,
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
 		SessionStorage: config.SessionStorageConfig{
 			BaseDir:         sessionsBaseDir,
 			ApplicationName: "test-app",

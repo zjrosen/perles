@@ -7,7 +7,20 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/zjrosen/perles/internal/mocks"
+	"github.com/zjrosen/perles/internal/orchestration/client"
 )
+
+// createTestSimpleAgentProvider creates an AgentProvider mock for testing.
+func createTestSimpleAgentProvider(t *testing.T) client.AgentProvider {
+	mockClient := mocks.NewMockHeadlessClient(t)
+	mockClient.EXPECT().Type().Return(client.ClientClaude).Maybe()
+
+	mockProvider := mocks.NewMockAgentProvider(t)
+	mockProvider.EXPECT().Client().Return(mockClient, nil).Maybe()
+	mockProvider.EXPECT().Extensions().Return(map[string]any{}).Maybe()
+	mockProvider.EXPECT().Type().Return(client.ClientClaude).Maybe()
+	return mockProvider
+}
 
 // ===========================================================================
 // SimpleInfrastructure Tests
@@ -15,31 +28,29 @@ import (
 
 func TestSimpleInfrastructureConfig_Validate(t *testing.T) {
 	t.Run("valid config", func(t *testing.T) {
-		mockClient := mocks.NewMockHeadlessClient(t)
 		cfg := SimpleInfrastructureConfig{
-			AIClient:     mockClient,
-			WorkDir:      "/tmp/test",
-			SystemPrompt: "You are a helpful assistant.",
+			AgentProvider: createTestSimpleAgentProvider(t),
+			WorkDir:       "/tmp/test",
+			SystemPrompt:  "You are a helpful assistant.",
 		}
 		err := cfg.Validate()
 		assert.NoError(t, err)
 	})
 
-	t.Run("nil AIClient returns error", func(t *testing.T) {
+	t.Run("nil AgentProvider returns error", func(t *testing.T) {
 		cfg := SimpleInfrastructureConfig{
-			AIClient: nil,
-			WorkDir:  "/tmp/test",
+			AgentProvider: nil,
+			WorkDir:       "/tmp/test",
 		}
 		err := cfg.Validate()
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "AI client is required")
+		assert.Contains(t, err.Error(), "AgentProvider is required")
 	})
 
 	t.Run("empty WorkDir returns error", func(t *testing.T) {
-		mockClient := mocks.NewMockHeadlessClient(t)
 		cfg := SimpleInfrastructureConfig{
-			AIClient: mockClient,
-			WorkDir:  "",
+			AgentProvider: createTestSimpleAgentProvider(t),
+			WorkDir:       "",
 		}
 		err := cfg.Validate()
 		assert.Error(t, err)
@@ -49,11 +60,10 @@ func TestSimpleInfrastructureConfig_Validate(t *testing.T) {
 
 func TestNewSimpleInfrastructure(t *testing.T) {
 	t.Run("creates infrastructure with valid config", func(t *testing.T) {
-		mockClient := mocks.NewMockHeadlessClient(t)
 		cfg := SimpleInfrastructureConfig{
-			AIClient:     mockClient,
-			WorkDir:      "/tmp/test",
-			SystemPrompt: "You are a helpful assistant.",
+			AgentProvider: createTestSimpleAgentProvider(t),
+			WorkDir:       "/tmp/test",
+			SystemPrompt:  "You are a helpful assistant.",
 		}
 
 		infra, err := NewSimpleInfrastructure(cfg)
@@ -68,23 +78,22 @@ func TestNewSimpleInfrastructure(t *testing.T) {
 		assert.NotNil(t, infra.CmdSubmitter)
 	})
 
-	t.Run("returns error for nil AIClient", func(t *testing.T) {
+	t.Run("returns error for nil AgentProvider", func(t *testing.T) {
 		cfg := SimpleInfrastructureConfig{
-			AIClient: nil,
-			WorkDir:  "/tmp/test",
+			AgentProvider: nil,
+			WorkDir:       "/tmp/test",
 		}
 
 		infra, err := NewSimpleInfrastructure(cfg)
 		assert.Error(t, err)
 		assert.Nil(t, infra)
-		assert.Contains(t, err.Error(), "AI client is required")
+		assert.Contains(t, err.Error(), "AgentProvider is required")
 	})
 
 	t.Run("returns error for empty WorkDir", func(t *testing.T) {
-		mockClient := mocks.NewMockHeadlessClient(t)
 		cfg := SimpleInfrastructureConfig{
-			AIClient: mockClient,
-			WorkDir:  "",
+			AgentProvider: createTestSimpleAgentProvider(t),
+			WorkDir:       "",
 		}
 
 		infra, err := NewSimpleInfrastructure(cfg)
@@ -96,11 +105,10 @@ func TestNewSimpleInfrastructure(t *testing.T) {
 
 func TestSimpleInfrastructure_Lifecycle(t *testing.T) {
 	t.Run("start and shutdown", func(t *testing.T) {
-		mockClient := mocks.NewMockHeadlessClient(t)
 		cfg := SimpleInfrastructureConfig{
-			AIClient:     mockClient,
-			WorkDir:      "/tmp/test",
-			SystemPrompt: "You are a helpful assistant.",
+			AgentProvider: createTestSimpleAgentProvider(t),
+			WorkDir:       "/tmp/test",
+			SystemPrompt:  "You are a helpful assistant.",
 		}
 
 		infra, err := NewSimpleInfrastructure(cfg)
@@ -116,10 +124,9 @@ func TestSimpleInfrastructure_Lifecycle(t *testing.T) {
 	})
 
 	t.Run("shutdown handles unstarted infrastructure", func(t *testing.T) {
-		mockClient := mocks.NewMockHeadlessClient(t)
 		cfg := SimpleInfrastructureConfig{
-			AIClient: mockClient,
-			WorkDir:  "/tmp/test",
+			AgentProvider: createTestSimpleAgentProvider(t),
+			WorkDir:       "/tmp/test",
 		}
 
 		infra, err := NewSimpleInfrastructure(cfg)
@@ -132,11 +139,10 @@ func TestSimpleInfrastructure_Lifecycle(t *testing.T) {
 }
 
 func TestSimpleInfrastructure_RegistersOnlyCoreHandlers(t *testing.T) {
-	mockClient := mocks.NewMockHeadlessClient(t)
 	cfg := SimpleInfrastructureConfig{
-		AIClient:     mockClient,
-		WorkDir:      "/tmp/test",
-		SystemPrompt: "You are a helpful assistant.",
+		AgentProvider: createTestSimpleAgentProvider(t),
+		WorkDir:       "/tmp/test",
+		SystemPrompt:  "You are a helpful assistant.",
 	}
 
 	infra, err := NewSimpleInfrastructure(cfg)

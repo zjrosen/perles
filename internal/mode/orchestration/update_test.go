@@ -17,6 +17,7 @@ import (
 	"github.com/zjrosen/perles/internal/git"
 	"github.com/zjrosen/perles/internal/mocks"
 	"github.com/zjrosen/perles/internal/mode"
+	"github.com/zjrosen/perles/internal/orchestration/client"
 	"github.com/zjrosen/perles/internal/orchestration/events"
 	"github.com/zjrosen/perles/internal/orchestration/mcp"
 	"github.com/zjrosen/perles/internal/orchestration/message"
@@ -3973,7 +3974,7 @@ func TestHandleSlashCommand_RoutesReplaceCommand(t *testing.T) {
 
 func TestHandleStartCoordinator_ShowsWorktreeModalInGitRepo(t *testing.T) {
 	// Test that handleStartCoordinator shows worktree modal when in a git repo
-	m := New(Config{WorkDir: "/test/dir"})
+	m := New(Config{WorkDir: "/test/dir", AgentProvider: client.NewAgentProvider(client.ClientClaude, nil)})
 	m = m.SetSize(120, 40)
 
 	// Set up mock git executor that reports this is a git repo
@@ -3992,7 +3993,10 @@ func TestHandleStartCoordinator_ShowsWorktreeModalInGitRepo(t *testing.T) {
 
 func TestHandleStartCoordinator_SkipsWorktreeModalWhenNotGitRepo(t *testing.T) {
 	// Test that handleStartCoordinator skips modal when not in a git repo
-	m := New(Config{WorkDir: "/test/dir"})
+	m := New(Config{
+		WorkDir:       "/test/dir",
+		AgentProvider: client.NewAgentProvider(client.ClientClaude, nil),
+	})
 	m = m.SetSize(120, 40)
 
 	// Set up mock git executor that reports this is NOT a git repo
@@ -4021,7 +4025,7 @@ func TestHandleStartCoordinator_SkipsWorktreeModalWhenNotGitRepo(t *testing.T) {
 
 func TestHandleStartCoordinator_SkipsWorktreeModalWhenDecisionMade(t *testing.T) {
 	// Test that handleStartCoordinator skips modal when decision already made
-	m := New(Config{WorkDir: "/test/dir"})
+	m := New(Config{WorkDir: "/test/dir", AgentProvider: client.NewAgentProvider(client.ClientClaude, nil)})
 	m = m.SetSize(120, 40)
 
 	// Set up mock git executor that reports this is a git repo
@@ -4051,7 +4055,7 @@ func TestHandleStartCoordinator_SkipsWorktreeModalWhenDecisionMade(t *testing.T)
 
 func TestWorktreeModal_CancelStartsWithoutWorktree(t *testing.T) {
 	// Test that canceling the worktree modal starts without worktree
-	m := New(Config{WorkDir: "/test/dir"})
+	m := New(Config{WorkDir: "/test/dir", AgentProvider: client.NewAgentProvider(client.ClientClaude, nil)})
 	m = m.SetSize(120, 40)
 
 	// Set up mock git executor
@@ -4087,7 +4091,7 @@ func TestWorktreeModal_CancelStartsWithoutWorktree(t *testing.T) {
 
 func TestWorktreeModal_SubmitAlwaysShowsBranchModal(t *testing.T) {
 	// Test that submitting worktree modal always shows branch selection modal
-	m := New(Config{WorkDir: "/test/dir"})
+	m := New(Config{WorkDir: "/test/dir", AgentProvider: client.NewAgentProvider(client.ClientClaude, nil)})
 	m = m.SetSize(120, 40)
 
 	// Set up mock git executor
@@ -4115,7 +4119,7 @@ func TestWorktreeModal_SubmitAlwaysShowsBranchModal(t *testing.T) {
 
 func TestBranchSelectModal_SubmitSetsBranch(t *testing.T) {
 	// Test that submitting branch selection modal sets the branch
-	m := New(Config{WorkDir: "/test/dir"})
+	m := New(Config{WorkDir: "/test/dir", AgentProvider: client.NewAgentProvider(client.ClientClaude, nil)})
 	m = m.SetSize(120, 40)
 
 	// Set up mock git executor
@@ -4160,7 +4164,7 @@ func TestBranchSelectModal_SubmitSetsBranch(t *testing.T) {
 
 func TestBranchSelectModal_CancelReturnsToWorktreeModal(t *testing.T) {
 	// Test that canceling branch selection modal returns to worktree modal
-	m := New(Config{WorkDir: "/test/dir"})
+	m := New(Config{WorkDir: "/test/dir", AgentProvider: client.NewAgentProvider(client.ClientClaude, nil)})
 	m = m.SetSize(120, 40)
 
 	// Set up mock git executor
@@ -4187,7 +4191,7 @@ func TestBranchSelectModal_CancelReturnsToWorktreeModal(t *testing.T) {
 
 func TestBranchSelectModal_SubmitExtractsCustomBranch(t *testing.T) {
 	// Test that form submission extracts custom_branch value correctly
-	m := New(Config{WorkDir: "/test/dir"})
+	m := New(Config{WorkDir: "/test/dir", AgentProvider: client.NewAgentProvider(client.ClientClaude, nil)})
 	m = m.SetSize(120, 40)
 
 	// Set up mock git executor
@@ -4234,7 +4238,7 @@ func TestBranchSelectModal_SubmitExtractsCustomBranch(t *testing.T) {
 
 func TestBranchSelectModal_WhitespaceTrimsCustomBranch(t *testing.T) {
 	// Test that whitespace is trimmed from custom branch input
-	m := New(Config{WorkDir: "/test/dir"})
+	m := New(Config{WorkDir: "/test/dir", AgentProvider: client.NewAgentProvider(client.ClientClaude, nil)})
 	m = m.SetSize(120, 40)
 
 	// Set up mock git executor
@@ -4279,7 +4283,7 @@ func TestBranchSelectModal_WhitespaceTrimsCustomBranch(t *testing.T) {
 
 func TestBranchSelectModal_EmptyCustomBranchRemainsEmpty(t *testing.T) {
 	// Test that empty custom_branch string remains empty (not converted to whitespace)
-	m := New(Config{WorkDir: "/test/dir"})
+	m := New(Config{WorkDir: "/test/dir", AgentProvider: client.NewAgentProvider(client.ClientClaude, nil)})
 	m = m.SetSize(120, 40)
 
 	// Set up mock git executor
@@ -4324,7 +4328,7 @@ func TestBranchSelectModal_EmptyCustomBranchRemainsEmpty(t *testing.T) {
 
 func TestBranchSelectModal_WhitespaceOnlyCustomBranchBecomesEmpty(t *testing.T) {
 	// Test that whitespace-only custom_branch becomes empty after trimming
-	m := New(Config{WorkDir: "/test/dir"})
+	m := New(Config{WorkDir: "/test/dir", AgentProvider: client.NewAgentProvider(client.ClientClaude, nil)})
 	m = m.SetSize(120, 40)
 
 	// Set up mock git executor
@@ -4371,7 +4375,7 @@ func TestBranchSelectModal_ValidationRejectsInvalidBranchName(t *testing.T) {
 	// Test that validation rejects invalid branch names with user-friendly error
 	// This test verifies that the validation function in showBranchSelectionModal
 	// properly calls ValidateBranchName and returns a user-friendly error message.
-	m := New(Config{WorkDir: "/test/dir"})
+	m := New(Config{WorkDir: "/test/dir", AgentProvider: client.NewAgentProvider(client.ClientClaude, nil)})
 	m = m.SetSize(120, 40)
 
 	// Set up mock git executor with expectations for modal creation and validation
@@ -4390,7 +4394,7 @@ func TestBranchSelectModal_ValidationRejectsInvalidBranchName(t *testing.T) {
 func TestBranchSelectModal_ValidationRejectsExistingBranch(t *testing.T) {
 	// Test that validation rejects existing branch names with specific error message
 	// The modal's Validate callback checks if the custom branch already exists
-	m := New(Config{WorkDir: "/test/dir"})
+	m := New(Config{WorkDir: "/test/dir", AgentProvider: client.NewAgentProvider(client.ClientClaude, nil)})
 	m = m.SetSize(120, 40)
 
 	// Set up mock git executor - only expectations for modal creation
@@ -4410,7 +4414,7 @@ func TestBranchSelectModal_ValidationRejectsExistingBranch(t *testing.T) {
 func TestBranchSelectModal_ValidationAcceptsEmptyCustomBranch(t *testing.T) {
 	// Test that validation accepts empty custom branch (optional field)
 	// When custom_branch is empty/whitespace, validation should skip branch name checks
-	m := New(Config{WorkDir: "/test/dir"})
+	m := New(Config{WorkDir: "/test/dir", AgentProvider: client.NewAgentProvider(client.ClientClaude, nil)})
 	m = m.SetSize(120, 40)
 
 	// Set up mock git executor - only expectations for modal creation
@@ -4430,7 +4434,7 @@ func TestBranchSelectModal_ValidationAcceptsEmptyCustomBranch(t *testing.T) {
 
 func TestSkipWorktree_OnlyAvailableForWorktreeFailure(t *testing.T) {
 	// Test that S key only skips when worktree creation failed
-	m := New(Config{WorkDir: "/test/dir"})
+	m := New(Config{WorkDir: "/test/dir", AgentProvider: client.NewAgentProvider(client.ClientClaude, nil)})
 	m = m.SetSize(120, 40)
 
 	// Set up mock git executor
@@ -4456,7 +4460,7 @@ func TestSkipWorktree_OnlyAvailableForWorktreeFailure(t *testing.T) {
 
 func TestSkipWorktree_NotAvailableForOtherFailures(t *testing.T) {
 	// Test that S key does nothing when failure is NOT worktree phase
-	m := New(Config{WorkDir: "/test/dir"})
+	m := New(Config{WorkDir: "/test/dir", AgentProvider: client.NewAgentProvider(client.ClientClaude, nil)})
 	m = m.SetSize(120, 40)
 
 	// Create a mock initializer that failed at a different phase
@@ -4480,6 +4484,7 @@ func TestHandleStartCoordinator_DisableWorktrees_SkipsModal(t *testing.T) {
 	m := New(Config{
 		WorkDir:          "/test/dir",
 		DisableWorktrees: true,
+		AgentProvider:    client.NewAgentProvider(client.ClientClaude, nil),
 	})
 	m = m.SetSize(120, 40)
 
@@ -4518,6 +4523,7 @@ func TestHandleStartCoordinator_DisableWorktrees_False_ShowsModal(t *testing.T) 
 	m := New(Config{
 		WorkDir:          "/test/dir",
 		DisableWorktrees: false,
+		AgentProvider:    client.NewAgentProvider(client.ClientClaude, nil),
 	})
 	m = m.SetSize(120, 40)
 
@@ -4541,6 +4547,7 @@ func TestHandleStartCoordinator_DisableWorktrees_NonGitRepo(t *testing.T) {
 	m := New(Config{
 		WorkDir:          "/test/dir",
 		DisableWorktrees: true,
+		AgentProvider:    client.NewAgentProvider(client.ClientClaude, nil),
 	})
 	m = m.SetSize(120, 40)
 

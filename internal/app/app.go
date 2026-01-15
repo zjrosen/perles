@@ -23,7 +23,6 @@ import (
 	"github.com/zjrosen/perles/internal/mode/orchestration"
 	"github.com/zjrosen/perles/internal/mode/search"
 	"github.com/zjrosen/perles/internal/mode/shared"
-	"github.com/zjrosen/perles/internal/orchestration/client"
 	v2 "github.com/zjrosen/perles/internal/orchestration/v2"
 	"github.com/zjrosen/perles/internal/orchestration/workflow"
 	"github.com/zjrosen/perles/internal/pubsub"
@@ -424,12 +423,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.orchestration = orchestration.New(orchestration.Config{
 			Services:             m.services,
 			WorkDir:              m.services.WorkDir,
-			ClientType:           orchConfig.Client,
-			ClaudeModel:          orchConfig.Claude.Model,
-			CodexModel:           orchConfig.Codex.Model,
-			AmpModel:             orchConfig.Amp.Model,
-			AmpMode:              orchConfig.Amp.Mode,
-			GeminiModel:          orchConfig.Gemini.Model,
+			AgentProvider:        orchConfig.AgentProvider(),
 			WorkflowRegistry:     m.workflowRegistry,
 			VimMode:              m.services.Config.UI.VimMode,
 			DebugMode:            m.debugMode,
@@ -878,21 +872,12 @@ func (m Model) handleToggleChatPanel() (tea.Model, tea.Cmd) {
 		if m.chatInfra == nil {
 			m.services.Sounds.Play("greeting", "chat_welcome")
 
-			// Create AI client based on chat panel config
-			aiClient, err := client.NewClient(client.ClientType(m.chatPanel.Config().ClientType))
-			if err != nil {
-				log.Warn(log.CatMode, "Failed to create AI client", "error", err)
-				return m, func() tea.Msg {
-					return mode.ShowToastMsg{
-						Message: "Failed to create AI client: " + err.Error(),
-						Style:   toaster.StyleError,
-					}
-				}
-			}
+			// Get AgentProvider from config (includes model settings from user config)
+			provider := m.services.Config.Orchestration.AgentProvider()
 
-			// Create v2 SimpleInfrastructure with config
+			// Create v2 SimpleInfrastructure with AgentProvider
 			infra, err := v2.NewSimpleInfrastructure(v2.SimpleInfrastructureConfig{
-				AIClient:      aiClient,
+				AgentProvider: provider,
 				WorkDir:       m.chatPanel.Config().WorkDir,
 				SystemPrompt:  chatpanel.BuildAssistantSystemPrompt(),
 				InitialPrompt: chatpanel.BuildAssistantInitialPrompt(),

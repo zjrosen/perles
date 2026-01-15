@@ -21,8 +21,8 @@ import (
 
 // SimpleInfrastructureConfig holds configuration for simple chat infrastructure.
 type SimpleInfrastructureConfig struct {
-	// AIClient is the headless AI client for spawning processes.
-	AIClient client.HeadlessClient
+	// AgentProvider creates and configures AI processes.
+	AgentProvider client.AgentProvider
 	// WorkDir is the working directory for the chat session.
 	WorkDir string
 	// SystemPrompt is the system prompt for the AI assistant.
@@ -33,8 +33,8 @@ type SimpleInfrastructureConfig struct {
 
 // Validate checks that all required configuration is provided.
 func (c *SimpleInfrastructureConfig) Validate() error {
-	if c.AIClient == nil {
-		return fmt.Errorf("AI client is required")
+	if c.AgentProvider == nil {
+		return fmt.Errorf("AgentProvider is required")
 	}
 	if c.WorkDir == "" {
 		return fmt.Errorf("work directory is required")
@@ -112,10 +112,10 @@ func NewSimpleInfrastructure(cfg SimpleInfrastructureConfig) (*SimpleInfrastruct
 	cmdSubmitter := handler.NewProcessorSubmitterAdapter(cmdProcessor)
 
 	// Create simple process spawner (no MCP - port=0, empty MCP config)
-	spawner := newSimpleProcessSpawner(cfg.AIClient, cfg.WorkDir, cfg.SystemPrompt, cfg.InitialPrompt, cmdSubmitter, eventBus)
+	spawner := newSimpleProcessSpawner(cfg.AgentProvider, cfg.WorkDir, cfg.SystemPrompt, cfg.InitialPrompt, cmdSubmitter, eventBus)
 
 	// Create simple message deliverer that spawns session resumes
-	deliverer := newSimpleMessageDeliverer(processRegistry, cfg.AIClient, cfg.WorkDir, cfg.SystemPrompt)
+	deliverer := newSimpleMessageDeliverer(processRegistry, cfg.AgentProvider, cfg.WorkDir, cfg.SystemPrompt)
 
 	// Register only the 4 core handlers needed for chat:
 	// 1. SpawnProcess - create the AI process
@@ -185,7 +185,7 @@ func (i *SimpleInfrastructure) Shutdown() {
 
 // simpleProcessSpawner implements UnifiedProcessSpawner for simple chat without MCP.
 type simpleProcessSpawner struct {
-	client        client.HeadlessClient
+	provider      client.AgentProvider
 	workDir       string
 	systemPrompt  string
 	initialPrompt string
@@ -194,13 +194,13 @@ type simpleProcessSpawner struct {
 }
 
 func newSimpleProcessSpawner(
-	c client.HeadlessClient,
+	provider client.AgentProvider,
 	workDir, systemPrompt, initialPrompt string,
 	submitter process.CommandSubmitter,
 	eventBus *pubsub.Broker[any],
 ) *simpleProcessSpawner {
 	return &simpleProcessSpawner{
-		client:        c,
+		provider:      provider,
 		workDir:       workDir,
 		systemPrompt:  systemPrompt,
 		initialPrompt: initialPrompt,
@@ -211,8 +211,10 @@ func newSimpleProcessSpawner(
 
 // SpawnProcess implements UnifiedProcessSpawner.
 func (s *simpleProcessSpawner) SpawnProcess(ctx context.Context, id string, role repository.ProcessRole, _ handler.SpawnOptions) (*process.Process, error) {
-	if s.client == nil {
-		return nil, fmt.Errorf("client is nil")
+	// Get the headless client
+	aiClient, err := s.provider.Client()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get AI client: %w", err)
 	}
 
 	// Simple config: no MCP, custom system prompt
@@ -223,10 +225,11 @@ func (s *simpleProcessSpawner) SpawnProcess(ctx context.Context, id string, role
 		MCPConfig:       "", // No MCP tools
 		SkipPermissions: true,
 		DisallowedTools: []string{"AskUserQuestion"},
+		Extensions:      s.provider.Extensions(),
 	}
 
 	// Spawn the underlying AI process
-	headlessProc, err := s.client.Spawn(ctx, cfg)
+	headlessProc, err := aiClient.Spawn(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to spawn AI process: %w", err)
 	}
@@ -248,19 +251,19 @@ func (s *simpleProcessSpawner) SpawnProcess(ctx context.Context, id string, role
 // Like ProcessSessionDeliverer but simpler (no MCP config, just system prompt).
 type simpleMessageDeliverer struct {
 	registry     *process.ProcessRegistry
-	client       client.HeadlessClient
+	provider     client.AgentProvider
 	workDir      string
 	systemPrompt string
 }
 
 func newSimpleMessageDeliverer(
 	registry *process.ProcessRegistry,
-	c client.HeadlessClient,
+	provider client.AgentProvider,
 	workDir, systemPrompt string,
 ) *simpleMessageDeliverer {
 	return &simpleMessageDeliverer{
 		registry:     registry,
-		client:       c,
+		provider:     provider,
 		workDir:      workDir,
 		systemPrompt: systemPrompt,
 	}
@@ -280,9 +283,15 @@ func (d *simpleMessageDeliverer) Deliver(_ context.Context, processID, content s
 		return fmt.Errorf("process %s has no session ID", processID)
 	}
 
+	// Get the headless client
+	aiClient, err := d.provider.Client()
+	if err != nil {
+		return fmt.Errorf("failed to get AI client: %w", err)
+	}
+
 	// Spawn/resume session with the message as prompt
 	// Use context.Background() because the process lifetime outlives this function
-	headlessProc, err := d.client.Spawn(context.Background(), client.Config{
+	cfg := client.Config{
 		WorkDir:         d.workDir,
 		SessionID:       sessionID,
 		Prompt:          content,
@@ -290,7 +299,10 @@ func (d *simpleMessageDeliverer) Deliver(_ context.Context, processID, content s
 		MCPConfig:       "", // No MCP tools for simple chat
 		SkipPermissions: true,
 		DisallowedTools: []string{"AskUserQuestion"},
-	})
+		Extensions:      d.provider.Extensions(),
+	}
+
+	headlessProc, err := aiClient.Spawn(context.Background(), cfg)
 	if err != nil {
 		return fmt.Errorf("failed to resume session for process %s: %w", processID, err)
 	}

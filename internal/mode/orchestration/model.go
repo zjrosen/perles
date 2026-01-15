@@ -24,6 +24,7 @@ import (
 	"github.com/zjrosen/perles/internal/git"
 	"github.com/zjrosen/perles/internal/log"
 	"github.com/zjrosen/perles/internal/mode"
+	"github.com/zjrosen/perles/internal/orchestration/client"
 	"github.com/zjrosen/perles/internal/orchestration/events"
 	"github.com/zjrosen/perles/internal/orchestration/mcp"
 	"github.com/zjrosen/perles/internal/orchestration/message"
@@ -150,12 +151,7 @@ type Model struct {
 	originalStartTime  time.Time                 // Original session start time (from loaded session)
 
 	// AI client configuration
-	clientType  string // "claude" (default) or "amp"
-	claudeModel string // Claude model: sonnet, opus, haiku
-	codexModel  string // Codex model: gpt-5.2-codex, o4-mini
-	ampModel    string // Amp model: opus, sonnet
-	ampMode     string // Amp mode: free, rush, smart
-	geminiModel string // Gemini model: gemini-2.5-pro, gemini-2.5-flash, gemini-3-pro-preview
+	agentProvider client.AgentProvider // Creates and configures AI processes
 
 	// Pub/sub subscriptions (initialized when coordinator starts)
 	// Note: Worker events flow through v2EventBus, not a separate workerListener
@@ -245,18 +241,9 @@ type WorkerPane struct {
 
 // Config holds configuration for creating an orchestration Model.
 type Config struct {
-	Services   mode.Services
-	WorkDir    string
-	ClientType string // "claude" (default) or "amp"
-	// Claude-specific settings
-	ClaudeModel string // sonnet (default), opus, haiku
-	// Codex-specific settings
-	CodexModel string
-	// Amp-specific settings
-	AmpModel string // opus (default), sonnet
-	AmpMode  string // free, rush, smart (default)
-	// Gemini-specific settings
-	GeminiModel string // gemini-2.5-pro (default), gemini-2.5-flash, gemini-3-pro-preview
+	Services      mode.Services
+	WorkDir       string
+	AgentProvider client.AgentProvider // Creates and configures AI processes
 	// Workflow templates
 	WorkflowRegistry *workflow.Registry // Pre-loaded workflow registry (optional)
 	// UI settings
@@ -298,12 +285,7 @@ func New(cfg Config) Model {
 		disableWorktrees:      cfg.DisableWorktrees,
 		messageTarget:         "COORDINATOR", // Default to coordinator
 		fullscreenWorkerIndex: -1,            // No fullscreen by default
-		clientType:            cfg.ClientType,
-		claudeModel:           cfg.ClaudeModel,
-		codexModel:            cfg.CodexModel,
-		ampModel:              cfg.AmpModel,
-		ampMode:               cfg.AmpMode,
-		geminiModel:           cfg.GeminiModel,
+		agentProvider:         cfg.AgentProvider,
 		workflowRegistry:      cfg.WorkflowRegistry,
 		activeWorkflowRef:     &activeWorkflowHolder{},
 		tracingConfig:         cfg.TracingConfig,

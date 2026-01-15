@@ -40,12 +40,10 @@ func (a *eventBusAdapter) Publish(eventType string, payload any) {
 type InfrastructureConfig struct {
 	// Port is the MCP server port for process communication.
 	Port int
-	// AIClient is the headless AI client for spawning processes.
-	AIClient client.HeadlessClient
+	// AgentProvider creates and configures AI processes.
+	AgentProvider client.AgentProvider
 	// WorkDir is the working directory for the orchestration session.
 	WorkDir string
-	// Extensions contains provider-specific configuration (e.g., model settings).
-	Extensions map[string]any
 	// MessageRepo is the message repository for inter-agent messaging.
 	MessageRepo repository.MessageRepository
 	// SessionID is the session identifier for accountability summary generation.
@@ -73,8 +71,8 @@ func (c *InfrastructureConfig) Validate() error {
 	if c.Port == 0 {
 		return fmt.Errorf("port is required")
 	}
-	if c.AIClient == nil {
-		return fmt.Errorf("AI client is required")
+	if c.AgentProvider == nil {
+		return fmt.Errorf("AgentProvider is required")
 	}
 	if c.MessageRepo == nil {
 		return fmt.Errorf("message repository is required")
@@ -142,6 +140,13 @@ func NewInfrastructure(cfg InfrastructureConfig) (*Infrastructure, error) {
 		return nil, fmt.Errorf("invalid infrastructure config: %w", err)
 	}
 
+	// Get client and extensions from AgentProvider
+	aiClient, err := cfg.AgentProvider.Client()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get AI client: %w", err)
+	}
+	extensions := cfg.AgentProvider.Extensions()
+
 	// Create repositories
 	taskRepo := repository.NewMemoryTaskRepository()
 	queueRepo := repository.NewMemoryQueueRepository(repository.DefaultQueueMaxSize)
@@ -182,7 +187,7 @@ func NewInfrastructure(cfg InfrastructureConfig) (*Infrastructure, error) {
 
 	// Register all command handlers
 	registerHandlers(cmdProcessor, processRepo, taskRepo, queueRepo, processRegistry, turnEnforcer,
-		cfg.AIClient, cfg.Extensions, beadsExec, cfg.Port, eventBus, cfg.WorkDir, cfg.Tracer,
+		aiClient, extensions, beadsExec, cfg.Port, eventBus, cfg.WorkDir, cfg.Tracer,
 		cfg.SessionRefNotifier, cfg.SoundService, cfg.SessionMetadataProvider)
 
 	// Create command submitter adapter

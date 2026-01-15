@@ -16,7 +16,6 @@ import (
 	"github.com/zjrosen/perles/internal/config"
 	"github.com/zjrosen/perles/internal/git"
 	"github.com/zjrosen/perles/internal/log"
-	"github.com/zjrosen/perles/internal/orchestration/amp"
 	"github.com/zjrosen/perles/internal/orchestration/client"
 	_ "github.com/zjrosen/perles/internal/orchestration/codex" // Register codex client
 	"github.com/zjrosen/perles/internal/orchestration/events"
@@ -56,14 +55,10 @@ type InitializerEvent struct {
 
 // InitializerConfig holds configuration for creating an Initializer.
 type InitializerConfig struct {
-	WorkDir     string
-	ClientType  string
-	CodexModel  string
-	ClaudeModel string
-	AmpModel    string
-	AmpMode     string
-	GeminiModel string
-	Timeout     time.Duration
+	WorkDir string
+	// AgentProvider creates and configures AI processes.
+	AgentProvider client.AgentProvider
+	Timeout       time.Duration
 	// Worktree configuration
 	WorktreeBaseBranch string          // Branch to base worktree on. Empty = skip worktree creation
 	WorktreeBranchName string          // Optional custom branch name (empty = auto-generate)
@@ -76,6 +71,15 @@ type InitializerConfig struct {
 	RestoredSession *session.ResumableSession // Set to restore from a previous session
 	// Sound service (pre-configured with flags and enabled sounds)
 	SoundService sound.SoundService
+}
+
+// getAgentProvider returns the AgentProvider.
+// Panics if AgentProvider is nil (it is a required field).
+func (c *InitializerConfig) getAgentProvider() client.AgentProvider {
+	if c.AgentProvider == nil {
+		panic("InitializerConfig.AgentProvider is required")
+	}
+	return c.AgentProvider
 }
 
 // InitializerResources holds the resources created during initialization.
@@ -148,6 +152,76 @@ func NewInitializer(cfg InitializerConfig) *Initializer {
 		readyChan: make(chan struct{}),
 		broker:    pubsub.NewBroker[InitializerEvent](),
 	}
+}
+
+// InitializerConfigBuilder provides a fluent builder pattern for InitializerConfig.
+// It separates static configuration (from Model) from runtime-only fields that must be set separately.
+type InitializerConfigBuilder struct {
+	cfg InitializerConfig
+}
+
+// NewInitializerConfigFromModel creates an InitializerConfigBuilder populated with
+// configuration from a Model's state. This centralizes the transformation from Model
+// state to InitializerConfig.
+//
+// Runtime-only fields (GitExecutor, RestoredSession, SoundService, Timeout) must be set
+// separately using the builder methods, as they contain runtime dependencies or computed values.
+//
+// Example:
+//
+//	cfg := NewInitializerConfigFromModel(m).
+//	    WithTimeout(timeout).
+//	    WithGitExecutor(m.gitExecutor).
+//	    WithSoundService(m.services.Sounds).
+//	    Build()
+func NewInitializerConfigFromModel(
+	workDir string,
+	agentProvider client.AgentProvider,
+	worktreeBaseBranch string,
+	worktreeCustomBranch string,
+	tracingConfig config.TracingConfig,
+	sessionStorageConfig config.SessionStorageConfig,
+) *InitializerConfigBuilder {
+	return &InitializerConfigBuilder{
+		cfg: InitializerConfig{
+			WorkDir:            workDir,
+			AgentProvider:      agentProvider,
+			WorktreeBaseBranch: worktreeBaseBranch,
+			WorktreeBranchName: worktreeCustomBranch,
+			TracingConfig:      tracingConfig,
+			SessionStorage:     sessionStorageConfig,
+		},
+	}
+}
+
+// WithTimeout sets the initialization timeout.
+// If not set, defaults to 30 seconds in NewInitializer.
+func (b *InitializerConfigBuilder) WithTimeout(timeout time.Duration) *InitializerConfigBuilder {
+	b.cfg.Timeout = timeout
+	return b
+}
+
+// WithGitExecutor sets the git executor for worktree operations.
+func (b *InitializerConfigBuilder) WithGitExecutor(executor git.GitExecutor) *InitializerConfigBuilder {
+	b.cfg.GitExecutor = executor
+	return b
+}
+
+// WithRestoredSession sets the session to restore from.
+func (b *InitializerConfigBuilder) WithRestoredSession(session *session.ResumableSession) *InitializerConfigBuilder {
+	b.cfg.RestoredSession = session
+	return b
+}
+
+// WithSoundService sets the sound service for notifications.
+func (b *InitializerConfigBuilder) WithSoundService(svc sound.SoundService) *InitializerConfigBuilder {
+	b.cfg.SoundService = svc
+	return b
+}
+
+// Build returns the completed InitializerConfig.
+func (b *InitializerConfigBuilder) Build() InitializerConfig {
+	return b.cfg
 }
 
 // Broker returns the event broker for subscribing to state changes.
@@ -594,12 +668,6 @@ func (i *Initializer) createWorktree() error {
 	return nil
 }
 
-// AIClientResult holds the result of createAIClient().
-type AIClientResult struct {
-	Client     client.HeadlessClient
-	Extensions map[string]any
-}
-
 // MCPServerResult holds the result of createMCPServer().
 // It encapsulates all components needed for MCP communication.
 type MCPServerResult struct {
@@ -608,52 +676,6 @@ type MCPServerResult struct {
 	Listener    net.Listener           // TCP listener for the HTTP server
 	CoordServer *mcp.CoordinatorServer // MCP coordinator server for direct worker messaging
 	WorkerCache *workerServerCache     // Worker server cache for worker endpoints
-}
-
-// createAIClient creates the AI client and builds the provider-specific extensions map.
-// It determines the client type from config (defaulting to Claude), creates the client,
-// and populates the extensions map with model and mode settings.
-func (i *Initializer) createAIClient() (*AIClientResult, error) {
-	// Determine client type, default to Claude if empty
-	clientType := client.ClientType(i.cfg.ClientType)
-	if clientType == "" {
-		clientType = client.ClientClaude
-	}
-
-	// Create the AI client
-	aiClient, err := client.NewClient(clientType)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create AI client: %w", err)
-	}
-
-	// Build extensions map for provider-specific configuration
-	extensions := make(map[string]any)
-	switch clientType {
-	case client.ClientClaude:
-		if i.cfg.ClaudeModel != "" {
-			extensions[client.ExtClaudeModel] = i.cfg.ClaudeModel
-		}
-	case client.ClientCodex:
-		if i.cfg.CodexModel != "" {
-			extensions[client.ExtCodexModel] = i.cfg.CodexModel
-		}
-	case client.ClientAmp:
-		if i.cfg.AmpModel != "" {
-			extensions[client.ExtAmpModel] = i.cfg.AmpModel
-		}
-		if i.cfg.AmpMode != "" {
-			extensions[amp.ExtAmpMode] = i.cfg.AmpMode
-		}
-	case client.ClientGemini:
-		if i.cfg.GeminiModel != "" {
-			extensions[client.ExtGeminiModel] = i.cfg.GeminiModel
-		}
-	}
-
-	return &AIClientResult{
-		Client:     aiClient,
-		Extensions: extensions,
-	}, nil
 }
 
 // MCPListenerResult holds the result of createMCPListener().
@@ -688,16 +710,15 @@ func (i *Initializer) createMCPListener() (*MCPListenerResult, error) {
 
 // MCPServerConfig holds the configuration for createMCPServer().
 type MCPServerConfig struct {
-	Listener     net.Listener                        // Pre-created TCP listener
-	Port         int                                 // Port the listener is bound to
-	AIClient     client.HeadlessClient               // AI client for coordinator server
-	MsgRepo      *repository.MemoryMessageRepository // Message repository for coordinator server
-	Session      *session.Session                    // Session for reflection writing
-	V2Adapter    *adapter.V2Adapter                  // V2 adapter for routing
-	TurnEnforcer mcp.ToolCallRecorder                // Turn completion enforcer for workers
-	WorkDir      string                              // Working directory
-	Extensions   map[string]any                      // Provider-specific extensions
-	Tracer       trace.Tracer                        // Tracer for distributed tracing (optional)
+	Listener      net.Listener                        // Pre-created TCP listener
+	Port          int                                 // Port the listener is bound to
+	AgentProvider client.AgentProvider                // Agent provider for coordinator server
+	MsgRepo       *repository.MemoryMessageRepository // Message repository for coordinator server
+	Session       *session.Session                    // Session for reflection writing
+	V2Adapter     *adapter.V2Adapter                  // V2 adapter for routing
+	TurnEnforcer  mcp.ToolCallRecorder                // Turn completion enforcer for workers
+	WorkDir       string                              // Working directory
+	Tracer        trace.Tracer                        // Tracer for distributed tracing (optional)
 }
 
 // createMCPServer creates the MCP server with HTTP routes for coordinator and worker endpoints.
@@ -707,16 +728,23 @@ func (i *Initializer) createMCPServer(cfg MCPServerConfig) (*MCPServerResult, er
 	if cfg.Listener == nil {
 		return nil, fmt.Errorf("listener is required")
 	}
-	if cfg.AIClient == nil {
-		return nil, fmt.Errorf("AI client is required")
+	if cfg.AgentProvider == nil {
+		return nil, fmt.Errorf("AgentProvider is required")
 	}
 	if cfg.MsgRepo == nil {
 		return nil, fmt.Errorf("message repository is required")
 	}
 
+	// Get client and extensions from provider
+	aiClient, err := cfg.AgentProvider.Client()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get AI client: %w", err)
+	}
+	extensions := cfg.AgentProvider.Extensions()
+
 	// Create coordinator server with the dynamic port and v2 adapter
 	mcpCoordServer := mcp.NewCoordinatorServerWithV2Adapter(
-		cfg.AIClient, cfg.MsgRepo, cfg.WorkDir, cfg.Port, cfg.Extensions,
+		aiClient, cfg.MsgRepo, cfg.WorkDir, cfg.Port, extensions,
 		beads.NewRealExecutor(cfg.WorkDir), cfg.V2Adapter)
 
 	// Set tracer for distributed tracing if provided
@@ -808,14 +836,9 @@ func (i *Initializer) createWorkspace() error {
 	}
 
 	// ============================================================
-	// Step 1: Create AI client
+	// Step 1: Get AgentProvider from config
 	// ============================================================
-	clientResult, err := i.createAIClient()
-	if err != nil {
-		return err
-	}
-	aiClient := clientResult.Client
-	extensions := clientResult.Extensions
+	provider := i.cfg.getAgentProvider()
 
 	// ============================================================
 	// Step 2: Create message repository for inter-agent messaging
@@ -856,9 +879,8 @@ func (i *Initializer) createWorkspace() error {
 
 	v2Infra, err := v2.NewInfrastructure(v2.InfrastructureConfig{
 		Port:                    port,
-		AIClient:                aiClient,
+		AgentProvider:           provider,
 		WorkDir:                 effectiveWorkDir, // Use worktree path when enabled
-		Extensions:              extensions,
 		MessageRepo:             msgRepo,
 		SessionID:               sess.ID,
 		SessionDir:              sessionDir, // Centralized session storage path
@@ -935,16 +957,15 @@ func (i *Initializer) createWorkspace() error {
 	// Step 6: Create MCP server with HTTP routes
 	// ============================================================
 	mcpResult, err := i.createMCPServer(MCPServerConfig{
-		Listener:     listenerResult.Listener,
-		Port:         port,
-		AIClient:     aiClient,
-		MsgRepo:      msgRepo,
-		Session:      sess,
-		V2Adapter:    v2Infra.Core.Adapter,
-		TurnEnforcer: v2Infra.Internal.TurnEnforcer,
-		WorkDir:      effectiveWorkDir, // Use worktree path when enabled
-		Extensions:   extensions,
-		Tracer:       tracer, // nil when tracing disabled - server handles this gracefully
+		Listener:      listenerResult.Listener,
+		Port:          port,
+		AgentProvider: provider,
+		MsgRepo:       msgRepo,
+		Session:       sess,
+		V2Adapter:     v2Infra.Core.Adapter,
+		TurnEnforcer:  v2Infra.Internal.TurnEnforcer,
+		WorkDir:       effectiveWorkDir, // Use worktree path when enabled
+		Tracer:        tracer,           // nil when tracing disabled - server handles this gracefully
 	})
 	if err != nil {
 		_ = listenerResult.Listener.Close()

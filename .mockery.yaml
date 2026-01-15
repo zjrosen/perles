@@ -18,6 +18,7 @@ packages:
       Clipboard:
   github.com/zjrosen/perles/internal/orchestration/client:
     interfaces:
+      AgentProvider:
       HeadlessClient:
       HeadlessProcess:
   github.com/zjrosen/perles/internal/git:

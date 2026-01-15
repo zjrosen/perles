@@ -46,8 +46,6 @@ const (
 	// ExtClaudeModel specifies the Claude model (string: "sonnet", "opus", "haiku").
 	ExtClaudeModel = "claude.model"
 
-	// ExtAmpThreadID specifies the Amp thread reference (string).
-	ExtAmpThreadID = "amp.thread_id"
 	// ExtAmpModel specifies the Amp model selection (string).
 	ExtAmpModel = "amp.model"
 
@@ -55,10 +53,8 @@ const (
 	ExtCodexModel = "codex.model"
 	// ExtCodexSandbox specifies the sandbox mode (string: "read-only", "workspace-write", "danger-full-access").
 	ExtCodexSandbox = "codex.sandbox"
-	// ExtCodexSkipGitCheck allows running outside git repos (bool).
-	ExtCodexSkipGitCheck = "codex.skip_git_check"
 
-	// ExtGeminiModel specifies the Gemini model (string: "gemini-2.5-pro", "gemini-2.5-flash").
+	// ExtGeminiModel specifies the Gemini model (string: "gemini-3-pro-preview", "gemini-2.5-flash").
 	ExtGeminiModel = "gemini.model"
 )
 
@@ -84,15 +80,28 @@ func (c *Config) CodexModel() string {
 	return "gpt-5.2-codex"
 }
 
-// GeminiModel returns the Gemini model from Extensions, or "gemini-2.5-pro" as default.
+// GeminiModel returns the Gemini model from Extensions, or "gemini-3-pro-preview" as default.
 func (c *Config) GeminiModel() string {
 	if c.Extensions == nil {
-		return "gemini-2.5-pro"
+		return "gemini-3-pro-preview"
 	}
 	if v, ok := c.Extensions[ExtGeminiModel].(string); ok && v != "" {
 		return v
 	}
-	return "gemini-2.5-pro"
+
+	return "gemini-3-pro-preview"
+}
+
+// AmpModel returns the Amp model from Extensions, or "opus" as default.
+func (c *Config) AmpModel() string {
+	if c.Extensions == nil {
+		return "opus"
+	}
+	if v, ok := c.Extensions[ExtAmpModel].(string); ok && v != "" {
+		return v
+	}
+
+	return "opus"
 }
 
 // SetExtension sets a provider-specific extension value.
@@ -123,4 +132,56 @@ func (c *Config) GetExtensionString(key string) string {
 		return v
 	}
 	return ""
+}
+
+// ClientConfigs groups all client-specific configuration structs.
+// This is used by NewFromClientConfigs to consolidate extensions building logic.
+type ClientConfigs struct {
+	ClaudeModel string // Claude model (sonnet, opus, haiku)
+	CodexModel  string // Codex model (gpt-5.2-codex, o4-mini)
+	AmpModel    string // Amp model (opus, sonnet)
+	AmpMode     string // Amp mode (free, rush, smart)
+	GeminiModel string // Gemini model (gemini-3-pro-preview, gemini-2.5-flash)
+}
+
+// NewFromClientConfigs builds a provider-specific Extensions map based on the client type.
+//
+// The function takes the client type and a ClientConfigs struct containing all possible
+// client-specific settings, and returns an Extensions map with only the relevant settings
+// for the specified client type.
+//
+// Example:
+//
+//	extensions := client.NewFromClientConfigs(client.ClientClaude, client.ClientConfigs{
+//	    ClaudeModel: "opus",
+//	})
+//	// Result: map[string]any{"claude.model": "opus"}
+func NewFromClientConfigs(clientType ClientType, configs ClientConfigs) map[string]any {
+	extensions := make(map[string]any)
+
+	switch clientType {
+	case ClientClaude:
+		if configs.ClaudeModel != "" {
+			extensions[ExtClaudeModel] = configs.ClaudeModel
+		}
+	case ClientCodex:
+		if configs.CodexModel != "" {
+			extensions[ExtCodexModel] = configs.CodexModel
+		}
+	case ClientAmp:
+		if configs.AmpModel != "" {
+			extensions[ExtAmpModel] = configs.AmpModel
+		}
+		if configs.AmpMode != "" {
+			// Note: Amp mode key is defined in amp package, but we use the literal here
+			// to avoid import cycle. The value is "amp.mode".
+			extensions["amp.mode"] = configs.AmpMode
+		}
+	case ClientGemini:
+		if configs.GeminiModel != "" {
+			extensions[ExtGeminiModel] = configs.GeminiModel
+		}
+	}
+
+	return extensions
 }
