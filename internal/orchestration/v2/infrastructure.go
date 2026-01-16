@@ -349,7 +349,7 @@ func registerHandlers(
 
 	// MessageDeliverer for delivering messages to processes via session resume
 	sessionProvider := handler.NewProcessRegistrySessionProvider(processRegistry, aiClient, workDir, port)
-	messageDeliverer := integration.NewProcessSessionDeliverer(sessionProvider, aiClient, processRegistry)
+	messageDeliverer := integration.NewProcessSessionDeliverer(sessionProvider, aiClient, processRegistry, extensions)
 
 	cmdProcessor.RegisterHandler(command.CmdSpawnProcess,
 		handler.NewSpawnProcessHandler(processRepo, processRegistry,
