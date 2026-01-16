@@ -564,32 +564,6 @@ func TestReportVerdictHandler_DeniedTransitionsImplementerToAddressingFeedback(t
 	require.Equal(t, events.ProcessPhaseAddressingFeedback, *updatedImplementer.Phase)
 }
 
-func TestReportVerdictHandler_FailsIfNotReviewingPhase(t *testing.T) {
-	processRepo := repository.NewMemoryProcessRepository()
-	taskRepo := repository.NewMemoryTaskRepository()
-	queueRepo := repository.NewMemoryQueueRepository(0)
-	bdExecutor := mocks.NewMockBeadsExecutor(t)
-
-	// Add worker in wrong phase
-	worker := &repository.Process{
-		ID:        "worker-2",
-		Role:      repository.RoleWorker,
-		Status:    repository.StatusWorking,
-		Phase:     phasePtr(events.ProcessPhaseImplementing), // Wrong phase
-		TaskID:    "perles-abc1.2",
-		CreatedAt: time.Now(),
-	}
-	processRepo.AddProcess(worker)
-
-	handler := NewReportVerdictHandler(processRepo, taskRepo, queueRepo, WithReportVerdictBDExecutor(bdExecutor))
-
-	cmd := command.NewReportVerdictCommand(command.SourceMCPTool, "worker-2", command.VerdictApproved, "")
-	_, err := handler.Handle(context.Background(), cmd)
-
-	require.Error(t, err, "expected error for non-reviewing phase")
-	require.ErrorIs(t, err, types.ErrProcessNotReviewing)
-}
-
 func TestReportVerdictHandler_FailsForInvalidVerdict(t *testing.T) {
 	processRepo := repository.NewMemoryProcessRepository()
 	taskRepo := repository.NewMemoryTaskRepository()

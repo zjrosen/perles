@@ -313,12 +313,10 @@ func (h *ReportVerdictHandler) Handle(ctx context.Context, cmd command.Command) 
 
 // handleVerdict executes the report verdict logic with optional span event recording.
 func (h *ReportVerdictHandler) handleVerdict(_ context.Context, verdictCmd *command.ReportVerdictCommand, span trace.Span) (*command.CommandResult, error) {
-	// 1. Validate verdict value
 	if !verdictCmd.Verdict.IsValid() {
 		return nil, types.ErrInvalidVerdict
 	}
 
-	// 2. Validate reviewer phase == PhaseReviewing
 	reviewer, err := h.processRepo.Get(verdictCmd.WorkerID)
 	if err != nil {
 		if errors.Is(err, repository.ErrProcessNotFound) {
@@ -327,11 +325,6 @@ func (h *ReportVerdictHandler) handleVerdict(_ context.Context, verdictCmd *comm
 		return nil, fmt.Errorf("failed to get reviewer: %w", err)
 	}
 
-	if reviewer.Phase == nil || *reviewer.Phase != events.ProcessPhaseReviewing {
-		return nil, types.ErrProcessNotReviewing
-	}
-
-	// 3. Get task being reviewed
 	if reviewer.TaskID == "" {
 		return nil, types.ErrNoTaskAssigned
 	}
