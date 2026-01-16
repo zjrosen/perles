@@ -1,6 +1,7 @@
 package orchestration
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -93,7 +94,7 @@ func TestWorktreeIntegration_BranchAlreadyCheckedOut_Error(t *testing.T) {
 	mockGit.EXPECT().IsGitRepo().Return(true)
 	mockGit.EXPECT().PruneWorktrees().Return(nil)
 	mockGit.EXPECT().DetermineWorktreePath(sessionID).Return(worktreePath, nil)
-	mockGit.EXPECT().CreateWorktree(worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).
+	mockGit.EXPECT().CreateWorktreeWithContext(mock.Anything, worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).
 		Return(fmt.Errorf("fatal: '%s' is already checked out at '/some/other/path'", expectedBranch))
 
 	init := NewInitializer(InitializerConfig{
@@ -106,7 +107,7 @@ func TestWorktreeIntegration_BranchAlreadyCheckedOut_Error(t *testing.T) {
 	init.sessionID = sessionID
 	init.mu.Unlock()
 
-	err := init.createWorktree()
+	err := init.createWorktreeWithContext(context.Background())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to create worktree")
 	require.Contains(t, err.Error(), "already checked out")
@@ -124,8 +125,8 @@ func TestWorktreeIntegration_BranchAlreadyCheckedOut_UniqueSessionBranch(t *test
 	mockGit.EXPECT().IsGitRepo().Return(true)
 	mockGit.EXPECT().PruneWorktrees().Return(nil)
 	mockGit.EXPECT().DetermineWorktreePath(sessionID).Return(worktreePath, nil)
-	mockGit.EXPECT().CreateWorktree(worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).
-		Run(func(path, newBranch, baseBranch string) {
+	mockGit.EXPECT().CreateWorktreeWithContext(mock.Anything, worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).
+		Run(func(ctx context.Context, path, newBranch, baseBranch string) {
 			capturedBranch = newBranch
 		}).
 		Return(nil)
@@ -140,7 +141,7 @@ func TestWorktreeIntegration_BranchAlreadyCheckedOut_UniqueSessionBranch(t *test
 	init.sessionID = sessionID
 	init.mu.Unlock()
 
-	err := init.createWorktree()
+	err := init.createWorktreeWithContext(context.Background())
 	require.NoError(t, err)
 	// Branch name should be unique based on session ID
 	require.Equal(t, "perles-session-unique-s", capturedBranch)
@@ -177,7 +178,7 @@ func TestWorktreeIntegration_UncommittedChanges_OperationStillAllowed(t *testing
 	mockGit.EXPECT().IsGitRepo().Return(true)
 	mockGit.EXPECT().PruneWorktrees().Return(nil)
 	mockGit.EXPECT().DetermineWorktreePath(sessionID).Return(worktreePath, nil)
-	mockGit.EXPECT().CreateWorktree(worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(nil)
+	mockGit.EXPECT().CreateWorktreeWithContext(mock.Anything, worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(nil)
 	// Note: HasUncommittedChanges is NOT checked during createWorktree -
 	// it's checked in the UI flow before deciding to enable worktree
 
@@ -192,7 +193,7 @@ func TestWorktreeIntegration_UncommittedChanges_OperationStillAllowed(t *testing
 	init.mu.Unlock()
 
 	// Worktree creation should succeed - uncommitted changes are in main, not worktree
-	err := init.createWorktree()
+	err := init.createWorktreeWithContext(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, worktreePath, init.WorktreePath())
 }
@@ -217,7 +218,7 @@ func TestWorktreeIntegration_WorktreePathExists_PruneFirst(t *testing.T) {
 		pruneCallCount++
 	}).Return(nil)
 	mockGit.EXPECT().DetermineWorktreePath(sessionID).Return(worktreePath, nil)
-	mockGit.EXPECT().CreateWorktree(worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(nil)
+	mockGit.EXPECT().CreateWorktreeWithContext(mock.Anything, worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(nil)
 
 	init := NewInitializer(InitializerConfig{
 		WorkDir:            workDir,
@@ -229,7 +230,7 @@ func TestWorktreeIntegration_WorktreePathExists_PruneFirst(t *testing.T) {
 	init.sessionID = sessionID
 	init.mu.Unlock()
 
-	err := init.createWorktree()
+	err := init.createWorktreeWithContext(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, 1, pruneCallCount, "PruneWorktrees should be called before CreateWorktree")
 }
@@ -245,7 +246,7 @@ func TestWorktreeIntegration_WorktreePathExists_Error(t *testing.T) {
 	mockGit.EXPECT().IsGitRepo().Return(true)
 	mockGit.EXPECT().PruneWorktrees().Return(nil) // Prune doesn't help - path exists as regular dir
 	mockGit.EXPECT().DetermineWorktreePath(sessionID).Return(worktreePath, nil)
-	mockGit.EXPECT().CreateWorktree(worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).
+	mockGit.EXPECT().CreateWorktreeWithContext(mock.Anything, worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).
 		Return(fmt.Errorf("fatal: '%s' already exists", worktreePath))
 
 	init := NewInitializer(InitializerConfig{
@@ -258,7 +259,7 @@ func TestWorktreeIntegration_WorktreePathExists_Error(t *testing.T) {
 	init.sessionID = sessionID
 	init.mu.Unlock()
 
-	err := init.createWorktree()
+	err := init.createWorktreeWithContext(context.Background())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to create worktree")
 	require.Contains(t, err.Error(), "already exists")
@@ -275,7 +276,7 @@ func TestWorktreeIntegration_WorktreePathExists_PruneThenSucceed(t *testing.T) {
 	mockGit.EXPECT().IsGitRepo().Return(true)
 	mockGit.EXPECT().PruneWorktrees().Return(nil) // Prune removes stale reference
 	mockGit.EXPECT().DetermineWorktreePath(sessionID).Return(worktreePath, nil)
-	mockGit.EXPECT().CreateWorktree(worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(nil)
+	mockGit.EXPECT().CreateWorktreeWithContext(mock.Anything, worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(nil)
 
 	init := NewInitializer(InitializerConfig{
 		WorkDir:            workDir,
@@ -287,7 +288,7 @@ func TestWorktreeIntegration_WorktreePathExists_PruneThenSucceed(t *testing.T) {
 	init.sessionID = sessionID
 	init.mu.Unlock()
 
-	err := init.createWorktree()
+	err := init.createWorktreeWithContext(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, worktreePath, init.WorktreePath())
 }
@@ -310,8 +311,8 @@ func TestWorktreeIntegration_DetachedHead_AutoBranch(t *testing.T) {
 	mockGit.EXPECT().IsGitRepo().Return(true)
 	mockGit.EXPECT().PruneWorktrees().Return(nil)
 	mockGit.EXPECT().DetermineWorktreePath(sessionID).Return(worktreePath, nil)
-	mockGit.EXPECT().CreateWorktree(worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).
-		Run(func(path, newBranch, baseBranch string) {
+	mockGit.EXPECT().CreateWorktreeWithContext(mock.Anything, worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).
+		Run(func(ctx context.Context, path, newBranch, baseBranch string) {
 			capturedBranch = newBranch
 		}).
 		Return(nil)
@@ -326,7 +327,7 @@ func TestWorktreeIntegration_DetachedHead_AutoBranch(t *testing.T) {
 	init.sessionID = sessionID
 	init.mu.Unlock()
 
-	err := init.createWorktree()
+	err := init.createWorktreeWithContext(context.Background())
 	require.NoError(t, err)
 	// Auto-generated branch name should be based on session ID
 	require.Equal(t, "perles-session-detached", capturedBranch)
@@ -356,8 +357,8 @@ func TestWorktreeIntegration_DetachedHead_ConfiguredBaseBranchPassedCorrectly(t 
 	mockGit.EXPECT().IsGitRepo().Return(true)
 	mockGit.EXPECT().PruneWorktrees().Return(nil)
 	mockGit.EXPECT().DetermineWorktreePath(sessionID).Return(worktreePath, nil)
-	mockGit.EXPECT().CreateWorktree(worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).
-		Run(func(path, newBranch, baseBranch string) {
+	mockGit.EXPECT().CreateWorktreeWithContext(mock.Anything, worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).
+		Run(func(ctx context.Context, path, newBranch, baseBranch string) {
 			capturedNewBranch = newBranch
 			capturedBaseBranch = baseBranch
 		}).
@@ -373,7 +374,7 @@ func TestWorktreeIntegration_DetachedHead_ConfiguredBaseBranchPassedCorrectly(t 
 	init.sessionID = sessionID
 	init.mu.Unlock()
 
-	err := init.createWorktree()
+	err := init.createWorktreeWithContext(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, expectedNewBranch, capturedNewBranch)     // Auto-generated branch
 	require.Equal(t, configuredBaseBranch, capturedBaseBranch) // Base branch passed correctly
@@ -403,7 +404,7 @@ func TestWorktreeIntegration_NotGitRepo_SkipWorktree(t *testing.T) {
 	init.sessionID = "test-session-id"
 	init.mu.Unlock()
 
-	err := init.createWorktree()
+	err := init.createWorktreeWithContext(context.Background())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not a git repository")
 }
@@ -478,7 +479,7 @@ func TestWorktreeIntegration_BareRepo_WorktreeCreationFails(t *testing.T) {
 	mockGit.EXPECT().IsGitRepo().Return(true)
 	mockGit.EXPECT().PruneWorktrees().Return(nil)
 	mockGit.EXPECT().DetermineWorktreePath(sessionID).Return(worktreePath, nil)
-	mockGit.EXPECT().CreateWorktree(worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).
+	mockGit.EXPECT().CreateWorktreeWithContext(mock.Anything, worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).
 		Return(fmt.Errorf("fatal: this operation must be run in a work tree"))
 
 	init := NewInitializer(InitializerConfig{
@@ -491,7 +492,7 @@ func TestWorktreeIntegration_BareRepo_WorktreeCreationFails(t *testing.T) {
 	init.sessionID = sessionID
 	init.mu.Unlock()
 
-	err := init.createWorktree()
+	err := init.createWorktreeWithContext(context.Background())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to create worktree")
 }
@@ -514,7 +515,7 @@ func TestWorktreeIntegration_GracefulDegradation_Skip(t *testing.T) {
 	mockGit.EXPECT().IsGitRepo().Return(true)
 	mockGit.EXPECT().PruneWorktrees().Return(nil)
 	mockGit.EXPECT().DetermineWorktreePath(sessionID).Return(worktreePath, nil)
-	mockGit.EXPECT().CreateWorktree(worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).
+	mockGit.EXPECT().CreateWorktreeWithContext(mock.Anything, worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).
 		Return(fmt.Errorf("some unexpected git error"))
 
 	init := NewInitializer(InitializerConfig{
@@ -528,7 +529,7 @@ func TestWorktreeIntegration_GracefulDegradation_Skip(t *testing.T) {
 	init.mu.Unlock()
 
 	// First attempt fails
-	err := init.createWorktree()
+	err := init.createWorktreeWithContext(context.Background())
 	require.Error(t, err)
 
 	// User chooses to skip - simulate by creating new initializer with worktree disabled
@@ -554,7 +555,7 @@ func TestWorktreeIntegration_GracefulDegradation_RetryOption(t *testing.T) {
 	mockGitFail.EXPECT().IsGitRepo().Return(true)
 	mockGitFail.EXPECT().PruneWorktrees().Return(nil)
 	mockGitFail.EXPECT().DetermineWorktreePath(sessionID).Return(worktreePath, nil)
-	mockGitFail.EXPECT().CreateWorktree(worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).
+	mockGitFail.EXPECT().CreateWorktreeWithContext(mock.Anything, worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).
 		Return(fmt.Errorf("temporary network error"))
 
 	initFail := NewInitializer(InitializerConfig{
@@ -568,7 +569,7 @@ func TestWorktreeIntegration_GracefulDegradation_RetryOption(t *testing.T) {
 	initFail.mu.Unlock()
 
 	// First attempt fails
-	err := initFail.createWorktree()
+	err := initFail.createWorktreeWithContext(context.Background())
 	require.Error(t, err)
 
 	// Second mock for success (simulating retry with new executor)
@@ -576,7 +577,7 @@ func TestWorktreeIntegration_GracefulDegradation_RetryOption(t *testing.T) {
 	mockGitSuccess.EXPECT().IsGitRepo().Return(true)
 	mockGitSuccess.EXPECT().PruneWorktrees().Return(nil)
 	mockGitSuccess.EXPECT().DetermineWorktreePath(sessionID).Return(worktreePath, nil)
-	mockGitSuccess.EXPECT().CreateWorktree(worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(nil)
+	mockGitSuccess.EXPECT().CreateWorktreeWithContext(mock.Anything, worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(nil)
 
 	initSuccess := NewInitializer(InitializerConfig{
 		WorkDir:            workDir,
@@ -589,7 +590,7 @@ func TestWorktreeIntegration_GracefulDegradation_RetryOption(t *testing.T) {
 	initSuccess.mu.Unlock()
 
 	// Retry succeeds
-	err = initSuccess.createWorktree()
+	err = initSuccess.createWorktreeWithContext(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, worktreePath, initSuccess.WorktreePath())
 }
@@ -605,7 +606,7 @@ func TestWorktreeIntegration_GracefulDegradation_ErrorPreserved(t *testing.T) {
 	mockGit.EXPECT().IsGitRepo().Return(true)
 	mockGit.EXPECT().PruneWorktrees().Return(nil)
 	mockGit.EXPECT().DetermineWorktreePath(sessionID).Return(worktreePath, nil)
-	mockGit.EXPECT().CreateWorktree(worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).
+	mockGit.EXPECT().CreateWorktreeWithContext(mock.Anything, worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).
 		Return(fmt.Errorf("%s", expectedErrorMsg))
 
 	init := NewInitializer(InitializerConfig{
@@ -618,7 +619,7 @@ func TestWorktreeIntegration_GracefulDegradation_ErrorPreserved(t *testing.T) {
 	init.sessionID = sessionID
 	init.mu.Unlock()
 
-	err := init.createWorktree()
+	err := init.createWorktreeWithContext(context.Background())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), expectedErrorMsg, "original error should be preserved")
 }
@@ -639,7 +640,7 @@ func TestWorktreeIntegration_EndToEnd_Success(t *testing.T) {
 	mockGit.EXPECT().IsGitRepo().Return(true)
 	mockGit.EXPECT().PruneWorktrees().Return(nil)
 	mockGit.EXPECT().DetermineWorktreePath(sessionID).Return(worktreePath, nil)
-	mockGit.EXPECT().CreateWorktree(worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(nil)
+	mockGit.EXPECT().CreateWorktreeWithContext(mock.Anything, worktreePath, mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(nil)
 
 	init := NewInitializer(InitializerConfig{
 		WorkDir:            workDir,
@@ -652,7 +653,7 @@ func TestWorktreeIntegration_EndToEnd_Success(t *testing.T) {
 	init.mu.Unlock()
 
 	// Execute worktree creation
-	err := init.createWorktree()
+	err := init.createWorktreeWithContext(context.Background())
 
 	// Verify success
 	require.NoError(t, err)
@@ -672,7 +673,7 @@ func TestWorktreeIntegration_EndToEnd_WithCustomBaseBranch(t *testing.T) {
 	mockGit.EXPECT().IsGitRepo().Return(true)
 	mockGit.EXPECT().PruneWorktrees().Return(nil)
 	mockGit.EXPECT().DetermineWorktreePath(sessionID).Return(worktreePath, nil)
-	mockGit.EXPECT().CreateWorktree(worktreePath, mock.AnythingOfType("string"), customBaseBranch).Return(nil)
+	mockGit.EXPECT().CreateWorktreeWithContext(mock.Anything, worktreePath, mock.AnythingOfType("string"), customBaseBranch).Return(nil)
 
 	init := NewInitializer(InitializerConfig{
 		WorkDir:            workDir,
@@ -684,7 +685,7 @@ func TestWorktreeIntegration_EndToEnd_WithCustomBaseBranch(t *testing.T) {
 	init.sessionID = sessionID
 	init.mu.Unlock()
 
-	err := init.createWorktree()
+	err := init.createWorktreeWithContext(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, worktreePath, init.WorktreePath())
 	require.Equal(t, expectedNewBranch, init.WorktreeBranch()) // Auto-generated branch name
@@ -892,7 +893,7 @@ func TestWorktreeIntegration_CustomBranchName_UsesProvided(t *testing.T) {
 	mockGit.EXPECT().PruneWorktrees().Return(nil)
 	mockGit.EXPECT().DetermineWorktreePath(sessionID).Return(worktreePath, nil)
 	// The key assertion: branch should be the custom name, not auto-generated
-	mockGit.EXPECT().CreateWorktree(worktreePath, customBranch, "main").Return(nil)
+	mockGit.EXPECT().CreateWorktreeWithContext(mock.Anything, worktreePath, customBranch, "main").Return(nil)
 
 	init := NewInitializer(InitializerConfig{
 		WorkDir:            workDir,
@@ -905,7 +906,7 @@ func TestWorktreeIntegration_CustomBranchName_UsesProvided(t *testing.T) {
 	init.sessionID = sessionID
 	init.mu.Unlock()
 
-	err := init.createWorktree()
+	err := init.createWorktreeWithContext(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, worktreePath, init.WorktreePath())
 	require.Equal(t, customBranch, init.WorktreeBranch())
@@ -923,7 +924,7 @@ func TestWorktreeIntegration_CustomBranchName_FallbackWhenEmpty(t *testing.T) {
 	mockGit.EXPECT().PruneWorktrees().Return(nil)
 	mockGit.EXPECT().DetermineWorktreePath(sessionID).Return(worktreePath, nil)
 	// The key assertion: branch should be auto-generated format
-	mockGit.EXPECT().CreateWorktree(worktreePath, expectedBranch, "main").Return(nil)
+	mockGit.EXPECT().CreateWorktreeWithContext(mock.Anything, worktreePath, expectedBranch, "main").Return(nil)
 
 	init := NewInitializer(InitializerConfig{
 		WorkDir:            workDir,
@@ -936,7 +937,7 @@ func TestWorktreeIntegration_CustomBranchName_FallbackWhenEmpty(t *testing.T) {
 	init.sessionID = sessionID
 	init.mu.Unlock()
 
-	err := init.createWorktree()
+	err := init.createWorktreeWithContext(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, worktreePath, init.WorktreePath())
 	require.Equal(t, expectedBranch, init.WorktreeBranch())
@@ -953,7 +954,7 @@ func TestWorktreeIntegration_CustomBranchName_ShortSessionID(t *testing.T) {
 	mockGit.EXPECT().IsGitRepo().Return(true)
 	mockGit.EXPECT().PruneWorktrees().Return(nil)
 	mockGit.EXPECT().DetermineWorktreePath(sessionID).Return(worktreePath, nil)
-	mockGit.EXPECT().CreateWorktree(worktreePath, expectedBranch, "main").Return(nil)
+	mockGit.EXPECT().CreateWorktreeWithContext(mock.Anything, worktreePath, expectedBranch, "main").Return(nil)
 
 	init := NewInitializer(InitializerConfig{
 		WorkDir:            workDir,
@@ -966,7 +967,7 @@ func TestWorktreeIntegration_CustomBranchName_ShortSessionID(t *testing.T) {
 	init.sessionID = sessionID
 	init.mu.Unlock()
 
-	err := init.createWorktree()
+	err := init.createWorktreeWithContext(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, expectedBranch, init.WorktreeBranch())
 }
@@ -982,7 +983,7 @@ func TestWorktreeIntegration_CustomBranchName_WithSlashes(t *testing.T) {
 	mockGit.EXPECT().IsGitRepo().Return(true)
 	mockGit.EXPECT().PruneWorktrees().Return(nil)
 	mockGit.EXPECT().DetermineWorktreePath(sessionID).Return(worktreePath, nil)
-	mockGit.EXPECT().CreateWorktree(worktreePath, customBranch, "develop").Return(nil)
+	mockGit.EXPECT().CreateWorktreeWithContext(mock.Anything, worktreePath, customBranch, "develop").Return(nil)
 
 	init := NewInitializer(InitializerConfig{
 		WorkDir:            workDir,
@@ -995,7 +996,7 @@ func TestWorktreeIntegration_CustomBranchName_WithSlashes(t *testing.T) {
 	init.sessionID = sessionID
 	init.mu.Unlock()
 
-	err := init.createWorktree()
+	err := init.createWorktreeWithContext(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, customBranch, init.WorktreeBranch())
 }

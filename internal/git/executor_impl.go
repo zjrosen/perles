@@ -37,6 +37,9 @@ var (
 
 	// ErrInvalidBranchName indicates the branch name format is invalid per git check-ref-format.
 	ErrInvalidBranchName = errors.New("invalid branch name format")
+
+	// ErrWorktreeTimeout is returned when a git worktree operation times out.
+	ErrWorktreeTimeout = errors.New("git worktree timed out")
 )
 
 // Compile-time check that RealExecutor implements GitExecutor.
@@ -331,9 +334,11 @@ func isWritable(dir string) bool {
 	return true
 }
 
-// CreateWorktree creates a new worktree at the specified path.
+// CreateWorktreeWithContext creates a new worktree at the specified path with context support.
 // If branch is empty, creates a new branch based on HEAD.
-func (e *RealExecutor) CreateWorktree(path, newBranch, baseBranch string) error {
+// The context can be used to cancel/timeout the operation.
+// Returns ErrWorktreeTimeout if the context deadline is exceeded.
+func (e *RealExecutor) CreateWorktreeWithContext(ctx context.Context, path, newBranch, baseBranch string) error {
 	// git worktree add -b <new-branch> <path> [<start-point>]
 	// -b creates a new branch; baseBranch is the starting point
 	args := []string{"worktree", "add", "-b", newBranch, path}
@@ -344,7 +349,15 @@ func (e *RealExecutor) CreateWorktree(path, newBranch, baseBranch string) error 
 	}
 	// If baseBranch is empty, git uses current HEAD as starting point
 
-	return e.runGit(args...)
+	_, err := e.runGitOutputWithContext(ctx, args...)
+	if err != nil {
+		// Check if the error is due to context timeout/cancellation
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("%w: git %s", ErrWorktreeTimeout, strings.Join(args, " "))
+		}
+		return err
+	}
+	return nil
 }
 
 // RemoveWorktree removes a worktree at the specified path.

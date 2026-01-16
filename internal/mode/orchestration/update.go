@@ -14,7 +14,6 @@ import (
 	"github.com/zjrosen/perles/internal/flags"
 	"github.com/zjrosen/perles/internal/git"
 	"github.com/zjrosen/perles/internal/log"
-	"github.com/zjrosen/perles/internal/orchestration/client"
 	"github.com/zjrosen/perles/internal/orchestration/events"
 	"github.com/zjrosen/perles/internal/orchestration/mcp"
 	"github.com/zjrosen/perles/internal/orchestration/message"
@@ -1061,17 +1060,10 @@ func (m Model) handleStartCoordinator() (Model, tea.Cmd) {
 	// Blur input during initialization - it will be re-focused when InitReady
 	m.input.Blur()
 
-	// Determine timeout based on client type.
-	// Codex and OpenCode take longer to boot due to model startup overhead.
-	timeout := 20 * time.Second
-	switch m.agentProvider.Type() {
-	case client.ClientCodex, client.ClientOpenCode:
-		timeout = 60 * time.Second
-	}
-
 	// Create InitializerConfig using builder pattern.
 	// The builder centralizes Model→InitializerConfig transformation while
-	// allowing runtime-only fields (Timeout, GitExecutor, etc.) to be set separately.
+	// allowing runtime-only fields (Timeouts, GitExecutor, etc.) to be set separately.
+	// Timeouts are loaded from config.yaml and passed through timeoutsConfig.
 	initConfig := NewInitializerConfigFromModel(
 		m.workDir,
 		m.agentProvider,
@@ -1080,7 +1072,7 @@ func (m Model) handleStartCoordinator() (Model, tea.Cmd) {
 		m.tracingConfig,
 		m.sessionStorageConfig,
 	).
-		WithTimeout(timeout).
+		WithTimeouts(m.timeoutsConfig).
 		WithGitExecutor(m.gitExecutor).
 		WithRestoredSession(m.resumedSession).
 		WithSoundService(m.services.Sounds).

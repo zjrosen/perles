@@ -60,7 +60,7 @@ type InitializerConfig struct {
 	WorkDir string
 	// AgentProvider creates and configures AI processes.
 	AgentProvider client.AgentProvider
-	Timeout       time.Duration
+	Timeouts      config.TimeoutsConfig
 	// Worktree configuration
 	WorktreeBaseBranch string          // Branch to base worktree on. Empty = skip worktree creation
 	WorktreeBranchName string          // Optional custom branch name (empty = auto-generate)
@@ -143,9 +143,21 @@ type Initializer struct {
 }
 
 // NewInitializer creates a new Initializer with the given configuration.
+// Applies defaults from config.DefaultTimeoutsConfig() for any zero-value timeout fields.
 func NewInitializer(cfg InitializerConfig) *Initializer {
-	if cfg.Timeout == 0 {
-		cfg.Timeout = 30 * time.Second
+	// Apply defaults for zero-value timeout fields
+	defaults := config.DefaultTimeoutsConfig()
+	if cfg.Timeouts.WorktreeCreation == 0 {
+		cfg.Timeouts.WorktreeCreation = defaults.WorktreeCreation
+	}
+	if cfg.Timeouts.CoordinatorStart == 0 {
+		cfg.Timeouts.CoordinatorStart = defaults.CoordinatorStart
+	}
+	if cfg.Timeouts.WorkspaceSetup == 0 {
+		cfg.Timeouts.WorkspaceSetup = defaults.WorkspaceSetup
+	}
+	if cfg.Timeouts.MaxTotal == 0 {
+		cfg.Timeouts.MaxTotal = defaults.MaxTotal
 	}
 
 	return &Initializer{
@@ -196,10 +208,18 @@ func NewInitializerConfigFromModel(
 	}
 }
 
-// WithTimeout sets the initialization timeout.
-// If not set, defaults to 30 seconds in NewInitializer.
+// WithTimeouts sets all timeout configuration values.
+// If not set, NewInitializer applies defaults from config.DefaultTimeoutsConfig().
+func (b *InitializerConfigBuilder) WithTimeouts(timeouts config.TimeoutsConfig) *InitializerConfigBuilder {
+	b.cfg.Timeouts = timeouts
+	return b
+}
+
+// WithTimeout sets the CoordinatorStart timeout for backwards compatibility.
+// New code should prefer WithTimeouts() to set all timeout values.
+// If not set, defaults are applied in NewInitializer.
 func (b *InitializerConfigBuilder) WithTimeout(timeout time.Duration) *InitializerConfigBuilder {
-	b.cfg.Timeout = timeout
+	b.cfg.Timeouts.CoordinatorStart = timeout
 	return b
 }
 
@@ -251,6 +271,12 @@ func (i *Initializer) FailedAtPhase() InitPhase {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
 	return i.failedAtPhase
+}
+
+// Timeouts returns the timeout configuration used by this Initializer.
+// Useful for displaying phase-specific timeout durations in error messages.
+func (i *Initializer) Timeouts() config.TimeoutsConfig {
+	return i.cfg.Timeouts
 }
 
 // WorktreePath returns the path to the created worktree, or empty string if disabled.
@@ -415,15 +441,41 @@ func (i *Initializer) Cancel() {
 
 // run is the main initialization goroutine.
 // With lazy spawning, initialization completes when coordinator's first turn finishes.
+//
+// Timeout architecture:
+// - Each phase (worktree, workspace, coordinator) has its own context.WithTimeout()
+// - A parallel maxTotalTimer enforces a hard ceiling on total initialization time
+// - The maxTotalTimer goroutine listens on readyChan to exit cleanly on success
 func (i *Initializer) run() {
-	// Start timeout timer
-	timeoutTimer := time.NewTimer(i.cfg.Timeout)
-	defer timeoutTimer.Stop()
+	// Start maxTotalTimer as a safety net running in parallel with per-phase timeouts.
+	// This provides hard-cut semantics: if MaxTotal fires, initialization fails immediately.
+	maxTotalTimer := time.NewTimer(i.cfg.Timeouts.MaxTotal)
+	defer maxTotalTimer.Stop()
+
+	// Launch goroutine to monitor maxTotalTimer.
+	// This goroutine exits cleanly when:
+	// 1. maxTotalTimer fires (calls i.timeout())
+	// 2. readyChan is closed (initialization succeeded)
+	// 3. ctx is cancelled (initialization failed or was cancelled)
+	go func() {
+		select {
+		case <-maxTotalTimer.C:
+			// MaxTotal safety net fired - hard-cut timeout
+			i.timeoutWithMaxTotal()
+		case <-i.readyChan:
+			// Initialization completed successfully - exit cleanly
+		case <-i.ctx.Done():
+			// Context cancelled - exit cleanly
+		}
+	}()
 
 	// Phase 0: Create worktree if branch specified
 	if i.cfg.WorktreeBaseBranch != "" && i.cfg.GitExecutor != nil {
 		i.transitionTo(InitCreatingWorktree)
-		if err := i.createWorktree(); err != nil {
+		worktreeCtx, worktreeCancel := context.WithTimeout(i.ctx, i.cfg.Timeouts.WorktreeCreation)
+		err := i.createWorktreeWithContext(worktreeCtx)
+		worktreeCancel()
+		if err != nil {
 			i.fail(err)
 			return
 		}
@@ -431,7 +483,10 @@ func (i *Initializer) run() {
 
 	// Phase 1: Create workspace
 	i.transitionTo(InitCreatingWorkspace)
-	if err := i.createWorkspace(); err != nil {
+	workspaceCtx, workspaceCancel := context.WithTimeout(i.ctx, i.cfg.Timeouts.WorkspaceSetup)
+	err := i.createWorkspaceWithContext(workspaceCtx)
+	workspaceCancel()
+	if err != nil {
 		i.fail(err)
 		return
 	}
@@ -452,9 +507,15 @@ func (i *Initializer) run() {
 		return
 	}
 
+	// Phase 2+3: Spawn coordinator and await first message
+	// These phases share the CoordinatorStart timeout since they're both about
+	// getting the coordinator up and responding.
+	coordCtx, coordCancel := context.WithTimeout(i.ctx, i.cfg.Timeouts.CoordinatorStart)
+	defer coordCancel()
+
 	// Phase 2: Spawn coordinator (new sessions only)
 	i.transitionTo(InitSpawningCoordinator)
-	if err := i.spawnCoordinator(); err != nil {
+	if err := i.spawnCoordinatorWithContext(coordCtx); err != nil {
 		i.fail(err)
 		return
 	}
@@ -472,9 +533,11 @@ func (i *Initializer) run() {
 			// Context cancelled - clean exit
 			return
 
-		case <-timeoutTimer.C:
-			// Initialization timed out
-			i.timeout()
+		case <-coordCtx.Done():
+			// Coordinator timeout exceeded
+			if coordCtx.Err() == context.DeadlineExceeded {
+				i.fail(fmt.Errorf("coordinator start timed out after %v", i.cfg.Timeouts.CoordinatorStart))
+			}
 			return
 
 		case <-i.readyChan:
@@ -611,10 +674,12 @@ func (i *Initializer) reopenSession() (*session.Session, error) {
 	return sess, nil
 }
 
-// createWorktree creates a git worktree for isolated workspace operation.
+// createWorktreeWithContext creates a git worktree for isolated workspace operation
+// with context-based timeout/cancellation support.
 // It performs pre-flight checks, determines the worktree path, and creates
 // the worktree with an auto-generated or configured branch name.
-func (i *Initializer) createWorktree() error {
+// Returns descriptive error if context deadline is exceeded.
+func (i *Initializer) createWorktreeWithContext(ctx context.Context) error {
 	gitExec := i.cfg.GitExecutor
 
 	// Pre-flight check: ensure we're in a git repository
@@ -656,7 +721,12 @@ func (i *Initializer) createWorktree() error {
 	baseBranch := i.cfg.WorktreeBaseBranch
 
 	// Create the worktree with new branch based on selected branch
-	if err := gitExec.CreateWorktree(path, newBranch, baseBranch); err != nil {
+	// Use context-aware method for timeout support
+	if err := gitExec.CreateWorktreeWithContext(ctx, path, newBranch, baseBranch); err != nil {
+		// Check if this was a timeout and provide descriptive error
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("worktree creation timed out after %v: %w", i.cfg.Timeouts.WorktreeCreation, err)
+		}
 		return fmt.Errorf("failed to create worktree: %w", err)
 	}
 
@@ -778,7 +848,8 @@ func (i *Initializer) createMCPServer(cfg MCPServerConfig) (*MCPServerResult, er
 	}, nil
 }
 
-// createWorkspace orchestrates the creation of all workspace resources needed for orchestration.
+// createWorkspaceWithContext orchestrates the creation of all workspace resources needed for orchestration
+// with context-based timeout/cancellation support.
 // It composes the extracted helper methods (createAIClient, createSession, createMCPListener,
 // createMCPServer) with V2 infrastructure setup in a clear sequence.
 //
@@ -792,7 +863,15 @@ func (i *Initializer) createMCPServer(cfg MCPServerConfig) (*MCPServerResult, er
 //  7. Start HTTP server in background
 //
 // Error handling: Each step properly cleans up resources from previous steps on failure.
-func (i *Initializer) createWorkspace() error {
+// Returns descriptive error if context deadline is exceeded.
+func (i *Initializer) createWorkspaceWithContext(ctx context.Context) error {
+	// Check context before starting
+	if ctx.Err() != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("workspace setup timed out after %v", i.cfg.Timeouts.WorkspaceSetup)
+		}
+		return ctx.Err()
+	}
 	// Determine effective work directory (use worktree path if created)
 	effectiveWorkDir := i.cfg.WorkDir
 	i.mu.RLock()
@@ -997,13 +1076,15 @@ func (i *Initializer) createWorkspace() error {
 	return nil
 }
 
-// spawnCoordinator creates and starts the coordinator using the v2 command processor.
+// spawnCoordinatorWithContext creates and starts the coordinator using the v2 command processor
+// with context-based timeout/cancellation support.
 // This submits a SpawnProcessCommand which handles all the AI spawning, registry registration,
 // and ProcessRepository updates through the unified command pattern.
 //
 // Note: This method is only called for new sessions. Resumed sessions skip coordinator
 // spawning entirely in the run() method since the coordinator is already restored.
-func (i *Initializer) spawnCoordinator() error {
+// Returns descriptive error if context deadline is exceeded.
+func (i *Initializer) spawnCoordinatorWithContext(ctx context.Context) error {
 	i.mu.RLock()
 	v2Infra := i.v2Infra
 	i.mu.RUnlock()
@@ -1016,8 +1097,13 @@ func (i *Initializer) spawnCoordinator() error {
 	spawnCmd := command.NewSpawnProcessCommand(command.SourceUser, repository.RoleCoordinator)
 
 	// Use SubmitAndWait to ensure coordinator is fully spawned before continuing
-	result, err := v2Infra.Core.Processor.SubmitAndWait(i.ctx, spawnCmd)
+	// Pass the context for timeout support
+	result, err := v2Infra.Core.Processor.SubmitAndWait(ctx, spawnCmd)
 	if err != nil {
+		// Check if this was a timeout and provide descriptive error
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("coordinator spawn timed out after %v: %w", i.cfg.Timeouts.CoordinatorStart, err)
+		}
 		return fmt.Errorf("spawning coordinator via command: %w", err)
 	}
 
@@ -1121,9 +1207,11 @@ func (i *Initializer) fail(err error) {
 	}
 }
 
-// timeout transitions to timed out state and publishes a timeout event.
+// timeoutWithMaxTotal transitions to timed out state when MaxTotal timer fires.
+// The error indicates both the current phase AND that max total was exceeded.
 // If already failed, this is a no-op to preserve the original failure.
-func (i *Initializer) timeout() {
+// This method also cancels the context to stop the run() loop.
+func (i *Initializer) timeoutWithMaxTotal() {
 	i.mu.Lock()
 	// Don't overwrite if already failed - preserve original failure
 	if i.phase == InitFailed || i.phase == InitTimedOut {
@@ -1132,14 +1220,24 @@ func (i *Initializer) timeout() {
 	}
 	i.failedAtPhase = i.phase
 	i.phase = InitTimedOut
+	// Set error to indicate both phase and max total exceeded
+	i.err = fmt.Errorf("max total timeout (%v) exceeded during %v phase", i.cfg.Timeouts.MaxTotal, i.failedAtPhase)
+	cancel := i.cancel
 	i.mu.Unlock()
 
-	log.Error(log.CatOrch, "Initialization timed out", "subsystem", "init", "phase", i.failedAtPhase)
+	log.Error(log.CatOrch, "Initialization timed out (max total exceeded)", "subsystem", "init",
+		"phase", i.failedAtPhase, "maxTotal", i.cfg.Timeouts.MaxTotal)
 
 	i.publishEvent(InitializerEvent{
 		Type:  InitEventTimedOut,
 		Phase: InitTimedOut,
+		Error: i.err,
 	})
+
+	// Cancel context to stop run() loop
+	if cancel != nil {
+		cancel()
+	}
 }
 
 // publishEvent publishes an event to subscribers.
@@ -1160,11 +1258,13 @@ func (i *Initializer) cleanupResources() {
 	mcpServer := i.mcpServer
 	v2Infra := i.v2Infra
 	tracingProvider := i.tracingProvider
+	sess := i.session
 
 	i.mcpServer = nil
 	i.v2Infra = nil
 	i.tracingProvider = nil
 	i.tracer = nil
+	i.session = nil
 	i.mu.Unlock()
 
 	if v2Infra != nil {
@@ -1175,6 +1275,10 @@ func (i *Initializer) cleanupResources() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		_ = mcpServer.Shutdown(ctx)
 		cancel()
+	}
+
+	if sess != nil {
+		_ = sess.Close(session.StatusFailed)
 	}
 
 	// Shutdown tracing provider last to ensure all spans are flushed

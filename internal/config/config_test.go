@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -1435,4 +1436,100 @@ func TestSoundSecurityBoundary(t *testing.T) {
 		expected := filepath.Join(home, ".perles", "sounds")
 		require.Equal(t, expected, boundary)
 	}
+}
+
+// Tests for TimeoutsConfig
+
+func TestDefaultTimeoutsConfig(t *testing.T) {
+	cfg := DefaultTimeoutsConfig()
+
+	require.Equal(t, 30*time.Second, cfg.WorktreeCreation, "WorktreeCreation should be 30s")
+	require.Equal(t, 60*time.Second, cfg.CoordinatorStart, "CoordinatorStart should be 60s")
+	require.Equal(t, 30*time.Second, cfg.WorkspaceSetup, "WorkspaceSetup should be 30s")
+	require.Equal(t, 120*time.Second, cfg.MaxTotal, "MaxTotal should be 120s")
+}
+
+func TestTimeoutsConfig_ZeroValue(t *testing.T) {
+	// Test that zero value TimeoutsConfig has expected defaults (all zero durations)
+	cfg := TimeoutsConfig{}
+	require.Equal(t, time.Duration(0), cfg.WorktreeCreation, "WorktreeCreation zero value should be 0")
+	require.Equal(t, time.Duration(0), cfg.CoordinatorStart, "CoordinatorStart zero value should be 0")
+	require.Equal(t, time.Duration(0), cfg.WorkspaceSetup, "WorkspaceSetup zero value should be 0")
+	require.Equal(t, time.Duration(0), cfg.MaxTotal, "MaxTotal zero value should be 0")
+}
+
+func TestDefaults_Timeouts(t *testing.T) {
+	cfg := Defaults()
+
+	require.Equal(t, 30*time.Second, cfg.Orchestration.Timeouts.WorktreeCreation, "WorktreeCreation should be 30s")
+	require.Equal(t, 60*time.Second, cfg.Orchestration.Timeouts.CoordinatorStart, "CoordinatorStart should be 60s")
+	require.Equal(t, 30*time.Second, cfg.Orchestration.Timeouts.WorkspaceSetup, "WorkspaceSetup should be 30s")
+	require.Equal(t, 120*time.Second, cfg.Orchestration.Timeouts.MaxTotal, "MaxTotal should be 120s")
+}
+
+func TestOrchestrationConfig_TimeoutsField(t *testing.T) {
+	// Verify OrchestrationConfig includes Timeouts field
+	cfg := OrchestrationConfig{
+		Client: "claude",
+		Timeouts: TimeoutsConfig{
+			WorktreeCreation: 45 * time.Second,
+			CoordinatorStart: 90 * time.Second,
+			WorkspaceSetup:   15 * time.Second,
+			MaxTotal:         180 * time.Second,
+		},
+	}
+	require.Equal(t, 45*time.Second, cfg.Timeouts.WorktreeCreation)
+	require.Equal(t, 90*time.Second, cfg.Timeouts.CoordinatorStart)
+	require.Equal(t, 15*time.Second, cfg.Timeouts.WorkspaceSetup)
+	require.Equal(t, 180*time.Second, cfg.Timeouts.MaxTotal)
+}
+
+func TestTimeoutsConfig_PartialValues(t *testing.T) {
+	// Test that partial values are preserved (no automatic defaulting in struct)
+	cfg := TimeoutsConfig{
+		WorktreeCreation: 45 * time.Second,
+		// Other fields left as zero
+	}
+	require.Equal(t, 45*time.Second, cfg.WorktreeCreation)
+	require.Equal(t, time.Duration(0), cfg.CoordinatorStart)
+	require.Equal(t, time.Duration(0), cfg.WorkspaceSetup)
+	require.Equal(t, time.Duration(0), cfg.MaxTotal)
+}
+
+func TestTimeoutsConfig_VariousDurationFormats(t *testing.T) {
+	// Test that various duration formats work correctly
+	testCases := []struct {
+		name     string
+		duration time.Duration
+		expected time.Duration
+	}{
+		{"30 seconds", 30 * time.Second, 30 * time.Second},
+		{"1 minute", 1 * time.Minute, 60 * time.Second},
+		{"90 seconds", 90 * time.Second, 90 * time.Second},
+		{"2 minutes", 2 * time.Minute, 120 * time.Second},
+		{"500 milliseconds", 500 * time.Millisecond, 500 * time.Millisecond},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := TimeoutsConfig{
+				WorktreeCreation: tc.duration,
+			}
+			require.Equal(t, tc.expected, cfg.WorktreeCreation)
+		})
+	}
+}
+
+func TestTimeoutsConfig_CustomValuesPreserved(t *testing.T) {
+	// Test that custom values are preserved (simulating config file loading)
+	cfg := TimeoutsConfig{
+		WorktreeCreation: 45 * time.Second,
+		CoordinatorStart: 90 * time.Second,
+		WorkspaceSetup:   15 * time.Second,
+		MaxTotal:         180 * time.Second,
+	}
+	require.Equal(t, 45*time.Second, cfg.WorktreeCreation)
+	require.Equal(t, 90*time.Second, cfg.CoordinatorStart)
+	require.Equal(t, 15*time.Second, cfg.WorkspaceSetup)
+	require.Equal(t, 180*time.Second, cfg.MaxTotal)
 }

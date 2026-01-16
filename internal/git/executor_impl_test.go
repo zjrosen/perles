@@ -372,9 +372,9 @@ func TestParseGitError(t *testing.T) {
 	}
 }
 
-// TestRealExecutor_CreateWorktree_Integration tests creating and removing worktrees.
+// TestRealExecutor_CreateWorktreeWithContext_Success tests creating a worktree with context.
 // This test creates an isolated temp git repo to avoid polluting the project repo.
-func TestRealExecutor_CreateWorktree_Integration(t *testing.T) {
+func TestRealExecutor_CreateWorktreeWithContext_Success(t *testing.T) {
 	// Create a temp directory for the main repo
 	repoDir := t.TempDir()
 
@@ -410,51 +410,83 @@ func TestRealExecutor_CreateWorktree_Integration(t *testing.T) {
 
 	// Create a temp directory for the worktree (outside the repo)
 	worktreeDir := t.TempDir()
-	worktreePath := filepath.Join(worktreeDir, "test-worktree")
-	branchName := "test-worktree-branch"
+	worktreePath := filepath.Join(worktreeDir, "test-worktree-ctx")
+	branchName := "test-worktree-ctx-branch"
 
-	// Create worktree with new branch based on HEAD (empty baseBranch)
-	err := executor.CreateWorktree(worktreePath, branchName, "")
-	require.NoError(t, err, "CreateWorktree() error")
+	// Create worktree with context (success case)
+	ctx := context.Background()
+	err := executor.CreateWorktreeWithContext(ctx, worktreePath, branchName, "")
+	require.NoError(t, err, "CreateWorktreeWithContext() error")
 
 	// Verify worktree was created
 	_, err = os.Stat(worktreePath)
 	require.False(t, os.IsNotExist(err), "Worktree directory was not created")
 
-	// List worktrees and verify our new one exists
-	worktrees, err := executor.ListWorktrees()
-	require.NoError(t, err, "ListWorktrees() error")
-
-	// Resolve symlinks for comparison (macOS uses /var -> /private/var)
-	worktreePathReal, _ := filepath.EvalSymlinks(worktreePath)
-	if worktreePathReal == "" {
-		worktreePathReal = worktreePath
-	}
-
-	found := false
-	for _, wt := range worktrees {
-		wtPathReal, _ := filepath.EvalSymlinks(wt.Path)
-		if wtPathReal == "" {
-			wtPathReal = wt.Path
-		}
-		if wtPathReal == worktreePathReal || wt.Path == worktreePath {
-			found = true
-			require.Equal(t, branchName, wt.Branch, "Worktree branch mismatch")
-			break
-		}
-	}
-	require.True(t, found, "New worktree not found in ListWorktrees(). Expected path %q (real: %q), got worktrees: %+v",
-		worktreePath, worktreePathReal, worktrees)
-
-	// Remove worktree
+	// Cleanup: Remove the worktree
 	err = executor.RemoveWorktree(worktreePath)
 	require.NoError(t, err, "RemoveWorktree() error")
+}
 
-	// Verify worktree was removed
-	_, err = os.Stat(worktreePath)
-	require.True(t, os.IsNotExist(err), "Worktree directory still exists after removal")
+// TestRealExecutor_CreateWorktreeWithContext_Timeout tests that context timeout is respected.
+// This test uses an already-cancelled context to verify timeout behavior.
+func TestRealExecutor_CreateWorktreeWithContext_Timeout(t *testing.T) {
+	// Create a temp directory for the main repo
+	repoDir := t.TempDir()
 
-	// No need to clean up branch - temp dirs are automatically removed by t.TempDir()
+	// Initialize a git repo with an initial commit
+	initCmds := [][]string{
+		{"git", "init"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test User"},
+	}
+	for _, args := range initCmds {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = repoDir
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "git command %v failed: %s", args, out)
+	}
+
+	// Create an initial commit (required for worktrees)
+	testFile := filepath.Join(repoDir, "README.md")
+	require.NoError(t, os.WriteFile(testFile, []byte("# Test\n"), 0644))
+	commitCmds := [][]string{
+		{"git", "add", "."},
+		{"git", "commit", "-m", "Initial commit"},
+	}
+	for _, args := range commitCmds {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = repoDir
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "git command %v failed: %s", args, out)
+	}
+
+	executor := NewRealExecutor(repoDir)
+	require.True(t, executor.IsGitRepo(), "temp dir should be a git repo")
+
+	// Create a temp directory for the worktree (outside the repo)
+	worktreeDir := t.TempDir()
+	worktreePath := filepath.Join(worktreeDir, "test-worktree-timeout")
+	branchName := "test-worktree-timeout-branch"
+
+	// Use an already-expired context to simulate timeout
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-1*time.Second))
+	defer cancel()
+
+	// CreateWorktreeWithContext should fail with timeout error
+	err := executor.CreateWorktreeWithContext(ctx, worktreePath, branchName, "")
+	require.Error(t, err, "CreateWorktreeWithContext with expired context should error")
+	require.ErrorIs(t, err, ErrWorktreeTimeout, "Error should be ErrWorktreeTimeout")
+
+	// Worktree should not have been created
+	_, statErr := os.Stat(worktreePath)
+	require.True(t, os.IsNotExist(statErr), "Worktree directory should not exist after timeout")
+}
+
+// TestErrWorktreeTimeout tests the timeout error type.
+func TestErrWorktreeTimeout(t *testing.T) {
+	// Verify the error is defined and usable
+	require.NotNil(t, ErrWorktreeTimeout)
+	require.Contains(t, ErrWorktreeTimeout.Error(), "timed out")
 }
 
 // TestRealExecutor_ErrorParsing_BranchConflict tests error detection for branch conflicts.

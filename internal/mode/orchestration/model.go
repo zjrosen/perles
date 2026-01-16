@@ -196,8 +196,9 @@ type Model struct {
 	exitMessage string // Message to display when exiting (e.g., worktree cleanup info)
 
 	// Debug mode flag (enables full session ID display in input bar)
-	debugMode     bool
-	tracingConfig config.TracingConfig // Tracing configuration (passed to Initializer)
+	debugMode      bool
+	tracingConfig  config.TracingConfig  // Tracing configuration (passed to Initializer)
+	timeoutsConfig config.TimeoutsConfig // Timeouts configuration (passed to Initializer)
 
 	// Session storage configuration
 	sessionStorageConfig config.SessionStorageConfig // Session storage configuration (passed to Initializer)
@@ -271,6 +272,12 @@ func New(cfg Config) Model {
 	})
 	ta.Focus() // Focus input by default
 
+	// Get timeouts config from services, falling back to defaults if not available
+	var timeoutsConfig config.TimeoutsConfig
+	if cfg.Services.Config != nil {
+		timeoutsConfig = cfg.Services.Config.Orchestration.Timeouts
+	}
+
 	return Model{
 		input:                 ta,
 		vimMode:               defaultMode, // Initialize mode tracking
@@ -289,6 +296,7 @@ func New(cfg Config) Model {
 		workflowRegistry:      cfg.WorkflowRegistry,
 		activeWorkflowRef:     &activeWorkflowHolder{},
 		tracingConfig:         cfg.TracingConfig,
+		timeoutsConfig:        timeoutsConfig,
 		sessionStorageConfig:  cfg.SessionStorageConfig,
 		resumeSessionDir:      cfg.ResumeSessionDir,
 		quitModal: quitmodal.New(quitmodal.Config{

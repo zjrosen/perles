@@ -1,9 +1,11 @@
 package orchestration
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -192,9 +194,10 @@ func (m Model) renderInitScreen() string {
 	// Timeout message
 	if currentPhase == InitTimedOut {
 		lines = append(lines, "") // Spacing
-		timeoutMsg := errorMessageStyle.Render("The coordinator did not load in time.")
+		// Use phase-specific timeout message with duration
+		timeoutDuration := m.getTimeoutDuration(actualFailedPhase)
+		timeoutMsg := errorMessageStyle.Render(timeoutErrorMessage(actualFailedPhase, timeoutDuration))
 		lines = append(lines, centerTextStyle.Render(timeoutMsg))
-		lines = append(lines, centerTextStyle.Render(errorMessageStyle.Render("This may indicate an API or network issue.")))
 	}
 
 	lines = append(lines, "") // Spacing
@@ -322,6 +325,24 @@ func (m Model) getWorktreePath() string {
 	return ""
 }
 
+// getTimeoutDuration returns the configured timeout duration for the given phase.
+// Returns a default duration if initializer is nil.
+func (m Model) getTimeoutDuration(phase InitPhase) time.Duration {
+	if m.initializer != nil {
+		timeouts := m.initializer.Timeouts()
+		switch phase {
+		case InitCreatingWorktree:
+			return timeouts.WorktreeCreation
+		case InitCreatingWorkspace:
+			return timeouts.WorkspaceSetup
+		case InitSpawningCoordinator, InitAwaitingFirstMessage:
+			return timeouts.CoordinatorStart
+		}
+	}
+	// Default fallback
+	return 30 * time.Second
+}
+
 // worktreeErrorMessage returns a user-friendly error message for worktree-specific errors.
 // It parses the error to identify common git worktree failure modes.
 func worktreeErrorMessage(err error) string {
@@ -332,6 +353,11 @@ func worktreeErrorMessage(err error) string {
 	// Check for sentinel errors first using errors.Is
 	if errors.Is(err, git.ErrInvalidBranchName) {
 		return "Invalid branch name. Branch names cannot contain spaces, special characters (~^:?*[), or start with a dot."
+	}
+
+	// Check for timeout errors (context deadline exceeded)
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "Worktree creation timed out. Git may be slow due to large repository size, SSH key prompts, or NFS issues. Check for .git/index.lock files. Consider increasing orchestration.timeouts.worktree_creation in config."
 	}
 
 	errStr := err.Error()
@@ -346,5 +372,20 @@ func worktreeErrorMessage(err error) string {
 		return "Invalid branch name. Branch names cannot contain spaces, special characters (~^:?*[), or start with a dot."
 	default:
 		return fmt.Sprintf("Worktree creation failed: %v", err)
+	}
+}
+
+// timeoutErrorMessage returns a phase-specific timeout error message with actionable guidance.
+// The duration parameter indicates the timeout that was exceeded.
+func timeoutErrorMessage(phase InitPhase, duration time.Duration) string {
+	switch phase {
+	case InitCreatingWorktree:
+		return fmt.Sprintf("Worktree creation timed out after %v. Git may be slow due to large repository size, SSH key prompts, or NFS issues. Consider increasing orchestration.timeouts.worktree_creation in config.", duration)
+	case InitCreatingWorkspace:
+		return fmt.Sprintf("Workspace setup timed out after %v. MCP server or session initialization failed. Consider increasing orchestration.timeouts.workspace_setup in config.", duration)
+	case InitSpawningCoordinator, InitAwaitingFirstMessage:
+		return fmt.Sprintf("Coordinator did not respond within %v. The AI service may be overloaded. Consider increasing orchestration.timeouts.coordinator_start in config.", duration)
+	default:
+		return fmt.Sprintf("Initialization timed out after %v.", duration)
 	}
 }

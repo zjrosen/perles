@@ -3,6 +3,8 @@
 package mocks
 
 import (
+	context "context"
+
 	mock "github.com/stretchr/testify/mock"
 	git "github.com/zjrosen/perles/internal/git"
 )
@@ -66,17 +68,17 @@ func (_c *MockGitExecutor_BranchExists_Call) RunAndReturn(run func(string) bool)
 	return _c
 }
 
-// CreateWorktree provides a mock function with given fields: path, newBranch, baseBranch
-func (_m *MockGitExecutor) CreateWorktree(path string, newBranch string, baseBranch string) error {
-	ret := _m.Called(path, newBranch, baseBranch)
+// CreateWorktreeWithContext provides a mock function with given fields: ctx, path, newBranch, baseBranch
+func (_m *MockGitExecutor) CreateWorktreeWithContext(ctx context.Context, path string, newBranch string, baseBranch string) error {
+	ret := _m.Called(ctx, path, newBranch, baseBranch)
 
 	if len(ret) == 0 {
-		panic("no return value specified for CreateWorktree")
+		panic("no return value specified for CreateWorktreeWithContext")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, string, string) error); ok {
-		r0 = rf(path, newBranch, baseBranch)
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, string) error); ok {
+		r0 = rf(ctx, path, newBranch, baseBranch)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -84,32 +86,33 @@ func (_m *MockGitExecutor) CreateWorktree(path string, newBranch string, baseBra
 	return r0
 }
 
-// MockGitExecutor_CreateWorktree_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateWorktree'
-type MockGitExecutor_CreateWorktree_Call struct {
+// MockGitExecutor_CreateWorktreeWithContext_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateWorktreeWithContext'
+type MockGitExecutor_CreateWorktreeWithContext_Call struct {
 	*mock.Call
 }
 
-// CreateWorktree is a helper method to define mock.On call
+// CreateWorktreeWithContext is a helper method to define mock.On call
+//   - ctx context.Context
 //   - path string
 //   - newBranch string
 //   - baseBranch string
-func (_e *MockGitExecutor_Expecter) CreateWorktree(path interface{}, newBranch interface{}, baseBranch interface{}) *MockGitExecutor_CreateWorktree_Call {
-	return &MockGitExecutor_CreateWorktree_Call{Call: _e.mock.On("CreateWorktree", path, newBranch, baseBranch)}
+func (_e *MockGitExecutor_Expecter) CreateWorktreeWithContext(ctx interface{}, path interface{}, newBranch interface{}, baseBranch interface{}) *MockGitExecutor_CreateWorktreeWithContext_Call {
+	return &MockGitExecutor_CreateWorktreeWithContext_Call{Call: _e.mock.On("CreateWorktreeWithContext", ctx, path, newBranch, baseBranch)}
 }
 
-func (_c *MockGitExecutor_CreateWorktree_Call) Run(run func(path string, newBranch string, baseBranch string)) *MockGitExecutor_CreateWorktree_Call {
+func (_c *MockGitExecutor_CreateWorktreeWithContext_Call) Run(run func(ctx context.Context, path string, newBranch string, baseBranch string)) *MockGitExecutor_CreateWorktreeWithContext_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(string), args[2].(string))
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(string))
 	})
 	return _c
 }
 
-func (_c *MockGitExecutor_CreateWorktree_Call) Return(_a0 error) *MockGitExecutor_CreateWorktree_Call {
+func (_c *MockGitExecutor_CreateWorktreeWithContext_Call) Return(_a0 error) *MockGitExecutor_CreateWorktreeWithContext_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockGitExecutor_CreateWorktree_Call) RunAndReturn(run func(string, string, string) error) *MockGitExecutor_CreateWorktree_Call {
+func (_c *MockGitExecutor_CreateWorktreeWithContext_Call) RunAndReturn(run func(context.Context, string, string, string) error) *MockGitExecutor_CreateWorktreeWithContext_Call {
 	_c.Call.Return(run)
 	return _c
 }

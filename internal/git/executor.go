@@ -1,6 +1,9 @@
 package git
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // BranchInfo holds information about a git branch.
 type BranchInfo struct {
@@ -21,11 +24,12 @@ type CommitInfo struct {
 // GitExecutor defines the interface for git worktree operations.
 // This abstraction allows for easy testing with mock implementations.
 type GitExecutor interface {
-	// CreateWorktree creates a new worktree at path with a new branch.
+	// CreateWorktreeWithContext creates a new worktree at path with a new branch.
 	// newBranch is the name of the new branch to create (e.g., perles-session-abc123).
 	// baseBranch is the starting point for the new branch (e.g., main, develop).
 	// If baseBranch is empty, uses current HEAD as the starting point.
-	CreateWorktree(path, newBranch, baseBranch string) error
+	// Returns ErrWorktreeTimeout if the context deadline is exceeded.
+	CreateWorktreeWithContext(ctx context.Context, path, newBranch, baseBranch string) error
 	RemoveWorktree(path string) error
 	PruneWorktrees() error
 	ListWorktrees() ([]WorktreeInfo, error)

@@ -1,0 +1,30 @@
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                          \│/                                                                           
+                          ╔═══════╗   ╔════╲   │   ╱════╗   ╔═══════╗   ╔═══════╗   ╔═══════╗                           
+                          ║       ╠═══╣     ╲  │  ╱     ╠═══╣       ╠═══╣       ╠═══╣       ║                           
+                          ║       ╠═══╣     ╱  │  ╲     ╠═══╣       ╠═══╣       ╠═══╣       ║                           
+                          ╚═══════╝   ╚════╱   │   ╲════╝   ╚═══════╝   ╚═══════╝   ╚═══════╝                           
+                                          /│\                                                                           
+                                                                                                                        
+                                               Initialization Timed Out                                                 
+                                                                                                                        
+                                                  ✓ Creating Worktree                                                   
+                                                 ✗ Creating Workspace                                                   
+                                                  Spawning Coordinator                                                  
+                                                    Coordinator Ready                                                   
+                                                                                                                        
+                              Workspace setup timed out after 30s. MCP server or session                                
+                                      initialization failed. Consider increasing                                        
+                                   orchestration.timeouts.workspace_setup in config.                                    
+                                                                                                                        
+                                                                                                                        
+                                          [R] Retry     [ESC] Exit to Kanban                                            
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        

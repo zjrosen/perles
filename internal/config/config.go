@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/zjrosen/perles/internal/log"
 	"github.com/zjrosen/perles/internal/orchestration/client"
@@ -115,6 +116,36 @@ type SessionStorageConfig struct {
 	ApplicationName string `mapstructure:"application_name"`
 }
 
+// TimeoutsConfig holds timeout settings for orchestration initialization phases.
+type TimeoutsConfig struct {
+	// WorktreeCreation is the timeout for git worktree creation.
+	// Default: 30 seconds
+	WorktreeCreation time.Duration `mapstructure:"worktree_creation"`
+
+	// CoordinatorStart is the timeout for coordinator process startup and first response.
+	// Default: 60 seconds (longer for slow API responses)
+	CoordinatorStart time.Duration `mapstructure:"coordinator_start"`
+
+	// WorkspaceSetup is the timeout for MCP server, session, and infrastructure setup.
+	// Default: 30 seconds
+	WorkspaceSetup time.Duration `mapstructure:"workspace_setup"`
+
+	// MaxTotal is the maximum total time allowed for initialization.
+	// Acts as a hard safety net; 0 means disabled.
+	// Default: 120 seconds
+	MaxTotal time.Duration `mapstructure:"max_total"`
+}
+
+// DefaultTimeoutsConfig returns the default timeout configuration.
+func DefaultTimeoutsConfig() TimeoutsConfig {
+	return TimeoutsConfig{
+		WorktreeCreation: 30 * time.Second,
+		CoordinatorStart: 60 * time.Second,
+		WorkspaceSetup:   30 * time.Second,
+		MaxTotal:         120 * time.Second,
+	}
+}
+
 // OrchestrationConfig holds orchestration mode configuration.
 type OrchestrationConfig struct {
 	Client           string               `mapstructure:"client"`            // "claude" (default), "amp", "codex", or "gemini"
@@ -126,6 +157,7 @@ type OrchestrationConfig struct {
 	Workflows        []WorkflowConfig     `mapstructure:"workflows"`       // Workflow template configurations
 	Tracing          TracingConfig        `mapstructure:"tracing"`         // Distributed tracing configuration
 	SessionStorage   SessionStorageConfig `mapstructure:"session_storage"` // Session storage location configuration
+	Timeouts         TimeoutsConfig       `mapstructure:"timeouts"`        // Initialization phase timeout configuration
 }
 
 // ClaudeClientConfig holds Claude-specific settings.
@@ -599,6 +631,7 @@ func Defaults() Config {
 				BaseDir:         DefaultSessionStorageBaseDir(),
 				ApplicationName: "", // Derived from git remote or directory name
 			},
+			Timeouts: DefaultTimeoutsConfig(),
 		},
 		Sound: SoundConfig{
 			Events: map[string]SoundEventConfig{

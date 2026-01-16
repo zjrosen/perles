@@ -1,14 +1,17 @@
 package orchestration
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/exp/teatest"
 	"github.com/stretchr/testify/require"
 
+	"github.com/zjrosen/perles/internal/config"
 	"github.com/zjrosen/perles/internal/git"
 )
 
@@ -31,6 +34,16 @@ func newTestInitializerWithFailedPhase(phase InitPhase, failedAt InitPhase, err 
 		phase:         phase,
 		failedAtPhase: failedAt,
 		err:           err,
+	}
+}
+
+// newTestInitializerWithTimeouts creates an Initializer with specific failed phase and timeout config.
+func newTestInitializerWithTimeouts(phase InitPhase, failedAt InitPhase, err error, timeouts config.TimeoutsConfig) *Initializer {
+	return &Initializer{
+		phase:         phase,
+		failedAtPhase: failedAt,
+		err:           err,
+		cfg:           InitializerConfig{Timeouts: timeouts},
 	}
 }
 
@@ -448,9 +461,14 @@ func TestView_Golden_LoadingFailed(t *testing.T) {
 }
 
 func TestView_Golden_LoadingTimedOut(t *testing.T) {
+	timeouts := config.TimeoutsConfig{
+		WorktreeCreation: 30 * time.Second,
+		WorkspaceSetup:   30 * time.Second,
+		CoordinatorStart: 60 * time.Second,
+	}
 	m := New(Config{})
 	m = m.SetSize(120, 30)
-	m.initializer = newTestInitializerWithFailedPhase(InitTimedOut, InitAwaitingFirstMessage, nil)
+	m.initializer = newTestInitializerWithTimeouts(InitTimedOut, InitAwaitingFirstMessage, nil, timeouts)
 	m.worktreeEnabled = true // Show worktree phase in loading screen
 
 	view := m.View()
@@ -810,4 +828,183 @@ func TestWorktreeErrorMessage_InvalidBranchName_StringContains(t *testing.T) {
 	err := errors.New("fatal: 'my branch' is not a valid branch name")
 	msg := worktreeErrorMessage(err)
 	require.Equal(t, "Invalid branch name. Branch names cannot contain spaces, special characters (~^:?*[), or start with a dot.", msg)
+}
+
+// ===========================================================================
+// timeoutErrorMessage Tests (Task perles-mo45.6)
+// ===========================================================================
+
+func TestTimeoutErrorMessage_AllPhases(t *testing.T) {
+	// Test: Verify correct message for each phase
+	tests := []struct {
+		name     string
+		phase    InitPhase
+		duration time.Duration
+		contains []string
+	}{
+		{
+			name:     "Worktree phase timeout",
+			phase:    InitCreatingWorktree,
+			duration: 30 * time.Second,
+			contains: []string{
+				"Worktree creation timed out after 30s",
+				"large repository size",
+				"SSH key prompts",
+				"NFS issues",
+				"orchestration.timeouts.worktree_creation",
+			},
+		},
+		{
+			name:     "Workspace phase timeout",
+			phase:    InitCreatingWorkspace,
+			duration: 30 * time.Second,
+			contains: []string{
+				"Workspace setup timed out after 30s",
+				"MCP server",
+				"session initialization",
+				"orchestration.timeouts.workspace_setup",
+			},
+		},
+		{
+			name:     "SpawningCoordinator phase timeout",
+			phase:    InitSpawningCoordinator,
+			duration: 60 * time.Second,
+			contains: []string{
+				"Coordinator did not respond within 1m0s",
+				"AI service may be overloaded",
+				"orchestration.timeouts.coordinator_start",
+			},
+		},
+		{
+			name:     "AwaitingFirstMessage phase timeout",
+			phase:    InitAwaitingFirstMessage,
+			duration: 60 * time.Second,
+			contains: []string{
+				"Coordinator did not respond within 1m0s",
+				"AI service may be overloaded",
+				"orchestration.timeouts.coordinator_start",
+			},
+		},
+		{
+			name:     "Default phase timeout",
+			phase:    InitNotStarted,
+			duration: 30 * time.Second,
+			contains: []string{
+				"Initialization timed out after 30s",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := timeoutErrorMessage(tt.phase, tt.duration)
+			for _, expectedContent := range tt.contains {
+				require.Contains(t, msg, expectedContent, "Expected message to contain %q", expectedContent)
+			}
+		})
+	}
+}
+
+func TestTimeoutErrorMessage_CustomDuration(t *testing.T) {
+	// Test: Verify duration is correctly formatted in message
+	msg := timeoutErrorMessage(InitCreatingWorktree, 45*time.Second)
+	require.Contains(t, msg, "45s")
+
+	msg = timeoutErrorMessage(InitCreatingWorkspace, 15*time.Second)
+	require.Contains(t, msg, "15s")
+
+	msg = timeoutErrorMessage(InitAwaitingFirstMessage, 90*time.Second)
+	require.Contains(t, msg, "1m30s")
+}
+
+func TestWorktreeErrorMessage_TimeoutError(t *testing.T) {
+	// Test: context.DeadlineExceeded is detected as timeout
+	err := context.DeadlineExceeded
+	msg := worktreeErrorMessage(err)
+	require.Contains(t, msg, "Worktree creation timed out")
+	require.Contains(t, msg, "large repository size")
+	require.Contains(t, msg, "SSH key prompts")
+	require.Contains(t, msg, "NFS issues")
+	require.Contains(t, msg, ".git/index.lock")
+	require.Contains(t, msg, "orchestration.timeouts.worktree_creation")
+}
+
+func TestWorktreeErrorMessage_WrappedTimeoutError(t *testing.T) {
+	// Test: Wrapped context.DeadlineExceeded is detected via errors.Is
+	err := fmt.Errorf("git operation failed: %w", context.DeadlineExceeded)
+	msg := worktreeErrorMessage(err)
+	require.Contains(t, msg, "Worktree creation timed out")
+}
+
+func TestGetTimeoutDuration_WithInitializer(t *testing.T) {
+	// Test: getTimeoutDuration returns correct duration for each phase
+	timeouts := config.TimeoutsConfig{
+		WorktreeCreation: 45 * time.Second,
+		WorkspaceSetup:   15 * time.Second,
+		CoordinatorStart: 90 * time.Second,
+	}
+
+	m := New(Config{})
+	m.initializer = newTestInitializerWithTimeouts(InitTimedOut, InitCreatingWorktree, nil, timeouts)
+
+	require.Equal(t, 45*time.Second, m.getTimeoutDuration(InitCreatingWorktree))
+	require.Equal(t, 15*time.Second, m.getTimeoutDuration(InitCreatingWorkspace))
+	require.Equal(t, 90*time.Second, m.getTimeoutDuration(InitSpawningCoordinator))
+	require.Equal(t, 90*time.Second, m.getTimeoutDuration(InitAwaitingFirstMessage))
+}
+
+func TestGetTimeoutDuration_NilInitializer(t *testing.T) {
+	// Test: getTimeoutDuration returns default 30s when initializer is nil
+	m := New(Config{})
+	// Initializer is nil by default
+
+	require.Equal(t, 30*time.Second, m.getTimeoutDuration(InitCreatingWorktree))
+	require.Equal(t, 30*time.Second, m.getTimeoutDuration(InitCreatingWorkspace))
+}
+
+// --- Golden tests for timeout error messages ---
+
+func TestView_Golden_LoadingTimedOutWorktreePhase(t *testing.T) {
+	timeouts := config.TimeoutsConfig{
+		WorktreeCreation: 30 * time.Second,
+		WorkspaceSetup:   30 * time.Second,
+		CoordinatorStart: 60 * time.Second,
+	}
+	m := New(Config{})
+	m = m.SetSize(120, 30)
+	m.initializer = newTestInitializerWithTimeouts(InitTimedOut, InitCreatingWorktree, nil, timeouts)
+	m.worktreeEnabled = true
+
+	view := m.View()
+	teatest.RequireEqualOutput(t, []byte(view))
+}
+
+func TestView_Golden_LoadingTimedOutWorkspacePhase(t *testing.T) {
+	timeouts := config.TimeoutsConfig{
+		WorktreeCreation: 30 * time.Second,
+		WorkspaceSetup:   30 * time.Second,
+		CoordinatorStart: 60 * time.Second,
+	}
+	m := New(Config{})
+	m = m.SetSize(120, 30)
+	m.initializer = newTestInitializerWithTimeouts(InitTimedOut, InitCreatingWorkspace, nil, timeouts)
+	m.worktreeEnabled = true
+
+	view := m.View()
+	teatest.RequireEqualOutput(t, []byte(view))
+}
+
+func TestView_Golden_LoadingTimedOutCoordinatorPhase(t *testing.T) {
+	timeouts := config.TimeoutsConfig{
+		WorktreeCreation: 30 * time.Second,
+		WorkspaceSetup:   30 * time.Second,
+		CoordinatorStart: 60 * time.Second,
+	}
+	m := New(Config{})
+	m = m.SetSize(120, 30)
+	m.initializer = newTestInitializerWithTimeouts(InitTimedOut, InitAwaitingFirstMessage, nil, timeouts)
+	m.worktreeEnabled = true
+
+	view := m.View()
+	teatest.RequireEqualOutput(t, []byte(view))
 }
