@@ -387,6 +387,14 @@ func TestValidateOrchestration_ValidGemini(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestValidateOrchestration_ValidOpencode(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Client: "opencode",
+	}
+	err := ValidateOrchestration(cfg)
+	require.NoError(t, err)
+}
+
 func TestValidateOrchestration_ValidClaudeModels(t *testing.T) {
 	models := []string{"sonnet", "opus", "haiku"}
 	for _, model := range models {

@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/zjrosen/perles/internal/orchestration/client"
 	"github.com/zjrosen/perles/internal/orchestration/mock"
 	"github.com/zjrosen/perles/internal/orchestration/v2/command"
 	"github.com/zjrosen/perles/internal/orchestration/v2/prompt/roles"
@@ -154,4 +155,52 @@ func TestUnifiedProcessSpawner_GenerateMCPConfig_HTTP(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, config, "9999")
 	assert.Contains(t, config, "worker-1")
+}
+
+// openCodeMockClient is a mock client that returns ClientOpenCode type.
+type openCodeMockClient struct {
+	*mock.Client
+}
+
+func (c *openCodeMockClient) Type() client.ClientType {
+	return client.ClientOpenCode
+}
+
+func TestUnifiedProcessSpawner_GenerateMCPConfig_OpenCode(t *testing.T) {
+	mockClient := &openCodeMockClient{Client: mock.NewClient()}
+	spawner := &UnifiedProcessSpawnerImpl{
+		client:  mockClient,
+		port:    9999,
+		workDir: "/test",
+	}
+
+	config, err := spawner.generateMCPConfig("worker-1")
+	require.NoError(t, err)
+	// OpenCode format uses {"mcp": {...}} wrapper, not {"mcpServers": {...}}
+	assert.Contains(t, config, `"mcp"`)
+	assert.Contains(t, config, `"perles-worker"`)
+	assert.Contains(t, config, `"type":"remote"`)
+	assert.Contains(t, config, "9999")
+	assert.Contains(t, config, "worker-1")
+	// Should NOT contain mcpServers (that's Claude format)
+	assert.NotContains(t, config, "mcpServers")
+}
+
+func TestUnifiedProcessSpawner_GenerateCoordinatorMCPConfig_OpenCode(t *testing.T) {
+	mockClient := &openCodeMockClient{Client: mock.NewClient()}
+	spawner := &UnifiedProcessSpawnerImpl{
+		client:  mockClient,
+		port:    9999,
+		workDir: "/test",
+	}
+
+	config, err := spawner.generateCoordinatorMCPConfig()
+	require.NoError(t, err)
+	// OpenCode format uses {"mcp": {...}} wrapper
+	assert.Contains(t, config, `"mcp"`)
+	assert.Contains(t, config, `"perles-orchestrator"`)
+	assert.Contains(t, config, `"type":"remote"`)
+	assert.Contains(t, config, "9999")
+	// Should NOT contain mcpServers (that's Claude format)
+	assert.NotContains(t, config, "mcpServers")
 }

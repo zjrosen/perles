@@ -186,3 +186,128 @@ func TestGenerateWorkerConfigCodex(t *testing.T) {
 		}
 	})
 }
+
+func TestGenerateCoordinatorConfigOpenCode(t *testing.T) {
+	t.Run("returns valid JSON", func(t *testing.T) {
+		configJSON, err := GenerateCoordinatorConfigOpenCode(9000)
+		require.NoError(t, err, "GenerateCoordinatorConfigOpenCode failed")
+
+		var parsed map[string]any
+		require.NoError(t, json.Unmarshal([]byte(configJSON), &parsed), "Output should be valid JSON")
+	})
+
+	t.Run("output format matches expected OpenCode structure", func(t *testing.T) {
+		configJSON, err := GenerateCoordinatorConfigOpenCode(9000)
+		require.NoError(t, err, "GenerateCoordinatorConfigOpenCode failed")
+
+		// Parse and verify structure: {"permission": "allow", "mcp": {"perles-orchestrator": {"type": "remote", "url": "..."}}}
+		var parsed map[string]any
+		require.NoError(t, json.Unmarshal([]byte(configJSON), &parsed), "Failed to parse JSON")
+
+		// Check "permission" contains wildcard allow-all for headless mode
+		perm, ok := parsed["permission"].(map[string]any)
+		require.True(t, ok, "Permission should be an object for headless mode")
+		starPerm, ok := perm["*"].(map[string]any)
+		require.True(t, ok, "Permission should have '*' wildcard key")
+		require.Equal(t, "allow", starPerm["*"], "Wildcard permission should be 'allow'")
+
+		// Check "mcp" key exists
+		mcp, ok := parsed["mcp"].(map[string]any)
+		require.True(t, ok, "Missing 'mcp' wrapper key")
+
+		// Check "perles-orchestrator" server exists
+		server, ok := mcp["perles-orchestrator"].(map[string]any)
+		require.True(t, ok, "Missing 'perles-orchestrator' server in mcp config")
+
+		// Check "type" is "remote"
+		require.Equal(t, "remote", server["type"], "Type should be 'remote'")
+
+		// Check "url" is correctly formatted
+		expectedURL := "http://localhost:9000/mcp"
+		require.Equal(t, expectedURL, server["url"], "URL mismatch")
+	})
+
+	t.Run("handles different port values", func(t *testing.T) {
+		testCases := []struct {
+			port     int
+			expected string
+		}{
+			{8765, "http://localhost:8765/mcp"},
+			{9000, "http://localhost:9000/mcp"},
+			{1234, "http://localhost:1234/mcp"},
+		}
+
+		for _, tc := range testCases {
+			configJSON, err := GenerateCoordinatorConfigOpenCode(tc.port)
+			require.NoError(t, err, "GenerateCoordinatorConfigOpenCode failed for port=%d", tc.port)
+			require.Contains(t, configJSON, tc.expected, "URL mismatch for port=%d", tc.port)
+		}
+	})
+}
+
+func TestGenerateWorkerConfigOpenCode(t *testing.T) {
+	t.Run("returns valid JSON", func(t *testing.T) {
+		configJSON, err := GenerateWorkerConfigOpenCode(9000, "WORKER.1")
+		require.NoError(t, err, "GenerateWorkerConfigOpenCode failed")
+
+		// Verify it's valid JSON by unmarshaling
+		var parsed map[string]any
+		require.NoError(t, json.Unmarshal([]byte(configJSON), &parsed), "Output is not valid JSON")
+	})
+
+	t.Run("output format matches expected OpenCode structure", func(t *testing.T) {
+		configJSON, err := GenerateWorkerConfigOpenCode(9000, "WORKER.1")
+		require.NoError(t, err, "GenerateWorkerConfigOpenCode failed")
+
+		// Parse and verify structure: {"permission": {...}, "mcp": {"perles-worker": {"type": "remote", "url": "..."}}}
+		var parsed map[string]any
+		require.NoError(t, json.Unmarshal([]byte(configJSON), &parsed), "Failed to parse JSON")
+
+		// Check "permission" contains wildcard allow-all for headless mode
+		perm, ok := parsed["permission"].(map[string]any)
+		require.True(t, ok, "Permission should be an object for headless mode")
+		starPerm, ok := perm["*"].(map[string]any)
+		require.True(t, ok, "Permission should have '*' wildcard key")
+		require.Equal(t, "allow", starPerm["*"], "Wildcard permission should be 'allow'")
+
+		// Check "mcp" key exists
+		mcp, ok := parsed["mcp"].(map[string]any)
+		require.True(t, ok, "Missing 'mcp' wrapper key")
+
+		// Check "perles-worker" server exists
+		server, ok := mcp["perles-worker"].(map[string]any)
+		require.True(t, ok, "Missing 'perles-worker' server in mcp config")
+
+		// Check "type" is "remote"
+		require.Equal(t, "remote", server["type"], "Type should be 'remote'")
+
+		// Check "url" is correctly formatted
+		expectedURL := "http://localhost:9000/worker/WORKER.1"
+		require.Equal(t, expectedURL, server["url"], "URL mismatch")
+	})
+
+	t.Run("serverURL is correctly embedded", func(t *testing.T) {
+		configJSON, err := GenerateWorkerConfigOpenCode(8765, "worker-5")
+		require.NoError(t, err, "GenerateWorkerConfigOpenCode failed")
+
+		require.Contains(t, configJSON, "http://localhost:8765/worker/worker-5", "URL not correctly embedded")
+	})
+
+	t.Run("workerID is correctly handled in URL", func(t *testing.T) {
+		testCases := []struct {
+			port     int
+			workerID string
+			expected string
+		}{
+			{8765, "WORKER.1", "http://localhost:8765/worker/WORKER.1"},
+			{9000, "worker-99", "http://localhost:9000/worker/worker-99"},
+			{1234, "test-worker", "http://localhost:1234/worker/test-worker"},
+		}
+
+		for _, tc := range testCases {
+			configJSON, err := GenerateWorkerConfigOpenCode(tc.port, tc.workerID)
+			require.NoError(t, err, "GenerateWorkerConfigOpenCode failed for workerID=%s", tc.workerID)
+			require.Contains(t, configJSON, tc.expected, "URL mismatch for workerID=%s", tc.workerID)
+		}
+	})
+}

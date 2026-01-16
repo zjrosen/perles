@@ -16,6 +16,7 @@ import (
 	"github.com/zjrosen/perles/internal/orchestration/metrics"
 	v2 "github.com/zjrosen/perles/internal/orchestration/v2"
 	"github.com/zjrosen/perles/internal/orchestration/v2/command"
+	"github.com/zjrosen/perles/internal/orchestration/v2/processor"
 	"github.com/zjrosen/perles/internal/orchestration/v2/repository"
 	"github.com/zjrosen/perles/internal/orchestration/workflow"
 	"github.com/zjrosen/perles/internal/pubsub"
@@ -517,6 +518,11 @@ func (m Model) handlePubSubEvent(event pubsub.Event[any]) (Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Check for CommandLogEvent (command processor failures)
+	if cmdEvent, ok := event.Payload.(processor.CommandLogEvent); ok {
+		return m.handleCommandLogEvent(cmdEvent)
+	}
+
 	// Type-assert to ProcessEvent
 	processEvent, ok := event.Payload.(events.ProcessEvent)
 	if !ok {
@@ -567,6 +573,27 @@ func (m Model) handlePubSubEvent(event pubsub.Event[any]) (Model, tea.Cmd) {
 	}
 
 	// CRITICAL: Always continue listening
+	return m, m.v2Listener.Listen()
+}
+
+// handleCommandLogEvent processes command processor events.
+// Shows toast errors for failed commands relevant to the chat panel.
+func (m Model) handleCommandLogEvent(cmdEvent processor.CommandLogEvent) (Model, tea.Cmd) {
+	// Only handle failures for commands relevant to the chat panel
+	if !cmdEvent.Success && cmdEvent.Error != nil {
+		switch cmdEvent.CommandType {
+		case command.CmdDeliverProcessQueued, command.CmdSendToProcess, command.CmdSpawnProcess:
+			// These commands are relevant to chat - show error toast
+			return m, tea.Batch(
+				m.v2Listener.Listen(),
+				func() tea.Msg {
+					return AssistantErrorMsg{Error: cmdEvent.Error}
+				},
+			)
+		}
+	}
+
+	// Continue listening for other events
 	return m, m.v2Listener.Listen()
 }
 

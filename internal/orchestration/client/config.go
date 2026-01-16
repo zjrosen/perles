@@ -56,6 +56,9 @@ const (
 
 	// ExtGeminiModel specifies the Gemini model (string: "gemini-3-pro-preview", "gemini-2.5-flash").
 	ExtGeminiModel = "gemini.model"
+
+	// ExtOpenCodeModel specifies the OpenCode model (string: "opencode/glm-4.7-free").
+	ExtOpenCodeModel = "opencode.model"
 )
 
 // ClaudeModel returns the Claude model from Extensions, or "opus" as default.
@@ -102,6 +105,18 @@ func (c *Config) AmpModel() string {
 	}
 
 	return "opus"
+}
+
+// OpenCodeModel returns the OpenCode model from Extensions, or "anthropic/claude-opus-4-5" as default.
+func (c *Config) OpenCodeModel() string {
+	if c.Extensions == nil {
+		return "anthropic/claude-opus-4-5"
+	}
+	if v, ok := c.Extensions[ExtOpenCodeModel].(string); ok && v != "" {
+		return v
+	}
+
+	return "anthropic/claude-opus-4-5"
 }
 
 // SetExtension sets a provider-specific extension value.

@@ -1,0 +1,13 @@
+# Input JSON (OpenCode --format json output)
+{"type":"assistant","message":{"id":"msg_001","role":"assistant","content":[{"type":"text","text":"I'll help you with that task. Let me analyze the code."}],"model":"glm-4.7-free","usage":{"input_tokens":2500,"output_tokens":150,"cache_read_input_tokens":1000,"cache_creation_input_tokens":500}}}
+
+# Expected parsed values:
+# Type: assistant
+# Message.ID: msg_001
+# Message.Role: assistant
+# Message.Model: glm-4.7-free
+# Message.GetText(): I'll help you with that task. Let me analyze the code.
+# Usage.TokensUsed: 4000 (2500 + 1000 + 500)
+# Usage.OutputTokens: 150
+# Usage.TotalTokens: 128000
+# IsAssistant(): true

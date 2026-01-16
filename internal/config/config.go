@@ -321,8 +321,8 @@ func ValidateViews(views []ViewConfig) error {
 // Returns nil if the configuration is valid (empty values use defaults).
 func ValidateOrchestration(orch OrchestrationConfig) error {
 	// Validate client type
-	if orch.Client != "" && orch.Client != "claude" && orch.Client != "amp" && orch.Client != "codex" && orch.Client != "gemini" {
-		return fmt.Errorf("orchestration.client must be \"claude\", \"amp\", \"codex\", or \"gemini\", got %q", orch.Client)
+	if orch.Client != "" && orch.Client != "claude" && orch.Client != "amp" && orch.Client != "codex" && orch.Client != "gemini" && orch.Client != "opencode" {
+		return fmt.Errorf("orchestration.client must be \"claude\", \"amp\", \"codex\", \"gemini\", or \"opencode\", got %q", orch.Client)
 	}
 
 	// Validate Amp mode

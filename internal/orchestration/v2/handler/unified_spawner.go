@@ -147,6 +147,8 @@ func (s *UnifiedProcessSpawnerImpl) generateCoordinatorMCPConfig() (string, erro
 		return mcp.GenerateCoordinatorConfigCodex(s.port), nil
 	case client.ClientGemini:
 		return mcp.GenerateCoordinatorConfigGemini(s.port)
+	case client.ClientOpenCode:
+		return mcp.GenerateCoordinatorConfigOpenCode(s.port)
 	default:
 		return mcp.GenerateCoordinatorConfigHTTP(s.port)
 	}
@@ -164,6 +166,8 @@ func (s *UnifiedProcessSpawnerImpl) generateMCPConfig(processID string) (string,
 		return mcp.GenerateWorkerConfigCodex(s.port, processID), nil
 	case client.ClientGemini:
 		return mcp.GenerateWorkerConfigGemini(s.port, processID)
+	case client.ClientOpenCode:
+		return mcp.GenerateWorkerConfigOpenCode(s.port, processID)
 	default:
 		return mcp.GenerateWorkerConfigHTTP(s.port, processID)
 	}

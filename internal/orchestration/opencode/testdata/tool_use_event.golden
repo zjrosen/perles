@@ -1,0 +1,14 @@
+# Input JSON (OpenCode --format json output)
+{"type":"assistant","message":{"id":"msg_002","content":[{"type":"text","text":"Let me read that file."},{"type":"tool_use","id":"toolu_read_001","name":"Read","input":{"file_path":"/project/src/main.go"}}]}}
+
+# Expected parsed values:
+# Type: assistant
+# Message.ID: msg_002
+# Message.GetText(): Let me read that file.
+# Message.HasToolUses(): true
+# Message.GetToolUses()[0].ID: toolu_read_001
+# Message.GetToolUses()[0].Name: Read
+# Tool.ID: toolu_read_001
+# Tool.Name: Read
+# Tool.Input: {"file_path":"/project/src/main.go"}
+# IsAssistant(): true

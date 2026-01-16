@@ -16,6 +16,8 @@ import (
 	"github.com/zjrosen/perles/internal/orchestration/events"
 	"github.com/zjrosen/perles/internal/orchestration/metrics"
 	v2 "github.com/zjrosen/perles/internal/orchestration/v2"
+	"github.com/zjrosen/perles/internal/orchestration/v2/command"
+	"github.com/zjrosen/perles/internal/orchestration/v2/processor"
 	"github.com/zjrosen/perles/internal/orchestration/workflow"
 	"github.com/zjrosen/perles/internal/pubsub"
 	"github.com/zjrosen/perles/internal/ui/shared/chatrender"
@@ -5787,4 +5789,172 @@ func TestSessionIsolation_MultipleSessionsIndependent(t *testing.T) {
 		require.Equal(t, tc.wantTokens, m.Metrics().TokensUsed,
 			"Session %s: TokensUsed mismatch", tc.sessionID)
 	}
+}
+
+// =============================================================================
+// CommandLogEvent Tests
+// =============================================================================
+
+func TestModel_HandleCommandLogEvent_DeliverFailed(t *testing.T) {
+	cfg := Config{
+		ClientType: "claude",
+		WorkDir:    "/tmp/test",
+	}
+	m := New(cfg)
+
+	// Create infrastructure
+	infra := newTestInfrastructure(t)
+	infra.Start()
+	defer infra.Shutdown()
+
+	m = m.SetInfrastructure(infra)
+
+	// Create a CommandLogEvent for failed deliver_process_queued
+	testErr := errors.New("process chat-panel has no session ID")
+	event := pubsub.Event[any]{
+		Type: pubsub.UpdatedEvent,
+		Payload: processor.CommandLogEvent{
+			CommandID:   "test-cmd-123",
+			CommandType: command.CmdDeliverProcessQueued,
+			Success:     false,
+			Error:       testErr,
+		},
+	}
+
+	// Handle the event
+	_, cmd := m.Update(event)
+
+	// Verify cmd is not nil (should be batch with listener + error msg)
+	require.NotNil(t, cmd)
+}
+
+func TestModel_HandleCommandLogEvent_SendFailed(t *testing.T) {
+	cfg := Config{
+		ClientType: "claude",
+		WorkDir:    "/tmp/test",
+	}
+	m := New(cfg)
+
+	// Create infrastructure
+	infra := newTestInfrastructure(t)
+	infra.Start()
+	defer infra.Shutdown()
+
+	m = m.SetInfrastructure(infra)
+
+	// Create a CommandLogEvent for failed send_to_process
+	testErr := errors.New("failed to send message")
+	event := pubsub.Event[any]{
+		Type: pubsub.UpdatedEvent,
+		Payload: processor.CommandLogEvent{
+			CommandID:   "test-cmd-456",
+			CommandType: command.CmdSendToProcess,
+			Success:     false,
+			Error:       testErr,
+		},
+	}
+
+	// Handle the event
+	_, cmd := m.Update(event)
+
+	// Verify cmd is not nil (should be batch with listener + error msg)
+	require.NotNil(t, cmd)
+}
+
+func TestModel_HandleCommandLogEvent_SpawnFailed(t *testing.T) {
+	cfg := Config{
+		ClientType: "claude",
+		WorkDir:    "/tmp/test",
+	}
+	m := New(cfg)
+
+	// Create infrastructure
+	infra := newTestInfrastructure(t)
+	infra.Start()
+	defer infra.Shutdown()
+
+	m = m.SetInfrastructure(infra)
+
+	// Create a CommandLogEvent for failed spawn_process
+	testErr := errors.New("failed to spawn process")
+	event := pubsub.Event[any]{
+		Type: pubsub.UpdatedEvent,
+		Payload: processor.CommandLogEvent{
+			CommandID:   "test-cmd-789",
+			CommandType: command.CmdSpawnProcess,
+			Success:     false,
+			Error:       testErr,
+		},
+	}
+
+	// Handle the event
+	_, cmd := m.Update(event)
+
+	// Verify cmd is not nil (should be batch with listener + error msg)
+	require.NotNil(t, cmd)
+}
+
+func TestModel_HandleCommandLogEvent_SuccessIgnored(t *testing.T) {
+	cfg := Config{
+		ClientType: "claude",
+		WorkDir:    "/tmp/test",
+	}
+	m := New(cfg)
+
+	// Create infrastructure
+	infra := newTestInfrastructure(t)
+	infra.Start()
+	defer infra.Shutdown()
+
+	m = m.SetInfrastructure(infra)
+
+	// Create a successful CommandLogEvent (should be ignored)
+	event := pubsub.Event[any]{
+		Type: pubsub.UpdatedEvent,
+		Payload: processor.CommandLogEvent{
+			CommandID:   "test-cmd-success",
+			CommandType: command.CmdDeliverProcessQueued,
+			Success:     true,
+			Error:       nil,
+		},
+	}
+
+	// Handle the event
+	_, cmd := m.Update(event)
+
+	// Verify cmd is not nil (should just be listener, no error)
+	require.NotNil(t, cmd)
+}
+
+func TestModel_HandleCommandLogEvent_UnrelatedCommandIgnored(t *testing.T) {
+	cfg := Config{
+		ClientType: "claude",
+		WorkDir:    "/tmp/test",
+	}
+	m := New(cfg)
+
+	// Create infrastructure
+	infra := newTestInfrastructure(t)
+	infra.Start()
+	defer infra.Shutdown()
+
+	m = m.SetInfrastructure(infra)
+
+	// Create a failed CommandLogEvent for unrelated command type
+	testErr := errors.New("some error")
+	event := pubsub.Event[any]{
+		Type: pubsub.UpdatedEvent,
+		Payload: processor.CommandLogEvent{
+			CommandID:   "test-cmd-unrelated",
+			CommandType: command.CmdAssignTask, // Not relevant to chat panel
+			Success:     false,
+			Error:       testErr,
+		},
+	}
+
+	// Handle the event
+	_, cmd := m.Update(event)
+
+	// Verify cmd is not nil (should just be listener, no error toast)
+	require.NotNil(t, cmd)
 }

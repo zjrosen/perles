@@ -77,6 +77,8 @@ func (p *ProcessRegistrySessionProvider) generateCoordinatorMCPConfig() (string,
 		return mcp.GenerateCoordinatorConfigCodex(p.port), nil
 	case client.ClientGemini:
 		return mcp.GenerateCoordinatorConfigGemini(p.port)
+	case client.ClientOpenCode:
+		return mcp.GenerateCoordinatorConfigOpenCode(p.port)
 	default:
 		return mcp.GenerateCoordinatorConfigHTTP(p.port)
 	}
@@ -94,6 +96,8 @@ func (p *ProcessRegistrySessionProvider) generateWorkerMCPConfig(workerID string
 		return mcp.GenerateWorkerConfigCodex(p.port, workerID), nil
 	case client.ClientGemini:
 		return mcp.GenerateWorkerConfigGemini(p.port, workerID)
+	case client.ClientOpenCode:
+		return mcp.GenerateWorkerConfigOpenCode(p.port, workerID)
 	default:
 		return mcp.GenerateWorkerConfigHTTP(p.port, workerID)
 	}

@@ -1062,9 +1062,10 @@ func (m Model) handleStartCoordinator() (Model, tea.Cmd) {
 	m.input.Blur()
 
 	// Determine timeout based on client type.
-	// Codex workers take longer to boot due to more reasoning steps.
+	// Codex and OpenCode take longer to boot due to model startup overhead.
 	timeout := 20 * time.Second
-	if m.agentProvider.Type() == client.ClientCodex {
+	switch m.agentProvider.Type() {
+	case client.ClientCodex, client.ClientOpenCode:
 		timeout = 60 * time.Second
 	}
 

@@ -1,0 +1,9 @@
+# Input JSON (OpenCode --format json output)
+{"type":"system","subtype":"init","session_id":"ses_abc123def456","cwd":"/Users/dev/project"}
+
+# Expected parsed values:
+# Type: system
+# SubType: init
+# SessionID: ses_abc123def456
+# WorkDir: /Users/dev/project
+# IsInit(): true

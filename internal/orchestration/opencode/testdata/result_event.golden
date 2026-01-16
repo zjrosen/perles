@@ -1,0 +1,15 @@
+# Input JSON (OpenCode --format json output)
+{"type":"result","subtype":"success","session_id":"ses_abc123def456","result":"Task completed successfully. All files have been updated.","duration_ms":45000,"total_cost_usd":0.0234,"message":{"usage":{"input_tokens":8000,"output_tokens":2500,"cache_read_input_tokens":15000,"cache_creation_input_tokens":3000}}}
+
+# Expected parsed values:
+# Type: result
+# SubType: success
+# SessionID: ses_abc123def456
+# Result: Task completed successfully. All files have been updated.
+# DurationMs: 45000
+# TotalCostUSD: 0.0234
+# Usage.TokensUsed: 26000 (8000 + 15000 + 3000)
+# Usage.OutputTokens: 2500
+# Usage.TotalTokens: 128000
+# IsResult(): true
+# IsError(): false

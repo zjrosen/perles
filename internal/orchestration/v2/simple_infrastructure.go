@@ -92,8 +92,11 @@ func NewSimpleInfrastructure(cfg SimpleInfrastructureConfig) (*SimpleInfrastruct
 	// Create event bus for process events
 	eventBus := pubsub.NewBroker[any]()
 
-	// Create minimal middleware (no tracing, no command log for simple use)
+	// Create middleware (minimal set but includes command log for error visibility)
 	loggingMiddleware := processor.NewLoggingMiddleware(processor.LoggingMiddlewareConfig{})
+	commandLogMiddleware := processor.NewCommandLogMiddleware(processor.CommandLogMiddlewareConfig{
+		EventBus: &eventBusAdapter{broker: eventBus},
+	})
 	timeoutMiddleware := processor.NewTimeoutMiddleware(processor.TimeoutMiddlewareConfig{
 		WarningThreshold: 500 * time.Millisecond,
 	})
@@ -102,7 +105,7 @@ func NewSimpleInfrastructure(cfg SimpleInfrastructureConfig) (*SimpleInfrastruct
 	cmdProcessor := processor.NewCommandProcessor(
 		processor.WithQueueCapacity(100),
 		processor.WithEventBus(eventBus),
-		processor.WithMiddleware(loggingMiddleware, timeoutMiddleware),
+		processor.WithMiddleware(loggingMiddleware, commandLogMiddleware, timeoutMiddleware),
 	)
 
 	// Create process registry for runtime process access
@@ -115,7 +118,7 @@ func NewSimpleInfrastructure(cfg SimpleInfrastructureConfig) (*SimpleInfrastruct
 	spawner := newSimpleProcessSpawner(cfg.AgentProvider, cfg.WorkDir, cfg.SystemPrompt, cfg.InitialPrompt, cmdSubmitter, eventBus)
 
 	// Create simple message deliverer that spawns session resumes
-	deliverer := newSimpleMessageDeliverer(processRegistry, cfg.AgentProvider, cfg.WorkDir, cfg.SystemPrompt)
+	deliverer := newSimpleMessageDeliverer(processRegistry, cfg.AgentProvider, cfg.WorkDir)
 
 	// Register only the 4 core handlers needed for chat:
 	// 1. SpawnProcess - create the AI process
@@ -248,24 +251,22 @@ func (s *simpleProcessSpawner) SpawnProcess(ctx context.Context, id string, role
 // ===========================================================================
 
 // simpleMessageDeliverer implements MessageDeliverer by spawning a session resume.
-// Like ProcessSessionDeliverer but simpler (no MCP config, just system prompt).
+// Like ProcessSessionDeliverer but simpler (no MCP config needed for simple chat).
 type simpleMessageDeliverer struct {
-	registry     *process.ProcessRegistry
-	provider     client.AgentProvider
-	workDir      string
-	systemPrompt string
+	registry *process.ProcessRegistry
+	provider client.AgentProvider
+	workDir  string
 }
 
 func newSimpleMessageDeliverer(
 	registry *process.ProcessRegistry,
 	provider client.AgentProvider,
-	workDir, systemPrompt string,
+	workDir string,
 ) *simpleMessageDeliverer {
 	return &simpleMessageDeliverer{
-		registry:     registry,
-		provider:     provider,
-		workDir:      workDir,
-		systemPrompt: systemPrompt,
+		registry: registry,
+		provider: provider,
+		workDir:  workDir,
 	}
 }
 
@@ -295,7 +296,6 @@ func (d *simpleMessageDeliverer) Deliver(_ context.Context, processID, content s
 		WorkDir:         d.workDir,
 		SessionID:       sessionID,
 		Prompt:          content,
-		SystemPrompt:    d.systemPrompt,
 		MCPConfig:       "", // No MCP tools for simple chat
 		SkipPermissions: true,
 		DisallowedTools: []string{"AskUserQuestion"},

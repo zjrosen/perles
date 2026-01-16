@@ -217,8 +217,11 @@ func (p *Process) eventLoop() {
 
 // handleOutputEvent processes a single output event from the AI process.
 func (p *Process) handleOutputEvent(event *client.OutputEvent) {
-	// Extract session ID from init event
-	if event.IsInit() && event.SessionID != "" {
+	// Extract session ID from events.
+	// Always update session ID when present - providers send the correct session ID
+	// for the current turn. Failed resumes are handled by sessionIDAtTurnStart rollback
+	// in handleProcessComplete.
+	if event.SessionID != "" {
 		p.setSessionID(event.SessionID)
 	}
 

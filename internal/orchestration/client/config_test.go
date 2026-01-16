@@ -71,6 +71,11 @@ func TestExtensionKeys_GeminiConstants(t *testing.T) {
 	require.Equal(t, "gemini.model", ExtGeminiModel)
 }
 
+func TestExtensionKeys_OpenCodeConstants(t *testing.T) {
+	// Verify all OpenCode extension key constants are defined
+	require.Equal(t, "opencode.model", ExtOpenCodeModel)
+}
+
 func TestConfig_GeminiModel_Default(t *testing.T) {
 	cfg := Config{}
 	require.Equal(t, "gemini-3-pro-preview", cfg.GeminiModel())
@@ -111,6 +116,48 @@ func TestConfig_GeminiModel_ViaSetExtension(t *testing.T) {
 	cfg := Config{}
 	cfg.SetExtension(ExtGeminiModel, "gemini-2.5-flash")
 	require.Equal(t, "gemini-2.5-flash", cfg.GeminiModel())
+}
+
+func TestConfig_OpenCodeModel_Default(t *testing.T) {
+	cfg := Config{}
+	require.Equal(t, "anthropic/claude-opus-4-5", cfg.OpenCodeModel())
+}
+
+func TestConfig_OpenCodeModel_NilExtensions(t *testing.T) {
+	cfg := Config{Extensions: nil}
+	require.Equal(t, "anthropic/claude-opus-4-5", cfg.OpenCodeModel())
+}
+
+func TestConfig_OpenCodeModel_EmptyExtensions(t *testing.T) {
+	cfg := Config{Extensions: map[string]any{}}
+	require.Equal(t, "anthropic/claude-opus-4-5", cfg.OpenCodeModel())
+}
+
+func TestConfig_OpenCodeModel_EmptyString(t *testing.T) {
+	cfg := Config{Extensions: map[string]any{
+		ExtOpenCodeModel: "",
+	}}
+	require.Equal(t, "anthropic/claude-opus-4-5", cfg.OpenCodeModel())
+}
+
+func TestConfig_OpenCodeModel_CustomModel(t *testing.T) {
+	cfg := Config{Extensions: map[string]any{
+		ExtOpenCodeModel: "opencode/custom-model",
+	}}
+	require.Equal(t, "opencode/custom-model", cfg.OpenCodeModel())
+}
+
+func TestConfig_OpenCodeModel_WrongType(t *testing.T) {
+	cfg := Config{Extensions: map[string]any{
+		ExtOpenCodeModel: 123, // Not a string
+	}}
+	require.Equal(t, "anthropic/claude-opus-4-5", cfg.OpenCodeModel())
+}
+
+func TestConfig_OpenCodeModel_ViaSetExtension(t *testing.T) {
+	cfg := Config{}
+	cfg.SetExtension(ExtOpenCodeModel, "opencode/glm-4.8")
+	require.Equal(t, "opencode/glm-4.8", cfg.OpenCodeModel())
 }
 
 // Tests for NewFromClientConfigs helper

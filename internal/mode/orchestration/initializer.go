@@ -16,11 +16,13 @@ import (
 	"github.com/zjrosen/perles/internal/config"
 	"github.com/zjrosen/perles/internal/git"
 	"github.com/zjrosen/perles/internal/log"
+	_ "github.com/zjrosen/perles/internal/orchestration/amp" // Register amp client
 	"github.com/zjrosen/perles/internal/orchestration/client"
 	_ "github.com/zjrosen/perles/internal/orchestration/codex" // Register codex client
 	"github.com/zjrosen/perles/internal/orchestration/events"
 	_ "github.com/zjrosen/perles/internal/orchestration/gemini" // Register gemini client
 	"github.com/zjrosen/perles/internal/orchestration/mcp"
+	_ "github.com/zjrosen/perles/internal/orchestration/opencode" // Register opencode client
 	"github.com/zjrosen/perles/internal/orchestration/session"
 	"github.com/zjrosen/perles/internal/orchestration/tracing"
 	v2 "github.com/zjrosen/perles/internal/orchestration/v2"

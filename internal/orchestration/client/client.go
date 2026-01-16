@@ -17,6 +17,8 @@ const (
 	ClientCodex ClientType = "codex"
 	// ClientGemini is the Gemini CLI client.
 	ClientGemini ClientType = "gemini"
+	// ClientOpenCode is the OpenCode CLI client.
+	ClientOpenCode ClientType = "opencode"
 	// ClientMock is a mock client for testing.
 	ClientMock ClientType = "mock"
 )

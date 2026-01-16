@@ -366,12 +366,12 @@ Perles includes a sophisticated multi-agent AI orchestration layer for coordinat
 └─────────────────────────────────────────────────────────────┘
                             │
                             ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Headless AI Clients                       │
-├──────────────────┬──────────────────┬───────────────────────┤
-│   Claude Code    │       Amp        │      Codex            │
-│   (claude/)      │     (amp/)       │    (codex/)           │
-└──────────────────┴──────────────────┴───────────────────────┘
+┌───────────────────────────────────────────────────────────────────────────┐
+│                         Headless AI Clients                               │
+├─────────────────┬─────────────────┬─────────────────┬─────────────────────┤
+│   Claude Code   │       Amp       │      Codex      │      OpenCode       │
+│   (claude/)     │     (amp/)      │    (codex/)     │    (opencode/)      │
+└─────────────────┴─────────────────┴─────────────────┴─────────────────────┘
 ```
 
 ### Key Components
@@ -382,6 +382,7 @@ Perles includes a sophisticated multi-agent AI orchestration layer for coordinat
 | `orchestration/amp/` | Amp CLI integration |
 | `orchestration/claude/` | Claude Code CLI integration |
 | `orchestration/codex/` | OpenAI Codex CLI integration |
+| `orchestration/opencode/` | OpenCode CLI integration (GLM-4.7, file-based MCP config) |
 | `orchestration/v2/` | Command processor, handlers, adapters, repositories |
 | `orchestration/mcp/` | MCP server exposing coordinator/worker tools |
 | `orchestration/events/` | Unified `ProcessEvent` type |
@@ -545,7 +546,7 @@ views:                               # Board views
         tree_mode: "deps"            # or "child"
 
 orchestration:                       # AI orchestration settings
-  client: "claude"                   # claude, amp, or codex
+  client: "claude"                   # claude, amp, codex, gemini, or opencode
   disable_worktrees: false           # Disable git worktree isolation
   session_storage:                   # Centralized session storage
     base_dir: ~/.perles/sessions     # Default storage location
