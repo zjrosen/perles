@@ -28,9 +28,13 @@ func buildSessionPickerItems(sessions []session.SessionSummary, now time.Time) [
 		// Format display name as "appName - Jan 2 15:04"
 		displayName := fmt.Sprintf("%s - %s", sess.ApplicationName, sess.StartTime.Format("Jan 2 15:04"))
 
-		// Build description with relative time, worker count, status
+		// Build description with relative time, worker count, status, and truncated session ID
 		relTime := shared.FormatRelativeTimeFrom(sess.StartTime, now)
-		description := fmt.Sprintf("%s • %d workers • %s", relTime, sess.WorkerCount, sess.Status)
+		shortID := sess.ID
+		if len(shortID) > 8 {
+			shortID = shortID[:8]
+		}
+		description := fmt.Sprintf("%s • %d workers • %s • %s", relTime, sess.WorkerCount, sess.Status, shortID)
 
 		// Color recent sessions (< 24h) green, older sessions muted
 		var color lipgloss.TerminalColor

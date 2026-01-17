@@ -53,10 +53,11 @@ func TestBuildSessionPickerItems_SingleSession(t *testing.T) {
 	// Check name format: "appName - Jan 2 15:04"
 	require.Equal(t, "perles - Jan 12 13:00", item.Name)
 
-	// Check description includes relative time, worker count, status
+	// Check description includes relative time, worker count, status, and truncated session ID
 	require.Contains(t, item.Description, "2h ago")
 	require.Contains(t, item.Description, "3 workers")
 	require.Contains(t, item.Description, "completed")
+	require.Contains(t, item.Description, "abc123") // Session ID (< 8 chars, displayed as-is)
 
 	// Check color is green for recent session
 	require.Equal(t, styles.IssueFeatureColor, item.Color)
@@ -101,16 +102,19 @@ func TestBuildSessionPickerItems_MultipleSessions(t *testing.T) {
 	require.Equal(t, "/sessions/app1/session1", items[0].ID)
 	require.Equal(t, "app1 - Jan 12 14:00", items[0].Name)
 	require.Contains(t, items[0].Description, "1h ago")
+	require.Contains(t, items[0].Description, "session1") // Session ID (< 8 chars)
 
 	// Second session - 5 hours ago
 	require.Equal(t, "/sessions/app2/session2", items[1].ID)
 	require.Equal(t, "app2 - Jan 12 10:00", items[1].Name)
 	require.Contains(t, items[1].Description, "5h ago")
+	require.Contains(t, items[1].Description, "session2") // Session ID (< 8 chars)
 
 	// Third session - 48 hours ago
 	require.Equal(t, "/sessions/app3/session3", items[2].ID)
 	require.Equal(t, "app3 - Jan 10 15:00", items[2].Name)
 	require.Contains(t, items[2].Description, "2d ago")
+	require.Contains(t, items[2].Description, "session3") // Session ID (< 8 chars)
 }
 
 // TestBuildSessionPickerItems_ColorByRecency verifies sessions are colored by recency.
@@ -179,6 +183,52 @@ func TestBuildSessionPickerItems_ExactBoundary24Hours(t *testing.T) {
 
 	// Just under 24h gets green (< 24h)
 	require.Equal(t, styles.IssueFeatureColor, items[1].Color)
+}
+
+// TestBuildSessionPickerItems_SessionIDTruncation verifies session IDs are truncated to 8 chars.
+func TestBuildSessionPickerItems_SessionIDTruncation(t *testing.T) {
+	now := time.Date(2026, 1, 12, 15, 0, 0, 0, time.UTC)
+
+	sessions := []session.SessionSummary{
+		{
+			ID:              "abcdefghijklmnop", // 16 chars, should be truncated to "abcdefgh"
+			ApplicationName: "app",
+			SessionDir:      "/sessions/long",
+			StartTime:       now.Add(-1 * time.Hour),
+			Status:          session.StatusCompleted,
+			WorkerCount:     1,
+		},
+		{
+			ID:              "short", // 5 chars, should display as-is
+			ApplicationName: "app",
+			SessionDir:      "/sessions/short",
+			StartTime:       now.Add(-2 * time.Hour),
+			Status:          session.StatusCompleted,
+			WorkerCount:     1,
+		},
+		{
+			ID:              "exactly8", // Exactly 8 chars, should display as-is
+			ApplicationName: "app",
+			SessionDir:      "/sessions/exact",
+			StartTime:       now.Add(-3 * time.Hour),
+			Status:          session.StatusCompleted,
+			WorkerCount:     1,
+		},
+	}
+
+	items := buildSessionPickerItems(sessions, now)
+
+	require.Len(t, items, 3)
+
+	// Long ID (16 chars) truncated to first 8 chars
+	require.Contains(t, items[0].Description, "abcdefgh")
+	require.NotContains(t, items[0].Description, "abcdefghi") // Verify truncation
+
+	// Short ID (5 chars) displayed as-is
+	require.Contains(t, items[1].Description, "short")
+
+	// Exactly 8 chars displayed as-is
+	require.Contains(t, items[2].Description, "exactly8")
 }
 
 // createTestServices creates mode.Services for session picker testing.
