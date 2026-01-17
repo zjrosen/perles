@@ -161,9 +161,6 @@ type Model struct {
 	ctx             context.Context                           // Context for subscription lifetime
 	cancel          context.CancelFunc                        // Cancel function for subscriptions
 
-	// Nudge batching (debounces coordinator nudges when multiple workers send messages)
-	nudgeBatcher *NudgeBatcher
-
 	// Message routing - who we're sending to (COORDINATOR or worker ID)
 	messageTarget string
 
@@ -746,9 +743,6 @@ func (m *Model) CancelSubscriptions() {
 	if m.cancel != nil {
 		m.cancel()
 	}
-	if m.nudgeBatcher != nil {
-		m.nudgeBatcher.Stop()
-	}
 }
 
 // Cleanup cleans up all orchestration resources.
@@ -832,7 +826,6 @@ func (m *Model) Cleanup() {
 	m.v2Listener = nil
 	m.ctx = nil
 	m.cancel = nil
-	m.nudgeBatcher = nil
 }
 
 // ExitMessage returns the exit message to display to the user after cleanup.

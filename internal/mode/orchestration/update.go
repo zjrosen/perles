@@ -664,18 +664,6 @@ func (m Model) handleMessageEvent(event pubsub.Event[message.Event]) (Model, tea
 			}
 			return m, m.messageListener.Listen()
 		}
-
-		// Nudge coordinator if message is to COORDINATOR or ALL
-		if entry.To == message.ActorCoordinator || entry.To == message.ActorAll {
-			if m.processRepo() != nil && m.nudgeBatcher != nil && entry.From != message.ActorCoordinator {
-				// Determine message type based on the entry type
-				msgType := WorkerNewMessage
-				if entry.Type == message.MessageWorkerReady {
-					msgType = WorkerReady
-				}
-				m.nudgeBatcher.Add(entry.From, msgType)
-			}
-		}
 	}
 
 	return m, m.messageListener.Listen()
@@ -881,43 +869,6 @@ func (m Model) handleInitializerEvent(event pubsub.Event[InitializerEvent]) (Mod
 				// This is the single source of truth for all process events (coordinator + workers)
 				if v2Bus := m.initializer.GetV2EventBus(); v2Bus != nil {
 					m.v2Listener = pubsub.NewContinuousListener(m.ctx, v2Bus)
-				}
-
-				// Set up nudge batcher early so worker ready messages get forwarded
-				if m.nudgeBatcher == nil {
-					m.nudgeBatcher = NewNudgeBatcher(1 * time.Second)
-					m.nudgeBatcher.SetOnNudge(func(messagesByType map[MessageType][]string) {
-						cmdSubmitter := m.cmdSubmitter()
-						if cmdSubmitter == nil {
-							return
-						}
-
-						var (
-							nudge                 string
-							readyMessageWorkerIds []string
-							newMessageWorkerIds   []string
-						)
-						for messageType, workerIds := range messagesByType {
-							switch messageType {
-							case WorkerReady:
-								readyMessageWorkerIds = append(readyMessageWorkerIds, workerIds...)
-							case WorkerNewMessage:
-								newMessageWorkerIds = append(newMessageWorkerIds, workerIds...)
-							}
-						}
-
-						if len(readyMessageWorkerIds) > 0 {
-							nudge = fmt.Sprintf("[%s] have started up and are now ready", strings.Join(readyMessageWorkerIds, ", "))
-							cmd := command.NewSendToProcessCommand(command.SourceUser, repository.CoordinatorID, nudge)
-							cmdSubmitter.Submit(cmd)
-						}
-
-						if len(newMessageWorkerIds) > 0 {
-							nudge = fmt.Sprintf("[%s sent messages] Use read_message_log to check for new messages.", strings.Join(newMessageWorkerIds, ", "))
-							cmd := command.NewSendToProcessCommand(command.SourceUser, repository.CoordinatorID, nudge)
-							cmdSubmitter.Submit(cmd)
-						}
-					})
 				}
 
 				cmds := []tea.Cmd{

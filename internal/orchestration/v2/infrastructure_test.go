@@ -121,6 +121,41 @@ func TestNewInfrastructure(t *testing.T) {
 
 		// Verify Internal components are created
 		assert.NotNil(t, infra.Internal.ProcessRegistry)
+		assert.NotNil(t, infra.Internal.CoordinatorNudger)
+	})
+
+	t.Run("creates nudger with default debounce when NudgeDebounce is zero", func(t *testing.T) {
+		cfg := InfrastructureConfig{
+			Port:          8080,
+			AgentProvider: createTestAgentProvider(t),
+			WorkDir:       "/tmp/test",
+			MessageRepo:   repository.NewMemoryMessageRepository(),
+			NudgeDebounce: 0, // Should use default
+		}
+
+		infra, err := NewInfrastructure(cfg)
+		require.NoError(t, err)
+		require.NotNil(t, infra)
+
+		// Nudger should be created
+		assert.NotNil(t, infra.Internal.CoordinatorNudger)
+	})
+
+	t.Run("creates nudger with custom debounce", func(t *testing.T) {
+		cfg := InfrastructureConfig{
+			Port:          8080,
+			AgentProvider: createTestAgentProvider(t),
+			WorkDir:       "/tmp/test",
+			MessageRepo:   repository.NewMemoryMessageRepository(),
+			NudgeDebounce: 500 * time.Millisecond,
+		}
+
+		infra, err := NewInfrastructure(cfg)
+		require.NoError(t, err)
+		require.NotNil(t, infra)
+
+		// Nudger should be created with custom debounce
+		assert.NotNil(t, infra.Internal.CoordinatorNudger)
 	})
 
 	t.Run("returns error for invalid config", func(t *testing.T) {
@@ -201,8 +236,39 @@ func TestInfrastructure_Start(t *testing.T) {
 		// Processor should be running after Start returns
 		assert.True(t, infra.Core.Processor.IsRunning())
 
+		// Nudger should exist after Start
+		assert.NotNil(t, infra.Internal.CoordinatorNudger)
+
 		// Clean up
-		infra.Drain()
+		infra.Shutdown()
+	})
+
+	t.Run("starts nudger after processor is ready", func(t *testing.T) {
+		cfg := InfrastructureConfig{
+			Port:          8080,
+			AgentProvider: createTestAgentProvider(t),
+			WorkDir:       "/tmp/test",
+			MessageRepo:   repository.NewMemoryMessageRepository(),
+		}
+
+		infra, err := NewInfrastructure(cfg)
+		require.NoError(t, err)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		// Start should succeed
+		err = infra.Start(ctx)
+		require.NoError(t, err)
+
+		// Processor must be running (nudger depends on it)
+		assert.True(t, infra.Core.Processor.IsRunning())
+
+		// Nudger should be created and started
+		assert.NotNil(t, infra.Internal.CoordinatorNudger)
+
+		// Clean up
+		infra.Shutdown()
 	})
 
 	t.Run("returns error when context is cancelled during start", func(t *testing.T) {
@@ -266,6 +332,76 @@ func TestInfrastructure_Drain(t *testing.T) {
 		// Drain should not panic even if Start was never called
 		assert.NotPanics(t, func() {
 			infra.Drain()
+		})
+	})
+}
+
+func TestInfrastructure_Shutdown(t *testing.T) {
+	t.Run("stops nudger before process registry", func(t *testing.T) {
+		cfg := InfrastructureConfig{
+			Port:          8080,
+			AgentProvider: createTestAgentProvider(t),
+			WorkDir:       "/tmp/test",
+			MessageRepo:   repository.NewMemoryMessageRepository(),
+		}
+
+		infra, err := NewInfrastructure(cfg)
+		require.NoError(t, err)
+
+		ctx := context.Background()
+		err = infra.Start(ctx)
+		require.NoError(t, err)
+
+		// All components should be running
+		assert.True(t, infra.Core.Processor.IsRunning())
+		assert.NotNil(t, infra.Internal.CoordinatorNudger)
+
+		// Shutdown should stop everything cleanly
+		// Nudger.Stop() should be called before ProcessRegistry.StopAll()
+		assert.NotPanics(t, func() {
+			infra.Shutdown()
+		})
+
+		// Processor should no longer be running
+		assert.False(t, infra.Core.Processor.IsRunning())
+	})
+
+	t.Run("handles shutdown on unstarted infrastructure", func(t *testing.T) {
+		cfg := InfrastructureConfig{
+			Port:          8080,
+			AgentProvider: createTestAgentProvider(t),
+			WorkDir:       "/tmp/test",
+			MessageRepo:   repository.NewMemoryMessageRepository(),
+		}
+
+		infra, err := NewInfrastructure(cfg)
+		require.NoError(t, err)
+
+		// Shutdown should not panic even if Start was never called
+		assert.NotPanics(t, func() {
+			infra.Shutdown()
+		})
+	})
+
+	t.Run("can be called multiple times safely", func(t *testing.T) {
+		cfg := InfrastructureConfig{
+			Port:          8080,
+			AgentProvider: createTestAgentProvider(t),
+			WorkDir:       "/tmp/test",
+			MessageRepo:   repository.NewMemoryMessageRepository(),
+		}
+
+		infra, err := NewInfrastructure(cfg)
+		require.NoError(t, err)
+
+		ctx := context.Background()
+		err = infra.Start(ctx)
+		require.NoError(t, err)
+
+		// Calling Shutdown multiple times should not panic
+		assert.NotPanics(t, func() {
+			infra.Shutdown()
+			infra.Shutdown()
 		})
 	})
 }

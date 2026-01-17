@@ -1028,57 +1028,6 @@ func TestHandleMessageEvent_WorkerReady_AppearsInMessagePane(t *testing.T) {
 	require.Equal(t, "WORKER.1", m.messagePane.entries[0].From)
 }
 
-func TestHandleMessageEvent_RegularMessage_UsesDebounce(t *testing.T) {
-	// Test that regular messages use debounce (contrast with worker ready)
-	m := New(Config{})
-	m = m.SetSize(120, 40)
-
-	// Set up mock v2 infrastructure
-	msgIssue := repository.NewMemoryMessageRepository()
-	infra, _ := mockV2Infra()
-	m = m.SetV2Infra(infra)
-
-	// Set up a message listener
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	m.messageListener = pubsub.NewContinuousListener(ctx, msgIssue.Broker())
-
-	// Set up nudge batcher with tracking
-	var nudgeCallCount int
-	m.nudgeBatcher = NewNudgeBatcher(100 * time.Millisecond) // Short debounce for test
-	m.nudgeBatcher.SetOnNudge(func(messagesByType map[MessageType][]string) {
-		nudgeCallCount++
-	})
-
-	// Create a regular info message event
-	infoEntry := message.Entry{
-		ID:      "test-info-789",
-		From:    "WORKER.1",
-		To:      message.ActorCoordinator,
-		Content: "Task completed",
-		Type:    message.MessageInfo,
-	}
-	event := pubsub.Event[message.Event]{
-		Type: pubsub.UpdatedEvent,
-		Payload: message.Event{
-			Type:  message.EventPosted,
-			Entry: infoEntry,
-		},
-	}
-
-	// Handle the message event
-	m, _ = m.handleMessageEvent(event)
-
-	// Immediately check - should NOT have fired yet (debounce pending)
-	require.Equal(t, 0, nudgeCallCount, "should not nudge immediately for regular messages")
-
-	// Wait for debounce
-	time.Sleep(150 * time.Millisecond)
-
-	// Now it should have fired
-	require.Equal(t, 1, nudgeCallCount, "should nudge after debounce for regular messages")
-}
-
 func TestQuitConfirmation_ForceQuit_DoubleCtrlC(t *testing.T) {
 	// Test that Ctrl+C while quit modal is visible bypasses confirmation (force quit)
 	m := New(Config{})

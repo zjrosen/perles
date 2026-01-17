@@ -17,6 +17,7 @@ import (
 	"github.com/zjrosen/perles/internal/orchestration/v2/command"
 	"github.com/zjrosen/perles/internal/orchestration/v2/handler"
 	"github.com/zjrosen/perles/internal/orchestration/v2/integration"
+	"github.com/zjrosen/perles/internal/orchestration/v2/nudger"
 	"github.com/zjrosen/perles/internal/orchestration/v2/process"
 	"github.com/zjrosen/perles/internal/orchestration/v2/processor"
 	"github.com/zjrosen/perles/internal/orchestration/v2/repository"
@@ -64,6 +65,9 @@ type InfrastructureConfig struct {
 	// SessionMetadataProvider provides access to session metadata for workflow completion.
 	// Optional - if nil, workflow completion status is not persisted to session metadata.
 	SessionMetadataProvider handler.SessionMetadataProvider
+	// NudgeDebounce is the debounce duration for coordinator nudges.
+	// Defaults to nudger.DefaultDebounce (1 second) if zero.
+	NudgeDebounce time.Duration
 }
 
 // Validate checks that all required configuration is provided.
@@ -126,6 +130,8 @@ type InternalComponents struct {
 	ProcessRegistry *process.ProcessRegistry
 	// TurnEnforcer tracks MCP tool calls during worker turns for enforcement.
 	TurnEnforcer handler.TurnCompletionEnforcer
+	// CoordinatorNudger batches worker messages and sends consolidated nudges.
+	CoordinatorNudger *nudger.CoordinatorNudger
 }
 
 // NewInfrastructure creates all v2 orchestration infrastructure components.
@@ -202,6 +208,13 @@ func NewInfrastructure(cfg InfrastructureConfig) (*Infrastructure, error) {
 		adapter.WithSessionID(cfg.SessionID, cfg.WorkDir, cfg.SessionDir),
 	)
 
+	// Create CoordinatorNudger for batching worker messages
+	coordNudger := nudger.New(nudger.Config{
+		Debounce:     cfg.NudgeDebounce, // Uses nudger.DefaultDebounce if zero
+		MsgBroker:    cfg.MessageRepo.Broker(),
+		CmdSubmitter: cmdSubmitter,
+	})
+
 	return &Infrastructure{
 		Core: CoreComponents{
 			Processor:    cmdProcessor,
@@ -215,8 +228,9 @@ func NewInfrastructure(cfg InfrastructureConfig) (*Infrastructure, error) {
 			QueueRepo:   queueRepo,
 		},
 		Internal: InternalComponents{
-			ProcessRegistry: processRegistry,
-			TurnEnforcer:    turnEnforcer,
+			ProcessRegistry:   processRegistry,
+			TurnEnforcer:      turnEnforcer,
+			CoordinatorNudger: coordNudger,
 		},
 		config: cfg,
 	}, nil
@@ -233,6 +247,12 @@ func (i *Infrastructure) Start(ctx context.Context) error {
 		return fmt.Errorf("waiting for command processor: %w", err)
 	}
 
+	// Start coordinator nudger after processor is ready
+	// (nudger submits commands, so processor must be running first)
+	if i.Internal.CoordinatorNudger != nil {
+		i.Internal.CoordinatorNudger.Start()
+	}
+
 	return nil
 }
 
@@ -247,7 +267,11 @@ func (i *Infrastructure) Drain() {
 // Shutdown stops all processes and drains the command processor.
 // This is the recommended way to cleanly shut down the infrastructure.
 func (i *Infrastructure) Shutdown() {
-	// Stop all processes first (coordinator and workers)
+	// Stop nudger first (it may submit final commands that need processing)
+	if i.Internal.CoordinatorNudger != nil {
+		i.Internal.CoordinatorNudger.Stop()
+	}
+	// Stop all processes (coordinator and workers)
 	if i.Internal.ProcessRegistry != nil {
 		i.Internal.ProcessRegistry.StopAll()
 	}
