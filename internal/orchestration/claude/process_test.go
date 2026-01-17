@@ -305,6 +305,38 @@ func TestOutputEventParsing(t *testing.T) {
 				require.Equal(t, "rate_limit", e.Error.Code)
 			},
 		},
+		{
+			name: "error as string code",
+			json: `{"type":"assistant","error":"invalid_request","message":{"content":[{"type":"text","text":"Something went wrong"}]}}`,
+			validate: func(t *testing.T, e client.OutputEvent) {
+				require.Equal(t, client.EventAssistant, e.Type)
+				require.NotNil(t, e.Error)
+				require.Equal(t, "invalid_request", e.Error.Code)
+				require.Equal(t, client.ErrReasonInvalidRequest, e.Error.Reason)
+			},
+		},
+		{
+			name: "context exhaustion - prompt too long",
+			json: `{"type":"assistant","message":{"id":"msg-123","role":"assistant","stop_reason":"stop_sequence","content":[{"type":"text","text":"Prompt is too long"}]},"error":"invalid_request","session_id":"sess-abc"}`,
+			validate: func(t *testing.T, e client.OutputEvent) {
+				require.Equal(t, client.EventAssistant, e.Type)
+				require.NotNil(t, e.Error)
+				require.Equal(t, "invalid_request", e.Error.Code)
+				require.Equal(t, client.ErrReasonContextExceeded, e.Error.Reason)
+				require.Equal(t, "Prompt is too long", e.Error.Message)
+				require.True(t, e.Error.IsContextExceeded())
+			},
+		},
+		{
+			name: "rate limit as string code",
+			json: `{"type":"error","error":"rate_limit_exceeded"}`,
+			validate: func(t *testing.T, e client.OutputEvent) {
+				require.Equal(t, client.EventError, e.Type)
+				require.NotNil(t, e.Error)
+				require.Equal(t, "rate_limit_exceeded", e.Error.Code)
+				require.Equal(t, client.ErrReasonRateLimited, e.Error.Reason)
+			},
+		},
 	}
 
 	for _, tt := range tests {

@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -246,10 +247,16 @@ func (p *Process) handleOutputEvent(event *client.OutputEvent) {
 	// Handle error events (e.g., turn.failed, error from Codex)
 	if event.Type == client.EventError {
 		errMsg := event.GetErrorMessage()
-		// Write error to output buffer so it appears in process pane
 		p.output.Append("⚠️ Error: " + errMsg)
-		// Publish immediately for real-time TUI visibility
 		p.handleInFlightError(fmt.Errorf("process error: %s", errMsg))
+		return
+	}
+
+	// Check for context exhaustion in assistant messages with error code
+	// This catches the Claude-specific pattern where error is in message content
+	if event.IsAssistant() && event.Error != nil && event.Error.IsContextExceeded() {
+		p.output.Append("⚠️ Context Exhausted")
+		p.handleInFlightError(&ContextExceededError{})
 		return
 	}
 
@@ -315,18 +322,33 @@ func (p *Process) handleOutputEvent(event *client.OutputEvent) {
 // Does NOT publish ProcessError - the handler is the authoritative source
 // of events and will emit ProcessError for startup failures.
 // For in-flight errors that need immediate visibility, use handleInFlightError.
+//
+// Note: Does NOT overwrite if we already have a ContextExceededError, since
+// the exit error ("claude process exited: exit status 1") is less informative.
 func (p *Process) handleError(err error) {
 	p.mu.Lock()
+	defer p.mu.Unlock()
+	// Don't overwrite a ContextExceededError with a generic exit error
+	var existing *ContextExceededError
+	if errors.As(p.lastError, &existing) {
+		return
+	}
 	p.lastError = err
-	p.mu.Unlock()
 }
 
 // handleInFlightError processes an error that occurs during the turn (not at exit).
 // These are published immediately for real-time TUI visibility (e.g., usage limits).
 // Also stores the error for the handler to include in its ProcessError event.
+//
+// Note: Does NOT overwrite if we already have a ContextExceededError, since
+// that's the most informative error for the handler.
 func (p *Process) handleInFlightError(err error) {
 	p.mu.Lock()
-	p.lastError = err
+	// Don't overwrite a ContextExceededError with a generic error
+	var existing *ContextExceededError
+	if !errors.As(p.lastError, &existing) {
+		p.lastError = err
+	}
 	p.mu.Unlock()
 	p.publishErrorEvent(err)
 }
@@ -601,4 +623,10 @@ func (p *Process) PID() int {
 		return 0
 	}
 	return proc.PID()
+}
+
+type ContextExceededError struct{}
+
+func (e *ContextExceededError) Error() string {
+	return "context exceeded limit"
 }

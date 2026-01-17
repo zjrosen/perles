@@ -471,6 +471,52 @@ func (h *ProcessTurnCompleteHandler) Handle(ctx context.Context, cmd command.Com
 	}
 
 	// ===========================================================================
+	// Context Exceeded Error Handling
+	// ===========================================================================
+	if turnCmd.Error != nil && proc.Role == repository.RoleWorker {
+		var contextExceededError *process.ContextExceededError
+		if errors.As(turnCmd.Error, &contextExceededError) {
+			coordinator, err := h.processRepo.GetCoordinator()
+			if err != nil {
+				return nil, fmt.Errorf("failed to get coordinator: %w", err)
+			}
+
+			// Enqueue the reminder directly to the queue
+			queue := h.queueRepo.GetOrCreate(coordinator.ID)
+
+			if err := queue.Enqueue(
+				prompt.BuildWorkerOutOfContextPrompt(proc.ID, proc.TaskID),
+				repository.SenderSystem,
+			); err != nil {
+				return nil, fmt.Errorf("failed to enqueue context exceeded message: %w", err)
+			}
+
+			// Transition to Worker to failed since they cannot respond
+			proc.Status = repository.StatusFailed
+			proc.LastActivityAt = time.Now()
+
+			if err := h.processRepo.Save(proc); err != nil {
+				return nil, fmt.Errorf("failed to save process: %w", err)
+			}
+
+			// Create DeliverProcessQueuedCommand to deliver the reminder
+			deliverCmd := command.NewDeliverProcessQueuedCommand(command.SourceInternal, coordinator.ID)
+			if turnCmd.TraceID() != "" {
+				deliverCmd.SetTraceID(turnCmd.TraceID())
+			}
+
+			result := &ProcessTurnCompleteResult{
+				ProcessID:      proc.ID,
+				NewStatus:      repository.StatusFailed,
+				QueuedDelivery: true,
+				WasNoOp:        false,
+			}
+
+			return SuccessWithEventsAndFollowUp(result, nil, []command.Command{deliverCmd}), nil
+		}
+	}
+
+	// ===========================================================================
 	// Turn completion enforcement for workers
 	// ===========================================================================
 	// Check exemptions FIRST (workers only, coordinators are never enforced)

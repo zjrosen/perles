@@ -396,7 +396,7 @@ func (p *Process) parseOutput() {
 
 		event, err := parseEvent(line)
 		if err != nil {
-			log.Debug(log.CatOrch, "parse error", "error", err, "line", string(line[:min(100, len(line))]))
+			log.Debug(log.CatOrch, "parse error", "error", err, "line", string(line))
 			continue
 		}
 
@@ -475,9 +475,7 @@ func (p *Process) waitForCompletion() {
 	defer p.wg.Done()
 	defer close(p.errors) // Signal that no more errors will be sent
 
-	log.Debug(log.CatOrch, "waiting for process to complete", "subsystem", "claude")
 	err := p.cmd.Wait()
-	log.Debug(log.CatOrch, "process completed", "subsystem", "claude", "error", err)
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -504,7 +502,6 @@ func (p *Process) waitForCompletion() {
 		}
 	} else {
 		p.status = client.StatusCompleted
-		log.Debug(log.CatOrch, "process completed successfully", "subsystem", "claude")
 	}
 }
 

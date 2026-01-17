@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -1459,4 +1460,234 @@ func TestPID_ReturnsZeroWhenNotRunning(t *testing.T) {
 
 	pid := p.PID()
 	assert.Equal(t, 0, pid, "PID should return 0 when process is nil")
+}
+
+// ===========================================================================
+// ContextExceededError Tests
+// ===========================================================================
+
+func TestContextExceededError_ImplementsError(t *testing.T) {
+	var err error = &ContextExceededError{}
+	assert.Equal(t, "context exceeded limit", err.Error())
+}
+
+func TestContextExceededError_CanBeDetectedWithErrorsAs(t *testing.T) {
+	err := &ContextExceededError{}
+
+	var contextErr *ContextExceededError
+	assert.True(t, errors.As(err, &contextErr))
+}
+
+// ===========================================================================
+// Context Exceeded Detection Tests
+// ===========================================================================
+
+func TestHandleOutputEvent_DetectsContextExceededInAssistantMessage(t *testing.T) {
+	// Test that context exhaustion is detected when Claude returns an assistant
+	// message with an error indicating context window was exceeded
+	proc := newMockHeadlessProcess()
+	submitter := &mockCommandSubmitter{}
+	eventBus := pubsub.NewBroker[any]()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sub := eventBus.Subscribe(ctx)
+
+	p := New("worker-1", repository.RoleWorker, proc, submitter, eventBus)
+	p.Start()
+
+	// Send assistant message with context exceeded error
+	proc.events <- client.OutputEvent{
+		Type: client.EventAssistant,
+		Message: &client.MessageContent{
+			Role: "assistant",
+		},
+		Error: &client.ErrorInfo{
+			Message: "Prompt is too long: 201234 tokens > 200000 maximum",
+			Code:    "PROMPT_TOO_LONG",
+			Reason:  client.ErrReasonContextExceeded,
+		},
+	}
+
+	// Should receive ProcessError event
+	select {
+	case evt := <-sub:
+		pe, ok := evt.Payload.(events.ProcessEvent)
+		require.True(t, ok, "expected ProcessEvent")
+		assert.Equal(t, events.ProcessError, pe.Type)
+		assert.Contains(t, pe.Error.Error(), "context exceeded")
+	case <-time.After(500 * time.Millisecond):
+		require.FailNow(t, "did not receive error event")
+	}
+
+	// Output should show context exhausted message
+	time.Sleep(20 * time.Millisecond)
+	lines := p.Output().Lines()
+	require.Len(t, lines, 1)
+	assert.Contains(t, lines[0], "⚠️ Context Exhausted")
+
+	proc.Complete()
+	<-p.eventDone
+
+	// The turn complete command should include the ContextExceededError
+	submitted := submitter.getSubmitted()
+	require.Len(t, submitted, 1)
+	turnCmd, ok := submitted[0].(*command.ProcessTurnCompleteCommand)
+	require.True(t, ok)
+	require.NotNil(t, turnCmd.Error)
+
+	var contextErr *ContextExceededError
+	assert.True(t, errors.As(turnCmd.Error, &contextErr), "error should be ContextExceededError")
+}
+
+func TestHandleOutputEvent_DoesNotTriggerContextExceededForNonContextErrors(t *testing.T) {
+	// Test that other errors in assistant messages don't trigger context exceeded handling
+	proc := newMockHeadlessProcess()
+	submitter := &mockCommandSubmitter{}
+
+	p := New("worker-1", repository.RoleWorker, proc, submitter, nil)
+	p.Start()
+
+	// Send assistant message with a different error type
+	proc.events <- client.OutputEvent{
+		Type: client.EventAssistant,
+		Message: &client.MessageContent{
+			Role: "assistant",
+		},
+		Error: &client.ErrorInfo{
+			Message: "Rate limit exceeded",
+			Reason:  client.ErrReasonRateLimited,
+		},
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	// Output should NOT show context exhausted message
+	lines := p.Output().Lines()
+	for _, line := range lines {
+		assert.NotContains(t, line, "Context Exhausted")
+	}
+
+	proc.Complete()
+	<-p.eventDone
+
+	// The turn complete command should NOT have ContextExceededError
+	submitted := submitter.getSubmitted()
+	require.Len(t, submitted, 1)
+	turnCmd := submitted[0].(*command.ProcessTurnCompleteCommand)
+
+	var contextErr *ContextExceededError
+	assert.False(t, errors.As(turnCmd.Error, &contextErr), "error should not be ContextExceededError")
+}
+
+// ===========================================================================
+// Error Preservation Tests
+// ===========================================================================
+
+func TestHandleError_DoesNotOverwriteContextExceededError(t *testing.T) {
+	// Test that a ContextExceededError is not overwritten by a generic exit error
+	proc := newMockHeadlessProcess()
+	submitter := &mockCommandSubmitter{}
+	eventBus := pubsub.NewBroker[any]()
+
+	p := New("worker-1", repository.RoleWorker, proc, submitter, eventBus)
+	p.Start()
+
+	// First, trigger a context exceeded error via assistant message
+	proc.events <- client.OutputEvent{
+		Type: client.EventAssistant,
+		Message: &client.MessageContent{
+			Role: "assistant",
+		},
+		Error: &client.ErrorInfo{
+			Message: "Context exceeded",
+			Reason:  client.ErrReasonContextExceeded,
+		},
+	}
+
+	time.Sleep(30 * time.Millisecond)
+
+	// Then send a generic error through the errors channel
+	// (This simulates the process exiting with a generic error after context exceeded)
+	go func() {
+		proc.errors <- &testError{msg: "claude process exited: exit status 1"}
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+
+	proc.Complete()
+	<-p.eventDone
+
+	// The turn complete command should still have the ContextExceededError
+	// (not the generic exit error)
+	submitted := submitter.getSubmitted()
+	require.Len(t, submitted, 1)
+	turnCmd := submitted[0].(*command.ProcessTurnCompleteCommand)
+	require.NotNil(t, turnCmd.Error)
+
+	var contextErr *ContextExceededError
+	assert.True(t, errors.As(turnCmd.Error, &contextErr),
+		"ContextExceededError should not be overwritten by generic exit error")
+}
+
+func TestHandleInFlightError_DoesNotOverwriteContextExceededError(t *testing.T) {
+	// Test that handleInFlightError doesn't overwrite ContextExceededError
+	proc := newMockHeadlessProcess()
+	submitter := &mockCommandSubmitter{}
+	eventBus := pubsub.NewBroker[any]()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sub := eventBus.Subscribe(ctx)
+
+	p := New("worker-1", repository.RoleWorker, proc, submitter, eventBus)
+	p.Start()
+
+	// First, trigger context exceeded error
+	proc.events <- client.OutputEvent{
+		Type: client.EventAssistant,
+		Message: &client.MessageContent{
+			Role: "assistant",
+		},
+		Error: &client.ErrorInfo{
+			Message: "Context exceeded",
+			Reason:  client.ErrReasonContextExceeded,
+		},
+	}
+
+	// Wait for the error event
+	select {
+	case <-sub:
+		// Received first error
+	case <-time.After(500 * time.Millisecond):
+		require.FailNow(t, "did not receive first error event")
+	}
+
+	// Now send a generic error event that would also call handleInFlightError
+	proc.events <- client.OutputEvent{
+		Type: client.EventError,
+		Error: &client.ErrorInfo{
+			Message: "Some other error",
+		},
+	}
+
+	// Wait for the second error event
+	select {
+	case <-sub:
+		// Received second error
+	case <-time.After(500 * time.Millisecond):
+		require.FailNow(t, "did not receive second error event")
+	}
+
+	time.Sleep(20 * time.Millisecond)
+	proc.Complete()
+	<-p.eventDone
+
+	// The turn complete command should still have ContextExceededError
+	submitted := submitter.getSubmitted()
+	require.Len(t, submitted, 1)
+	turnCmd := submitted[0].(*command.ProcessTurnCompleteCommand)
+	require.NotNil(t, turnCmd.Error)
+
+	var contextErr *ContextExceededError
+	assert.True(t, errors.As(turnCmd.Error, &contextErr),
+		"ContextExceededError should be preserved even after subsequent errors")
 }

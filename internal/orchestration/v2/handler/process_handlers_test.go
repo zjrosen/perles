@@ -804,6 +804,175 @@ func TestProcessTurnCompleteHandler_CoordinatorStartupFailure_TransitionsToFaile
 }
 
 // ===========================================================================
+// ProcessTurnCompleteHandler Context Exceeded Tests
+// ===========================================================================
+
+func TestProcessTurnCompleteHandler_WorkerContextExceeded_NotifiesCoordinator(t *testing.T) {
+	// Tests that when a worker runs out of context, the handler:
+	// 1. Transitions the worker to Failed status
+	// 2. Sends a message to the coordinator to replace the worker
+	// 3. Returns a DeliverProcessQueuedCommand to deliver the message
+	processRepo, queueRepo := setupProcessRepos()
+
+	// Create coordinator
+	coord := &repository.Process{
+		ID:     repository.CoordinatorID,
+		Role:   repository.RoleCoordinator,
+		Status: repository.StatusReady,
+	}
+	processRepo.AddProcess(coord)
+
+	// Create worker with a task
+	worker := &repository.Process{
+		ID:               "worker-1",
+		Role:             repository.RoleWorker,
+		Status:           repository.StatusWorking,
+		TaskID:           "task-123",
+		HasCompletedTurn: true,
+	}
+	processRepo.AddProcess(worker)
+
+	h := handler.NewProcessTurnCompleteHandler(processRepo, queueRepo)
+
+	// Simulate context exceeded error
+	contextErr := &process.ContextExceededError{}
+	cmd := command.NewProcessTurnCompleteCommand("worker-1", false, nil, contextErr)
+	result, err := h.Handle(context.Background(), cmd)
+
+	require.NoError(t, err)
+	assert.True(t, result.Success)
+
+	// Verify worker transitioned to Failed
+	turnResult := result.Data.(*handler.ProcessTurnCompleteResult)
+	assert.Equal(t, repository.StatusFailed, turnResult.NewStatus)
+	assert.True(t, turnResult.QueuedDelivery, "should queue delivery to coordinator")
+
+	// Verify worker is Failed in repo
+	updated, _ := processRepo.Get("worker-1")
+	assert.Equal(t, repository.StatusFailed, updated.Status)
+
+	// Verify message was enqueued to coordinator
+	coordQueue := queueRepo.GetOrCreate(repository.CoordinatorID)
+	require.False(t, coordQueue.IsEmpty(), "coordinator queue should have message")
+	entry, _ := coordQueue.Dequeue()
+	assert.Contains(t, entry.Content, "WORKER CONTEXT EXHAUSTED")
+	assert.Contains(t, entry.Content, "worker-1")
+	assert.Contains(t, entry.Content, "replace_worker")
+	assert.Contains(t, entry.Content, "task-123") // Should mention the task
+
+	// Verify follow-up command to deliver to coordinator
+	require.Len(t, result.FollowUp, 1)
+	deliverCmd, ok := result.FollowUp[0].(*command.DeliverProcessQueuedCommand)
+	require.True(t, ok)
+	assert.Equal(t, repository.CoordinatorID, deliverCmd.ProcessID)
+}
+
+func TestProcessTurnCompleteHandler_WorkerContextExceeded_NoTask(t *testing.T) {
+	// Tests context exceeded for worker without assigned task
+	processRepo, queueRepo := setupProcessRepos()
+
+	// Create coordinator
+	coord := &repository.Process{
+		ID:     repository.CoordinatorID,
+		Role:   repository.RoleCoordinator,
+		Status: repository.StatusReady,
+	}
+	processRepo.AddProcess(coord)
+
+	// Create worker without a task
+	worker := &repository.Process{
+		ID:               "worker-2",
+		Role:             repository.RoleWorker,
+		Status:           repository.StatusWorking,
+		TaskID:           "", // No task assigned
+		HasCompletedTurn: true,
+	}
+	processRepo.AddProcess(worker)
+
+	h := handler.NewProcessTurnCompleteHandler(processRepo, queueRepo)
+
+	contextErr := &process.ContextExceededError{}
+	cmd := command.NewProcessTurnCompleteCommand("worker-2", false, nil, contextErr)
+	result, err := h.Handle(context.Background(), cmd)
+
+	require.NoError(t, err)
+
+	// Verify message mentions no assigned task
+	coordQueue := queueRepo.GetOrCreate(repository.CoordinatorID)
+	require.False(t, coordQueue.IsEmpty())
+	entry, _ := coordQueue.Dequeue()
+	assert.Contains(t, entry.Content, "worker-2")
+	assert.Contains(t, entry.Content, "no assigned task")
+
+	// Should still have follow-up command
+	require.Len(t, result.FollowUp, 1)
+}
+
+func TestProcessTurnCompleteHandler_CoordinatorContextExceeded_NotHandledAsWorker(t *testing.T) {
+	// Tests that context exceeded for coordinator is NOT handled by the special
+	// worker context exceeded logic (only workers get this special handling)
+	processRepo, queueRepo := setupProcessRepos()
+
+	coord := &repository.Process{
+		ID:               repository.CoordinatorID,
+		Role:             repository.RoleCoordinator,
+		Status:           repository.StatusWorking,
+		HasCompletedTurn: true,
+	}
+	processRepo.AddProcess(coord)
+
+	h := handler.NewProcessTurnCompleteHandler(processRepo, queueRepo)
+
+	// Coordinator with context exceeded error
+	contextErr := &process.ContextExceededError{}
+	cmd := command.NewProcessTurnCompleteCommand(repository.CoordinatorID, false, nil, contextErr)
+	result, err := h.Handle(context.Background(), cmd)
+
+	require.NoError(t, err)
+
+	// Should be handled as a normal mid-session failure, not the special worker path
+	turnResult := result.Data.(*handler.ProcessTurnCompleteResult)
+	assert.Equal(t, repository.StatusFailed, turnResult.NewStatus)
+
+	// Should NOT queue message to coordinator (can't message itself about context exhaustion)
+	coordQueue := queueRepo.GetOrCreate(repository.CoordinatorID)
+	assert.True(t, coordQueue.IsEmpty(), "coordinator queue should be empty")
+}
+
+func TestProcessTurnCompleteHandler_WorkerContextExceeded_TraceIDPropagated(t *testing.T) {
+	// Tests that trace ID is propagated to follow-up command
+	processRepo, queueRepo := setupProcessRepos()
+
+	coord := &repository.Process{
+		ID:     repository.CoordinatorID,
+		Role:   repository.RoleCoordinator,
+		Status: repository.StatusReady,
+	}
+	processRepo.AddProcess(coord)
+
+	worker := &repository.Process{
+		ID:     "worker-1",
+		Role:   repository.RoleWorker,
+		Status: repository.StatusWorking,
+	}
+	processRepo.AddProcess(worker)
+
+	h := handler.NewProcessTurnCompleteHandler(processRepo, queueRepo)
+
+	contextErr := &process.ContextExceededError{}
+	cmd := command.NewProcessTurnCompleteCommand("worker-1", false, nil, contextErr)
+	cmd.SetTraceID("trace-123")
+
+	result, err := h.Handle(context.Background(), cmd)
+	require.NoError(t, err)
+
+	// Verify trace ID is propagated
+	require.Len(t, result.FollowUp, 1)
+	deliverCmd := result.FollowUp[0].(*command.DeliverProcessQueuedCommand)
+	assert.Equal(t, "trace-123", deliverCmd.TraceID())
+}
+
+// ===========================================================================
 // ProcessTurnCompleteHandler Turn Enforcement Tests
 // ===========================================================================
 

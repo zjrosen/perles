@@ -220,8 +220,28 @@ type ModelUsage struct {
 	CostUSD                  float64 `json:"costUSD,omitempty"`
 }
 
+// ErrorReason provides structured error classification for known error types.
+type ErrorReason string
+
+const (
+	// ErrReasonUnknown is the default when error type cannot be determined.
+	ErrReasonUnknown ErrorReason = ""
+	// ErrReasonContextExceeded indicates the prompt/context window was exhausted.
+	ErrReasonContextExceeded ErrorReason = "context_exceeded"
+	// ErrReasonRateLimited indicates the API rate limit was hit.
+	ErrReasonRateLimited ErrorReason = "rate_limited"
+	// ErrReasonInvalidRequest indicates a malformed or invalid request.
+	ErrReasonInvalidRequest ErrorReason = "invalid_request"
+)
+
 // ErrorInfo holds error details.
 type ErrorInfo struct {
-	Message string `json:"message,omitempty"`
-	Code    string `json:"code,omitempty"`
+	Message string      `json:"message,omitempty"`
+	Code    string      `json:"code,omitempty"`
+	Reason  ErrorReason `json:"reason,omitempty"` // Structured error classification
+}
+
+// IsContextExceeded returns true if this error indicates context window exhaustion.
+func (e *ErrorInfo) IsContextExceeded() bool {
+	return e != nil && e.Reason == ErrReasonContextExceeded
 }

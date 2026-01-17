@@ -144,15 +144,6 @@ func (r *MemoryMessageRepository) AppendRestored(entry Message) (*Message, error
 
 	r.entries = append(r.entries, entry)
 
-	// Intentionally NO broker publish - TUI state is restored separately
-	// via RestoreFromSession() which populates messagePane.entries directly
-
-	log.Debug(log.CatBeads, "Message restored",
-		"id", entry.ID,
-		"from", entry.From,
-		"to", entry.To,
-		"type", entry.Type)
-
 	return &entry, nil
 }
 

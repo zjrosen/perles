@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"strings"
 	"text/template"
-
-	"github.com/zjrosen/perles/internal/log"
 )
 
 // promptModeData holds data for rendering the prompt mode system prompt.
@@ -173,27 +171,38 @@ bd tasks must be assigned via assign_task so the tracker can monitor progress.
 `
 
 // BuildCoordinatorSystemPrompt builds the system prompt for the coordinator.
-// In epic mode, it includes task context from bd.
-// In prompt mode, it uses the user's goal without bd dependencies.
 func BuildCoordinatorSystemPrompt() (string, error) {
-	return buildPromptModeSystemPrompt()
-}
-
-func BuildCoordinatorInitialPrompt() (string, error) {
-	return initialPrompt, nil
-}
-
-// buildPromptModeSystemPrompt builds the prompt for free-form prompt mode.
-// No bd dependencies - coordinator waits for user instructions.
-func buildPromptModeSystemPrompt() (string, error) {
-	log.Debug(log.CatOrch, "Building prompt mode system prompt", "subsystem", "coord")
-
 	var buf bytes.Buffer
 	if err := systemPromptTemplate.Execute(&buf, promptModeData{}); err != nil {
 		return "", fmt.Errorf("executing prompt mode template: %w", err)
 	}
 
 	return buf.String(), nil
+}
+
+func BuildCoordinatorInitialPrompt() (string, error) {
+	return initialPrompt, nil
+}
+
+func BuildWorkerOutOfContextPrompt(workerID string, taskID string) string {
+	var prompt strings.Builder
+
+	prompt.WriteString("[WORKER CONTEXT EXHAUSTED]\n\n")
+	prompt.WriteString(fmt.Sprintf("Worker `%s` has run out of context and can no longer process messages.\n\n", workerID))
+
+	prompt.WriteString("REQUIRED ACTION:\n")
+	prompt.WriteString(fmt.Sprintf("1. Use `replace_worker` tool to replace `%s` with a fresh worker\n", workerID))
+	prompt.WriteString("2. Wait for the new worker to send a \"ready\" message\n")
+
+	if taskID != "" {
+		prompt.WriteString(fmt.Sprintf("3. The previous worker was working on task `%s`. Use `assign_task` to assign this task to the new worker and include in the summary they need to check for existing work since they are taking over from a previous worker.\n", taskID))
+	} else {
+		prompt.WriteString("3. The previous worker had no assigned task. Use `send_to_worker` to send the new worker instructions for what to work on and include in the summary they need to check for existing work since they are taking over from a previous worker.\n")
+	}
+
+	prompt.WriteString("\nDo NOT attempt to send messages to the old worker - it cannot process them.\n")
+
+	return prompt.String()
 }
 
 // BuildReplacePrompt creates a comprehensive prompt for a replacement coordinator.
