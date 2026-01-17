@@ -43,23 +43,24 @@ func (c *InsertTextCommand) Execute(m *Model) ExecuteResult {
 	}
 	line := m.content[c.row]
 
-	// Clamp col to valid range
-	col := min(c.col, len(line))
+	// Clamp col to valid range (grapheme-aware)
+	col := min(c.col, GraphemeCount(line))
 	c.col = col
 
 	// Check if text contains newlines (multi-line paste)
 	if !strings.Contains(c.text, "\n") {
-		// Simple case: single line insertion
-		m.content[c.row] = line[:col] + c.text + line[col:]
-		m.cursorCol = col + len(c.text)
+		// Simple case: single line insertion (grapheme-aware)
+		m.content[c.row] = InsertAtGrapheme(line, col, c.text)
+		m.cursorCol = col + GraphemeCount(c.text)
 		c.linesAdded = 0
 		c.endRow = c.row
 		c.endCol = m.cursorCol
 	} else {
-		// Multi-line paste
+		// Multi-line paste (grapheme-aware)
 		lines := strings.Split(c.text, "\n")
-		beforeCursor := line[:col]
-		afterCursor := line[col:]
+		lineGraphemeCount := GraphemeCount(line)
+		beforeCursor := SliceByGraphemes(line, 0, col)
+		afterCursor := SliceByGraphemes(line, col, lineGraphemeCount)
 
 		// First line: text before cursor + first pasted line
 		m.content[c.row] = beforeCursor + lines[0]
@@ -82,7 +83,7 @@ func (c *InsertTextCommand) Execute(m *Model) ExecuteResult {
 
 		c.linesAdded = len(lines) - 1
 		m.cursorRow = c.row + c.linesAdded
-		m.cursorCol = len(lines[len(lines)-1])
+		m.cursorCol = GraphemeCount(lines[len(lines)-1])
 		c.endRow = m.cursorRow
 		c.endCol = m.cursorCol
 	}
@@ -93,21 +94,27 @@ func (c *InsertTextCommand) Execute(m *Model) ExecuteResult {
 // Undo removes the inserted text.
 func (c *InsertTextCommand) Undo(m *Model) error {
 	if c.linesAdded == 0 {
-		// Simple case: remove inserted text from single line
+		// Simple case: remove inserted text from single line (grapheme-aware)
 		line := m.content[c.row]
-		if c.col+len(c.text) <= len(line) {
-			m.content[c.row] = line[:c.col] + line[c.col+len(c.text):]
+		lineGraphemeCount := GraphemeCount(line)
+		textGraphemeCount := GraphemeCount(c.text)
+		if c.col+textGraphemeCount <= lineGraphemeCount {
+			before := SliceByGraphemes(line, 0, c.col)
+			after := SliceByGraphemes(line, c.col+textGraphemeCount, lineGraphemeCount)
+			m.content[c.row] = before + after
 		}
 	} else {
-		// Multi-line: need to reconstruct original single line
+		// Multi-line: need to reconstruct original single line (grapheme-aware)
 		// Get text before insertion point (from first line)
 		firstLine := m.content[c.row]
 		lines := strings.Split(c.text, "\n")
-		beforeCursor := firstLine[:c.col]
+		beforeCursor := SliceByGraphemes(firstLine, 0, c.col)
 
 		// Get text after insertion point (from last line)
 		lastLine := m.content[c.row+c.linesAdded]
-		afterCursor := lastLine[len(lines[len(lines)-1]):]
+		lastPastedLineGraphemeCount := GraphemeCount(lines[len(lines)-1])
+		lastLineGraphemeCount := GraphemeCount(lastLine)
+		afterCursor := SliceByGraphemes(lastLine, lastPastedLineGraphemeCount, lastLineGraphemeCount)
 
 		// Reconstruct original line
 		originalLine := beforeCursor + afterCursor
@@ -161,13 +168,14 @@ func (c *SplitLineCommand) Execute(m *Model) ExecuteResult {
 	}
 	line := m.content[c.row]
 
-	// Clamp col
-	col := min(c.col, len(line))
+	// Clamp col (grapheme-aware)
+	lineGraphemeCount := GraphemeCount(line)
+	col := min(c.col, lineGraphemeCount)
 	c.col = col
 
-	// Split the line
-	beforeCursor := line[:col]
-	afterCursor := line[col:]
+	// Split the line (grapheme-aware)
+	beforeCursor := SliceByGraphemes(line, 0, col)
+	afterCursor := SliceByGraphemes(line, col, lineGraphemeCount)
 
 	// Create new content with the split
 	newContent := make([]string, len(m.content)+1)
