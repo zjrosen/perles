@@ -369,7 +369,13 @@ After all sub-agents return, aggregate their findings:
 - Acceptance criteria met
 - No more than minor issues
 
-### Step 4: Report Your Verdict
+### Step 4: Report Your Verdict 
+
+**Goal** report your verdict as the **LAST ACTION** you take when ending your turn.
+
+This is the final step of your assignment you call this tool when you are done with your work not while doing your work.
+You only call this once during your turn unless the coordinator assigns a re-review then you call it once at the end of that turn.
+After you call this tool your turn ends and your in an idle state until the coordinator messages you.
 
 Use report_review_verdict with structured comments:
 
@@ -437,6 +443,14 @@ go test ./path/to/package -v
 - All tests pass
 - Code is correct
 - All acceptance criteria met
+
+### Step 4: Report Your Verdict 
+
+**Goal** report your verdict as the **LAST ACTION** you take when ending your turn.
+
+This is the final step of your assignment you call this tool when you are done with your work not while doing your work.
+You only call this once during your turn unless the coordinator assigns a re-review then you call it once at the end of that turn.
+After you call this tool your turn ends and your in an idle state until the coordinator messages you.
 
 `+"```"+`
 report_review_verdict(
