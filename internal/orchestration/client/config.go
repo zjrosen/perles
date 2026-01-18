@@ -152,11 +152,12 @@ func (c *Config) GetExtensionString(key string) string {
 // ClientConfigs groups all client-specific configuration structs.
 // This is used by NewFromClientConfigs to consolidate extensions building logic.
 type ClientConfigs struct {
-	ClaudeModel string // Claude model (sonnet, opus, haiku)
-	CodexModel  string // Codex model (gpt-5.2-codex, o4-mini)
-	AmpModel    string // Amp model (opus, sonnet)
-	AmpMode     string // Amp mode (free, rush, smart)
-	GeminiModel string // Gemini model (gemini-3-pro-preview, gemini-2.5-flash)
+	ClaudeModel   string // Claude model (sonnet, opus, haiku)
+	CodexModel    string // Codex model (gpt-5.2-codex, o4-mini)
+	AmpModel      string // Amp model (opus, sonnet)
+	AmpMode       string // Amp mode (free, rush, smart)
+	GeminiModel   string // Gemini model (gemini-3-pro-preview, gemini-2.5-flash)
+	OpenCodeModel string // OpenCode model (anthropic/claude-opus-4-5)
 }
 
 // NewFromClientConfigs builds a provider-specific Extensions map based on the client type.
@@ -195,6 +196,10 @@ func NewFromClientConfigs(clientType ClientType, configs ClientConfigs) map[stri
 	case ClientGemini:
 		if configs.GeminiModel != "" {
 			extensions[ExtGeminiModel] = configs.GeminiModel
+		}
+	case ClientOpenCode:
+		if configs.OpenCodeModel != "" {
+			extensions[ExtOpenCodeModel] = configs.OpenCodeModel
 		}
 	}
 

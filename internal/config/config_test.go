@@ -482,6 +482,29 @@ func TestValidateOrchestration_ValidGeminiModels(t *testing.T) {
 	}
 }
 
+func TestOrchestrationConfig_OpenCodeField(t *testing.T) {
+	// Verify OrchestrationConfig includes OpenCode field
+	cfg := OrchestrationConfig{
+		Client: "opencode",
+		OpenCode: OpenCodeClientConfig{
+			Model: "anthropic/claude-sonnet-4",
+		},
+	}
+	require.Equal(t, "anthropic/claude-sonnet-4", cfg.OpenCode.Model)
+}
+
+func TestValidateOrchestration_ValidOpenCodeModels(t *testing.T) {
+	models := []string{"anthropic/claude-opus-4-5", "anthropic/claude-sonnet-4", "openai/gpt-4o"}
+	for _, model := range models {
+		cfg := OrchestrationConfig{
+			Client:   "opencode",
+			OpenCode: OpenCodeClientConfig{Model: model},
+		}
+		err := ValidateOrchestration(cfg)
+		require.NoError(t, err, "model %q should be valid", model)
+	}
+}
+
 func TestDefaults_Orchestration(t *testing.T) {
 	cfg := Defaults()
 

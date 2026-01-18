@@ -154,6 +154,7 @@ type OrchestrationConfig struct {
 	Codex            CodexClientConfig    `mapstructure:"codex"`
 	Amp              AmpClientConfig      `mapstructure:"amp"`
 	Gemini           GeminiClientConfig   `mapstructure:"gemini"`
+	OpenCode         OpenCodeClientConfig `mapstructure:"opencode"`
 	Workflows        []WorkflowConfig     `mapstructure:"workflows"`       // Workflow template configurations
 	Tracing          TracingConfig        `mapstructure:"tracing"`         // Distributed tracing configuration
 	SessionStorage   SessionStorageConfig `mapstructure:"session_storage"` // Session storage location configuration
@@ -181,6 +182,11 @@ type GeminiClientConfig struct {
 	Model string `mapstructure:"model"` // gemini-3-pro-preview (default), gemini-2.5-flash
 }
 
+// OpenCodeClientConfig holds OpenCode-specific settings.
+type OpenCodeClientConfig struct {
+	Model string `mapstructure:"model"` // anthropic/claude-opus-4-5 (default)
+}
+
 // AgentProvider returns an AgentProvider configured from user settings.
 // This is the preferred way to get an AI client for orchestration or chat.
 func (o OrchestrationConfig) AgentProvider() client.AgentProvider {
@@ -189,11 +195,12 @@ func (o OrchestrationConfig) AgentProvider() client.AgentProvider {
 		clientType = client.ClientClaude
 	}
 	extensions := client.NewFromClientConfigs(clientType, client.ClientConfigs{
-		ClaudeModel: o.Claude.Model,
-		CodexModel:  o.Codex.Model,
-		AmpModel:    o.Amp.Model,
-		AmpMode:     o.Amp.Mode,
-		GeminiModel: o.Gemini.Model,
+		ClaudeModel:   o.Claude.Model,
+		CodexModel:    o.Codex.Model,
+		AmpModel:      o.Amp.Model,
+		AmpMode:       o.Amp.Mode,
+		GeminiModel:   o.Gemini.Model,
+		OpenCodeModel: o.OpenCode.Model,
 	})
 	return client.NewAgentProvider(clientType, extensions)
 }
@@ -735,7 +742,7 @@ views:
 # Orchestration mode settings
 # Configure which AI client to use when entering orchestration mode
 orchestration:
-  # AI client provider: "claude" (default) or "amp" or "codex"
+  # AI client provider: "claude" (default), "amp", "codex", "gemini", or "opencode"
   client: claude
 
   # Skip worktree prompt and always run in current directory (default: false)
@@ -753,6 +760,10 @@ orchestration:
   amp:
     model: opus    # opus (default) or sonnet
     mode: smart    # free, rush, or smart (default)
+
+  # OpenCode-specific settings (only used when client: opencode)
+  opencode:
+    model: anthropic/claude-opus-4-5  # anthropic/claude-opus-4-5 (default)
 
   # Workflow templates (Ctrl+P to open picker in orchestration mode)
   # User workflows are loaded from ~/.perles/workflows/*.md

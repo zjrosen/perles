@@ -272,12 +272,34 @@ func TestNewFromClientConfigs_Gemini_EmptyModel(t *testing.T) {
 	require.Empty(t, extensions)
 }
 
+func TestNewFromClientConfigs_OpenCode(t *testing.T) {
+	configs := ClientConfigs{
+		OpenCodeModel: "anthropic/claude-sonnet-4",
+	}
+
+	extensions := NewFromClientConfigs(ClientOpenCode, configs)
+
+	require.Equal(t, "anthropic/claude-sonnet-4", extensions[ExtOpenCodeModel])
+	require.Len(t, extensions, 1)
+}
+
+func TestNewFromClientConfigs_OpenCode_EmptyModel(t *testing.T) {
+	configs := ClientConfigs{
+		OpenCodeModel: "",
+	}
+
+	extensions := NewFromClientConfigs(ClientOpenCode, configs)
+
+	require.Empty(t, extensions)
+}
+
 func TestNewFromClientConfigs_UnknownClientType(t *testing.T) {
 	configs := ClientConfigs{
-		ClaudeModel: "opus",
-		CodexModel:  "gpt-5.2-codex",
-		AmpModel:    "sonnet",
-		GeminiModel: "gemini-3-pro-preview",
+		ClaudeModel:   "opus",
+		CodexModel:    "gpt-5.2-codex",
+		AmpModel:      "sonnet",
+		GeminiModel:   "gemini-3-pro-preview",
+		OpenCodeModel: "anthropic/claude-opus-4-5",
 	}
 
 	// Unknown client type should return empty map
@@ -289,11 +311,12 @@ func TestNewFromClientConfigs_UnknownClientType(t *testing.T) {
 func TestNewFromClientConfigs_IgnoresIrrelevantConfigs(t *testing.T) {
 	// When creating Claude extensions, other client configs should be ignored
 	configs := ClientConfigs{
-		ClaudeModel: "opus",
-		CodexModel:  "gpt-5.2-codex",
-		AmpModel:    "sonnet",
-		AmpMode:     "rush",
-		GeminiModel: "gemini-2.5-flash",
+		ClaudeModel:   "opus",
+		CodexModel:    "gpt-5.2-codex",
+		AmpModel:      "sonnet",
+		AmpMode:       "rush",
+		GeminiModel:   "gemini-2.5-flash",
+		OpenCodeModel: "anthropic/claude-opus-4-5",
 	}
 
 	extensions := NewFromClientConfigs(ClientClaude, configs)
@@ -304,6 +327,7 @@ func TestNewFromClientConfigs_IgnoresIrrelevantConfigs(t *testing.T) {
 	require.NotContains(t, extensions, ExtCodexModel)
 	require.NotContains(t, extensions, ExtAmpModel)
 	require.NotContains(t, extensions, ExtGeminiModel)
+	require.NotContains(t, extensions, ExtOpenCodeModel)
 }
 
 func TestNewFromClientConfigs_EmptyConfigs(t *testing.T) {
@@ -314,4 +338,5 @@ func TestNewFromClientConfigs_EmptyConfigs(t *testing.T) {
 	require.Empty(t, NewFromClientConfigs(ClientCodex, configs))
 	require.Empty(t, NewFromClientConfigs(ClientAmp, configs))
 	require.Empty(t, NewFromClientConfigs(ClientGemini, configs))
+	require.Empty(t, NewFromClientConfigs(ClientOpenCode, configs))
 }
