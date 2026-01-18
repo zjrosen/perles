@@ -932,9 +932,8 @@ func TestBaseProcess_waitForCompletion_SetsStatusCompleted(t *testing.T) {
 	err := cmd.Start()
 	require.NoError(t, err)
 
-	bp.wg.Add(1)
-	go bp.waitForCompletion()
-	bp.wg.Wait()
+	bp.StartGoroutines()
+	bp.Wait()
 
 	require.Equal(t, StatusCompleted, bp.Status())
 }
@@ -955,9 +954,8 @@ func TestBaseProcess_waitForCompletion_SetsStatusFailed(t *testing.T) {
 	err := cmd.Start()
 	require.NoError(t, err)
 
-	bp.wg.Add(1)
-	go bp.waitForCompletion()
-	bp.wg.Wait()
+	bp.StartGoroutines()
+	bp.Wait()
 
 	require.Equal(t, StatusFailed, bp.Status())
 
@@ -987,11 +985,8 @@ func TestBaseProcess_waitForCompletion_IncludesStderrInError(t *testing.T) {
 	err := cmd.Start()
 	require.NoError(t, err)
 
-	// Start stderr capture
-	bp.wg.Add(2)
-	go bp.parseStderr()
-	go bp.waitForCompletion()
-	bp.wg.Wait()
+	bp.StartGoroutines()
+	bp.Wait()
 
 	require.Equal(t, StatusFailed, bp.Status())
 
@@ -1022,17 +1017,17 @@ func TestBaseProcess_waitForCompletion_DetectsTimeout(t *testing.T) {
 	err := cmd.Start()
 	require.NoError(t, err)
 
-	bp.wg.Add(1)
-	go bp.waitForCompletion()
-	bp.wg.Wait()
+	bp.StartGoroutines()
+	bp.Wait()
 
 	require.Equal(t, StatusFailed, bp.Status())
 
-	// Should have sent ErrTimeout
+	// Should have sent ErrTimeout - use blocking read with timeout
+	// The error channel is closed after waitForCompletion, so we can range over it
 	select {
 	case err := <-bp.Errors():
 		require.Equal(t, ErrTimeout, err)
-	default:
+	case <-time.After(100 * time.Millisecond):
 		t.Fatal("Expected ErrTimeout to be sent")
 	}
 }
@@ -1054,9 +1049,8 @@ func TestBaseProcess_waitForCompletion_PreservesCancelledStatus(t *testing.T) {
 	// Cancel to stop the process
 	cancel()
 
-	bp.wg.Add(1)
-	go bp.waitForCompletion()
-	bp.wg.Wait()
+	bp.StartGoroutines()
+	bp.Wait()
 
 	// Status should remain Cancelled
 	require.Equal(t, StatusCancelled, bp.Status())

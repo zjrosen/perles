@@ -151,8 +151,9 @@ func (p *CommandProcessor) Run(ctx context.Context) {
 	// Initialize queue
 	p.queue = make(chan queueItem, p.queueCapacity)
 
-	p.running.Store(true)
+	// Add to wait group BEFORE setting running to avoid race with Drain()
 	p.wg.Add(1)
+	p.running.Store(true)
 
 	// Signal that processor is ready to accept commands
 	p.readyMu.Lock()

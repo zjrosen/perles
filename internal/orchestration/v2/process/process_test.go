@@ -33,8 +33,8 @@ func newMockHeadlessProcess() *mockProcess {
 	return &mockProcess{
 		sessionRef: "test-session-123",
 		status:     client.StatusRunning,
-		events:     make(chan client.OutputEvent),
-		errors:     make(chan error),
+		events:     make(chan client.OutputEvent, 10),
+		errors:     make(chan error, 10),
 		workDir:    "/test/dir",
 	}
 }
@@ -454,10 +454,8 @@ func TestHandleError_DoesNotCrash(t *testing.T) {
 	p := New("worker-1", repository.RoleWorker, proc, nil, eventBus)
 	p.Start()
 
-	// Send an error
-	go func() {
-		proc.errors <- &testError{msg: "test error"}
-	}()
+	// Send an error (buffered channel, no goroutine needed)
+	proc.errors <- &testError{msg: "test error"}
 
 	time.Sleep(20 * time.Millisecond)
 
@@ -1049,13 +1047,11 @@ func TestHandleError_StoresErrorForCommand(t *testing.T) {
 	p := New("worker-1", repository.RoleWorker, proc, submitter, eventBus)
 	p.Start()
 
-	// Send error through errors channel
+	// Send error through errors channel (buffered channel, no goroutine needed)
 	testErr := &testError{msg: "exit status 1"}
-	go func() {
-		proc.errors <- testErr
-	}()
+	proc.errors <- testErr
 
-	// Wait a bit then complete the process
+	// Wait for error to be processed
 	time.Sleep(50 * time.Millisecond)
 	proc.Complete()
 	<-p.eventDone
@@ -1724,11 +1720,9 @@ func TestHandleError_DoesNotOverwriteContextExceededError(t *testing.T) {
 
 	time.Sleep(30 * time.Millisecond)
 
-	// Then send a generic error through the errors channel
+	// Then send a generic error through the errors channel (buffered, no goroutine needed)
 	// (This simulates the process exiting with a generic error after context exceeded)
-	go func() {
-		proc.errors <- &testError{msg: "claude process exited: exit status 1"}
-	}()
+	proc.errors <- &testError{msg: "claude process exited: exit status 1"}
 
 	time.Sleep(30 * time.Millisecond)
 

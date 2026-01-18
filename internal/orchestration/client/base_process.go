@@ -102,6 +102,11 @@ type BaseProcess struct {
 	stderrLines   []string
 	captureStderr bool
 
+	// Goroutine completion signals - waitForCompletion waits on these
+	// before closing channels to prevent send-on-closed-channel races
+	stderrDone chan struct{}
+	stdoutDone chan struct{}
+
 	// Provider identification (for logging/errors)
 	providerName string
 
@@ -133,6 +138,8 @@ func NewBaseProcess(
 		cancelFunc:   cancelFunc,
 		ctx:          ctx,
 		providerName: "base", // default, should be overridden
+		stderrDone:   make(chan struct{}),
+		stdoutDone:   make(chan struct{}),
 	}
 
 	// Apply functional options
@@ -291,13 +298,15 @@ func (bp *BaseProcess) SetStatus(s ProcessStatus) {
 }
 
 // SendError attempts to send an error to the errors channel.
-// If the channel is full, the error is logged but not sent to avoid blocking.
+// If the channel is full, the error is logged but not sent.
+// This is safe to call from parseOutput/parseStderr because waitForCompletion
+// waits for both goroutines to finish before closing the errors channel.
 func (bp *BaseProcess) SendError(err error) {
+	// Non-blocking send to avoid deadlock if channel is full
 	select {
 	case bp.errors <- err:
 		// Error sent successfully
 	default:
-		// Channel full, log the dropped error
 		log.Debug(log.CatOrch, "error channel full, dropping error",
 			"subsystem", bp.providerName, "error", err)
 	}
@@ -338,6 +347,7 @@ func (bp *BaseProcess) StartGoroutines() {
 // to support OpenCode's pattern of capturing session ID from any event.
 func (bp *BaseProcess) parseOutput() {
 	defer bp.wg.Done()
+	defer close(bp.stdoutDone)
 	defer close(bp.events)
 
 	scanner := bufio.NewScanner(bp.stdout)
@@ -399,14 +409,34 @@ func (bp *BaseProcess) parseOutput() {
 	if err := scanner.Err(); err != nil {
 		log.Debug(log.CatOrch, "scanner error",
 			"subsystem", bp.providerName, "error", err)
-		bp.SendError(fmt.Errorf("stdout scanner error: %w", err))
+		// Don't send scanner errors for expected conditions:
+		// - Context done (timeout/cancellation killed the process)
+		// - Pipe closed errors (process exited normally)
+		// These are normal consequences of process termination, not real errors.
+		// The actual exit status will be reported by waitForCompletion.
+		if bp.ctx.Err() == nil && !isPipeClosedError(err) {
+			bp.SendError(fmt.Errorf("stdout scanner error: %w", err))
+		}
 	}
+}
+
+// isPipeClosedError checks if the error is due to the pipe being closed,
+// which is expected when the process exits.
+func isPipeClosedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "file already closed") ||
+		strings.Contains(errStr, "broken pipe") ||
+		errors.Is(err, io.ErrClosedPipe)
 }
 
 // parseStderr reads and logs stderr output.
 // If captureStderr is enabled, lines are captured for inclusion in error messages.
 func (bp *BaseProcess) parseStderr() {
 	defer bp.wg.Done()
+	defer close(bp.stderrDone)
 
 	scanner := bufio.NewScanner(bp.stderr)
 	for scanner.Scan() {
@@ -433,18 +463,29 @@ func (bp *BaseProcess) waitForCompletion() {
 
 	err := bp.cmd.Wait()
 
+	// Wait for both output parsers to complete before accessing shared state
+	// or closing the errors channel. This prevents:
+	// 1. Reading stderrLines before parseStderr has captured all output
+	// 2. Closing errors channel while parseOutput might still call SendError
+	<-bp.stderrDone
+	<-bp.stdoutDone
+
+	// Determine status and error to send (if any) while holding lock
 	bp.mu.Lock()
-	defer bp.mu.Unlock()
 
 	// If already cancelled, don't override status
 	if bp.status == StatusCancelled {
+		bp.mu.Unlock()
 		log.Debug(log.CatOrch, "process was cancelled", "subsystem", bp.providerName)
 		return
 	}
 
+	var errToSend error
+
 	// Check for timeout using errors.Is()
 	if errors.Is(bp.ctx.Err(), context.DeadlineExceeded) {
 		bp.status = StatusFailed
+		bp.mu.Unlock()
 		log.Debug(log.CatOrch, "process timed out", "subsystem", bp.providerName)
 		bp.SendError(ErrTimeout)
 		return
@@ -455,11 +496,17 @@ func (bp *BaseProcess) waitForCompletion() {
 		// Include stderr output in error message if captured
 		if bp.captureStderr && len(bp.stderrLines) > 0 {
 			stderrMsg := strings.Join(bp.stderrLines, "\n")
-			bp.SendError(fmt.Errorf("%s process failed: %s (exit: %w)", bp.providerName, stderrMsg, err))
+			errToSend = fmt.Errorf("%s process failed: %s (exit: %w)", bp.providerName, stderrMsg, err)
 		} else {
-			bp.SendError(fmt.Errorf("%s process exited: %w", bp.providerName, err))
+			errToSend = fmt.Errorf("%s process exited: %w", bp.providerName, err)
 		}
 	} else {
 		bp.status = StatusCompleted
+	}
+	bp.mu.Unlock()
+
+	// Send error outside of lock to avoid deadlock with SendError's RLock
+	if errToSend != nil {
+		bp.SendError(errToSend)
 	}
 }

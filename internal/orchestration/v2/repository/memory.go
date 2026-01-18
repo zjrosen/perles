@@ -211,6 +211,7 @@ func NewMemoryProcessRepository() *MemoryProcessRepository {
 
 // Get retrieves a process by ID.
 // Returns ErrProcessNotFound if the process does not exist.
+// Returns a copy of the process to avoid races with concurrent modifications.
 func (r *MemoryProcessRepository) Get(processID string) (*Process, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -219,7 +220,9 @@ func (r *MemoryProcessRepository) Get(processID string) (*Process, error) {
 	if !ok {
 		return nil, ErrProcessNotFound
 	}
-	return process, nil
+	// Return a copy to avoid races with handler modifications
+	copy := *process
+	return &copy, nil
 }
 
 // Save persists a process. Creates new or updates existing.
