@@ -8,7 +8,7 @@
 //
 // Import this package to register the Codex client with the client registry:
 //
-//	import _ "github.com/zjrosen/perles/internal/orchestration/codex"
+//	import _ "github.com/zjrosen/perles/internal/orchestration/client/providers/codex"
 //
 // Then create a client using the registry:
 //

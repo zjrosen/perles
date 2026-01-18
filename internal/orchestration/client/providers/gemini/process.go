@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/zjrosen/perles/internal/log"
 	"github.com/zjrosen/perles/internal/orchestration/client"
@@ -180,84 +179,49 @@ func Resume(ctx context.Context, sessionID string, cfg Config) (*Process, error)
 }
 
 // spawnProcess is the internal implementation for both Spawn and Resume.
+// Uses SpawnBuilder for clean process lifecycle management.
+//
+// CRITICAL: Pre-spawn validation (validateAuth, setupMCPConfig) MUST execute
+// BEFORE SpawnBuilder - these do filesystem writes and auth checks that must
+// happen before process spawning begins.
 func spawnProcess(ctx context.Context, cfg Config, _ bool) (*Process, error) {
-	// Validate authentication first
+	// PRE-SPAWN VALIDATION (stays in provider - BEFORE SpawnBuilder)
 	if err := validateAuth(); err != nil {
 		return nil, err
 	}
 
-	// Find the gemini executable
+	// PRE-SPAWN EXECUTABLE DISCOVERY (stays in provider)
 	execPath, err := findExecutable()
 	if err != nil {
 		return nil, err
 	}
 
-	// Setup MCP configuration (creates/updates .gemini/settings.json)
+	// PRE-SPAWN FILESYSTEM WRITES (stays in provider - BEFORE SpawnBuilder)
+	// setupMCPConfig() writes to .gemini/settings.json
 	if err := setupMCPConfig(cfg); err != nil {
 		return nil, fmt.Errorf("failed to setup MCP config: %w", err)
 	}
 
-	var procCtx context.Context
-	var cancel context.CancelFunc
-	if cfg.Timeout > 0 {
-		procCtx, cancel = context.WithTimeout(ctx, cfg.Timeout)
-	} else {
-		procCtx, cancel = context.WithCancel(ctx)
-	}
-
 	args := buildArgs(cfg)
-	log.Debug(log.CatOrch, "Spawning gemini process", "subsystem", "gemini", "args", strings.Join(args, " "), "workDir", cfg.WorkDir)
-
-	// #nosec G204 -- args are built from Config struct, not user input
-	cmd := exec.CommandContext(procCtx, execPath, args...)
-	cmd.Dir = cfg.WorkDir
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
-	}
-
-	// Create the Gemini process with embedded BaseProcess
-	p := &Process{}
-
-	// Create parser instance for event parsing and session extraction
 	parser := NewParser()
 
-	// Create BaseProcess with Gemini-specific hooks
-	bp := client.NewBaseProcess(
-		procCtx,
-		cancel,
-		cmd,
-		stdout,
-		stderr,
-		cfg.WorkDir,
-		client.WithEventParser(parser),
-		client.WithSessionExtractor(parser.ExtractSessionRef),
-		client.WithStderrCapture(true),
-		client.WithProviderName("gemini"),
-	)
-	p.BaseProcess = bp
-
-	if err := cmd.Start(); err != nil {
-		cancel()
-		log.Debug(log.CatOrch, "Failed to start gemini process", "subsystem", "gemini", "error", err)
-		return nil, fmt.Errorf("failed to start gemini process: %w", err)
+	// SpawnBuilder handles spawn mechanics only - all pre-spawn validation
+	// has already completed above
+	base, err := client.NewSpawnBuilder(ctx).
+		WithExecutable(execPath, args).
+		WithWorkDir(cfg.WorkDir).
+		WithSessionRef(cfg.SessionID).
+		WithTimeout(cfg.Timeout).
+		WithParser(parser).
+		WithSessionExtractor(parser.ExtractSessionRef).
+		WithStderrCapture(true).
+		WithProviderName("gemini").
+		Build()
+	if err != nil {
+		return nil, fmt.Errorf("gemini: %w", err)
 	}
 
-	log.Debug(log.CatOrch, "Gemini process started", "subsystem", "gemini", "pid", cmd.Process.Pid)
-	bp.SetStatus(client.StatusRunning)
-
-	// Start output parser goroutines
-	bp.StartGoroutines()
-
-	return p, nil
+	return &Process{BaseProcess: base}, nil
 }
 
 // Ensure Process implements client.HeadlessProcess at compile time.

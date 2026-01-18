@@ -1,7 +1,7 @@
 package amp
 
 // buildArgs constructs the command line arguments for amp.
-// For new sessions, the prompt is passed via stdin.
+// For new sessions, the prompt is passed as the final positional argument.
 // For resume, we use "threads continue <thread-id>".
 func buildArgs(cfg Config, isResume bool) []string {
 	var args []string
@@ -10,9 +10,6 @@ func buildArgs(cfg Config, isResume bool) []string {
 	if isResume && cfg.ThreadID != "" {
 		args = append(args, "threads", "continue", cfg.ThreadID)
 	}
-
-	// Execute mode with stream-json output
-	args = append(args, "-x", "--stream-json")
 
 	// Skip permission prompts
 	if cfg.SkipPermissions {
@@ -40,6 +37,14 @@ func buildArgs(cfg Config, isResume bool) []string {
 	// MCP configuration
 	if cfg.MCPConfig != "" {
 		args = append(args, "--mcp-config", cfg.MCPConfig)
+	}
+
+	// Execute mode with stream-json output
+	args = append(args, "--stream-json", "-x")
+
+	// Prompt as final positional argument (if present)
+	if cfg.Prompt != "" {
+		args = append(args, cfg.Prompt)
 	}
 
 	return args

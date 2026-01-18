@@ -170,76 +170,37 @@ func extractSession(event client.OutputEvent, rawLine []byte) string {
 
 // Spawn creates and starts a new headless Claude process.
 // Context is used for cancellation and timeout control.
+// Uses SpawnBuilder for clean process lifecycle management.
 func Spawn(ctx context.Context, cfg Config) (*Process, error) {
-	var procCtx context.Context
-	var cancel context.CancelFunc
-	if cfg.Timeout > 0 {
-		procCtx, cancel = context.WithTimeout(ctx, cfg.Timeout)
-	} else {
-		procCtx, cancel = context.WithCancel(ctx)
-	}
-
+	// Find executable BEFORE SpawnBuilder (provider-specific)
 	claudePath, err := findExecutable()
 	if err != nil {
-		cancel()
 		return nil, err
 	}
 
 	args := buildArgs(cfg)
-	log.Debug(log.CatOrch, "Spawning claude process", "subsystem", "claude", "executable", claudePath, "args", strings.Join(args, " "), "workDir", cfg.WorkDir)
 
-	// #nosec G204 -- args are built from Config struct, not user input
-	cmd := exec.CommandContext(procCtx, claudePath, args...)
-	cmd.Dir = cfg.WorkDir
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
-	}
-
-	// Create the Claude process with embedded BaseProcess
+	// Create Process wrapper FIRST (needed for OnInitEvent hook closure)
 	p := &Process{}
 
-	// Create BaseProcess with Claude-specific hooks
-	bp := client.NewBaseProcess(
-		procCtx,
-		cancel,
-		cmd,
-		stdout,
-		stderr,
-		cfg.WorkDir,
-		client.WithEventParser(NewParser()),
-		client.WithSessionExtractor(extractSession),
-		client.WithOnInitEvent(p.extractMainModel),
-		client.WithStderrCapture(true),
-		client.WithProviderName("claude"),
-	)
-	p.BaseProcess = bp
-
-	// Set initial session ID if provided (for --resume)
-	if cfg.SessionID != "" {
-		bp.SetSessionRef(cfg.SessionID)
+	// Use SpawnBuilder with OnInitEvent hook for mainModel extraction
+	base, err := client.NewSpawnBuilder(ctx).
+		WithExecutable(claudePath, args).
+		WithWorkDir(cfg.WorkDir).
+		WithSessionRef(cfg.SessionID).
+		WithTimeout(cfg.Timeout).
+		WithParser(NewParser()).
+		WithSessionExtractor(extractSession).
+		WithOnInitEvent(p.extractMainModel).
+		WithStderrCapture(true).
+		WithProviderName("claude").
+		Build()
+	if err != nil {
+		return nil, fmt.Errorf("claude: %w", err)
 	}
 
-	if err := cmd.Start(); err != nil {
-		cancel()
-		log.Debug(log.CatOrch, "Failed to start claude process", "subsystem", "claude", "error", err)
-		return nil, fmt.Errorf("failed to start claude process: %w", err)
-	}
-
-	log.Debug(log.CatOrch, "Claude process started", "subsystem", "claude", "pid", cmd.Process.Pid)
-	bp.SetStatus(client.StatusRunning)
-
-	// Start output parser goroutines
-	bp.StartGoroutines()
-
+	// Assign BaseProcess AFTER Build() completes (circular reference pattern)
+	p.BaseProcess = base
 	return p, nil
 }
 

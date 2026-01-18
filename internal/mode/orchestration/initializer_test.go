@@ -17,8 +17,8 @@ import (
 
 	"github.com/zjrosen/perles/internal/config"
 	"github.com/zjrosen/perles/internal/mocks"
-	"github.com/zjrosen/perles/internal/orchestration/amp"
 	"github.com/zjrosen/perles/internal/orchestration/client"
+	"github.com/zjrosen/perles/internal/orchestration/client/providers/amp"
 	"github.com/zjrosen/perles/internal/orchestration/session"
 	"github.com/zjrosen/perles/internal/orchestration/v2/repository"
 )

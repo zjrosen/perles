@@ -9,7 +9,7 @@
 //
 // Import this package to register the OpenCode client with the client registry:
 //
-//	import _ "github.com/zjrosen/perles/internal/orchestration/opencode"
+//	import _ "github.com/zjrosen/perles/internal/orchestration/client/providers/opencode"
 //
 // Then create a client using the registry:
 //

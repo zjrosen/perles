@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/zjrosen/perles/internal/log"
 	"github.com/zjrosen/perles/internal/orchestration/client"
@@ -72,81 +71,38 @@ func Resume(ctx context.Context, sessionID string, cfg Config) (*Process, error)
 }
 
 // spawnProcess is the internal implementation for both Spawn and Resume.
+// Uses SpawnBuilder for clean process lifecycle management.
 func spawnProcess(ctx context.Context, cfg Config, isResume bool) (*Process, error) {
-	// Find the opencode executable
+	// Find the opencode executable (provider-specific)
 	execPath, err := findExecutable()
 	if err != nil {
 		return nil, err
 	}
 
-	var procCtx context.Context
-	var cancel context.CancelFunc
-	if cfg.Timeout > 0 {
-		procCtx, cancel = context.WithTimeout(ctx, cfg.Timeout)
-	} else {
-		procCtx, cancel = context.WithCancel(ctx)
-	}
-
 	args := buildArgs(cfg, isResume)
-	log.Debug(log.CatOrch, "Spawning opencode process", "subsystem", "opencode", "args", strings.Join(args, " "), "workDir", cfg.WorkDir)
 
-	// #nosec G204 -- args are built from Config struct, not user input
-	cmd := exec.CommandContext(procCtx, execPath, args...)
-	cmd.Dir = cfg.WorkDir
-
-	// Pass MCP config via OPENCODE_CONFIG_CONTENT env var for process isolation.
-	// Each process gets its own MCP config without file conflicts.
+	// Build environment variables for MCP config
+	// OPENCODE_CONFIG_CONTENT allows per-process MCP config without file conflicts
+	var env []string
 	if cfg.MCPConfig != "" {
-		cmd.Env = append(os.Environ(), "OPENCODE_CONFIG_CONTENT="+cfg.MCPConfig)
-		log.Debug(log.CatOrch, "Setting OPENCODE_CONFIG_CONTENT", "subsystem", "opencode", "config", cfg.MCPConfig)
+		env = []string{"OPENCODE_CONFIG_CONTENT=" + cfg.MCPConfig}
 	}
 
-	stdout, err := cmd.StdoutPipe()
+	base, err := client.NewSpawnBuilder(ctx).
+		WithExecutable(execPath, args).
+		WithWorkDir(cfg.WorkDir).
+		WithSessionRef(cfg.SessionID).
+		WithTimeout(cfg.Timeout).
+		WithParser(NewParser()).
+		WithEnv(env).
+		WithProviderName("opencode").
+		WithStderrCapture(true).
+		Build()
 	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+		return nil, fmt.Errorf("opencode: %w", err)
 	}
 
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
-	}
-
-	// Create BaseProcess with OpenCode-specific hooks
-	parser := NewParser()
-	bp := client.NewBaseProcess(
-		procCtx,
-		cancel,
-		cmd,
-		stdout,
-		stderr,
-		cfg.WorkDir,
-		client.WithEventParser(parser),
-		client.WithStderrCapture(true),
-		client.WithProviderName("opencode"),
-	)
-
-	p := &Process{BaseProcess: bp}
-
-	// Set initial session ID if provided (for --resume)
-	if cfg.SessionID != "" {
-		bp.SetSessionRef(cfg.SessionID)
-	}
-
-	if err := cmd.Start(); err != nil {
-		cancel()
-		log.Debug(log.CatOrch, "Failed to start opencode process", "subsystem", "opencode", "error", err)
-		return nil, fmt.Errorf("failed to start opencode process: %w", err)
-	}
-
-	log.Debug(log.CatOrch, "OpenCode process started", "subsystem", "opencode", "pid", cmd.Process.Pid)
-	bp.SetStatus(client.StatusRunning)
-
-	// Start output parser goroutines
-	bp.StartGoroutines()
-
-	return p, nil
+	return &Process{BaseProcess: base}, nil
 }
 
 // SessionID returns the session ID (may be empty until first event with sessionID is received).

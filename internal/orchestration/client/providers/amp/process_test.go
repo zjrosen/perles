@@ -474,8 +474,8 @@ func TestBuildArgs(t *testing.T) {
 			},
 			isResume: false,
 			expected: []string{
-				"-x", "--stream-json",
 				"--no-notifications",
+				"--stream-json", "-x",
 			},
 		},
 		{
@@ -486,9 +486,9 @@ func TestBuildArgs(t *testing.T) {
 			},
 			isResume: false,
 			expected: []string{
-				"-x", "--stream-json",
 				"--dangerously-allow-all",
 				"--no-notifications",
+				"--stream-json", "-x",
 			},
 		},
 		{
@@ -499,9 +499,9 @@ func TestBuildArgs(t *testing.T) {
 			},
 			isResume: false,
 			expected: []string{
-				"-x", "--stream-json",
 				"--no-notifications",
 				"--no-ide",
+				"--stream-json", "-x",
 			},
 		},
 		{
@@ -512,9 +512,9 @@ func TestBuildArgs(t *testing.T) {
 			},
 			isResume: false,
 			expected: []string{
-				"-x", "--stream-json",
 				"--no-notifications",
 				"--use-sonnet",
+				"--stream-json", "-x",
 			},
 		},
 		{
@@ -525,9 +525,9 @@ func TestBuildArgs(t *testing.T) {
 			},
 			isResume: false,
 			expected: []string{
-				"-x", "--stream-json",
 				"--no-notifications",
 				"-m", "rush",
+				"--stream-json", "-x",
 			},
 		},
 		{
@@ -538,9 +538,9 @@ func TestBuildArgs(t *testing.T) {
 			},
 			isResume: false,
 			expected: []string{
-				"-x", "--stream-json",
 				"--no-notifications",
 				"--mcp-config", `{"servers":{}}`,
+				"--stream-json", "-x",
 			},
 		},
 		{
@@ -552,8 +552,8 @@ func TestBuildArgs(t *testing.T) {
 			isResume: true,
 			expected: []string{
 				"threads", "continue", "T-abc123",
-				"-x", "--stream-json",
 				"--no-notifications",
+				"--stream-json", "-x",
 			},
 		},
 		{
@@ -570,13 +570,13 @@ func TestBuildArgs(t *testing.T) {
 			isResume: true,
 			expected: []string{
 				"threads", "continue", "T-xyz789",
-				"-x", "--stream-json",
 				"--dangerously-allow-all",
 				"--no-notifications",
 				"--no-ide",
 				"--use-sonnet",
 				"-m", "smart",
 				"--mcp-config", `{"mcpServers":{}}`,
+				"--stream-json", "-x",
 			},
 		},
 	}
@@ -979,4 +979,125 @@ func TestParsePolymorphicError(t *testing.T) {
 			require.Equal(t, tt.wantCode, result.Code)
 		})
 	}
+}
+
+// =============================================================================
+// SpawnBuilder Migration Tests - Verify Amp uses SpawnBuilder correctly
+// =============================================================================
+
+// TestAmp_SpawnBuilder_ResumeWithThreadID verifies that resume preserves thread ID.
+// This validates that WithSessionRef correctly passes through the thread ID.
+func TestAmp_SpawnBuilder_ResumeWithThreadID(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	threadID := "T-abc123-def456"
+
+	// Use BaseProcess to verify session ref pattern
+	bp := client.NewBaseProcess(
+		ctx,
+		cancel,
+		nil,
+		nil,
+		nil,
+		"/test/project",
+		client.WithProviderName("amp"),
+	)
+
+	// Simulate what SpawnBuilder's WithSessionRef does
+	bp.SetSessionRef(threadID)
+
+	p := &Process{BaseProcess: bp}
+	require.Equal(t, threadID, p.ThreadID())
+	require.Equal(t, threadID, p.SessionRef())
+}
+
+// TestAmp_SpawnBuilder_BuildArgsWithPrompt verifies that buildArgs() correctly
+// appends prompt as the final positional argument.
+func TestAmp_SpawnBuilder_BuildArgsWithPrompt(t *testing.T) {
+	// Test various config combinations to ensure buildArgs still works
+	tests := []struct {
+		name     string
+		cfg      Config
+		isResume bool
+		contains []string
+	}{
+		{
+			name: "basic config",
+			cfg: Config{
+				WorkDir: "/project",
+			},
+			isResume: false,
+			contains: []string{"-x", "--stream-json"},
+		},
+		{
+			name: "resume with thread ID",
+			cfg: Config{
+				WorkDir:  "/project",
+				ThreadID: "T-abc123",
+			},
+			isResume: true,
+			contains: []string{"threads", "continue", "T-abc123"},
+		},
+		{
+			name: "with prompt as positional arg",
+			cfg: Config{
+				WorkDir: "/project",
+				Prompt:  "Hello",
+			},
+			isResume: false,
+			// Prompt is the final positional argument
+			contains: []string{"-x", "--stream-json", "Hello"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := buildArgs(tt.cfg, tt.isResume)
+
+			for _, expected := range tt.contains {
+				found := false
+				for _, arg := range args {
+					if arg == expected {
+						found = true
+						break
+					}
+				}
+				require.True(t, found, "Expected %q in args: %v", expected, args)
+			}
+		})
+	}
+}
+
+// TestAmp_SpawnBuilder_PromptAsLastArg verifies that the prompt is passed
+// as the final positional argument, not via stdin.
+func TestAmp_SpawnBuilder_PromptAsLastArg(t *testing.T) {
+	cfg := Config{
+		WorkDir: "/project",
+		Prompt:  "This is my prompt",
+	}
+
+	args := buildArgs(cfg, false)
+
+	// Verify prompt IS in args as the last element
+	require.NotEmpty(t, args)
+	require.Equal(t, cfg.Prompt, args[len(args)-1], "Prompt should be the last argument")
+}
+
+// TestAmp_SpawnBuilder_NoPromptNoTrailingArg verifies that when there's no prompt,
+// there's no trailing argument added.
+func TestAmp_SpawnBuilder_NoPromptNoTrailingArg(t *testing.T) {
+	cfg := Config{
+		WorkDir: "/project",
+		Prompt:  "", // No prompt
+	}
+
+	args := buildArgs(cfg, false)
+
+	// Last arg should be a flag, not an empty string
+	require.NotEmpty(t, args)
+	lastArg := args[len(args)-1]
+	require.NotEqual(t, "", lastArg, "Should not have empty trailing argument")
+	// Last arg should be -x (execute flag, added at end before prompt)
+	require.Equal(t, "-x", lastArg)
 }

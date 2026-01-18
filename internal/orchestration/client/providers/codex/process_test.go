@@ -404,10 +404,11 @@ func TestErrTimeout(t *testing.T) {
 }
 
 // =============================================================================
-// extractSession Tests
+// Parser.ExtractSessionRef Tests
 // =============================================================================
 
-func TestExtractSession(t *testing.T) {
+func TestParser_ExtractSessionRef(t *testing.T) {
+	parser := NewParser()
 	tests := []struct {
 		name     string
 		event    client.OutputEvent
@@ -446,7 +447,7 @@ func TestExtractSession(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := extractSession(tt.event, tt.rawLine)
+			result := parser.ExtractSessionRef(tt.event, tt.rawLine)
 			require.Equal(t, tt.expected, result)
 		})
 	}

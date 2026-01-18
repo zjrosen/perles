@@ -9,7 +9,7 @@
 //
 // Import this package to register the Gemini client with the client registry:
 //
-//	import _ "github.com/zjrosen/perles/internal/orchestration/gemini"
+//	import _ "github.com/zjrosen/perles/internal/orchestration/client/providers/gemini"
 //
 // Then create a client using the registry:
 //
