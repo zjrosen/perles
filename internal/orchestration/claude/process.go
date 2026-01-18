@@ -2,12 +2,9 @@
 package claude
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -145,30 +142,31 @@ type CostInfo struct {
 }
 
 // Process represents a headless Claude Code process.
-// Process implements client.HeadlessProcess.
+// Process implements client.HeadlessProcess by embedding BaseProcess.
 type Process struct {
-	cmd        *exec.Cmd
-	stdin      io.WriteCloser
-	stdout     io.ReadCloser
-	stderr     io.ReadCloser
-	sessionID  string
-	mainModel  string // Main model name from init event, used to extract correct usage from modelUsage
-	workDir    string
-	status     client.ProcessStatus
-	events     chan client.OutputEvent
-	errors     chan error
-	cancelFunc context.CancelFunc
-	ctx        context.Context
-	mu         sync.RWMutex
-	wg         sync.WaitGroup
+	*client.BaseProcess
 
-	// stderrLines captures stderr output for inclusion in error messages.
-	// Protected by mu.
-	stderrLines []string
+	// mainModel is Claude-specific: the model name from init event.
+	// Used to extract correct usage from modelUsage.
+	mainModel string
+	mu        sync.RWMutex // protects mainModel
 }
 
 // ErrTimeout is returned when a Claude process exceeds its configured timeout.
 var ErrTimeout = fmt.Errorf("claude process timed out")
+
+// extractSession extracts the session ID from an init event.
+func extractSession(event client.OutputEvent, rawLine []byte) string {
+	if event.Type == client.EventSystem && event.SubType == "init" {
+		var initData struct {
+			SessionID string `json:"session_id"`
+		}
+		if err := json.Unmarshal(rawLine, &initData); err == nil && initData.SessionID != "" {
+			return initData.SessionID
+		}
+	}
+	return ""
+}
 
 // Spawn creates and starts a new headless Claude process.
 // Context is used for cancellation and timeout control.
@@ -206,18 +204,28 @@ func Spawn(ctx context.Context, cfg Config) (*Process, error) {
 		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
 
-	p := &Process{
-		cmd:        cmd,
-		stdin:      nil, // Not needed for --print mode
-		stdout:     stdout,
-		stderr:     stderr,
-		sessionID:  cfg.SessionID,
-		workDir:    cfg.WorkDir,
-		status:     client.StatusPending,
-		events:     make(chan client.OutputEvent, 100),
-		errors:     make(chan error, 10),
-		cancelFunc: cancel,
-		ctx:        procCtx,
+	// Create the Claude process with embedded BaseProcess
+	p := &Process{}
+
+	// Create BaseProcess with Claude-specific hooks
+	bp := client.NewBaseProcess(
+		procCtx,
+		cancel,
+		cmd,
+		stdout,
+		stderr,
+		cfg.WorkDir,
+		client.WithParseEventFunc(parseEvent),
+		client.WithSessionExtractor(extractSession),
+		client.WithOnInitEvent(p.extractMainModel),
+		client.WithStderrCapture(true),
+		client.WithProviderName("claude"),
+	)
+	p.BaseProcess = bp
+
+	// Set initial session ID if provided (for --resume)
+	if cfg.SessionID != "" {
+		bp.SetSessionRef(cfg.SessionID)
 	}
 
 	if err := cmd.Start(); err != nil {
@@ -227,15 +235,33 @@ func Spawn(ctx context.Context, cfg Config) (*Process, error) {
 	}
 
 	log.Debug(log.CatOrch, "Claude process started", "subsystem", "claude", "pid", cmd.Process.Pid)
-	p.setStatus(client.StatusRunning)
+	bp.SetStatus(client.StatusRunning)
 
 	// Start output parser goroutines
-	p.wg.Add(3)
-	go p.parseOutput()
-	go p.parseStderr()
-	go p.waitForCompletion()
+	bp.StartGoroutines()
 
 	return p, nil
+}
+
+// extractMainModel extracts the main model name from the init event.
+// This is called via the OnInitEvent hook.
+func (p *Process) extractMainModel(event client.OutputEvent, rawLine []byte) {
+	var initData struct {
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal(rawLine, &initData); err == nil && initData.Model != "" {
+		p.mu.Lock()
+		p.mainModel = initData.Model
+		p.mu.Unlock()
+		log.Debug(log.CatOrch, "extracted main model", "subsystem", "claude", "model", initData.Model)
+	}
+}
+
+// MainModel returns the main model name from the init event.
+func (p *Process) MainModel() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.mainModel
 }
 
 // ResumeWithConfig continues an existing Claude session with full configuration control.
@@ -292,217 +318,10 @@ func buildArgs(cfg Config) []string {
 	return args
 }
 
-// Events returns a channel that receives parsed output events.
-func (p *Process) Events() <-chan client.OutputEvent {
-	return p.events
-}
-
-// Errors returns a channel that receives errors.
-func (p *Process) Errors() <-chan error {
-	return p.errors
-}
-
 // SessionID returns the session ID (may be empty until init event is received).
+// This is a convenience method that wraps SessionRef for backwards compatibility.
 func (p *Process) SessionID() string {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.sessionID
-}
-
-// Status returns the current process status.
-func (p *Process) Status() client.ProcessStatus {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.status
-}
-
-// IsRunning returns true if the process is currently running.
-func (p *Process) IsRunning() bool {
-	return p.Status() == client.StatusRunning
-}
-
-// WorkDir returns the working directory of the process.
-func (p *Process) WorkDir() string {
-	return p.workDir
-}
-
-// PID returns the process ID of the Claude process, or 0 if not running.
-func (p *Process) PID() int {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	if p.cmd != nil && p.cmd.Process != nil {
-		return p.cmd.Process.Pid
-	}
-	return 0
-}
-
-// Cancel terminates the Claude process.
-// The status is set before calling cancelFunc to prevent race with waitForCompletion.
-func (p *Process) Cancel() error {
-	p.mu.Lock()
-	p.status = client.StatusCancelled
-	p.mu.Unlock()
-	p.cancelFunc()
-	return nil
-}
-
-// Wait blocks until the process completes.
-func (p *Process) Wait() error {
-	p.wg.Wait()
-	return nil
-}
-
-// SessionRef returns the session reference (session ID for Claude).
-// This implements client.HeadlessProcess.
-// May be empty until the init event is received.
-func (p *Process) SessionRef() string {
-	return p.SessionID()
-}
-
-// setStatus updates the process status thread-safely.
-func (p *Process) setStatus(s client.ProcessStatus) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.status = s
-}
-
-// sendError attempts to send an error to the errors channel.
-// If the channel is full, the error is logged but not sent to avoid blocking.
-func (p *Process) sendError(err error) {
-	select {
-	case p.errors <- err:
-		// Error sent successfully
-	default:
-		// Channel full, log the dropped error
-		log.Debug(log.CatOrch, "error channel full, dropping error", "subsystem", "claude", "error", err)
-	}
-}
-
-// parseOutput reads stdout and parses stream-json events.
-func (p *Process) parseOutput() {
-	defer p.wg.Done()
-	defer close(p.events)
-
-	scanner := bufio.NewScanner(p.stdout)
-	// Increase buffer size for large outputs
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
-
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-
-		event, err := parseEvent(line)
-		if err != nil {
-			log.Debug(log.CatOrch, "parse error", "error", err, "line", string(line))
-			continue
-		}
-
-		event.Raw = make([]byte, len(line))
-		copy(event.Raw, line)
-		event.Timestamp = time.Now()
-
-		// Extract session ID and model from init event
-		if event.Type == client.EventSystem && event.SubType == "init" {
-			// Parse model from raw JSON since it's not in OutputEvent struct
-			var initData struct {
-				SessionID string `json:"session_id"`
-				Model     string `json:"model"`
-			}
-			if err := json.Unmarshal(line, &initData); err == nil {
-				p.mu.Lock()
-				if initData.SessionID != "" {
-					p.sessionID = initData.SessionID
-				}
-				if initData.Model != "" {
-					p.mainModel = initData.Model
-				}
-				p.mu.Unlock()
-				log.Debug(log.CatOrch, "session init", "sessionID", initData.SessionID, "model", initData.Model)
-			}
-		}
-
-		// TODO this could be wrong but currently the EventResult doesnt' feel like its the correct token usage.
-		// will need to revisit this to understand if this is a Claude bug or if we should be using the assistant event
-		if event.Type == client.EventAssistant && event.Usage != nil {
-			p.mu.RLock()
-			sessionID := p.sessionID
-			p.mu.RUnlock()
-
-			log.Debug(log.CatOrch, "result context",
-				"session", sessionID,
-				"tokensUsed", event.Usage.TokensUsed,
-				"pctUsed", float64(event.Usage.TokensUsed)/200000*100)
-		}
-
-		select {
-		case p.events <- event:
-		case <-p.ctx.Done():
-			return
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		log.Debug(log.CatOrch, "scanner error", "subsystem", "claude", "error", err)
-		p.sendError(fmt.Errorf("stdout scanner error: %w", err))
-	}
-}
-
-// parseStderr reads and logs stderr output, capturing lines for error messages.
-func (p *Process) parseStderr() {
-	defer p.wg.Done()
-
-	scanner := bufio.NewScanner(p.stderr)
-	for scanner.Scan() {
-		line := scanner.Text()
-		log.Debug(log.CatOrch, "STDERR", "subsystem", "claude", "line", line)
-
-		// Capture stderr lines for inclusion in error messages
-		p.mu.Lock()
-		p.stderrLines = append(p.stderrLines, line)
-		p.mu.Unlock()
-	}
-	if err := scanner.Err(); err != nil {
-		log.Debug(log.CatOrch, "Stderr scanner error", "subsystem", "claude", "error", err)
-	}
-}
-
-// waitForCompletion waits for the process to exit and updates status.
-// It closes the errors channel when done to signal completion to consumers.
-func (p *Process) waitForCompletion() {
-	defer p.wg.Done()
-	defer close(p.errors) // Signal that no more errors will be sent
-
-	err := p.cmd.Wait()
-
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if p.status == client.StatusCancelled {
-		log.Debug(log.CatOrch, "process was cancelled", "subsystem", "claude")
-		return
-	}
-
-	if errors.Is(p.ctx.Err(), context.DeadlineExceeded) {
-		p.status = client.StatusFailed
-		log.Debug(log.CatOrch, "process timed out", "subsystem", "claude")
-		p.sendError(ErrTimeout)
-		return
-	}
-
-	if err != nil {
-		p.status = client.StatusFailed
-		if len(p.stderrLines) > 0 {
-			stderrMsg := strings.Join(p.stderrLines, "\n")
-			p.sendError(fmt.Errorf("claude process failed: %s (exit: %w)", stderrMsg, err))
-		} else {
-			p.sendError(fmt.Errorf("claude process exited: %w", err))
-		}
-	} else {
-		p.status = client.StatusCompleted
-	}
+	return p.SessionRef()
 }
 
 // Ensure Process implements client.HeadlessProcess at compile time.

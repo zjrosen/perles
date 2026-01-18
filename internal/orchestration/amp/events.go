@@ -2,6 +2,7 @@ package amp
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/zjrosen/perles/internal/orchestration/client"
 )
@@ -25,8 +26,8 @@ type ampEvent struct {
 	NumTurns     int     `json:"num_turns,omitempty"`
 	TotalCostUSD float64 `json:"total_cost_usd,omitempty"`
 
-	// Error info
-	Error *client.ErrorInfo `json:"error,omitempty"`
+	// Error info - can be string or object, use json.RawMessage for polymorphic parsing
+	Error json.RawMessage `json:"error,omitempty"`
 }
 
 // ampMessage represents message content in Amp events.
@@ -67,12 +68,9 @@ func parseEvent(line []byte) (client.OutputEvent, error) {
 		DurationMs:    raw.DurationMs,
 		IsErrorResult: raw.IsError,
 		TotalCostUSD:  raw.TotalCostUSD,
-		Error:         raw.Error,
+		Error:         parseErrorField(raw.Error),
 	}
-
-	// Copy raw data for debugging
-	event.Raw = make([]byte, len(line))
-	copy(event.Raw, line)
+	// Note: Raw is set by BaseProcess.parseOutput() after calling this function
 
 	// Convert message content
 	if raw.Message != nil {
@@ -106,7 +104,93 @@ func parseEvent(line []byte) (client.OutputEvent, error) {
 		}
 	}
 
+	// Detect context exhaustion patterns:
+	// 1. Result event with is_error=true and result containing context-related messages
+	// 2. Error event with message containing context-related messages
+	// Common patterns: "Prompt is too long", "Context window exceeded", "context limit"
+	if event.IsErrorResult || event.Type == client.EventError {
+		errorMsg := event.Result
+		if event.Error != nil && event.Error.Message != "" {
+			errorMsg = event.Error.Message
+		}
+		if isContextExceededMessage(errorMsg) {
+			if event.Error == nil {
+				event.Error = &client.ErrorInfo{}
+			}
+			event.Error.Reason = client.ErrReasonContextExceeded
+			if event.Error.Message == "" {
+				event.Error.Message = errorMsg
+			}
+		}
+	}
+
 	return event, nil
+}
+
+// parseErrorField handles the polymorphic error field from Amp CLI.
+// It can be either a string (error message) or an object (ErrorInfo).
+// String format example: "413 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Prompt is too long\"}}"
+func parseErrorField(raw json.RawMessage) *client.ErrorInfo {
+	if len(raw) == 0 {
+		return nil
+	}
+
+	// Try parsing as object first
+	var errInfo client.ErrorInfo
+	if err := json.Unmarshal(raw, &errInfo); err == nil && (errInfo.Message != "" || errInfo.Code != "") {
+		return &errInfo
+	}
+
+	// Try parsing as string (error message like "413 {...}")
+	var errStr string
+	if err := json.Unmarshal(raw, &errStr); err == nil && errStr != "" {
+		// Extract the actual error message from the string
+		// Common format: "413 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Prompt is too long\"}}"
+		return parseErrorString(errStr)
+	}
+
+	return nil
+}
+
+// parseErrorString extracts error information from an error string.
+// Handles formats like: "413 {\"type\":\"error\",\"error\":{...}}"
+func parseErrorString(errStr string) *client.ErrorInfo {
+	// Try to find embedded JSON in the string
+	if idx := strings.Index(errStr, "{"); idx >= 0 {
+		jsonPart := errStr[idx:]
+		// Try parsing as nested error object: {"type":"error","error":{...}}
+		var nested struct {
+			Type  string `json:"type"`
+			Error struct {
+				Type    string `json:"type"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(jsonPart), &nested); err == nil && nested.Error.Message != "" {
+			return &client.ErrorInfo{
+				Message: nested.Error.Message,
+				Code:    nested.Error.Type,
+			}
+		}
+	}
+
+	// Fall back to using the entire string as the message
+	return &client.ErrorInfo{
+		Message: errStr,
+	}
+}
+
+// isContextExceededMessage checks if an error message indicates context window exhaustion.
+func isContextExceededMessage(msg string) bool {
+	if msg == "" {
+		return false
+	}
+	lower := strings.ToLower(msg)
+	return strings.Contains(lower, "prompt is too long") ||
+		strings.Contains(lower, "context window exceeded") ||
+		strings.Contains(lower, "context exceeded") ||
+		strings.Contains(lower, "context limit") ||
+		strings.Contains(lower, "token limit")
 }
 
 // mapEventType maps Amp event type strings to client.EventType.

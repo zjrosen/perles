@@ -151,10 +151,7 @@ func ParseEvent(line []byte) (client.OutputEvent, error) {
 	event := client.OutputEvent{
 		Type: mapEventType(raw.Type, raw.Item),
 	}
-
-	// Copy raw data for debugging
-	event.Raw = make([]byte, len(line))
-	copy(event.Raw, line)
+	// Note: Raw is set by BaseProcess.parseOutput() after calling this function
 
 	// Handle thread.started -> EventSystem (init subtype)
 	if raw.Type == "thread.started" {

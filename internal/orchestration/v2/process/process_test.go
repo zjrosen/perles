@@ -1539,6 +1539,63 @@ func TestHandleOutputEvent_DetectsContextExceededInAssistantMessage(t *testing.T
 	assert.True(t, errors.As(turnCmd.Error, &contextErr), "error should be ContextExceededError")
 }
 
+func TestHandleOutputEvent_DetectsContextExceededInResultEvent(t *testing.T) {
+	// Test that context exhaustion is detected in result events (Amp pattern)
+	// Amp sends context exceeded as: {"type":"result","is_error":true,"error":{...}}
+	proc := newMockHeadlessProcess()
+	submitter := &mockCommandSubmitter{}
+	eventBus := pubsub.NewBroker[any]()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sub := eventBus.Subscribe(ctx)
+
+	p := New("worker-1", repository.RoleWorker, proc, submitter, eventBus)
+	p.Start()
+
+	// Send result event with context exceeded error (Amp format)
+	proc.events <- client.OutputEvent{
+		Type:          client.EventResult,
+		SubType:       "error_during_execution",
+		IsErrorResult: true,
+		Result:        "Prompt is too long",
+		Error: &client.ErrorInfo{
+			Message: "Prompt is too long",
+			Code:    "invalid_request_error",
+			Reason:  client.ErrReasonContextExceeded,
+		},
+	}
+
+	// Should receive ProcessError event
+	select {
+	case evt := <-sub:
+		pe, ok := evt.Payload.(events.ProcessEvent)
+		require.True(t, ok, "expected ProcessEvent")
+		assert.Equal(t, events.ProcessError, pe.Type)
+		assert.Contains(t, pe.Error.Error(), "context exceeded")
+	case <-time.After(500 * time.Millisecond):
+		require.FailNow(t, "did not receive error event")
+	}
+
+	// Output should show error message
+	time.Sleep(20 * time.Millisecond)
+	lines := p.Output().Lines()
+	require.Len(t, lines, 1)
+	assert.Contains(t, lines[0], "⚠️ Error")
+
+	proc.Complete()
+	<-p.eventDone
+
+	// The turn complete command should include the ContextExceededError
+	submitted := submitter.getSubmitted()
+	require.Len(t, submitted, 1)
+	turnCmd, ok := submitted[0].(*command.ProcessTurnCompleteCommand)
+	require.True(t, ok)
+	require.NotNil(t, turnCmd.Error)
+
+	var contextErr *ContextExceededError
+	assert.True(t, errors.As(turnCmd.Error, &contextErr), "error should be ContextExceededError")
+}
+
 func TestHandleOutputEvent_DoesNotTriggerContextExceededForNonContextErrors(t *testing.T) {
 	// Test that other errors in assistant messages don't trigger context exceeded handling
 	proc := newMockHeadlessProcess()

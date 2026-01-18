@@ -194,43 +194,49 @@ func TestFindExecutable_NotFound(t *testing.T) {
 // This allows testing lifecycle methods, status transitions, and channel behavior.
 func newTestProcess() *Process {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Process{
-		sessionID:  "gemini-test-session-12345",
-		workDir:    "/test/project",
-		status:     client.StatusRunning,
-		events:     make(chan client.OutputEvent, 100),
-		errors:     make(chan error, 10),
-		cancelFunc: cancel,
-		ctx:        ctx,
-	}
+	bp := client.NewBaseProcess(
+		ctx,
+		cancel,
+		nil, // cmd
+		nil, // stdout
+		nil, // stderr
+		"/test/project",
+		client.WithProviderName("gemini"),
+	)
+	bp.SetSessionRef("gemini-test-session-12345")
+	bp.SetStatus(client.StatusRunning)
+	return &Process{BaseProcess: bp}
 }
 
 func TestProcess_ChannelBufferSizes(t *testing.T) {
 	p := newTestProcess()
 
 	// Events channel should have capacity 100
-	require.Equal(t, 100, cap(p.events))
+	require.Equal(t, 100, cap(p.EventsWritable()))
 
 	// Errors channel should have capacity 10
-	require.Equal(t, 10, cap(p.errors))
+	require.Equal(t, 10, cap(p.ErrorsWritable()))
 }
 
 func TestProcess_StatusTransitions_PendingToRunning(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	p := &Process{
-		status:     client.StatusPending,
-		events:     make(chan client.OutputEvent, 100),
-		errors:     make(chan error, 10),
-		cancelFunc: cancel,
-		ctx:        ctx,
-	}
+	bp := client.NewBaseProcess(
+		ctx,
+		cancel,
+		nil,
+		nil,
+		nil,
+		"/test/project",
+		client.WithProviderName("gemini"),
+	)
+	p := &Process{BaseProcess: bp}
 
 	require.Equal(t, client.StatusPending, p.Status())
 	require.False(t, p.IsRunning())
 
-	p.setStatus(client.StatusRunning)
+	p.SetStatus(client.StatusRunning)
 	require.Equal(t, client.StatusRunning, p.Status())
 	require.True(t, p.IsRunning())
 }
@@ -241,7 +247,7 @@ func TestProcess_StatusTransitions_RunningToCompleted(t *testing.T) {
 	require.Equal(t, client.StatusRunning, p.Status())
 	require.True(t, p.IsRunning())
 
-	p.setStatus(client.StatusCompleted)
+	p.SetStatus(client.StatusCompleted)
 	require.Equal(t, client.StatusCompleted, p.Status())
 	require.False(t, p.IsRunning())
 }
@@ -252,7 +258,7 @@ func TestProcess_StatusTransitions_RunningToFailed(t *testing.T) {
 	require.Equal(t, client.StatusRunning, p.Status())
 	require.True(t, p.IsRunning())
 
-	p.setStatus(client.StatusFailed)
+	p.SetStatus(client.StatusFailed)
 	require.Equal(t, client.StatusFailed, p.Status())
 	require.False(t, p.IsRunning())
 }
@@ -282,7 +288,7 @@ func TestProcess_Cancel_TerminatesAndSetsStatus(t *testing.T) {
 
 	// Context should be cancelled
 	select {
-	case <-p.ctx.Done():
+	case <-p.Context().Done():
 		// Expected - context was cancelled
 	default:
 		require.Fail(t, "Context should be cancelled after Cancel()")
@@ -296,13 +302,17 @@ func TestProcess_Cancel_RacePrevention(t *testing.T) {
 
 	for i := 0; i < 100; i++ {
 		ctx, cancel := context.WithCancel(context.Background())
-		p := &Process{
-			status:     client.StatusRunning,
-			events:     make(chan client.OutputEvent, 100),
-			errors:     make(chan error, 10),
-			cancelFunc: cancel,
-			ctx:        ctx,
-		}
+		bp := client.NewBaseProcess(
+			ctx,
+			cancel,
+			nil,
+			nil,
+			nil,
+			"/test/project",
+			client.WithProviderName("gemini"),
+		)
+		bp.SetStatus(client.StatusRunning)
+		p := &Process{BaseProcess: bp}
 
 		// Track status seen by a goroutine that races with Cancel
 		var observedStatus client.ProcessStatus
@@ -312,7 +322,7 @@ func TestProcess_Cancel_RacePrevention(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			// Wait for context cancellation
-			<-p.ctx.Done()
+			<-p.Context().Done()
 			// Immediately check status - should already be StatusCancelled
 			observedStatus = p.Status()
 		}()
@@ -358,13 +368,17 @@ func TestProcess_Cancel_DoesNotOverrideTerminalState(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
-			p := &Process{
-				status:     tt.initialStatus,
-				events:     make(chan client.OutputEvent, 100),
-				errors:     make(chan error, 10),
-				cancelFunc: cancel,
-				ctx:        ctx,
-			}
+			bp := client.NewBaseProcess(
+				ctx,
+				cancel,
+				nil,
+				nil,
+				nil,
+				"/test/project",
+				client.WithProviderName("gemini"),
+			)
+			bp.SetStatus(tt.initialStatus)
+			p := &Process{BaseProcess: bp}
 
 			err := p.Cancel()
 			require.NoError(t, err)
@@ -378,19 +392,23 @@ func TestProcess_ContextTimeout_TriggersCancellation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 
-	p := &Process{
-		status:     client.StatusRunning,
-		events:     make(chan client.OutputEvent, 100),
-		errors:     make(chan error, 10),
-		cancelFunc: cancel,
-		ctx:        ctx,
-	}
+	bp := client.NewBaseProcess(
+		ctx,
+		cancel,
+		nil,
+		nil,
+		nil,
+		"/test/project",
+		client.WithProviderName("gemini"),
+	)
+	bp.SetStatus(client.StatusRunning)
+	p := &Process{BaseProcess: bp}
 
 	// Wait for context to timeout
-	<-p.ctx.Done()
+	<-p.Context().Done()
 
 	// Verify context was cancelled due to deadline
-	require.Equal(t, context.DeadlineExceeded, p.ctx.Err())
+	require.Equal(t, context.DeadlineExceeded, p.Context().Err())
 }
 
 func TestProcess_SessionRef_ReturnsSessionID(t *testing.T) {
@@ -404,15 +422,17 @@ func TestProcess_SessionRef_InitiallyEmpty(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	p := &Process{
-		sessionID:  "", // No session ID set initially
-		workDir:    "/test/project",
-		status:     client.StatusRunning,
-		events:     make(chan client.OutputEvent, 100),
-		errors:     make(chan error, 10),
-		cancelFunc: cancel,
-		ctx:        ctx,
-	}
+	bp := client.NewBaseProcess(
+		ctx,
+		cancel,
+		nil,
+		nil,
+		nil,
+		"/test/project",
+		client.WithProviderName("gemini"),
+	)
+	bp.SetStatus(client.StatusRunning)
+	p := &Process{BaseProcess: bp}
 
 	// SessionRef should be empty until init event is processed
 	require.Equal(t, "", p.SessionRef())
@@ -425,15 +445,15 @@ func TestProcess_WorkDir(t *testing.T) {
 
 func TestProcess_PID_NilProcess(t *testing.T) {
 	p := newTestProcess()
-	// cmd is nil, so PID should return 0
-	require.Equal(t, 0, p.PID())
+	// cmd is nil, so PID should return -1
+	require.Equal(t, -1, p.PID())
 }
 
 func TestProcess_Wait_BlocksUntilCompletion(t *testing.T) {
 	p := newTestProcess()
 
 	// Add a WaitGroup counter to simulate goroutines
-	p.wg.Add(1)
+	p.WaitGroup().Add(1)
 
 	// Wait should block until wg is done
 	done := make(chan bool)
@@ -452,7 +472,7 @@ func TestProcess_Wait_BlocksUntilCompletion(t *testing.T) {
 	}
 
 	// Release the waitgroup
-	p.wg.Done()
+	p.WaitGroup().Done()
 
 	// Wait should now complete
 	select {
@@ -465,40 +485,50 @@ func TestProcess_Wait_BlocksUntilCompletion(t *testing.T) {
 
 func TestProcess_SendError_NonBlocking(t *testing.T) {
 	// Create a process with a full error channel
-	p := &Process{
-		errors: make(chan error, 2), // Small capacity
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	bp := client.NewBaseProcess(
+		ctx,
+		cancel,
+		nil,
+		nil,
+		nil,
+		"/test/project",
+		client.WithProviderName("gemini"),
+	)
+	p := &Process{BaseProcess: bp}
+
+	// Fill the channel (capacity is 10)
+	for i := 0; i < 10; i++ {
+		p.ErrorsWritable() <- errTest
 	}
 
-	// Fill the channel
-	p.errors <- errTest
-	p.errors <- errTest
-
-	// Channel is now full - sendError should not block
+	// Channel is now full - SendError should not block
 	done := make(chan bool)
 	go func() {
-		p.sendError(ErrTimeout) // This should not block
+		p.SendError(ErrTimeout) // This should not block
 		done <- true
 	}()
 
 	select {
 	case <-done:
-		// Expected - sendError returned without blocking
+		// Expected - SendError returned without blocking
 	case <-time.After(100 * time.Millisecond):
-		require.Fail(t, "sendError blocked on full channel - should have dropped error")
+		require.Fail(t, "SendError blocked on full channel - should have dropped error")
 	}
 
 	// Original errors should still be in channel
-	require.Len(t, p.errors, 2)
+	require.Len(t, p.ErrorsWritable(), 10)
 }
 
 func TestProcess_SendError_SuccessWhenSpaceAvailable(t *testing.T) {
 	p := newTestProcess()
 
-	// sendError should send to channel when space available
-	p.sendError(ErrTimeout)
+	// SendError should send to channel when space available
+	p.SendError(ErrTimeout)
 
 	select {
-	case err := <-p.errors:
+	case err := <-p.ErrorsWritable():
 		require.Equal(t, ErrTimeout, err)
 	default:
 		require.Fail(t, "Error should have been sent to channel")
@@ -514,7 +544,7 @@ func TestProcess_EventsChannel(t *testing.T) {
 
 	// Send an event
 	go func() {
-		p.events <- client.OutputEvent{Type: client.EventSystem, SubType: "init"}
+		p.EventsWritable() <- client.OutputEvent{Type: client.EventSystem, SubType: "init"}
 	}()
 
 	select {
@@ -535,7 +565,7 @@ func TestProcess_ErrorsChannel(t *testing.T) {
 
 	// Send an error
 	go func() {
-		p.errors <- errTest
+		p.ErrorsWritable() <- errTest
 	}()
 
 	select {
@@ -916,4 +946,40 @@ func TestSetupMCPConfig_OverwritesSameServer(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "http://localhost:8080/worker/NEW", worker["httpUrl"], "should be updated URL")
 	require.Equal(t, float64(30000), worker["timeout"], "should be updated timeout")
+}
+
+// =============================================================================
+// Session Extraction Tests
+// =============================================================================
+
+func TestExtractSession_InitEvent(t *testing.T) {
+	event := client.OutputEvent{
+		Type:      client.EventSystem,
+		SubType:   "init",
+		SessionID: "gemini-session-123",
+	}
+
+	sessionID := extractSession(event, nil)
+	require.Equal(t, "gemini-session-123", sessionID)
+}
+
+func TestExtractSession_NonInitEvent(t *testing.T) {
+	event := client.OutputEvent{
+		Type:      client.EventAssistant,
+		SessionID: "gemini-session-123",
+	}
+
+	sessionID := extractSession(event, nil)
+	require.Equal(t, "", sessionID) // Only init events should return session ID
+}
+
+func TestExtractSession_EmptySessionID(t *testing.T) {
+	event := client.OutputEvent{
+		Type:      client.EventSystem,
+		SubType:   "init",
+		SessionID: "",
+	}
+
+	sessionID := extractSession(event, nil)
+	require.Equal(t, "", sessionID)
 }

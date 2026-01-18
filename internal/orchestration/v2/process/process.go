@@ -267,6 +267,13 @@ func (p *Process) handleOutputEvent(event *client.OutputEvent) {
 			errMsg := event.GetErrorMessage()
 			// Write error to output buffer so it appears in process pane
 			p.output.Append("⚠️ Error: " + errMsg)
+
+			// Check if this is a context exceeded error (Amp sends this in result events)
+			if event.Error != nil && event.Error.IsContextExceeded() {
+				p.handleInFlightError(&ContextExceededError{})
+				return
+			}
+
 			// Publish immediately for real-time TUI visibility
 			p.handleInFlightError(fmt.Errorf("process error: %s", errMsg))
 			return

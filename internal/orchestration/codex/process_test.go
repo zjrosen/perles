@@ -23,33 +23,40 @@ var errTest = errors.New("test error")
 // This allows testing lifecycle methods, status transitions, and channel behavior.
 func newTestProcess() *Process {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Process{
-		sessionID:  "019b6dea-903b-7bd3-aef5-202a16205a9a",
-		workDir:    "/test/project",
-		status:     client.StatusRunning,
-		events:     make(chan client.OutputEvent, 100),
-		errors:     make(chan error, 10),
-		cancelFunc: cancel,
-		ctx:        ctx,
-	}
+	bp := client.NewBaseProcess(
+		ctx,
+		cancel,
+		nil, // no cmd
+		nil, // no stdout
+		nil, // no stderr
+		"/test/project",
+		client.WithProviderName("codex"),
+	)
+	bp.SetSessionRef("019b6dea-903b-7bd3-aef5-202a16205a9a")
+	bp.SetStatus(client.StatusRunning)
+	return &Process{BaseProcess: bp}
 }
 
 func TestProcessLifecycle_StatusTransitions_PendingToRunning(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	p := &Process{
-		status:     client.StatusPending,
-		events:     make(chan client.OutputEvent, 100),
-		errors:     make(chan error, 10),
-		cancelFunc: cancel,
-		ctx:        ctx,
-	}
+	bp := client.NewBaseProcess(
+		ctx,
+		cancel,
+		nil,
+		nil,
+		nil,
+		"/test/project",
+		client.WithProviderName("codex"),
+	)
+	// Status starts as Pending by default in NewBaseProcess
+	p := &Process{BaseProcess: bp}
 
 	require.Equal(t, client.StatusPending, p.Status())
 	require.False(t, p.IsRunning())
 
-	p.setStatus(client.StatusRunning)
+	bp.SetStatus(client.StatusRunning)
 	require.Equal(t, client.StatusRunning, p.Status())
 	require.True(t, p.IsRunning())
 }
@@ -60,7 +67,7 @@ func TestProcessLifecycle_StatusTransitions_RunningToCompleted(t *testing.T) {
 	require.Equal(t, client.StatusRunning, p.Status())
 	require.True(t, p.IsRunning())
 
-	p.setStatus(client.StatusCompleted)
+	p.BaseProcess.SetStatus(client.StatusCompleted)
 	require.Equal(t, client.StatusCompleted, p.Status())
 	require.False(t, p.IsRunning())
 }
@@ -71,7 +78,7 @@ func TestProcessLifecycle_StatusTransitions_RunningToFailed(t *testing.T) {
 	require.Equal(t, client.StatusRunning, p.Status())
 	require.True(t, p.IsRunning())
 
-	p.setStatus(client.StatusFailed)
+	p.BaseProcess.SetStatus(client.StatusFailed)
 	require.Equal(t, client.StatusFailed, p.Status())
 	require.False(t, p.IsRunning())
 }
@@ -101,7 +108,7 @@ func TestProcessLifecycle_Cancel_TerminatesAndSetsStatus(t *testing.T) {
 
 	// Context should be cancelled
 	select {
-	case <-p.ctx.Done():
+	case <-p.Context().Done():
 		// Expected - context was cancelled
 	default:
 		require.Fail(t, "Context should be cancelled after Cancel()")
@@ -115,13 +122,17 @@ func TestProcessLifecycle_Cancel_RacePrevention(t *testing.T) {
 
 	for i := 0; i < 100; i++ {
 		ctx, cancel := context.WithCancel(context.Background())
-		p := &Process{
-			status:     client.StatusRunning,
-			events:     make(chan client.OutputEvent, 100),
-			errors:     make(chan error, 10),
-			cancelFunc: cancel,
-			ctx:        ctx,
-		}
+		bp := client.NewBaseProcess(
+			ctx,
+			cancel,
+			nil,
+			nil,
+			nil,
+			"/test/project",
+			client.WithProviderName("codex"),
+		)
+		bp.SetStatus(client.StatusRunning)
+		p := &Process{BaseProcess: bp}
 
 		// Track status seen by a goroutine that races with Cancel
 		var observedStatus client.ProcessStatus
@@ -131,7 +142,7 @@ func TestProcessLifecycle_Cancel_RacePrevention(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			// Wait for context cancellation
-			<-p.ctx.Done()
+			<-p.Context().Done()
 			// Immediately check status - should already be StatusCancelled
 			observedStatus = p.Status()
 		}()
@@ -176,13 +187,17 @@ func TestProcessLifecycle_Cancel_DoesNotOverrideTerminalState(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
-			p := &Process{
-				status:     tt.initialStatus,
-				events:     make(chan client.OutputEvent, 100),
-				errors:     make(chan error, 10),
-				cancelFunc: cancel,
-				ctx:        ctx,
-			}
+			bp := client.NewBaseProcess(
+				ctx,
+				cancel,
+				nil,
+				nil,
+				nil,
+				"/test/project",
+				client.WithProviderName("codex"),
+			)
+			bp.SetStatus(tt.initialStatus)
+			p := &Process{BaseProcess: bp}
 
 			err := p.Cancel()
 			require.NoError(t, err)
@@ -202,15 +217,18 @@ func TestProcessLifecycle_SessionRef_InitiallyEmpty(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	p := &Process{
-		sessionID:  "", // No session ID set initially
-		workDir:    "/test/project",
-		status:     client.StatusRunning,
-		events:     make(chan client.OutputEvent, 100),
-		errors:     make(chan error, 10),
-		cancelFunc: cancel,
-		ctx:        ctx,
-	}
+	bp := client.NewBaseProcess(
+		ctx,
+		cancel,
+		nil,
+		nil,
+		nil,
+		"/test/project",
+		client.WithProviderName("codex"),
+	)
+	bp.SetStatus(client.StatusRunning)
+	// Don't set session ref
+	p := &Process{BaseProcess: bp}
 
 	// SessionRef should be empty until thread.started event is processed
 	require.Equal(t, "", p.SessionRef())
@@ -223,15 +241,15 @@ func TestProcessLifecycle_WorkDir(t *testing.T) {
 
 func TestProcessLifecycle_PID_NilProcess(t *testing.T) {
 	p := newTestProcess()
-	// cmd is nil, so PID should return 0
-	require.Equal(t, 0, p.PID())
+	// cmd is nil, so PID should return -1 (BaseProcess returns -1 for nil)
+	require.Equal(t, -1, p.PID())
 }
 
 func TestProcessLifecycle_Wait_BlocksUntilCompletion(t *testing.T) {
 	p := newTestProcess()
 
 	// Add a WaitGroup counter to simulate goroutines
-	p.wg.Add(1)
+	p.WaitGroup().Add(1)
 
 	// Wait should block until wg is done
 	done := make(chan bool)
@@ -249,7 +267,7 @@ func TestProcessLifecycle_Wait_BlocksUntilCompletion(t *testing.T) {
 	}
 
 	// Release the waitgroup
-	p.wg.Done()
+	p.WaitGroup().Done()
 
 	// Wait should now complete
 	select {
@@ -261,19 +279,17 @@ func TestProcessLifecycle_Wait_BlocksUntilCompletion(t *testing.T) {
 }
 
 func TestProcessLifecycle_SendError_NonBlocking(t *testing.T) {
-	// Create a process with a full error channel
-	p := &Process{
-		errors: make(chan error, 2), // Small capacity
+	p := newTestProcess()
+
+	// Fill the channel (capacity is 10)
+	for i := 0; i < 10; i++ {
+		p.ErrorsWritable() <- errTest
 	}
 
-	// Fill the channel
-	p.errors <- errTest
-	p.errors <- errTest
-
-	// Channel is now full - sendError should not block
+	// Channel is now full - SendError should not block
 	done := make(chan bool)
 	go func() {
-		p.sendError(ErrTimeout) // This should not block
+		p.SendError(ErrTimeout) // This should not block
 		done <- true
 	}()
 
@@ -285,17 +301,17 @@ func TestProcessLifecycle_SendError_NonBlocking(t *testing.T) {
 	}
 
 	// Original errors should still be in channel
-	require.Len(t, p.errors, 2)
+	require.Len(t, p.ErrorsWritable(), 10)
 }
 
 func TestProcessLifecycle_SendError_SuccessWhenSpaceAvailable(t *testing.T) {
 	p := newTestProcess()
 
-	// sendError should send to channel when space available
-	p.sendError(ErrTimeout)
+	// SendError should send to channel when space available
+	p.SendError(ErrTimeout)
 
 	select {
-	case err := <-p.errors:
+	case err := <-p.Errors():
 		require.Equal(t, ErrTimeout, err)
 	default:
 		require.Fail(t, "Error should have been sent to channel")
@@ -306,14 +322,14 @@ func TestProcessLifecycle_EventsChannelCapacity(t *testing.T) {
 	p := newTestProcess()
 
 	// Events channel should have capacity 100
-	require.Equal(t, 100, cap(p.events))
+	require.Equal(t, 100, cap(p.EventsWritable()))
 }
 
 func TestProcessLifecycle_ErrorsChannelCapacity(t *testing.T) {
 	p := newTestProcess()
 
 	// Errors channel should have capacity 10
-	require.Equal(t, 10, cap(p.errors))
+	require.Equal(t, 10, cap(p.ErrorsWritable()))
 }
 
 func TestProcessLifecycle_EventsChannel(t *testing.T) {
@@ -325,7 +341,7 @@ func TestProcessLifecycle_EventsChannel(t *testing.T) {
 
 	// Send an event
 	go func() {
-		p.events <- client.OutputEvent{Type: client.EventSystem, SubType: "init"}
+		p.EventsWritable() <- client.OutputEvent{Type: client.EventSystem, SubType: "init"}
 	}()
 
 	select {
@@ -346,7 +362,7 @@ func TestProcessLifecycle_ErrorsChannel(t *testing.T) {
 
 	// Send an error
 	go func() {
-		p.errors <- errTest
+		p.ErrorsWritable() <- errTest
 	}()
 
 	select {
@@ -385,4 +401,53 @@ func TestProcess_ImplementsHeadlessProcess(t *testing.T) {
 func TestErrTimeout(t *testing.T) {
 	require.NotNil(t, ErrTimeout)
 	require.Contains(t, ErrTimeout.Error(), "timed out")
+}
+
+// =============================================================================
+// extractSession Tests
+// =============================================================================
+
+func TestExtractSession(t *testing.T) {
+	tests := []struct {
+		name     string
+		event    client.OutputEvent
+		rawLine  []byte
+		expected string
+	}{
+		{
+			name: "extracts session from init event",
+			event: client.OutputEvent{
+				Type:      client.EventSystem,
+				SubType:   "init",
+				SessionID: "thread-123",
+			},
+			rawLine:  []byte(`{"type":"thread.started","thread_id":"thread-123"}`),
+			expected: "thread-123",
+		},
+		{
+			name: "returns empty for non-init event",
+			event: client.OutputEvent{
+				Type:      client.EventAssistant,
+				SessionID: "thread-123",
+			},
+			rawLine:  []byte(`{"type":"item.completed"}`),
+			expected: "",
+		},
+		{
+			name: "returns empty for init event without session ID",
+			event: client.OutputEvent{
+				Type:    client.EventSystem,
+				SubType: "init",
+			},
+			rawLine:  []byte(`{"type":"thread.started"}`),
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractSession(tt.event, tt.rawLine)
+			require.Equal(t, tt.expected, result)
+		})
+	}
 }
