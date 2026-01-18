@@ -167,14 +167,6 @@ func setupMCPConfig(cfg Config) error {
 	return nil
 }
 
-// extractSession extracts the session ID from an init event.
-func extractSession(event client.OutputEvent, _ []byte) string {
-	if event.Type == client.EventSystem && event.SubType == "init" && event.SessionID != "" {
-		return event.SessionID
-	}
-	return ""
-}
-
 // Spawn creates and starts a new headless Gemini process.
 // Context is used for cancellation and timeout control.
 func Spawn(ctx context.Context, cfg Config) (*Process, error) {
@@ -235,6 +227,9 @@ func spawnProcess(ctx context.Context, cfg Config, _ bool) (*Process, error) {
 	// Create the Gemini process with embedded BaseProcess
 	p := &Process{}
 
+	// Create parser instance for event parsing and session extraction
+	parser := NewParser()
+
 	// Create BaseProcess with Gemini-specific hooks
 	bp := client.NewBaseProcess(
 		procCtx,
@@ -243,8 +238,8 @@ func spawnProcess(ctx context.Context, cfg Config, _ bool) (*Process, error) {
 		stdout,
 		stderr,
 		cfg.WorkDir,
-		client.WithParseEventFunc(ParseEvent),
-		client.WithSessionExtractor(extractSession),
+		client.WithEventParser(parser),
+		client.WithSessionExtractor(parser.ExtractSessionRef),
 		client.WithStderrCapture(true),
 		client.WithProviderName("gemini"),
 	)

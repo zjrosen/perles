@@ -2,7 +2,7 @@ package gemini
 
 import (
 	"encoding/json"
-	"log"
+	stdlog "log"
 
 	"github.com/zjrosen/perles/internal/orchestration/client"
 )
@@ -77,124 +77,6 @@ type geminiError struct {
 	Code string `json:"code,omitempty"`
 }
 
-// ParseEvent parses a JSON line from Gemini's stream-json output into a client.OutputEvent.
-// Returns the parsed event or an error if parsing fails.
-//
-// Event mappings:
-//   - init -> EventSystem (subtype: init) with SessionID extraction
-//   - message (role: assistant) -> EventAssistant with text content
-//   - message (role: user) -> ignored (returns empty event)
-//   - tool_use -> EventToolUse with tool name and parameters
-//   - tool_result -> EventToolResult with status and output
-//   - result -> EventResult with usage mapping
-//   - error -> EventError with message and code
-//
-// Unknown event types are logged as warnings but do not cause errors.
-// The event type is passed through as-is for forward compatibility.
-func ParseEvent(line []byte) (client.OutputEvent, error) {
-	var raw geminiEvent
-	if err := json.Unmarshal(line, &raw); err != nil {
-		return client.OutputEvent{}, err
-	}
-
-	event := client.OutputEvent{
-		Type: mapEventType(raw.Type, raw.Role),
-	}
-
-	// Copy raw data for debugging
-	event.Raw = make([]byte, len(line))
-	copy(event.Raw, line)
-
-	// Handle init -> EventSystem (init subtype)
-	if raw.Type == "init" {
-		event.SubType = "init"
-		event.SessionID = raw.SessionID
-		return event, nil
-	}
-
-	// Handle message events with role-based discrimination
-	if raw.Type == "message" {
-		if raw.Role == "assistant" {
-			event.Delta = raw.Delta // Pass through streaming chunk indicator
-			event.Message = &client.MessageContent{
-				Role:  raw.Role,
-				Model: raw.Model,
-				Content: []client.ContentBlock{
-					{
-						Type: "text",
-						Text: raw.Content,
-					},
-				},
-			}
-		}
-		// User messages (role: "user") are ignored - return event with empty message
-		return event, nil
-	}
-
-	// Handle tool_use -> EventToolUse
-	// Gemini format: {"tool_name": "...", "tool_id": "...", "parameters": {...}}
-	if raw.Type == "tool_use" && raw.ToolName != "" {
-		event.Tool = &client.ToolContent{
-			ID:    raw.ToolID,
-			Name:  raw.ToolName,
-			Input: raw.Parameters,
-		}
-		// Populate Message.Content for process handler compatibility
-		event.Message = &client.MessageContent{
-			Role: "assistant",
-			Content: []client.ContentBlock{
-				{
-					Type:  "tool_use",
-					ID:    raw.ToolID,
-					Name:  raw.ToolName,
-					Input: raw.Parameters,
-				},
-			},
-		}
-		return event, nil
-	}
-
-	// Handle tool_result -> EventToolResult
-	// Gemini format: {"tool_id": "...", "status": "...", "output": "..."}
-	if raw.Type == "tool_result" && raw.ToolID != "" {
-		event.Tool = &client.ToolContent{
-			ID:     raw.ToolID,
-			Output: raw.Output,
-		}
-		// Mark as error if status indicates failure
-		if raw.Status == "error" || raw.Status == "failed" {
-			event.IsErrorResult = true
-		}
-		return event, nil
-	}
-
-	// Handle result -> EventResult with usage
-	if raw.Type == "result" {
-		if raw.Stats != nil {
-			// TokensUsed = prompt + cached tokens
-			tokensUsed := raw.Stats.TokensPrompt + raw.Stats.TokensCached
-			event.Usage = &client.UsageInfo{
-				TokensUsed:   tokensUsed,
-				TotalTokens:  1000000, // Gemini has 1M token context window
-				OutputTokens: raw.Stats.TokensCandidates,
-			}
-			event.DurationMs = raw.Stats.DurationMs
-		}
-		return event, nil
-	}
-
-	// Handle error -> EventError
-	if raw.Type == "error" && raw.Error != nil {
-		event.Error = &client.ErrorInfo{
-			Message: raw.Error.Message,
-			Code:    raw.Error.Code,
-		}
-		return event, nil
-	}
-
-	return event, nil
-}
-
 // mapEventType maps Gemini event type and role strings to client.EventType.
 // Role is used to discriminate message events (assistant vs user).
 func mapEventType(geminiType, role string) client.EventType {
@@ -218,7 +100,7 @@ func mapEventType(geminiType, role string) client.EventType {
 		return client.EventError
 	default:
 		// Log warning for unknown event types
-		log.Printf("gemini: unknown event type: %q", geminiType)
+		stdlog.Printf("gemini: unknown event type: %q", geminiType)
 		// Pass through as-is for forward compatibility
 		return client.EventType(geminiType)
 	}

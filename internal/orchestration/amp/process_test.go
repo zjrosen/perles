@@ -407,10 +407,11 @@ func TestAmpErrTimeout(t *testing.T) {
 }
 
 // =============================================================================
-// extractSession Tests
+// Parser.ExtractSessionRef Tests (migrated from extractSession)
 // =============================================================================
 
-func TestExtractSession(t *testing.T) {
+func TestParser_ExtractSession(t *testing.T) {
+	p := NewParser()
 	tests := []struct {
 		name     string
 		event    client.OutputEvent
@@ -449,7 +450,7 @@ func TestExtractSession(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := extractSession(tt.event, tt.rawLine)
+			result := p.ExtractSessionRef(tt.event, tt.rawLine)
 			require.Equal(t, tt.expected, result)
 		})
 	}
@@ -717,7 +718,7 @@ func TestParseEvent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			event, err := parseEvent([]byte(tt.json))
+			event, err := NewParser().ParseEvent([]byte(tt.json))
 			require.NoError(t, err)
 			tt.validate(t, event)
 		})
@@ -725,7 +726,7 @@ func TestParseEvent(t *testing.T) {
 }
 
 func TestParseEvent_InvalidJSON(t *testing.T) {
-	_, err := parseEvent([]byte("not json"))
+	_, err := NewParser().ParseEvent([]byte("not json"))
 	require.Error(t, err)
 }
 
@@ -823,7 +824,7 @@ func TestToolExtraction(t *testing.T) {
 	// Test that tool_use content blocks are properly extracted
 	jsonStr := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_abc","name":"Read","input":{"path":"/file.txt"}}]}}`
 
-	event, err := parseEvent([]byte(jsonStr))
+	event, err := NewParser().ParseEvent([]byte(jsonStr))
 	require.NoError(t, err)
 	require.NotNil(t, event.Tool)
 	require.Equal(t, "toolu_abc", event.Tool.ID)
@@ -846,7 +847,7 @@ func TestMultipleToolUses(t *testing.T) {
 		{"type":"tool_use","id":"toolu_2","name":"Read","input":{"path":"b.go"}}
 	]}}`
 
-	event, err := parseEvent([]byte(jsonStr))
+	event, err := NewParser().ParseEvent([]byte(jsonStr))
 	require.NoError(t, err)
 	require.NotNil(t, event.Message)
 	require.True(t, event.Message.HasToolUses())
@@ -857,7 +858,8 @@ func TestMultipleToolUses(t *testing.T) {
 	require.Equal(t, "toolu_2", tools[1].ID)
 }
 
-func TestIsContextExceededMessage(t *testing.T) {
+func TestParser_IsContextExhausted_Patterns(t *testing.T) {
+	p := NewParser()
 	tests := []struct {
 		msg      string
 		expected bool
@@ -886,8 +888,14 @@ func TestIsContextExceededMessage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.msg, func(t *testing.T) {
-			result := isContextExceededMessage(tt.msg)
-			require.Equal(t, tt.expected, result, "isContextExceededMessage(%q)", tt.msg)
+			event := client.OutputEvent{
+				Type: client.EventError,
+				Error: &client.ErrorInfo{
+					Message: tt.msg,
+				},
+			}
+			result := p.IsContextExhausted(event)
+			require.Equal(t, tt.expected, result, "IsContextExhausted for message %q", tt.msg)
 		})
 	}
 }
@@ -896,7 +904,7 @@ func TestParseEvent_ErrorEventWithContextExceeded(t *testing.T) {
 	// Test error event type with context exceeded message
 	jsonStr := `{"type":"error","error":{"message":"Prompt is too long: 250000 tokens","code":"CONTEXT_EXCEEDED"}}`
 
-	event, err := parseEvent([]byte(jsonStr))
+	event, err := NewParser().ParseEvent([]byte(jsonStr))
 	require.NoError(t, err)
 	require.Equal(t, client.EventError, event.Type)
 	require.NotNil(t, event.Error)
@@ -909,7 +917,7 @@ func TestParseEvent_ErrorAsStringWithEmbeddedJSON(t *testing.T) {
 	// error is a string containing "413 {...json...}"
 	jsonStr := `{"type":"result","subtype":"error_during_execution","duration_ms":389584,"is_error":true,"num_turns":28,"error":"413 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Prompt is too long\"},\"request_id\":\"req_vrtx_011CXDs3LJPo57WcNsT9h9bs\"}","session_id":"T-019bce63-7de3-73a4-93a7-c1b84e61411e"}`
 
-	event, err := parseEvent([]byte(jsonStr))
+	event, err := NewParser().ParseEvent([]byte(jsonStr))
 	require.NoError(t, err)
 	require.Equal(t, client.EventResult, event.Type)
 	require.Equal(t, "error_during_execution", event.SubType)
@@ -921,7 +929,7 @@ func TestParseEvent_ErrorAsStringWithEmbeddedJSON(t *testing.T) {
 	require.True(t, event.Error.IsContextExceeded())
 }
 
-func TestParseErrorField(t *testing.T) {
+func TestParsePolymorphicError(t *testing.T) {
 	tests := []struct {
 		name        string
 		input       string
@@ -959,7 +967,7 @@ func TestParseErrorField(t *testing.T) {
 			if tt.input != "" {
 				raw = json.RawMessage(tt.input)
 			}
-			result := parseErrorField(raw)
+			result := client.ParsePolymorphicError(raw)
 
 			if tt.wantMessage == "" {
 				require.Nil(t, result)

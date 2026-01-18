@@ -1,0 +1,9 @@
+{"type":"system","subtype":"init","session_id":"T-abc123","cwd":"/project","tools":["Bash","Read"]}
+{"type":"assistant","message":{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"Hello from Amp!"}],"model":"claude-sonnet-4","usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":1000,"cache_creation_input_tokens":500}}}
+{"type":"assistant","message":{"id":"msg_2","content":[{"type":"tool_use","id":"toolu_123","name":"Bash","input":{"cmd":"ls -la"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_123","content":"success"}]}}
+{"type":"result","subtype":"success","duration_ms":5000,"is_error":false,"num_turns":3,"result":"Task completed","session_id":"T-abc123","total_cost_usd":0.0123}
+{"type":"error","error":{"message":"Something went wrong","code":"INTERNAL"}}
+{"type":"error","error":{"message":"Prompt is too long: 250000 tokens","code":"CONTEXT_EXCEEDED"}}
+{"type":"result","subtype":"error","is_error":true,"result":"Context window exceeded"}
+{"type":"result","subtype":"error_during_execution","duration_ms":389584,"is_error":true,"num_turns":28,"error":"413 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Prompt is too long\"},\"request_id\":\"req_vrtx_011CXDs3LJPo57WcNsT9h9bs\"}","session_id":"T-019bce63-7de3-73a4-93a7-c1b84e61411e"}

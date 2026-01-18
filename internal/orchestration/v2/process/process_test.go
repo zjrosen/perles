@@ -3,6 +3,7 @@ package process
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1634,6 +1635,66 @@ func TestHandleOutputEvent_DoesNotTriggerContextExceededForNonContextErrors(t *t
 
 	var contextErr *ContextExceededError
 	assert.False(t, errors.As(turnCmd.Error, &contextErr), "error should not be ContextExceededError")
+}
+
+// ===========================================================================
+// EventError Context Exhaustion Tests (OpenCode pattern)
+// ===========================================================================
+
+func TestHandleOutputEvent_DetectsContextExceededInEventError(t *testing.T) {
+	// Test that EventError type with context exhaustion triggers ContextExceededError.
+	// This is the OpenCode pattern where errors come as {"type":"error","error":{"name":"APIError",...}}
+	proc := newMockHeadlessProcess()
+	submitter := &mockCommandSubmitter{}
+	eventBus := pubsub.NewBroker[any]()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sub := eventBus.Subscribe(ctx)
+
+	p := New("worker-1", repository.RoleWorker, proc, submitter, eventBus)
+	p.Start()
+
+	// Send EventError with context exceeded (OpenCode format)
+	proc.events <- client.OutputEvent{
+		Type: client.EventError,
+		Error: &client.ErrorInfo{
+			Message: "prompt is too long: 200561 tokens > 200000 maximum",
+			Code:    "APIError",
+			Reason:  client.ErrReasonContextExceeded,
+		},
+	}
+
+	// Should receive ProcessError event
+	select {
+	case evt := <-sub:
+		pe, ok := evt.Payload.(events.ProcessEvent)
+		require.True(t, ok, "expected ProcessEvent")
+		assert.Equal(t, events.ProcessError, pe.Type)
+		assert.Contains(t, pe.Error.Error(), "context exceeded")
+	case <-time.After(500 * time.Millisecond):
+		require.FailNow(t, "did not receive error event")
+	}
+
+	// Output should show context exhausted message
+	time.Sleep(20 * time.Millisecond)
+	lines := p.Output().Lines()
+	require.GreaterOrEqual(t, len(lines), 1)
+	// Should contain both the error and the context exhausted indicator
+	output := strings.Join(lines, "\n")
+	assert.Contains(t, output, "⚠️ Context Exhausted")
+
+	proc.Complete()
+	<-p.eventDone
+
+	// The turn complete command should include the ContextExceededError
+	submitted := submitter.getSubmitted()
+	require.Len(t, submitted, 1)
+	turnCmd, ok := submitted[0].(*command.ProcessTurnCompleteCommand)
+	require.True(t, ok)
+	require.NotNil(t, turnCmd.Error)
+
+	var contextErr *ContextExceededError
+	assert.True(t, errors.As(turnCmd.Error, &contextErr), "error should be ContextExceededError")
 }
 
 // ===========================================================================

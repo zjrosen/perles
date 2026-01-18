@@ -952,34 +952,37 @@ func TestSetupMCPConfig_OverwritesSameServer(t *testing.T) {
 // Session Extraction Tests
 // =============================================================================
 
-func TestExtractSession_InitEvent(t *testing.T) {
+func TestParser_ExtractSessionRef_InitEvent(t *testing.T) {
+	parser := NewParser()
 	event := client.OutputEvent{
 		Type:      client.EventSystem,
 		SubType:   "init",
 		SessionID: "gemini-session-123",
 	}
 
-	sessionID := extractSession(event, nil)
+	sessionID := parser.ExtractSessionRef(event, nil)
 	require.Equal(t, "gemini-session-123", sessionID)
 }
 
-func TestExtractSession_NonInitEvent(t *testing.T) {
+func TestParser_ExtractSessionRef_NonInitEvent(t *testing.T) {
+	parser := NewParser()
 	event := client.OutputEvent{
 		Type:      client.EventAssistant,
 		SessionID: "gemini-session-123",
 	}
 
-	sessionID := extractSession(event, nil)
+	sessionID := parser.ExtractSessionRef(event, nil)
 	require.Equal(t, "", sessionID) // Only init events should return session ID
 }
 
-func TestExtractSession_EmptySessionID(t *testing.T) {
+func TestParser_ExtractSessionRef_EmptySessionID(t *testing.T) {
+	parser := NewParser()
 	event := client.OutputEvent{
 		Type:      client.EventSystem,
 		SubType:   "init",
 		SessionID: "",
 	}
 
-	sessionID := extractSession(event, nil)
+	sessionID := parser.ExtractSessionRef(event, nil)
 	require.Equal(t, "", sessionID)
 }

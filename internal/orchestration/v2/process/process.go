@@ -252,10 +252,18 @@ func (p *Process) handleOutputEvent(event *client.OutputEvent) {
 		return
 	}
 
-	// Handle error events (e.g., turn.failed, error from Codex)
+	// Handle error events (e.g., turn.failed, error from Codex, context exceeded from OpenCode)
 	if event.Type == client.EventError {
 		errMsg := event.GetErrorMessage()
 		p.output.Append("⚠️ Error: " + errMsg)
+
+		// Check if this is a context exceeded error
+		if event.Error != nil && event.Error.IsContextExceeded() {
+			p.output.Append("⚠️ Context Exhausted")
+			p.handleInFlightError(&ContextExceededError{})
+			return
+		}
+
 		p.handleInFlightError(fmt.Errorf("process error: %s", errMsg))
 		return
 	}

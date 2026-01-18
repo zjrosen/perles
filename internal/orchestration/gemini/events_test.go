@@ -21,7 +21,7 @@ func TestParseEvent_Init(t *testing.T) {
 	// Test: init -> EventSystem with SessionID extraction
 	data := readTestData(t, "init.json")
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventSystem, event.Type)
@@ -36,7 +36,7 @@ func TestParseEvent_MessageAssistant(t *testing.T) {
 	// Test: message (role: assistant) -> EventAssistant with text content
 	data := readTestData(t, "message.json")
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventAssistant, event.Type)
@@ -53,7 +53,7 @@ func TestParseEvent_MessageUser(t *testing.T) {
 	// Test: message (role: user) -> EventToolResult (user messages are mapped differently)
 	data := []byte(`{"type":"message","role":"user","content":"User input here"}`)
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	// User messages are mapped to EventToolResult and don't populate Message
@@ -65,7 +65,7 @@ func TestParseEvent_MessageAssistantWithDelta(t *testing.T) {
 	// Test: message with delta:true indicates streaming chunk
 	data := []byte(`{"type":"message","role":"assistant","content":"Hello","delta":true}`)
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventAssistant, event.Type)
@@ -78,7 +78,7 @@ func TestParseEvent_MessageAssistantWithoutDelta(t *testing.T) {
 	// Test: message without delta field (or delta:false) is a complete message
 	data := []byte(`{"type":"message","role":"assistant","content":"Complete message","delta":false}`)
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventAssistant, event.Type)
@@ -91,7 +91,7 @@ func TestParseEvent_MessageAssistantDeltaOmitted(t *testing.T) {
 	// Test: message without delta field defaults to false
 	data := readTestData(t, "message.json") // Uses existing fixture without delta field
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventAssistant, event.Type)
@@ -102,7 +102,7 @@ func TestParseEvent_ToolUse(t *testing.T) {
 	// Test: tool_use -> EventToolUse with tool name and parameters
 	data := readTestData(t, "tool_use.json")
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventToolUse, event.Type)
@@ -125,7 +125,7 @@ func TestParseEvent_ToolUse_TopLevelFormat(t *testing.T) {
 	// This format has tool_name, tool_id, and parameters at top level
 	data := []byte(`{"type":"tool_use","timestamp":"2026-01-15T02:43:46.538Z","tool_name":"run_shell_command","tool_id":"run_shell_command-1768445026538-e87fd6c2461a7","parameters":{"description":"Show issues","command":"bd ready -n 5"}}`)
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventToolUse, event.Type)
@@ -147,7 +147,7 @@ func TestParseEvent_ToolResult_TopLevelFormat(t *testing.T) {
 	// Test: tool_result with top-level format (current Gemini format)
 	data := []byte(`{"type":"tool_result","timestamp":"2026-01-15T02:43:51.808Z","tool_id":"run_shell_command-1768445026538-e87fd6c2461a7","status":"success","output":"No open issues"}`)
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventToolResult, event.Type)
@@ -162,7 +162,7 @@ func TestParseEvent_ToolResult(t *testing.T) {
 	// Test: tool_result -> EventToolResult with status and output
 	data := readTestData(t, "tool_result.json")
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventToolResult, event.Type)
@@ -179,7 +179,7 @@ func TestParseEvent_ToolResultError(t *testing.T) {
 	// Test: tool_result with error status
 	data := []byte(`{"type":"tool_result","tool_id":"tool_2","status":"error","output":"command not found"}`)
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventToolResult, event.Type)
@@ -192,7 +192,7 @@ func TestParseEvent_ToolResultFailed(t *testing.T) {
 	// Test: tool_result with failed status
 	data := []byte(`{"type":"tool_result","tool_id":"tool_3","status":"failed","output":"permission denied"}`)
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventToolResult, event.Type)
@@ -203,7 +203,7 @@ func TestParseEvent_Result(t *testing.T) {
 	// Test: result -> EventResult with usage metrics
 	data := readTestData(t, "result.json")
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventResult, event.Type)
@@ -222,7 +222,7 @@ func TestParseEvent_Error(t *testing.T) {
 	// Test: error -> EventError with message and code
 	data := readTestData(t, "error.json")
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventError, event.Type)
@@ -236,7 +236,7 @@ func TestParseEvent_ErrorWithoutCode(t *testing.T) {
 	// Test: error without code field
 	data := []byte(`{"type":"error","error":{"message":"Connection timeout"}}`)
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventError, event.Type)
@@ -249,7 +249,7 @@ func TestParseEvent_UnknownEventType(t *testing.T) {
 	// Test: Unknown event type is passed through
 	data := []byte(`{"type":"custom.event.type","some_field":"value"}`)
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	// Unknown types should be passed through as-is
@@ -270,7 +270,7 @@ func TestParseEvent_MalformedJSON(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := ParseEvent([]byte(tc.data))
+			_, err := NewParser().ParseEvent([]byte(tc.data))
 			require.Error(t, err)
 		})
 	}
@@ -278,11 +278,11 @@ func TestParseEvent_MalformedJSON(t *testing.T) {
 
 func TestParseEvent_EmptyLine(t *testing.T) {
 	// Test: Empty line handling (returns error for invalid JSON)
-	_, err := ParseEvent([]byte(""))
+	_, err := NewParser().ParseEvent([]byte(""))
 	require.Error(t, err)
 
 	// Whitespace only also fails
-	_, err = ParseEvent([]byte("   "))
+	_, err = NewParser().ParseEvent([]byte("   "))
 	require.Error(t, err)
 }
 
@@ -290,7 +290,7 @@ func TestParseEvent_RawDataPreserved(t *testing.T) {
 	// Test: Raw data is preserved for debugging
 	data := readTestData(t, "init.json")
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.NotNil(t, event.Raw)
@@ -302,7 +302,7 @@ func TestParseEvent_ResultWithoutStats(t *testing.T) {
 	// Test: result event without stats field
 	data := []byte(`{"type":"result"}`)
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventResult, event.Type)
@@ -314,7 +314,7 @@ func TestParseEvent_ToolUseWithoutTool(t *testing.T) {
 	// Test: tool_use event without tool field (edge case)
 	data := []byte(`{"type":"tool_use"}`)
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventToolUse, event.Type)
@@ -396,7 +396,7 @@ func TestGetContextTokens(t *testing.T) {
 	// Test: GetContextTokens() returns TokensUsed
 	data := readTestData(t, "result.json")
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	// TokensUsed = tokens_prompt + tokens_cached = 5000 + 2000 = 7000

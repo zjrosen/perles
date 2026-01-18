@@ -548,8 +548,10 @@ func TestErrNotFound(t *testing.T) {
 // OpenCode-Specific BaseProcess Integration Tests
 // =============================================================================
 
-func TestExtractSession_FromAnyEvent(t *testing.T) {
+func TestParser_ExtractSessionRef_FromAnyEvent(t *testing.T) {
 	// CRITICAL: OpenCode extracts session ID from ANY event (not just init events)
+	parser := NewParser()
+
 	tests := []struct {
 		name     string
 		event    client.OutputEvent
@@ -590,38 +592,36 @@ func TestExtractSession_FromAnyEvent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := extractSession(tt.event, tt.rawLine)
+			result := parser.ExtractSessionRef(tt.event, tt.rawLine)
 			require.Equal(t, tt.expected, result)
 		})
 	}
 }
 
-func TestExtractSession_CalledForEveryEvent(t *testing.T) {
-	// Verify the extractSession function is called for every event (not just init)
-	// by creating a BaseProcess and verifying the hook is registered
+func TestParser_EventParserRegisteredWithBaseProcess(t *testing.T) {
+	// Verify that OpenCode uses WithEventParser which registers the parser
+	// including the session extractor
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	parser := NewParser()
 	bp := client.NewBaseProcess(
 		ctx,
 		cancel,
 		nil, nil, nil,
 		"/test",
 		client.WithProviderName("opencode"),
-		client.WithSessionExtractor(extractSession),
+		client.WithEventParser(parser),
 	)
 
-	// Verify the extractor is set
+	// Verify the extractor is set (WithEventParser registers ExtractSessionRef)
 	require.NotNil(t, bp.ExtractSessionFn())
 }
 
 func TestProcess_SessionExtraction_FromNonInitEvent(t *testing.T) {
 	// This test verifies that session ID can be extracted from later events
 	// (not just init), which is unique to OpenCode
-	p := newTestProcess()
-
-	// Initially empty session
-	p.SetSessionRef("") // Clear any default
+	parser := NewParser()
 
 	// Simulate receiving a text event with sessionID (not init)
 	event := client.OutputEvent{
@@ -630,7 +630,7 @@ func TestProcess_SessionExtraction_FromNonInitEvent(t *testing.T) {
 	}
 
 	// Extract session - this should work because OpenCode extracts from any event
-	sessionRef := extractSession(event, []byte(`{"type":"text","sessionID":"ses_from_text_event"}`))
+	sessionRef := parser.ExtractSessionRef(event, []byte(`{"type":"text","sessionID":"ses_from_text_event"}`))
 	require.Equal(t, "ses_from_text_event", sessionRef)
 }
 

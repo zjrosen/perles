@@ -11,7 +11,7 @@ import (
 func TestParseEvent_StepStart(t *testing.T) {
 	jsonLine := `{"type":"step_start","timestamp":1768539296394,"sessionID":"ses_43ad8482affef0ocxqD4UJi3Ym","part":{"id":"prt_bc528128a001i5fTcV5LsEJJt0","sessionID":"ses_43ad8482affef0ocxqD4UJi3Ym","messageID":"msg_bc527b89a0011pTYxdlkzIIRSC","type":"step-start","snapshot":"b2a39d9a8ce035534a3b6832dee918391341c6fa"}}`
 
-	event, err := parseEvent([]byte(jsonLine))
+	event, err := NewParser().ParseEvent([]byte(jsonLine))
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventType("step_start"), event.Type)
@@ -24,7 +24,7 @@ func TestParseEvent_StepStart(t *testing.T) {
 func TestParseEvent_TextEvent(t *testing.T) {
 	jsonLine := `{"type":"text","timestamp":1768539298870,"sessionID":"ses_43ad8482affef0ocxqD4UJi3Ym","part":{"id":"prt_bc5281899001mErid8gs789wna","sessionID":"ses_43ad8482affef0ocxqD4UJi3Ym","messageID":"msg_bc527b89a0011pTYxdlkzIIRSC","type":"text","text":"I'll gather some context about your project before we start.","time":{"start":1768539298870,"end":1768539298870}}}`
 
-	event, err := parseEvent([]byte(jsonLine))
+	event, err := NewParser().ParseEvent([]byte(jsonLine))
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventAssistant, event.Type)
@@ -38,7 +38,7 @@ func TestParseEvent_TextEvent(t *testing.T) {
 func TestParseEvent_ToolUseEvent(t *testing.T) {
 	jsonLine := `{"type":"tool_use","timestamp":1768539298840,"sessionID":"ses_43ad8482affef0ocxqD4UJi3Ym","part":{"id":"prt_bc5281aff001MDkJAHVrM49Lf1","sessionID":"ses_43ad8482affef0ocxqD4UJi3Ym","messageID":"msg_bc527b89a0011pTYxdlkzIIRSC","type":"tool","callID":"call_ca7a77bbc3784e959917e32c","tool":"bash","state":{"status":"completed","input":{"command":"bd ready -n 5","description":"Show top 5 ready issues"},"output":"\n✨ No ready work found\n\n","title":"Show top 5 ready issues","metadata":{"output":"\n✨ No ready work found\n\n","exit":0,"description":"Show top 5 ready issues","truncated":false},"time":{"start":1768539298570,"end":1768539298840}}}}`
 
-	event, err := parseEvent([]byte(jsonLine))
+	event, err := NewParser().ParseEvent([]byte(jsonLine))
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventToolUse, event.Type)
@@ -66,7 +66,7 @@ func TestParseEvent_ToolUseEvent(t *testing.T) {
 func TestParseEvent_StepFinishWithTokens(t *testing.T) {
 	jsonLine := `{"type":"step_finish","timestamp":1768539299091,"sessionID":"ses_43ad8482affef0ocxqD4UJi3Ym","part":{"id":"prt_bc5281cdf001DJPSpp3k4sgvS0","sessionID":"ses_43ad8482affef0ocxqD4UJi3Ym","messageID":"msg_bc527b89a0011pTYxdlkzIIRSC","type":"step-finish","reason":"tool-calls","snapshot":"b2a39d9a8ce035534a3b6832dee918391341c6fa","cost":0,"tokens":{"input":20923,"output":154,"reasoning":92,"cache":{"read":467,"write":0}}}}`
 
-	event, err := parseEvent([]byte(jsonLine))
+	event, err := NewParser().ParseEvent([]byte(jsonLine))
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventType("step_finish"), event.Type)
@@ -83,7 +83,7 @@ func TestParseEvent_StepFinishWithTokens(t *testing.T) {
 func TestParseEvent_StepFinishStopReason(t *testing.T) {
 	jsonLine := `{"type":"step_finish","timestamp":1768539307264,"sessionID":"ses_abc","part":{"type":"step-finish","reason":"stop","cost":0,"tokens":{"input":21363,"output":216,"reasoning":96,"cache":{"read":468,"write":0}}}}`
 
-	event, err := parseEvent([]byte(jsonLine))
+	event, err := NewParser().ParseEvent([]byte(jsonLine))
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventType("step_finish"), event.Type)
@@ -94,12 +94,12 @@ func TestParseEvent_StepFinishStopReason(t *testing.T) {
 func TestParseEvent_MalformedJSON(t *testing.T) {
 	invalidJSON := `{"type":"text",invalid}`
 
-	_, err := parseEvent([]byte(invalidJSON))
+	_, err := NewParser().ParseEvent([]byte(invalidJSON))
 	require.Error(t, err)
 }
 
 func TestParseEvent_EmptyLine(t *testing.T) {
-	_, err := parseEvent([]byte(""))
+	_, err := NewParser().ParseEvent([]byte(""))
 	require.Error(t, err)
 }
 
@@ -107,7 +107,7 @@ func TestParseEvent_MinimalEvent(t *testing.T) {
 	// Event with just type
 	jsonLine := `{"type":"step_start"}`
 
-	event, err := parseEvent([]byte(jsonLine))
+	event, err := NewParser().ParseEvent([]byte(jsonLine))
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventType("step_start"), event.Type)
@@ -118,7 +118,7 @@ func TestParseEvent_MinimalEvent(t *testing.T) {
 func TestParseEvent_PreservesRawData(t *testing.T) {
 	jsonLine := `{"type":"text","sessionID":"ses_123","part":{"type":"text","text":"test"}}`
 
-	event, err := parseEvent([]byte(jsonLine))
+	event, err := NewParser().ParseEvent([]byte(jsonLine))
 	require.NoError(t, err)
 
 	// Raw should be a copy, not the same slice
@@ -164,7 +164,7 @@ func TestMapEventType_UnknownTypesPassThrough(t *testing.T) {
 func TestParseEvent_TextEventExtractsContent(t *testing.T) {
 	jsonLine := `{"type":"text","sessionID":"ses_test","part":{"id":"prt_123","type":"text","text":"Hello, world!"}}`
 
-	event, err := parseEvent([]byte(jsonLine))
+	event, err := NewParser().ParseEvent([]byte(jsonLine))
 	require.NoError(t, err)
 
 	require.True(t, event.IsAssistant())
@@ -176,7 +176,7 @@ func TestParseEvent_TextEventExtractsContent(t *testing.T) {
 func TestParseEvent_ToolUseWithReadTool(t *testing.T) {
 	jsonLine := `{"type":"tool_use","sessionID":"ses_test","part":{"callID":"call_123","tool":"Read","state":{"status":"completed","input":{"file_path":"/project/main.go"},"output":"package main\n\nfunc main() {}"}}}`
 
-	event, err := parseEvent([]byte(jsonLine))
+	event, err := NewParser().ParseEvent([]byte(jsonLine))
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventToolUse, event.Type)
@@ -200,7 +200,7 @@ func TestParseEvent_ToolUseWithoutState(t *testing.T) {
 	// Tool use event before execution (no state yet)
 	jsonLine := `{"type":"tool_use","sessionID":"ses_test","part":{"callID":"call_456","tool":"Bash"}}`
 
-	event, err := parseEvent([]byte(jsonLine))
+	event, err := NewParser().ParseEvent([]byte(jsonLine))
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventToolUse, event.Type)
@@ -212,7 +212,7 @@ func TestParseEvent_ToolUseWithoutState(t *testing.T) {
 func TestParseEvent_StepFinishWithoutTokens(t *testing.T) {
 	jsonLine := `{"type":"step_finish","sessionID":"ses_test","part":{"type":"step-finish","reason":"stop"}}`
 
-	event, err := parseEvent([]byte(jsonLine))
+	event, err := NewParser().ParseEvent([]byte(jsonLine))
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventType("step_finish"), event.Type)
@@ -223,7 +223,7 @@ func TestParseEvent_StepFinishWithoutTokens(t *testing.T) {
 func TestParseEvent_StepFinishWithNilCache(t *testing.T) {
 	jsonLine := `{"type":"step_finish","sessionID":"ses_test","part":{"type":"step-finish","reason":"stop","tokens":{"input":1000,"output":100}}}`
 
-	event, err := parseEvent([]byte(jsonLine))
+	event, err := NewParser().ParseEvent([]byte(jsonLine))
 	require.NoError(t, err)
 
 	require.NotNil(t, event.Usage)
@@ -238,7 +238,7 @@ func TestGolden_ActualTextEvent(t *testing.T) {
 	// Exact JSON from actual opencode run
 	jsonLine := `{"type":"text","timestamp":1768539307196,"sessionID":"ses_43ad8482affef0ocxqD4UJi3Ym","part":{"id":"prt_bc5283112001cVq9ECSKmsy7GQ","sessionID":"ses_43ad8482affef0ocxqD4UJi3Ym","messageID":"msg_bc5281d3a001vFhgU23qpX5hvZ","type":"text","text":"Hi! I'm ready to help with your Perles project.\n\n**Current Status:**\n- No ready work available","time":{"start":1768539307195,"end":1768539307195}}}`
 
-	event, err := parseEvent([]byte(jsonLine))
+	event, err := NewParser().ParseEvent([]byte(jsonLine))
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventAssistant, event.Type)
@@ -252,7 +252,7 @@ func TestGolden_ActualToolUseEvent(t *testing.T) {
 	// Exact JSON from actual opencode run (shortened output for test)
 	jsonLine := `{"type":"tool_use","timestamp":1768539299039,"sessionID":"ses_43ad8482affef0ocxqD4UJi3Ym","part":{"id":"prt_bc5281c12001aVZtMO7Vwb5i4U","sessionID":"ses_43ad8482affef0ocxqD4UJi3Ym","messageID":"msg_bc527b89a0011pTYxdlkzIIRSC","type":"tool","callID":"call_8f7d72b588794fea8be69bd1","tool":"bash","state":{"status":"completed","input":{"command":"bd activity --limit 10","description":"Show recent project activity"},"output":"[23:21:04] Activity output here\n","title":"Show recent project activity","time":{"start":1768539298837,"end":1768539299038}}}}`
 
-	event, err := parseEvent([]byte(jsonLine))
+	event, err := NewParser().ParseEvent([]byte(jsonLine))
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventToolUse, event.Type)
@@ -274,7 +274,7 @@ func TestGolden_ActualStepFinishEvent(t *testing.T) {
 	// Exact JSON from actual opencode run
 	jsonLine := `{"type":"step_finish","timestamp":1768539307264,"sessionID":"ses_43ad8482affef0ocxqD4UJi3Ym","part":{"id":"prt_bc5283cbc0019uZE74M8MOnGKR","sessionID":"ses_43ad8482affef0ocxqD4UJi3Ym","messageID":"msg_bc5281d3a001vFhgU23qpX5hvZ","type":"step-finish","reason":"stop","snapshot":"b2a39d9a8ce035534a3b6832dee918391341c6fa","cost":0,"tokens":{"input":21363,"output":216,"reasoning":96,"cache":{"read":468,"write":0}}}}`
 
-	event, err := parseEvent([]byte(jsonLine))
+	event, err := NewParser().ParseEvent([]byte(jsonLine))
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventType("step_finish"), event.Type)
@@ -324,7 +324,7 @@ func TestEventTypeCompatibility(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			event, err := parseEvent([]byte(tt.jsonLine))
+			event, err := NewParser().ParseEvent([]byte(tt.jsonLine))
 			require.NoError(t, err)
 			tt.check(t, event)
 		})

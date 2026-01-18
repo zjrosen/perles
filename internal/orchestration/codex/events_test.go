@@ -21,7 +21,7 @@ func TestParseEvent_ThreadStarted(t *testing.T) {
 	// Test: thread.started -> EventSystem with SessionID extraction
 	data := readTestData(t, "thread_started.json")
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventSystem, event.Type)
@@ -36,7 +36,7 @@ func TestParseEvent_ItemCompletedAgentMessage(t *testing.T) {
 	// Test: item.completed (agent_message) -> EventAssistant with text
 	data := readTestData(t, "item_completed_agent_message.json")
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventAssistant, event.Type)
@@ -54,7 +54,7 @@ func TestParseEvent_ItemStartedCommand(t *testing.T) {
 	// Test: item.started (command_execution) -> EventToolUse with command
 	data := readTestData(t, "item_started_command.json")
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventToolUse, event.Type)
@@ -69,7 +69,7 @@ func TestParseEvent_ItemCompletedCommand(t *testing.T) {
 	// Test: item.completed (command_execution) -> EventToolResult with output
 	data := readTestData(t, "item_completed_command.json")
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventToolResult, event.Type)
@@ -87,7 +87,7 @@ func TestParseEvent_ItemCompletedCommandError(t *testing.T) {
 	// Test: item.completed (command_execution) with non-zero exit code
 	data := readTestData(t, "item_completed_command_error.json")
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventToolResult, event.Type)
@@ -102,7 +102,7 @@ func TestParseEvent_TurnCompleted(t *testing.T) {
 	// Test: turn.completed -> EventResult with usage (including cache token mapping)
 	data := readTestData(t, "turn_completed.json")
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventResult, event.Type)
@@ -119,7 +119,7 @@ func TestParseEvent_TurnFailed(t *testing.T) {
 	// Test: turn.failed -> EventError (string format)
 	data := readTestData(t, "turn_failed.json")
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventError, event.Type)
@@ -133,7 +133,7 @@ func TestParseEvent_TurnFailedObjectError(t *testing.T) {
 	// This is the format Codex uses for usage limit errors
 	data := []byte(`{"type":"turn.failed","error":{"message":"You've hit your usage limit. Try again at 6:55 PM."}}`)
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventError, event.Type)
@@ -147,7 +147,7 @@ func TestParseEvent_ErrorEventTopLevelMessage(t *testing.T) {
 	// Format: {"type":"error","message":"..."}
 	data := []byte(`{"type":"error","message":"You've hit your usage limit. Try again at 6:55 PM."}`)
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventError, event.Type)
@@ -171,7 +171,7 @@ func TestParseEvent_MalformedJSON(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Should not panic
-			_, err := ParseEvent([]byte(tc.data))
+			_, err := NewParser().ParseEvent([]byte(tc.data))
 			require.Error(t, err)
 		})
 	}
@@ -181,7 +181,7 @@ func TestParseEvent_UnknownEventType(t *testing.T) {
 	// Test: Unknown event type handling
 	data := []byte(`{"type":"unknown.event.type","some_field":"value"}`)
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	// Unknown types should be passed through as-is
@@ -192,7 +192,7 @@ func TestGetContextTokens(t *testing.T) {
 	// Test: GetContextTokens() returns TokensUsed
 	data := readTestData(t, "turn_completed.json")
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	// GetContextTokens() now returns TokensUsed directly
@@ -206,7 +206,7 @@ func TestParseEvent_RawDataPreserved(t *testing.T) {
 	// and that Raw can be set externally (as BaseProcess does).
 	data := readTestData(t, "thread_started.json")
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	// ParseEvent doesn't set Raw (BaseProcess does that after calling ParseEvent)
@@ -227,7 +227,7 @@ func TestParseEvent_TurnStarted(t *testing.T) {
 	// Test: turn.started is handled (maps to system event)
 	data := []byte(`{"type":"turn.started"}`)
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventSystem, event.Type)
@@ -237,7 +237,7 @@ func TestParseEvent_ErrorEvent(t *testing.T) {
 	// Test: error event -> EventError
 	data := []byte(`{"type":"error","error":"Connection timeout"}`)
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventError, event.Type)
@@ -251,7 +251,7 @@ func TestParseEvent_ItemStartedMCPToolCall(t *testing.T) {
 	// Uses real Codex format: "tool" instead of "tool_name", "arguments" instead of "tool_input"
 	data := []byte(`{"type":"item.started","item":{"id":"mcp_1","type":"mcp_tool_call","server":"perles-worker","tool":"read_file","arguments":{"path":"/tmp/test.txt"},"status":"in_progress"}}`)
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventToolUse, event.Type)
@@ -267,7 +267,7 @@ func TestParseEvent_ItemCompletedMCPToolCall(t *testing.T) {
 	// Uses real Codex format: "tool" and "result" with content array
 	data := []byte(`{"type":"item.completed","item":{"id":"mcp_1","type":"mcp_tool_call","server":"perles-worker","tool":"read_file","result":{"content":[{"type":"text","text":"File contents here"}]}}}`)
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventToolResult, event.Type)
@@ -282,7 +282,7 @@ func TestParseEvent_ReasoningEventIgnored(t *testing.T) {
 	// Test: reasoning events are handled but not exposed as user-facing content
 	data := []byte(`{"type":"item.completed","item":{"id":"reason_1","type":"reasoning","text":"Internal thinking process..."}}`)
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	// Event should parse successfully
@@ -295,7 +295,7 @@ func TestParseEvent_ItemUpdated(t *testing.T) {
 	// Test: item.updated for agent_message
 	data := []byte(`{"type":"item.updated","item":{"id":"item_5","type":"agent_message","text":"Partial response..."}}`)
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventAssistant, event.Type)
@@ -396,7 +396,7 @@ func TestParseEvent_NilUsage(t *testing.T) {
 	// Test: turn.completed without usage field
 	data := []byte(`{"type":"turn.completed"}`)
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.Equal(t, client.EventResult, event.Type)
@@ -408,7 +408,7 @@ func TestParseEvent_ZeroExitCode(t *testing.T) {
 	// Test: command with explicit exit_code: 0 should not be marked as error
 	data := []byte(`{"type":"item.completed","item":{"id":"cmd_1","type":"command_execution","aggregated_output":"success","exit_code":0}}`)
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.False(t, event.IsErrorResult)
@@ -418,7 +418,7 @@ func TestParseEvent_NilExitCode(t *testing.T) {
 	// Test: command without exit_code field
 	data := []byte(`{"type":"item.completed","item":{"id":"cmd_1","type":"command_execution","aggregated_output":"output"}}`)
 
-	event, err := ParseEvent(data)
+	event, err := NewParser().ParseEvent(data)
 	require.NoError(t, err)
 
 	require.False(t, event.IsErrorResult)

@@ -19,6 +19,8 @@ type opencodeEvent struct {
 	Timestamp int64         `json:"timestamp,omitempty"`
 	SessionID string        `json:"sessionID,omitempty"` //nolint:tagliatelle // matches actual OpenCode API
 	Part      *opencodePart `json:"part,omitempty"`
+	Error     *opcodeError  `json:"error,omitempty"`
+	Message   string        `json:"message,omitempty"` // Top-level message for some error formats
 }
 
 // opencodePart represents the "part" object in OpenCode events.
@@ -84,90 +86,23 @@ type opcodeTime struct {
 	End   int64 `json:"end,omitempty"`
 }
 
-// parseEvent parses a JSON line from OpenCode's --format json output into a client.OutputEvent.
-func parseEvent(line []byte) (client.OutputEvent, error) {
-	var raw opencodeEvent
-	if err := json.Unmarshal(line, &raw); err != nil {
-		return client.OutputEvent{}, err
-	}
+// opcodeError represents error information in OpenCode events.
+// OpenCode returns nested API errors with structure: {"name":"APIError","data":{"message":"...",...}}
+type opcodeError struct {
+	// Top-level error fields (for simpler error formats)
+	Message string `json:"message,omitempty"`
+	Code    string `json:"code,omitempty"`
 
-	event := client.OutputEvent{
-		Type:      mapEventType(raw.Type),
-		SessionID: raw.SessionID,
-	}
+	// Nested error structure (for API errors like context exceeded)
+	Name string           `json:"name,omitempty"` // e.g., "APIError"
+	Data *opcodeErrorData `json:"data,omitempty"`
+}
 
-	// Copy raw data for debugging
-	event.Raw = make([]byte, len(line))
-	copy(event.Raw, line)
-
-	// Process part-based content
-	if raw.Part != nil {
-		// Handle text events
-		if raw.Type == "text" && raw.Part.Text != "" {
-			event.Message = &client.MessageContent{
-				ID:   raw.Part.ID,
-				Role: "assistant",
-				Content: []client.ContentBlock{
-					{Type: "text", Text: raw.Part.Text},
-				},
-			}
-		}
-
-		// Handle tool_use events
-		if raw.Type == "tool_use" && raw.Part.Tool != "" {
-			// Create tool content
-			event.Tool = &client.ToolContent{
-				ID:   raw.Part.CallID,
-				Name: raw.Part.Tool,
-			}
-			if raw.Part.State != nil {
-				event.Tool.Input = raw.Part.State.Input
-
-				// Create a message with tool_use content block for consistency
-				event.Message = &client.MessageContent{
-					ID:   raw.Part.ID,
-					Role: "assistant",
-					Content: []client.ContentBlock{
-						{
-							Type:  "tool_use",
-							ID:    raw.Part.CallID,
-							Name:  raw.Part.Tool,
-							Input: raw.Part.State.Input,
-						},
-					},
-				}
-
-				// If tool has output, it's a completed tool result
-				if raw.Part.State.Output != "" {
-					event.Result = raw.Part.State.Output
-				}
-			}
-		}
-
-		// Handle step_finish events
-		if raw.Type == "step_finish" {
-			// Set subtype based on reason
-			if raw.Part.Reason != "" {
-				event.SubType = raw.Part.Reason
-			}
-
-			// Extract token usage if available
-			if raw.Part.Tokens != nil {
-				tokens := raw.Part.Tokens
-				cacheRead := 0
-				if tokens.Cache != nil {
-					cacheRead = tokens.Cache.Read
-				}
-				event.Usage = &client.UsageInfo{
-					TokensUsed:   tokens.Input + cacheRead,
-					TotalTokens:  200000, // Claude context window
-					OutputTokens: tokens.Output,
-				}
-			}
-		}
-	}
-
-	return event, nil
+// opcodeErrorData represents nested error data in API errors.
+type opcodeErrorData struct {
+	Message     string `json:"message,omitempty"`     // e.g., "prompt is too long: 200561 tokens > 200000 maximum"
+	StatusCode  int    `json:"statusCode,omitempty"`  //nolint:tagliatelle // matches actual OpenCode API
+	IsRetryable bool   `json:"isRetryable,omitempty"` //nolint:tagliatelle // matches actual OpenCode API
 }
 
 // mapEventType maps OpenCode event type strings to client.EventType.

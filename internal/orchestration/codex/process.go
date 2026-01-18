@@ -70,6 +70,7 @@ func spawnProcess(ctx context.Context, cfg Config, isResume bool) (*Process, err
 	}
 
 	// Create BaseProcess with Codex-specific hooks
+	parser := NewParser()
 	bp := client.NewBaseProcess(
 		procCtx,
 		cancel,
@@ -77,7 +78,7 @@ func spawnProcess(ctx context.Context, cfg Config, isResume bool) (*Process, err
 		stdout,
 		stderr,
 		cfg.WorkDir,
-		client.WithParseEventFunc(ParseEvent),
+		client.WithEventParser(parser),
 		client.WithSessionExtractor(extractSession),
 		client.WithStderrCapture(false), // Codex logs only, doesn't capture
 		client.WithProviderName("codex"),

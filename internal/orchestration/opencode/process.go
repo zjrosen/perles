@@ -59,17 +59,6 @@ func findExecutable() (string, error) {
 	return "", ErrNotFound
 }
 
-// extractSession extracts the session ID from any OpenCode event.
-// CRITICAL: OpenCode doesn't emit a system/init event, so we capture from ANY event with sessionID.
-// This is called for EVERY event by BaseProcess.
-func extractSession(event client.OutputEvent, _ []byte) string {
-	// OpenCode includes sessionID in most events
-	if event.SessionID != "" {
-		return event.SessionID
-	}
-	return ""
-}
-
 // Spawn creates and starts a new headless OpenCode process.
 // Context is used for cancellation and timeout control.
 func Spawn(ctx context.Context, cfg Config) (*Process, error) {
@@ -125,6 +114,7 @@ func spawnProcess(ctx context.Context, cfg Config, isResume bool) (*Process, err
 	}
 
 	// Create BaseProcess with OpenCode-specific hooks
+	parser := NewParser()
 	bp := client.NewBaseProcess(
 		procCtx,
 		cancel,
@@ -132,8 +122,7 @@ func spawnProcess(ctx context.Context, cfg Config, isResume bool) (*Process, err
 		stdout,
 		stderr,
 		cfg.WorkDir,
-		client.WithParseEventFunc(parseEvent),
-		client.WithSessionExtractor(extractSession),
+		client.WithEventParser(parser),
 		client.WithStderrCapture(true),
 		client.WithProviderName("opencode"),
 	)

@@ -344,7 +344,7 @@ func TestOutputEventParsing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			event, err := parseEvent([]byte(tt.json))
+			event, err := NewParser().ParseEvent([]byte(tt.json))
 			require.NoError(t, err)
 			tt.validate(t, event)
 		})
@@ -862,8 +862,8 @@ func TestMainModelTokenCalculation(t *testing.T) {
 
 			require.Equal(t, tt.expectedMainModel, p.mainModel)
 
-			// Parse result event using parseEvent (which populates Usage from raw JSON)
-			resultEvent, err := parseEvent([]byte(tt.resultJSON))
+			// Parse result event using NewParser().ParseEvent (which populates Usage from raw JSON)
+			resultEvent, err := NewParser().ParseEvent([]byte(tt.resultJSON))
 			require.NoError(t, err)
 
 			// Simulate the fix: populate Usage from main model's ModelUsage (as done in parseOutput)

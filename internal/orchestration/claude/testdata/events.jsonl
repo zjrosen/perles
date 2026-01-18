@@ -1,0 +1,8 @@
+{"type":"system","subtype":"init","session_id":"sess-abc123","cwd":"/project","model":"claude-sonnet-4"}
+{"type":"assistant","message":{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"Hello, world!"}],"model":"claude-sonnet-4","usage":{"input_tokens":100,"output_tokens":50}}}
+{"type":"assistant","message":{"id":"msg_2","role":"assistant","content":[{"type":"tool_use","id":"toolu_123","name":"Read","input":{"file_path":"main.go"}}],"model":"claude-sonnet-4"}}
+{"type":"tool_result","tool":{"id":"toolu_123","name":"Read","content":"package main\n"}}
+{"type":"result","is_error":false,"result":"Task completed successfully","duration_ms":1234,"num_turns":3,"total_cost_usd":0.0123}
+{"type":"error","error":{"message":"Rate limit exceeded","code":"rate_limit_exceeded"}}
+{"type":"error","error":{"message":"Prompt is too long: 250000 tokens > 200000 maximum","code":"invalid_request"}}
+{"type":"assistant","message":{"id":"msg_stop","role":"assistant","content":[{"type":"text","text":"Prompt is too long"}],"stop_reason":"stop_sequence"},"error":"invalid_request"}

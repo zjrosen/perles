@@ -215,7 +215,7 @@ func Spawn(ctx context.Context, cfg Config) (*Process, error) {
 		stdout,
 		stderr,
 		cfg.WorkDir,
-		client.WithParseEventFunc(parseEvent),
+		client.WithEventParser(NewParser()),
 		client.WithSessionExtractor(extractSession),
 		client.WithOnInitEvent(p.extractMainModel),
 		client.WithStderrCapture(true),

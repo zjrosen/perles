@@ -70,6 +70,16 @@ func WithProviderName(name string) BaseProcessOption {
 	}
 }
 
+// WithEventParser sets the event parsing function from an EventParser interface.
+// This enables incremental migration from function hooks to the EventParser interface.
+// It sets bp.parseEventFn to parser.ParseEvent and bp.extractSessionFn to parser.ExtractSessionRef.
+func WithEventParser(parser EventParser) BaseProcessOption {
+	return func(bp *BaseProcess) {
+		bp.parseEventFn = parser.ParseEvent
+		bp.extractSessionFn = parser.ExtractSessionRef
+	}
+}
+
 // BaseProcess provides common process lifecycle management for all providers.
 // Providers embed this struct and configure behavior via functional options.
 type BaseProcess struct {
@@ -346,10 +356,11 @@ func (bp *BaseProcess) parseOutput() {
 			continue
 		}
 
+		log.Debug(log.CatOrch, "raw client response", "subsystem", bp.providerName, "json", string(line))
+
 		event, err := bp.parseEventFn(line)
 		if err != nil {
-			log.Debug(log.CatOrch, "parse error",
-				"subsystem", bp.providerName, "error", err, "line", string(line))
+			log.Debug(log.CatOrch, "parse error", "subsystem", bp.providerName, "error", err, "line", string(line))
 			continue
 		}
 

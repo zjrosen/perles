@@ -20,14 +20,8 @@ type Process struct {
 // ErrTimeout is returned when an Amp process exceeds its configured timeout.
 var ErrTimeout = fmt.Errorf("amp process timed out")
 
-// extractSession extracts the thread ID from an init event.
-// Amp uses threadID as its session reference.
-func extractSession(event client.OutputEvent, rawLine []byte) string {
-	if event.Type == client.EventSystem && event.SubType == "init" && event.SessionID != "" {
-		return event.SessionID
-	}
-	return ""
-}
+// parser is the shared Amp event parser instance.
+var parser = NewParser()
 
 // Spawn creates and starts a new headless Amp process.
 // Context is used for cancellation and timeout control.
@@ -84,8 +78,7 @@ func spawnProcess(ctx context.Context, cfg Config, isResume bool) (*Process, err
 		stdout,
 		stderr,
 		cfg.WorkDir,
-		client.WithParseEventFunc(parseEvent),
-		client.WithSessionExtractor(extractSession),
+		client.WithEventParser(parser),
 		client.WithStderrCapture(false), // Amp logs but doesn't capture stderr
 		client.WithProviderName("amp"),
 	)
