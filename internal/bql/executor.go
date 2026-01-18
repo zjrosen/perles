@@ -394,7 +394,7 @@ func (e *Executor) loadDependenciesForIssues(ids []string) (map[string]IssueDeps
 		WHERE d.issue_id IN (%s)
 		  AND i.status NOT IN ('deleted', 'tombstone')
 		  AND i.deleted_at IS NULL
-		UNION ALL
+		UNION
 		SELECT d.issue_id, d.depends_on_id, d.type
 		FROM dependencies d
 		JOIN issues i ON d.issue_id = i.id
