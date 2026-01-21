@@ -12,33 +12,6 @@ import (
 	"github.com/zjrosen/perles/internal/ui/styles"
 )
 
-// === Unit Tests: formatTokenCount ===
-
-func TestFormatTokenCount(t *testing.T) {
-	tests := []struct {
-		name     string
-		tokens   int64
-		expected string
-	}{
-		{"zero", 0, "-"},
-		{"small", 500, "500"},
-		{"just under 1K", 999, "999"},
-		{"exactly 1K", 1000, "1.0K"},
-		{"thousands", 12345, "12.3K"},
-		{"hundreds of thousands", 125000, "125.0K"},
-		{"just under 1M", 999999, "1000.0K"},
-		{"exactly 1M", 1000000, "1.0M"},
-		{"millions", 2500000, "2.5M"},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			result := formatTokenCount(tc.tokens)
-			require.Equal(t, tc.expected, result)
-		})
-	}
-}
-
 // === Unit Tests: getStatusTextAndColor ===
 
 func TestGetStatusTextAndColor(t *testing.T) {

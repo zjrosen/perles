@@ -1,6 +1,6 @@
 ╭────────────────────────────────────────────────────────────────────────────────────────╮            
-│#   Status    Name       WorkDir         Workers  Tokens   Health   Uptime   Started        EpicID  │
-│1   RUNNING   Running... ·               1        50.0K    ❤️ 0s    5m       12/13 11:55AM  -       │
+│#   Status    ... EpicID           WorkDir                 Workers  Health   Uptime   Started       │
+│1   RUNNING   ... -                ·                       1        ❤️ 0s    5m       12/13 11:55AM │
 │                                                                                        │            
 │                                                                                        │            
 │                                                                                        │            

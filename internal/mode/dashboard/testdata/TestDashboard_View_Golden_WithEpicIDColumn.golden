@@ -1,8 +1,8 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│#   Status    Name              WorkDir           Workers  Tokens   Health   Uptime   Started        EpicID           │
-│1   RUNNING   Epic-linked wo... ·                 2        50.0K    ❤️ 0s    -        -              perles-abc.1     │
-│2   PENDING   Standalone wor... ·                 0        -        -        -        -              -                │
-│3   RUNNING   Another epic w... ·                 1        25.0K    ❤️ 0s    -        -              epic-xyz         │
+│#   Status    Name                  EpicID           WorkDir                 Workers  Health   Uptime   Started       │
+│1   RUNNING   Epic-linked workflow  perles-abc.1     ·                       2        ❤️ 0s    -        -             │
+│2   PENDING   Standalone workflow   -                ·                       0        -        -        -             │
+│3   RUNNING   Another epic workflow epic-xyz         ·                       1        ❤️ 0s    -        -             │
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │

@@ -79,10 +79,27 @@ func (m Model) createWorkflowTableConfig() table.TableConfig {
 				},
 			},
 			{
-				Key:      "workdir",
-				Header:   "WorkDir",
-				MinWidth: 15,
-				Type:     table.ColumnTypeText,
+				Key:    "epicid",
+				Header: "EpicID",
+				Width:  16,
+				Type:   table.ColumnTypeText,
+				Render: func(row any, _ string, w int, _ bool) string {
+					r := row.(WorkflowTableRow)
+					epicID := r.Workflow.EpicID
+					if epicID == "" {
+						return "-"
+					}
+					if lipgloss.Width(epicID) > w {
+						return styles.TruncateString(epicID, w)
+					}
+					return epicID
+				},
+			},
+			{
+				Key:    "workdir",
+				Header: "WorkDir",
+				Width:  23,
+				Type:   table.ColumnTypeText,
 				Render: func(row any, _ string, w int, _ bool) string {
 					r := row.(WorkflowTableRow)
 					wf := r.Workflow
@@ -122,16 +139,17 @@ func (m Model) createWorkflowTableConfig() table.TableConfig {
 					return fmt.Sprintf("%d", r.Workflow.ActiveWorkers)
 				},
 			},
-			{
-				Key:    "tokens",
-				Header: "Tokens",
-				Width:  8,
-				Type:   table.ColumnTypeText,
-				Render: func(row any, _ string, _ int, _ bool) string {
-					r := row.(WorkflowTableRow)
-					return formatTokenCount(r.Workflow.TokensUsed)
-				},
-			},
+			// TODO: Re-enable tokens column once token tracking is implemented
+			// {
+			// 	Key:    "tokens",
+			// 	Header: "Tokens",
+			// 	Width:  8,
+			// 	Type:   table.ColumnTypeText,
+			// 	Render: func(row any, _ string, _ int, _ bool) string {
+			// 		r := row.(WorkflowTableRow)
+			// 		return formatTokenCount(r.Workflow.TokensUsed)
+			// 	},
+			// },
 			{
 				Key:    "health",
 				Header: "Health",
@@ -160,23 +178,6 @@ func (m Model) createWorkflowTableConfig() table.TableConfig {
 				Render: func(row any, _ string, _ int, _ bool) string {
 					r := row.(WorkflowTableRow)
 					return m.getStartedDisplay(r.Workflow)
-				},
-			},
-			{
-				Key:      "epicid",
-				Header:   "EpicID",
-				MinWidth: 8,
-				Type:     table.ColumnTypeText,
-				Render: func(row any, _ string, w int, _ bool) string {
-					r := row.(WorkflowTableRow)
-					epicID := r.Workflow.EpicID
-					if epicID == "" {
-						return "-"
-					}
-					if lipgloss.Width(epicID) > w {
-						return styles.TruncateString(epicID, w)
-					}
-					return epicID
 				},
 			},
 		},
@@ -383,20 +384,6 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dm", int(d.Minutes()))
 	}
 	return fmt.Sprintf("%dh", int(d.Hours()))
-}
-
-// formatTokenCount formats a token count for display.
-func formatTokenCount(tokens int64) string {
-	if tokens == 0 {
-		return "-"
-	}
-	if tokens < 1000 {
-		return fmt.Sprintf("%d", tokens)
-	}
-	if tokens < 1000000 {
-		return fmt.Sprintf("%.1fK", float64(tokens)/1000)
-	}
-	return fmt.Sprintf("%.1fM", float64(tokens)/1000000)
 }
 
 // ResourceSummary holds aggregated resource statistics.

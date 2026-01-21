@@ -98,14 +98,25 @@ If the epic doesn't provide clear instructions for a phase or task:
 
 ## Completing the Workflow
 
-**CRITICAL**: When all phases are complete, you MUST signal workflow completion:
+**CRITICAL**: When all phases are complete, you MUST:
 
-```
-signal_workflow_complete(
-    status="success",
-    summary="Completed [workflow name]. [Brief description of what was accomplished and key outputs]."
-)
-```
+1. **Close all remaining open tasks** in the epic (including any that were skipped):
+   ```
+   mark_task_complete(task_id="epic-id.N")
+   ```
+
+2. **Close the epic itself**:
+   ```
+   mark_task_complete(task_id="epic-id")
+   ```
+
+3. **Signal workflow completion**:
+   ```
+   signal_workflow_complete(
+       status="success",
+       summary="Completed [workflow name]. [Brief description of what was accomplished and key outputs]."
+   )
+   ```
 
 If the workflow fails or cannot continue:
 
@@ -116,7 +127,7 @@ signal_workflow_complete(
 )
 ```
 
-**Do not end the workflow without calling `signal_workflow_complete`** - this is how the system knows the workflow has finished.
+**Do not end the workflow without closing the epic and calling `signal_workflow_complete`** - this is how the system knows the workflow has finished and keeps the tracker clean.
 
 ## Success Criteria
 

@@ -296,8 +296,8 @@ func (m *NewWorkflowModal) createWorkflowAsync(values map[string]any) tea.Cmd {
 
 			epicID = result.Epic.ID
 
-			// Build coordinator prompt: epic_driven.md + epic ID section + user goal
-			initialPrompt = m.buildCoordinatorPrompt(epicID, goal)
+			// Build coordinator prompt: instructions template + epic ID section + user goal
+			initialPrompt = m.buildCoordinatorPrompt(templateID, epicID, goal)
 		} else {
 			// No WorkflowCreator, use goal directly as InitialGoal
 			initialPrompt = goal
@@ -339,22 +339,26 @@ func (m *NewWorkflowModal) createWorkflowAsync(values map[string]any) tea.Cmd {
 }
 
 // buildCoordinatorPrompt assembles the coordinator prompt from:
-// 1. epic_driven.md content (generic coordinator instructions)
+// 1. Instructions template content (from registration's instructions field)
 // 2. Epic ID section (so coordinator can read detailed instructions via bd show)
 // 3. User's goal
-func (m *NewWorkflowModal) buildCoordinatorPrompt(epicID, goal string) string {
-	// Load epic_driven.md template if registry service is available
-	var epicDrivenContent string
+func (m *NewWorkflowModal) buildCoordinatorPrompt(templateID, epicID, goal string) string {
+	// Load instructions template if registry service is available
+	var instructionsContent string
 	if m.registryService != nil {
-		content, err := m.registryService.GetEpicDrivenTemplate()
+		// Get the registration for this template
+		reg, err := m.registryService.GetByKey("spec-workflow", templateID)
 		if err == nil {
-			epicDrivenContent = content
+			content, err := m.registryService.GetInstructionsTemplate(reg)
+			if err == nil {
+				instructionsContent = content
+			}
 		}
 		// If error loading template, continue without it
 	}
 
 	// Build the full prompt
-	if epicDrivenContent != "" {
+	if instructionsContent != "" {
 		return fmt.Sprintf(`%s
 
 ---
@@ -368,7 +372,7 @@ Use `+"`bd show %s --json`"+` to read your detailed workflow instructions.
 # Your Goal
 
 %s
-`, epicDrivenContent, epicID, epicID, goal)
+`, instructionsContent, epicID, epicID, goal)
 	}
 
 	// Fallback if no epic_driven.md available

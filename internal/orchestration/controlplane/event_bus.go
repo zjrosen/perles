@@ -126,6 +126,16 @@ func (b *CrossWorkflowEventBus) forwardEvents(
 			// Update workflow heartbeat on any activity
 			inst.RecordHeartbeat()
 
+			// Update worker count on spawn/retire events
+			switch eventType {
+			case EventWorkerSpawned:
+				inst.ActiveWorkers++
+			case EventWorkerRetired:
+				if inst.ActiveWorkers > 0 {
+					inst.ActiveWorkers--
+				}
+			}
+
 			// Create ControlPlaneEvent with workflow context
 			cpEvent := ControlPlaneEvent{
 				Type:         eventType,

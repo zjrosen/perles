@@ -9,7 +9,6 @@ import (
 
 	beads "github.com/zjrosen/perles/internal/beads/domain"
 	"github.com/zjrosen/perles/internal/mocks"
-	"github.com/zjrosen/perles/internal/orchestration/workflow"
 	"github.com/zjrosen/perles/internal/templates"
 )
 
@@ -108,9 +107,7 @@ func TestWorkflowCreator_Create(t *testing.T) {
 			tt.setupMock(mockExecutor)
 
 			// Create service with real registry
-			workflowFS, err := workflow.BuiltinTemplatesSubFS()
-			require.NoError(t, err)
-			registrySvc, err := NewRegistryService(templates.RegistryFS(), workflowFS)
+			registrySvc, err := NewRegistryService(templates.RegistryFS())
 			require.NoError(t, err)
 
 			creator := NewWorkflowCreator(registrySvc, mockExecutor)

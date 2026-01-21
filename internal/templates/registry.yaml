@@ -6,7 +6,7 @@ registry:
     name: "Research Proposal"
     description: "Collaborative research with parallel exploration and structured synthesis for implementation plans"
     template: "v1-research-proposal-epic.md"
-    instructions: "epic_driven.md"
+    instructions: "v1-epic-instructions.md"
     labels:
       - "category:planning"
       - "workers:4"
@@ -170,7 +170,7 @@ registry:
     name: "Research to Tasks"
     description: "Translate research documents into well-planned beads epics and tasks with multi-perspective review. Uses 4 workers: Task Writer, Implementation Reviewer, Test Reviewer, and Mediator."
     template: "v1-research-to-tasks-epic.md"
-    instructions: "epic_driven.md"
+    instructions: "v1-epic-instructions.md"
     labels:
       - "category:planning"
       - "workers:4"

@@ -1,8 +1,8 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│#   Status    Name              WorkDir           Workers  Tokens   Health   Uptime   Started        EpicID           │
-│1   RUNNING   Worktree workflow 🌳 feature-branch 2        50.0K    ❤️ 0s    -        -              -                │
-│2   PENDING   Custom workdir... project           0        -        -        -        -              -                │
-│3   RUNNING   Current direct... ·                 1        25.0K    ❤️ 0s    -        -              -                │
+│#   Status    Name                  EpicID           WorkDir                 Workers  Health   Uptime   Started       │
+│1   RUNNING   Worktree workflow     -                🌳 feature-branch       2        ❤️ 0s    -        -             │
+│2   PENDING   Custom workdir wor... -                project                 0        -        -        -             │
+│3   RUNNING   Current directory ... -                ·                       1        ❤️ 0s    -        -             │
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │

@@ -18,7 +18,6 @@ import (
 	"github.com/zjrosen/perles/internal/cachemanager"
 	"github.com/zjrosen/perles/internal/config"
 	"github.com/zjrosen/perles/internal/log"
-	"github.com/zjrosen/perles/internal/orchestration/workflow"
 	"github.com/zjrosen/perles/internal/paths"
 	appreg "github.com/zjrosen/perles/internal/registry/application"
 	"github.com/zjrosen/perles/internal/templates"
@@ -120,16 +119,10 @@ func initConfig() {
 }
 
 func initServices() {
-	// Initialize registry service with both template filesystems:
-	// - templates.RegistryFS() contains registry.yaml and spec workflow templates
-	// - workflow.BuiltinTemplatesSubFS() contains epic_driven.md and orchestration templates
-	workflowTemplatesFS, err := workflow.BuiltinTemplatesSubFS()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error loading workflow templates:", err)
-		os.Exit(1)
-	}
-
-	registryService, err = appreg.NewRegistryService(templates.RegistryFS(), workflowTemplatesFS)
+	// Initialize registry service with embedded templates
+	// templates.RegistryFS() contains registry.yaml, workflow templates, and coordinator instructions
+	var err error
+	registryService, err = appreg.NewRegistryService(templates.RegistryFS())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error initializing registry service:", err)
 		os.Exit(1)

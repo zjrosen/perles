@@ -16,6 +16,7 @@ import (
 	"github.com/zjrosen/perles/internal/mode"
 	"github.com/zjrosen/perles/internal/orchestration/controlplane"
 	appreg "github.com/zjrosen/perles/internal/registry/application"
+	registry "github.com/zjrosen/perles/internal/registry/domain"
 )
 
 // === Test Helpers ===
@@ -61,21 +62,11 @@ registry:
 	}
 }
 
-// createTestWorkflowTemplatesFS creates a mock workflow templates FS with epic_driven.md
-func createTestWorkflowTemplatesFS() fstest.MapFS {
-	return fstest.MapFS{
-		"epic_driven.md": &fstest.MapFile{
-			Data: []byte("# Epic-Driven Workflow\n\nYou are the Coordinator."),
-		},
-	}
-}
-
 // createTestRegistryService creates a registry service with test templates.
 func createTestRegistryService(t *testing.T) *appreg.RegistryService {
 	t.Helper()
 	registryFS := createTestRegistryServiceFS()
-	workflowFS := createTestWorkflowTemplatesFS()
-	registry, err := appreg.NewRegistryService(registryFS, workflowFS)
+	registry, err := appreg.NewRegistryService(registryFS)
 	require.NoError(t, err)
 	return registry
 }
@@ -518,8 +509,7 @@ registry:
 		},
 		"v1-coding.md": &fstest.MapFile{Data: []byte("# Coding Guidelines")},
 	}
-	workflowFS := createTestWorkflowTemplatesFS()
-	registryService, err := appreg.NewRegistryService(fs, workflowFS)
+	registryService, err := appreg.NewRegistryService(fs)
 	require.NoError(t, err)
 
 	options := buildTemplateOptions(registryService)
@@ -883,8 +873,8 @@ type MockRegistryService struct {
 	mock.Mock
 }
 
-func (m *MockRegistryService) GetEpicDrivenTemplate() (string, error) {
-	args := m.Called()
+func (m *MockRegistryService) GetInstructionsTemplate(reg *registry.Registration) (string, error) {
+	args := m.Called(reg)
 	return args.String(0), args.Error(1)
 }
 
@@ -936,7 +926,8 @@ func TestNewWorkflowModal_MockCreatorAndRegistryServiceTypes(t *testing.T) {
 	mockCreator.On("Create", "test-feature", "quick-plan").Return(mockCreatorResult, nil)
 
 	mockRegService := &MockRegistryService{}
-	mockRegService.On("GetEpicDrivenTemplate").Return("# Epic-Driven Workflow\n\nYou are the Coordinator.", nil)
+	// GetInstructionsTemplate takes a registration parameter (use mock.Anything for flexibility)
+	mockRegService.On("GetInstructionsTemplate", mock.Anything).Return("# Coordinator Instructions\n\nYou are the Coordinator.", nil)
 
 	// Verify mock methods work
 	result, err := mockCreator.Create("test-feature", "quick-plan")
@@ -944,9 +935,10 @@ func TestNewWorkflowModal_MockCreatorAndRegistryServiceTypes(t *testing.T) {
 	require.Equal(t, "perles-abc123", result.Epic.ID)
 	require.True(t, strings.Contains(result.Epic.Title, "Test Feature"))
 
-	template, err := mockRegService.GetEpicDrivenTemplate()
+	// GetInstructionsTemplate requires a registration, pass nil for simplicity in mock test
+	template, err := mockRegService.GetInstructionsTemplate(nil)
 	require.NoError(t, err)
-	require.Contains(t, template, "Epic-Driven Workflow")
+	require.Contains(t, template, "Coordinator Instructions")
 
 	mockCreator.AssertExpectations(t)
 	mockRegService.AssertExpectations(t)
@@ -956,8 +948,8 @@ func TestNewWorkflowModal_BuildCoordinatorPromptContainsAllSections(t *testing.T
 	registryService := createTestRegistryService(t)
 	modal := NewNewWorkflowModal(registryService, nil, nil, nil)
 
-	// Test the prompt building with no registry service (fallback)
-	prompt := modal.buildCoordinatorPrompt("perles-abc123", "Build a cool feature")
+	// Test the prompt building with a template that doesn't have instructions (fallback path)
+	prompt := modal.buildCoordinatorPrompt("quick-plan", "perles-abc123", "Build a cool feature")
 
 	// Verify prompt contains epic ID
 	require.Contains(t, prompt, "perles-abc123")
@@ -1009,4 +1001,106 @@ func TestNewWorkflowModal_EpicIDPassedToWorkflowSpec(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, controlplane.WorkflowID("workflow-123"), createMsg.WorkflowID)
 	mockCP.AssertExpectations(t)
+}
+
+// === Tests for GetInstructionsTemplate integration ===
+
+// createTestRegistryServiceWithInstructions creates a registry service where templates have instructions specified
+func createTestRegistryServiceWithInstructions(t *testing.T) *appreg.RegistryService {
+	t.Helper()
+	registryFS := fstest.MapFS{
+		"registry.yaml": &fstest.MapFile{
+			Data: []byte(`
+registry:
+  - namespace: "spec-workflow"
+    key: "quick-plan"
+    version: "v1"
+    name: "Quick Plan"
+    description: "Fast planning workflow"
+    instructions: "custom_instructions.md"
+    nodes:
+      - key: "plan"
+        name: "Plan"
+        template: "v1-plan.md"
+`),
+		},
+		"v1-plan.md": &fstest.MapFile{Data: []byte("# Plan Template")},
+		"custom_instructions.md": &fstest.MapFile{
+			Data: []byte("# Custom Instructions\n\nThis is a custom coordinator prompt."),
+		},
+	}
+	registry, err := appreg.NewRegistryService(registryFS)
+	require.NoError(t, err)
+	return registry
+}
+
+func TestBuildCoordinatorPrompt_UsesCustomInstructions(t *testing.T) {
+	registryService := createTestRegistryServiceWithInstructions(t)
+	modal := NewNewWorkflowModal(registryService, nil, nil, nil)
+
+	// Test the prompt building with a template that HAS instructions
+	prompt := modal.buildCoordinatorPrompt("quick-plan", "perles-abc123", "Build a cool feature")
+
+	// Verify prompt contains custom instructions content
+	require.Contains(t, prompt, "# Custom Instructions")
+	require.Contains(t, prompt, "This is a custom coordinator prompt")
+	// Verify prompt still contains epic ID and goal
+	require.Contains(t, prompt, "perles-abc123")
+	require.Contains(t, prompt, "Build a cool feature")
+	require.Contains(t, prompt, "# Your Epic")
+	require.Contains(t, prompt, "# Your Goal")
+}
+
+func TestBuildCoordinatorPrompt_HandlesInstructionsError(t *testing.T) {
+	// Create a registry where the template specifies an instructions file that doesn't exist
+	registryFS := fstest.MapFS{
+		"registry.yaml": &fstest.MapFile{
+			Data: []byte(`
+registry:
+  - namespace: "spec-workflow"
+    key: "broken-plan"
+    version: "v1"
+    name: "Broken Plan"
+    description: "Workflow with missing instructions"
+    instructions: "nonexistent.md"
+    nodes:
+      - key: "plan"
+        name: "Plan"
+        template: "v1-plan.md"
+`),
+		},
+		"v1-plan.md": &fstest.MapFile{Data: []byte("# Plan Template")},
+		// No "nonexistent.md" file - instructions file doesn't exist
+	}
+
+	registryService, err := appreg.NewRegistryService(registryFS)
+	require.NoError(t, err)
+
+	modal := NewNewWorkflowModal(registryService, nil, nil, nil)
+
+	// Test the prompt building - should fall back gracefully when instructions can't be loaded
+	prompt := modal.buildCoordinatorPrompt("broken-plan", "perles-abc123", "Build a cool feature")
+
+	// Verify prompt falls back to minimal prompt without instructions
+	require.Contains(t, prompt, "perles-abc123")
+	require.Contains(t, prompt, "Build a cool feature")
+	require.Contains(t, prompt, "# Your Epic")
+	require.Contains(t, prompt, "# Your Goal")
+	// Should NOT contain custom instructions content since file doesn't exist
+	require.NotContains(t, prompt, "# Custom Instructions")
+}
+
+func TestBuildCoordinatorPrompt_HandlesNoInstructionsField(t *testing.T) {
+	// Create a registry where the template has no instructions field
+	registryService := createTestRegistryService(t)
+	modal := NewNewWorkflowModal(registryService, nil, nil, nil)
+
+	// Test the prompt building - should fall back gracefully when no instructions field
+	prompt := modal.buildCoordinatorPrompt("quick-plan", "perles-abc123", "Build a cool feature")
+
+	// Verify prompt falls back to minimal prompt without instructions
+	require.Contains(t, prompt, "perles-abc123")
+	require.Contains(t, prompt, "Build a cool feature")
+	require.Contains(t, prompt, "# Your Epic")
+	require.Contains(t, prompt, "# Your Goal")
 }

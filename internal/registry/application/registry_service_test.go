@@ -129,19 +129,9 @@ func createRegistryServiceWithFS(fsys fstest.MapFS) (*RegistryService, error) {
 	}
 
 	return &RegistryService{
-		registry:            reg,
-		templateFS:          fs.ReadFileFS(fsys),
-		workflowTemplatesFS: nil, // Tests that don't need GetInstructionsTemplate can use nil
+		registry:   reg,
+		templateFS: fs.ReadFileFS(fsys),
 	}, nil
-}
-
-// createWorkflowTemplatesFS creates a mock workflow templates FS for testing
-func createWorkflowTemplatesFS() fstest.MapFS {
-	return fstest.MapFS{
-		"test-instructions.md": &fstest.MapFile{
-			Data: []byte("# Test Instructions\n\nYou are the Coordinator."),
-		},
-	}
 }
 
 func TestNewRegistryService(t *testing.T) {
@@ -585,24 +575,34 @@ func createTestChain() *registry.Chain {
 }
 
 func TestGetInstructionsTemplate_ReturnsContent(t *testing.T) {
-	testFS := createTestFS()
-	workflowFS := fstest.MapFS{
+	// Create test FS with instructions file included
+	testFS := fstest.MapFS{
+		"registry.yaml": &fstest.MapFile{
+			Data: []byte(`registry:
+  - namespace: "test-ns"
+    key: "test-key"
+    version: "v1"
+    name: "Test"
+    description: "Test workflow"
+    instructions: "my-instructions.md"
+    nodes:
+      - key: "test"
+        name: "Test Node"
+        template: "test.md"
+        assignee: "worker-1"
+`),
+		},
 		"my-instructions.md": &fstest.MapFile{
 			Data: []byte("# My Instructions\n\nContent here."),
 		},
+		"test.md": &fstest.MapFile{Data: []byte("# Test")},
 	}
 
-	svc, err := NewRegistryService(testFS, workflowFS)
+	svc, err := NewRegistryService(testFS)
 	require.NoError(t, err)
 
-	// Create a registration with instructions
-	reg, err := registry.NewBuilder("test-ns").
-		Key("test-key").
-		Version("v1").
-		Name("Test").
-		Instructions("my-instructions.md").
-		SetChain(createTestChain()).
-		Build()
+	// Get the registration from the service
+	reg, err := svc.GetByKey("test-ns", "test-key")
 	require.NoError(t, err)
 
 	content, err := svc.GetInstructionsTemplate(reg)
@@ -611,30 +611,9 @@ func TestGetInstructionsTemplate_ReturnsContent(t *testing.T) {
 	require.Contains(t, content, "My Instructions")
 }
 
-func TestGetInstructionsTemplate_ErrorWhenNilFS(t *testing.T) {
-	testFS := createTestFS()
-	svc, err := NewRegistryService(testFS, nil)
-	require.NoError(t, err)
-
-	reg, err := registry.NewBuilder("test-ns").
-		Key("test-key").
-		Version("v1").
-		Name("Test").
-		Instructions("instructions.md").
-		SetChain(createTestChain()).
-		Build()
-	require.NoError(t, err)
-
-	content, err := svc.GetInstructionsTemplate(reg)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "workflow templates FS not configured")
-	require.Empty(t, content)
-}
-
 func TestGetInstructionsTemplate_ErrorWhenNilRegistration(t *testing.T) {
 	testFS := createTestFS()
-	workflowFS := fstest.MapFS{}
-	svc, err := NewRegistryService(testFS, workflowFS)
+	svc, err := NewRegistryService(testFS)
 	require.NoError(t, err)
 
 	content, err := svc.GetInstructionsTemplate(nil)
@@ -645,8 +624,7 @@ func TestGetInstructionsTemplate_ErrorWhenNilRegistration(t *testing.T) {
 
 func TestGetInstructionsTemplate_ErrorWhenEmptyInstructions(t *testing.T) {
 	testFS := createTestFS()
-	workflowFS := fstest.MapFS{}
-	svc, err := NewRegistryService(testFS, workflowFS)
+	svc, err := NewRegistryService(testFS)
 	require.NoError(t, err)
 
 	// Create a registration without instructions
@@ -667,10 +645,10 @@ func TestGetInstructionsTemplate_ErrorWhenEmptyInstructions(t *testing.T) {
 
 func TestGetInstructionsTemplate_ErrorWhenNotFound(t *testing.T) {
 	testFS := createTestFS()
-	emptyWorkflowFS := fstest.MapFS{}
-	svc, err := NewRegistryService(testFS, emptyWorkflowFS)
+	svc, err := NewRegistryService(testFS)
 	require.NoError(t, err)
 
+	// Create a registration with instructions pointing to nonexistent file
 	reg, err := registry.NewBuilder("test-ns").
 		Key("test-key").
 		Version("v1").

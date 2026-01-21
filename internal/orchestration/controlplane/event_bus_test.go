@@ -550,3 +550,72 @@ func TestCrossWorkflowEventBus_EventClassification(t *testing.T) {
 		})
 	}
 }
+
+func TestCrossWorkflowEventBus_ActiveWorkerCount(t *testing.T) {
+	bus := NewCrossWorkflowEventBus()
+	defer bus.Close()
+
+	inst := createTestWorkflowWithEventBus(WorkflowID("wf-worker-count"), "Worker Count Test")
+	require.Equal(t, 0, inst.ActiveWorkers, "initial ActiveWorkers should be 0")
+
+	bus.AttachWorkflow(inst)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	ch := bus.Subscribe(ctx)
+
+	// Spawn first worker
+	inst.Infrastructure.Core.EventBus.Publish(pubsub.UpdatedEvent, events.ProcessEvent{
+		Type:      events.ProcessSpawned,
+		Role:      events.RoleWorker,
+		ProcessID: "worker-1",
+	})
+	select {
+	case <-ch:
+	case <-ctx.Done():
+		t.Fatal("timeout waiting for event")
+	}
+	require.Equal(t, 1, inst.ActiveWorkers, "ActiveWorkers should be 1 after first spawn")
+
+	// Spawn second worker
+	inst.Infrastructure.Core.EventBus.Publish(pubsub.UpdatedEvent, events.ProcessEvent{
+		Type:      events.ProcessSpawned,
+		Role:      events.RoleWorker,
+		ProcessID: "worker-2",
+	})
+	select {
+	case <-ch:
+	case <-ctx.Done():
+		t.Fatal("timeout waiting for event")
+	}
+	require.Equal(t, 2, inst.ActiveWorkers, "ActiveWorkers should be 2 after second spawn")
+
+	// Retire first worker
+	inst.Infrastructure.Core.EventBus.Publish(pubsub.UpdatedEvent, events.ProcessEvent{
+		Type:      events.ProcessStatusChange,
+		Role:      events.RoleWorker,
+		ProcessID: "worker-1",
+		Status:    events.ProcessStatusRetired,
+	})
+	select {
+	case <-ch:
+	case <-ctx.Done():
+		t.Fatal("timeout waiting for event")
+	}
+	require.Equal(t, 1, inst.ActiveWorkers, "ActiveWorkers should be 1 after retire")
+
+	// Retire second worker
+	inst.Infrastructure.Core.EventBus.Publish(pubsub.UpdatedEvent, events.ProcessEvent{
+		Type:      events.ProcessStatusChange,
+		Role:      events.RoleWorker,
+		ProcessID: "worker-2",
+		Status:    events.ProcessStatusRetired,
+	})
+	select {
+	case <-ch:
+	case <-ctx.Done():
+		t.Fatal("timeout waiting for event")
+	}
+	require.Equal(t, 0, inst.ActiveWorkers, "ActiveWorkers should be 0 after all retired")
+}

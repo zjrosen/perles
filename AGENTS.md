@@ -373,15 +373,14 @@ When importing the registry application layer:
 ```go
 import (
     appreg "github.com/zjrosen/perles/internal/registry/application"
-    "github.com/zjrosen/perles/internal/orchestration/workflow"
     "github.com/zjrosen/perles/internal/templates"
 )
 
-// RegistryService requires two filesystems:
-// - templates.RegistryFS() for registry.yaml and spec workflow templates
-// - workflow.BuiltinTemplatesSubFS() for epic_driven.md and orchestration templates
-workflowFS, _ := workflow.BuiltinTemplatesSubFS()
-svc, err := appreg.NewRegistryService(templates.RegistryFS(), workflowFS)
+// RegistryService loads from templates.RegistryFS() which contains:
+// - registry.yaml (workflow definitions)
+// - spec workflow templates (v1-*.md)
+// - coordinator instructions (v1-epic-instructions.md)
+svc, err := appreg.NewRegistryService(templates.RegistryFS())
 
 // Use workflow.Registry for workflow template management
 ```

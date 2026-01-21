@@ -29,15 +29,13 @@ type TemplateContext struct {
 
 // RegistryService handles template registry operations
 type RegistryService struct {
-	registry            *registry.Registry
-	templateFS          fs.FS // Registry templates (from internal/templates)
-	workflowTemplatesFS fs.FS // Workflow templates (from internal/orchestration/workflow/templates)
+	registry   *registry.Registry
+	templateFS fs.FS // Registry templates (from internal/templates)
 }
 
 // NewRegistryService creates a new registry service with default registrations.
-// templateFS contains the registry.yaml and spec workflow templates.
-// workflowTemplatesFS contains epic_driven.md and other orchestration templates.
-func NewRegistryService(templateFS, workflowTemplatesFS fs.FS) (*RegistryService, error) {
+// templateFS contains the registry.yaml, spec workflow templates, and coordinator instructions.
+func NewRegistryService(templateFS fs.FS) (*RegistryService, error) {
 	reg := registry.NewRegistry()
 
 	// Load all registrations from YAML
@@ -51,9 +49,8 @@ func NewRegistryService(templateFS, workflowTemplatesFS fs.FS) (*RegistryService
 	}
 
 	return &RegistryService{
-		registry:            reg,
-		templateFS:          templateFS,
-		workflowTemplatesFS: workflowTemplatesFS,
+		registry:   reg,
+		templateFS: templateFS,
 	}, nil
 }
 
@@ -204,9 +201,6 @@ func buildArtifactPaths(artifacts []*registry.Artifact, slug string) map[string]
 // GetInstructionsTemplate returns coordinator instructions for a registration.
 // The registration must have a non-empty Instructions() field.
 func (s *RegistryService) GetInstructionsTemplate(reg *registry.Registration) (string, error) {
-	if s.workflowTemplatesFS == nil {
-		return "", fmt.Errorf("workflow templates FS not configured")
-	}
 	if reg == nil {
 		return "", fmt.Errorf("registration is nil")
 	}
@@ -214,7 +208,7 @@ func (s *RegistryService) GetInstructionsTemplate(reg *registry.Registration) (s
 		return "", fmt.Errorf("registration %s has no instructions template specified", reg.Key())
 	}
 
-	content, err := fs.ReadFile(s.workflowTemplatesFS, reg.Instructions())
+	content, err := fs.ReadFile(s.templateFS, reg.Instructions())
 	if err != nil {
 		return "", fmt.Errorf("read instructions template %q: %w", reg.Instructions(), err)
 	}

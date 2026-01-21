@@ -273,8 +273,7 @@ func createGoldenTestModelWithRegistry(t *testing.T, workflows []*controlplane.W
 	}, true).Maybe()
 
 	registryFS := createGoldenTestRegistryFS()
-	workflowFS := createTestWorkflowTemplatesFS()
-	registryService, err := appreg.NewRegistryService(registryFS, workflowFS)
+	registryService, err := appreg.NewRegistryService(registryFS)
 	require.NoError(t, err)
 
 	cfg := Config{
