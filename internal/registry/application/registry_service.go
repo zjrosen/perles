@@ -201,18 +201,23 @@ func buildArtifactPaths(artifacts []*registry.Artifact, slug string) map[string]
 	return paths
 }
 
-// GetEpicDrivenTemplate returns the generic coordinator instructions template.
-// This is the base prompt for all epic-driven workflows, containing instructions
-// for how the coordinator should use MCP tools and follow epic-based workflows.
-//
-// The template is loaded from "epic_driven.md" in the workflow templates filesystem.
-func (s *RegistryService) GetEpicDrivenTemplate() (string, error) {
+// GetInstructionsTemplate returns coordinator instructions for a registration.
+// The registration must have a non-empty Instructions() field.
+func (s *RegistryService) GetInstructionsTemplate(reg *registry.Registration) (string, error) {
 	if s.workflowTemplatesFS == nil {
-		return "", fmt.Errorf("read epic_driven template: workflow templates FS not configured")
+		return "", fmt.Errorf("workflow templates FS not configured")
 	}
-	content, err := fs.ReadFile(s.workflowTemplatesFS, "epic_driven.md")
+	if reg == nil {
+		return "", fmt.Errorf("registration is nil")
+	}
+	if reg.Instructions() == "" {
+		return "", fmt.Errorf("registration %s has no instructions template specified", reg.Key())
+	}
+
+	content, err := fs.ReadFile(s.workflowTemplatesFS, reg.Instructions())
 	if err != nil {
-		return "", fmt.Errorf("read epic_driven template: %w", err)
+		return "", fmt.Errorf("read instructions template %q: %w", reg.Instructions(), err)
 	}
+
 	return string(content), nil
 }

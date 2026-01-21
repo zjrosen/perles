@@ -131,15 +131,15 @@ func createRegistryServiceWithFS(fsys fstest.MapFS) (*RegistryService, error) {
 	return &RegistryService{
 		registry:            reg,
 		templateFS:          fs.ReadFileFS(fsys),
-		workflowTemplatesFS: nil, // Tests that don't need GetEpicDrivenTemplate can use nil
+		workflowTemplatesFS: nil, // Tests that don't need GetInstructionsTemplate can use nil
 	}, nil
 }
 
-// createWorkflowTemplatesFS creates a mock workflow templates FS with epic_driven.md
+// createWorkflowTemplatesFS creates a mock workflow templates FS for testing
 func createWorkflowTemplatesFS() fstest.MapFS {
 	return fstest.MapFS{
-		"epic_driven.md": &fstest.MapFile{
-			Data: []byte("# Epic-Driven Workflow\n\nYou are the Coordinator.\n\n## Read the Epic\n\n## MCP Tools Available\n\n## signal_workflow_complete\n\n## Key Principles"),
+		"test-instructions.md": &fstest.MapFile{
+			Data: []byte("# Test Instructions\n\nYou are the Coordinator."),
 		},
 	}
 }
@@ -574,62 +574,115 @@ func TestRenderTemplate_IdentifierErrors(t *testing.T) {
 	}
 }
 
-// === GetEpicDrivenTemplate tests ===
+// === GetInstructionsTemplate tests ===
 
-func TestGetEpicDrivenTemplate_ReturnsContent(t *testing.T) {
+// createTestChain creates a minimal chain for testing registrations
+func createTestChain() *registry.Chain {
+	chain, _ := registry.NewChain().
+		Node("test", "Test Node", "test.md").
+		Build()
+	return chain
+}
+
+func TestGetInstructionsTemplate_ReturnsContent(t *testing.T) {
 	testFS := createTestFS()
-	workflowFS := createWorkflowTemplatesFS()
+	workflowFS := fstest.MapFS{
+		"my-instructions.md": &fstest.MapFile{
+			Data: []byte("# My Instructions\n\nContent here."),
+		},
+	}
+
 	svc, err := NewRegistryService(testFS, workflowFS)
 	require.NoError(t, err)
 
-	content, err := svc.GetEpicDrivenTemplate()
+	// Create a registration with instructions
+	reg, err := registry.NewBuilder("test-ns").
+		Key("test-key").
+		Version("v1").
+		Name("Test").
+		Instructions("my-instructions.md").
+		SetChain(createTestChain()).
+		Build()
+	require.NoError(t, err)
+
+	content, err := svc.GetInstructionsTemplate(reg)
 	require.NoError(t, err)
 	require.NotEmpty(t, content)
-	require.Contains(t, content, "Epic-Driven Workflow")
+	require.Contains(t, content, "My Instructions")
 }
 
-func TestGetEpicDrivenTemplate_ErrorWhenNilFS(t *testing.T) {
+func TestGetInstructionsTemplate_ErrorWhenNilFS(t *testing.T) {
 	testFS := createTestFS()
 	svc, err := NewRegistryService(testFS, nil)
 	require.NoError(t, err)
 
-	content, err := svc.GetEpicDrivenTemplate()
+	reg, err := registry.NewBuilder("test-ns").
+		Key("test-key").
+		Version("v1").
+		Name("Test").
+		Instructions("instructions.md").
+		SetChain(createTestChain()).
+		Build()
+	require.NoError(t, err)
+
+	content, err := svc.GetInstructionsTemplate(reg)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "workflow templates FS not configured")
 	require.Empty(t, content)
 }
 
-func TestGetEpicDrivenTemplate_ErrorWhenNotFound(t *testing.T) {
+func TestGetInstructionsTemplate_ErrorWhenNilRegistration(t *testing.T) {
+	testFS := createTestFS()
+	workflowFS := fstest.MapFS{}
+	svc, err := NewRegistryService(testFS, workflowFS)
+	require.NoError(t, err)
+
+	content, err := svc.GetInstructionsTemplate(nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "registration is nil")
+	require.Empty(t, content)
+}
+
+func TestGetInstructionsTemplate_ErrorWhenEmptyInstructions(t *testing.T) {
+	testFS := createTestFS()
+	workflowFS := fstest.MapFS{}
+	svc, err := NewRegistryService(testFS, workflowFS)
+	require.NoError(t, err)
+
+	// Create a registration without instructions
+	reg, err := registry.NewBuilder("test-ns").
+		Key("test-key").
+		Version("v1").
+		Name("Test").
+		SetChain(createTestChain()).
+		Build()
+	require.NoError(t, err)
+
+	content, err := svc.GetInstructionsTemplate(reg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "has no instructions template specified")
+	require.Contains(t, err.Error(), "test-key")
+	require.Empty(t, content)
+}
+
+func TestGetInstructionsTemplate_ErrorWhenNotFound(t *testing.T) {
 	testFS := createTestFS()
 	emptyWorkflowFS := fstest.MapFS{}
 	svc, err := NewRegistryService(testFS, emptyWorkflowFS)
 	require.NoError(t, err)
 
-	content, err := svc.GetEpicDrivenTemplate()
+	reg, err := registry.NewBuilder("test-ns").
+		Key("test-key").
+		Version("v1").
+		Name("Test").
+		Instructions("nonexistent.md").
+		SetChain(createTestChain()).
+		Build()
+	require.NoError(t, err)
+
+	content, err := svc.GetInstructionsTemplate(reg)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "read epic_driven template")
+	require.Contains(t, err.Error(), "read instructions template")
+	require.Contains(t, err.Error(), "nonexistent.md")
 	require.Empty(t, content)
-}
-
-func TestGetEpicDrivenTemplate_ContainsExpectedSections(t *testing.T) {
-	testFS := createTestFS()
-	workflowFS := createWorkflowTemplatesFS()
-	svc, err := NewRegistryService(testFS, workflowFS)
-	require.NoError(t, err)
-
-	content, err := svc.GetEpicDrivenTemplate()
-	require.NoError(t, err)
-
-	// Verify key sections exist in the template
-	expectedSections := []string{
-		"Epic-Driven Workflow",
-		"Read the Epic",
-		"MCP Tools Available",
-		"signal_workflow_complete",
-		"Key Principles",
-	}
-
-	for _, section := range expectedSections {
-		require.Contains(t, content, section, "Expected template to contain %q", section)
-	}
 }
