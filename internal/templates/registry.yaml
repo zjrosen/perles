@@ -80,7 +80,7 @@ registry:
       - key: "clarification-review"
         name: "Clarification Review"
         template: "v1-human-review.md"
-        assignee: "worker-1"
+        assignee: "human"
         inputs:
           - "research-proposal.md"
         after:

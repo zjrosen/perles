@@ -156,6 +156,11 @@ type WorkflowSpec struct {
 	// Labels are arbitrary key-value pairs for filtering and organization.
 	Labels map[string]string
 
+	// EpicID is the beads epic ID associated with this workflow.
+	// This links the workflow to a tracking epic in the beads issue tracker.
+	// Optional - may be empty for workflows not associated with an epic.
+	EpicID string
+
 	// WorktreeEnabled indicates whether to create a git worktree for this workflow.
 	// When enabled, the workflow runs in an isolated worktree directory.
 	WorktreeEnabled bool
@@ -193,6 +198,7 @@ type WorkflowInstance struct {
 	// Configuration
 	WorkDir     string // Working directory for the workflow
 	InitialGoal string // Initial prompt/goal for the coordinator
+	EpicID      string // Beads epic ID associated with this workflow (optional)
 
 	// Worktree configuration (from WorkflowSpec)
 	WorktreeEnabled    bool   // Whether worktree was requested
@@ -256,6 +262,7 @@ func NewWorkflowInstance(spec *WorkflowSpec) (*WorkflowInstance, error) {
 		Name:        name,
 		WorkDir:     spec.WorkDir,
 		InitialGoal: spec.InitialGoal,
+		EpicID:      spec.EpicID,
 		// Worktree configuration from spec
 		WorktreeEnabled:    spec.WorktreeEnabled,
 		WorktreeBaseBranch: spec.WorktreeBaseBranch,

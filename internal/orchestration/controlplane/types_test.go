@@ -579,3 +579,70 @@ func TestNewWorkflowInstance_PreservesWorktreeDisabled(t *testing.T) {
 	require.Empty(t, inst.WorktreePath)
 	require.Empty(t, inst.WorktreeBranch)
 }
+
+// === WorkflowSpec EpicID Tests ===
+
+func TestWorkflowSpec_EpicIDField(t *testing.T) {
+	spec := &WorkflowSpec{
+		TemplateID:  "cook.md",
+		InitialGoal: "Implement feature X",
+		Name:        "Feature X",
+		EpicID:      "epic-123",
+	}
+
+	// Verify field is stored correctly
+	require.Equal(t, "epic-123", spec.EpicID)
+
+	// Verify spec with EpicID still validates
+	err := spec.Validate()
+	require.NoError(t, err)
+}
+
+func TestWorkflowSpec_EpicIDEmptyIsValid(t *testing.T) {
+	spec := &WorkflowSpec{
+		TemplateID:  "cook.md",
+		InitialGoal: "Implement feature X",
+		// EpicID intentionally left empty for backwards compatibility
+	}
+
+	// Verify empty EpicID is valid
+	require.Empty(t, spec.EpicID)
+
+	// Verify spec without EpicID still validates
+	err := spec.Validate()
+	require.NoError(t, err)
+}
+
+// === NewWorkflowInstance EpicID Preservation Tests ===
+
+func TestNewWorkflowInstance_PreservesEpicID(t *testing.T) {
+	spec := &WorkflowSpec{
+		TemplateID:  "cook.md",
+		InitialGoal: "Implement feature X",
+		EpicID:      "perles-123",
+	}
+
+	inst, err := NewWorkflowInstance(spec)
+
+	require.NoError(t, err)
+	require.NotNil(t, inst)
+
+	// Verify EpicID is copied from spec
+	require.Equal(t, "perles-123", inst.EpicID)
+}
+
+func TestNewWorkflowInstance_EmptyEpicIDIsValid(t *testing.T) {
+	spec := &WorkflowSpec{
+		TemplateID:  "cook.md",
+		InitialGoal: "Implement feature X",
+		// EpicID intentionally left empty for backwards compatibility
+	}
+
+	inst, err := NewWorkflowInstance(spec)
+
+	require.NoError(t, err)
+	require.NotNil(t, inst)
+
+	// Verify empty EpicID is preserved (backwards compatibility)
+	require.Empty(t, inst.EpicID)
+}

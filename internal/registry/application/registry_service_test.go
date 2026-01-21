@@ -129,9 +129,19 @@ func createRegistryServiceWithFS(fsys fstest.MapFS) (*RegistryService, error) {
 	}
 
 	return &RegistryService{
-		registry:   reg,
-		templateFS: fs.ReadFileFS(fsys),
+		registry:            reg,
+		templateFS:          fs.ReadFileFS(fsys),
+		workflowTemplatesFS: nil, // Tests that don't need GetEpicDrivenTemplate can use nil
 	}, nil
+}
+
+// createWorkflowTemplatesFS creates a mock workflow templates FS with epic_driven.md
+func createWorkflowTemplatesFS() fstest.MapFS {
+	return fstest.MapFS{
+		"epic_driven.md": &fstest.MapFile{
+			Data: []byte("# Epic-Driven Workflow\n\nYou are the Coordinator.\n\n## Read the Epic\n\n## MCP Tools Available\n\n## signal_workflow_complete\n\n## Key Principles"),
+		},
+	}
 }
 
 func TestNewRegistryService(t *testing.T) {
@@ -561,5 +571,65 @@ func TestRenderTemplate_IdentifierErrors(t *testing.T) {
 			require.Error(t, err)
 			require.Contains(t, err.Error(), tt.wantErr)
 		})
+	}
+}
+
+// === GetEpicDrivenTemplate tests ===
+
+func TestGetEpicDrivenTemplate_ReturnsContent(t *testing.T) {
+	testFS := createTestFS()
+	workflowFS := createWorkflowTemplatesFS()
+	svc, err := NewRegistryService(testFS, workflowFS)
+	require.NoError(t, err)
+
+	content, err := svc.GetEpicDrivenTemplate()
+	require.NoError(t, err)
+	require.NotEmpty(t, content)
+	require.Contains(t, content, "Epic-Driven Workflow")
+}
+
+func TestGetEpicDrivenTemplate_ErrorWhenNilFS(t *testing.T) {
+	testFS := createTestFS()
+	svc, err := NewRegistryService(testFS, nil)
+	require.NoError(t, err)
+
+	content, err := svc.GetEpicDrivenTemplate()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "workflow templates FS not configured")
+	require.Empty(t, content)
+}
+
+func TestGetEpicDrivenTemplate_ErrorWhenNotFound(t *testing.T) {
+	testFS := createTestFS()
+	emptyWorkflowFS := fstest.MapFS{}
+	svc, err := NewRegistryService(testFS, emptyWorkflowFS)
+	require.NoError(t, err)
+
+	content, err := svc.GetEpicDrivenTemplate()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "read epic_driven template")
+	require.Empty(t, content)
+}
+
+func TestGetEpicDrivenTemplate_ContainsExpectedSections(t *testing.T) {
+	testFS := createTestFS()
+	workflowFS := createWorkflowTemplatesFS()
+	svc, err := NewRegistryService(testFS, workflowFS)
+	require.NoError(t, err)
+
+	content, err := svc.GetEpicDrivenTemplate()
+	require.NoError(t, err)
+
+	// Verify key sections exist in the template
+	expectedSections := []string{
+		"Epic-Driven Workflow",
+		"Read the Epic",
+		"MCP Tools Available",
+		"signal_workflow_complete",
+		"Key Principles",
+	}
+
+	for _, section := range expectedSections {
+		require.Contains(t, content, section, "Expected template to contain %q", section)
 	}
 }

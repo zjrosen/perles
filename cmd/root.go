@@ -18,6 +18,7 @@ import (
 	"github.com/zjrosen/perles/internal/cachemanager"
 	"github.com/zjrosen/perles/internal/config"
 	"github.com/zjrosen/perles/internal/log"
+	"github.com/zjrosen/perles/internal/orchestration/workflow"
 	"github.com/zjrosen/perles/internal/paths"
 	appreg "github.com/zjrosen/perles/internal/registry/application"
 	"github.com/zjrosen/perles/internal/templates"
@@ -119,9 +120,16 @@ func initConfig() {
 }
 
 func initServices() {
-	// Initialize registry service with embedded registry templates
-	var err error
-	registryService, err = appreg.NewRegistryService(templates.RegistryFS())
+	// Initialize registry service with both template filesystems:
+	// - templates.RegistryFS() contains registry.yaml and spec workflow templates
+	// - workflow.BuiltinTemplatesSubFS() contains epic_driven.md and orchestration templates
+	workflowTemplatesFS, err := workflow.BuiltinTemplatesSubFS()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error loading workflow templates:", err)
+		os.Exit(1)
+	}
+
+	registryService, err = appreg.NewRegistryService(templates.RegistryFS(), workflowTemplatesFS)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error initializing registry service:", err)
 		os.Exit(1)
@@ -235,6 +243,7 @@ func runApp(cmd *cobra.Command, args []string) error {
 		configFilePath,
 		workDir,
 		debug,
+		registryService,
 	)
 	p := tea.NewProgram(
 		&model,

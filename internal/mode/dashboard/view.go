@@ -162,6 +162,23 @@ func (m Model) createWorkflowTableConfig() table.TableConfig {
 					return m.getStartedDisplay(r.Workflow)
 				},
 			},
+			{
+				Key:      "epicid",
+				Header:   "EpicID",
+				MinWidth: 8,
+				Type:     table.ColumnTypeText,
+				Render: func(row any, _ string, w int, _ bool) string {
+					r := row.(WorkflowTableRow)
+					epicID := r.Workflow.EpicID
+					if epicID == "" {
+						return "-"
+					}
+					if lipgloss.Width(epicID) > w {
+						return styles.TruncateString(epicID, w)
+					}
+					return epicID
+				},
+			},
 		},
 		ShowHeader:   true,
 		ShowBorder:   true,

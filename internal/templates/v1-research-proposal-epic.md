@@ -54,25 +54,6 @@ mark_task_complete(task_id="<task-id>", summary="<what was accomplished>")
 
 ## Phase-by-Phase Guide
 
-### Phase 0: Gather User Input (BEFORE ANYTHING ELSE)
-
-**CRITICAL**: Before starting any work, you MUST ask the user what they want to research.
-
-1. **Prompt the user** with a clear question:
-   > "What feature or problem would you like me to research? Please describe the goal, any constraints, and what you hope to achieve."
-
-2. **Wait for their response** - Do NOT proceed until you have:
-   - A clear problem statement or feature description
-   - Understanding of what success looks like
-   - Any specific constraints or requirements
-
-3. **Confirm understanding** by summarizing back:
-   > "Let me confirm: You want to research [summary]. The goal is [goal]. Key constraints are [constraints]. Is this correct?"
-
-4. **Only after user confirms**, proceed to Phase 1.
-
-**Why this matters**: The entire workflow depends on a well-defined research question. Skipping this step leads to unfocused research and proposals that don't address user needs.
-
 ### Phase 1: Setup
 - **You (worker-1)** create the proposal file with problem statement and research questions
 - Define clear research questions for each worker role

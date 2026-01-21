@@ -22,7 +22,7 @@ import (
 	"github.com/zjrosen/perles/internal/orchestration/controlplane"
 	"github.com/zjrosen/perles/internal/orchestration/events"
 	"github.com/zjrosen/perles/internal/orchestration/message"
-	"github.com/zjrosen/perles/internal/orchestration/workflow"
+	appreg "github.com/zjrosen/perles/internal/registry/application"
 	"github.com/zjrosen/perles/internal/ui/modals/help"
 	"github.com/zjrosen/perles/internal/ui/shared/chatrender"
 	"github.com/zjrosen/perles/internal/ui/shared/table"
@@ -43,8 +43,11 @@ type Model struct {
 	// Services contains shared dependencies
 	services mode.Services
 
-	// Workflow template registry
-	registry *workflow.Registry
+	// RegistryService provides template listing, validation, and access to epic_driven.md
+	registryService *appreg.RegistryService
+
+	// WorkflowCreator creates epics and tasks in beads from workflow DAGs
+	workflowCreator *appreg.WorkflowCreator
 
 	// Workflow state
 	workflows       []*controlplane.WorkflowInstance
@@ -91,7 +94,12 @@ type WorkflowTableRow struct {
 type Config struct {
 	ControlPlane controlplane.ControlPlane
 	Services     mode.Services
-	Registry     *workflow.Registry
+	// RegistryService provides template listing, validation, and access to epic_driven.md.
+	// If nil, template listing returns empty options.
+	RegistryService *appreg.RegistryService
+	// WorkflowCreator creates epics and tasks in beads from workflow DAGs.
+	// If nil, epic creation is skipped and workflow is created directly.
+	WorkflowCreator *appreg.WorkflowCreator
 	// GitExecutorFactory creates git executors for worktree operations.
 	// If nil, worktree options are disabled in the new workflow modal.
 	GitExecutorFactory func(path string) appgit.GitExecutor
@@ -107,7 +115,8 @@ func New(cfg Config) Model {
 	m := Model{
 		controlPlane:       cfg.ControlPlane,
 		services:           cfg.Services,
-		registry:           cfg.Registry,
+		registryService:    cfg.RegistryService,
+		workflowCreator:    cfg.WorkflowCreator,
 		workflows:          make([]*controlplane.WorkflowInstance, 0),
 		selectedIndex:      0,
 		workflowList:       NewWorkflowList(),
@@ -635,8 +644,12 @@ func (m Model) openNewWorkflowModal() (mode.Controller, tea.Cmd) {
 	if m.gitExecutorFactory != nil && m.workDir != "" {
 		gitExec = m.gitExecutorFactory(m.workDir)
 	}
-	m.newWorkflowModal = NewNewWorkflowModal(m.registry, m.controlPlane, gitExec).
-		SetSize(m.width, m.height)
+	m.newWorkflowModal = NewNewWorkflowModal(
+		m.registryService,
+		m.controlPlane,
+		gitExec,
+		m.workflowCreator,
+	).SetSize(m.width, m.height)
 	return m, m.newWorkflowModal.Init()
 }
 

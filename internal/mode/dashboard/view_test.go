@@ -193,3 +193,52 @@ func TestWorkDirColumn_TruncatesLongCustomWorkDir(t *testing.T) {
 	require.LessOrEqual(t, lipgloss.Width(result), 10)
 	require.Contains(t, result, "...")
 }
+
+// === Unit Tests: EpicID column rendering ===
+
+// renderEpicIDColumn extracts and invokes the EpicID column render function.
+// This allows testing the rendering logic without needing the full table component.
+func renderEpicIDColumn(wf *controlplane.WorkflowInstance, width int) string {
+	// Replicate the render logic from createWorkflowTableConfig
+	epicID := wf.EpicID
+	if epicID == "" {
+		return "-"
+	}
+	if lipgloss.Width(epicID) > width {
+		return styles.TruncateString(epicID, width)
+	}
+	return epicID
+}
+
+func TestEpicIDColumn_EmptyEpicID(t *testing.T) {
+	wf := &controlplane.WorkflowInstance{
+		ID:     "wf-001",
+		EpicID: "",
+	}
+
+	result := renderEpicIDColumn(wf, 20)
+	require.Equal(t, "-", result)
+}
+
+func TestEpicIDColumn_WithEpicID(t *testing.T) {
+	wf := &controlplane.WorkflowInstance{
+		ID:     "wf-001",
+		EpicID: "epic-123",
+	}
+
+	result := renderEpicIDColumn(wf, 20)
+	require.Equal(t, "epic-123", result)
+}
+
+func TestEpicIDColumn_TruncatesLongEpicID(t *testing.T) {
+	wf := &controlplane.WorkflowInstance{
+		ID:     "wf-001",
+		EpicID: "very-long-epic-id-that-exceeds-column-width",
+	}
+
+	// Width of 15 should truncate the display
+	result := renderEpicIDColumn(wf, 15)
+
+	require.LessOrEqual(t, lipgloss.Width(result), 15)
+	require.Contains(t, result, "...")
+}

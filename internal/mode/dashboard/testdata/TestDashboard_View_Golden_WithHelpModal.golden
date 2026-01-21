@@ -1,6 +1,6 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│#   Status    Name                       WorkDir                    Workers  Tokens   Health   Uptime   Started       │
-│1   RUNNING   Build authentication sy... ·                          2        50.0K    ❤️ 0s    -        -             │
+│#   Status    Name              WorkDir           Workers  Tokens   Health   Uptime   Started        EpicID           │
+│1   RUNNING   Build authenti... ·                 2        50.0K    ❤️ 0s    -        -              -                │
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │

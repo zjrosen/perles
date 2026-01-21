@@ -2,14 +2,16 @@ package dashboard
 
 import (
 	"testing"
+	"testing/fstest"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/exp/teatest"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/zjrosen/perles/internal/mode"
 	"github.com/zjrosen/perles/internal/orchestration/controlplane"
-	"github.com/zjrosen/perles/internal/orchestration/workflow"
+	appreg "github.com/zjrosen/perles/internal/registry/application"
 )
 
 // testNow is a fixed reference time for golden tests to ensure reproducible timestamps.
@@ -215,7 +217,48 @@ func TestDashboard_View_Golden_LargeTokenCounts(t *testing.T) {
 	teatest.RequireEqualOutput(t, []byte(view))
 }
 
-// createGoldenTestModelWithRegistry creates a Model with mocked dependencies and a registry.
+// createGoldenTestRegistryFS creates a MapFS for golden testing with a valid registry.yaml
+func createGoldenTestRegistryFS() fstest.MapFS {
+	return fstest.MapFS{
+		"registry.yaml": &fstest.MapFile{
+			Data: []byte(`
+registry:
+  - namespace: "spec-workflow"
+    key: "quick-plan"
+    version: "v1"
+    name: "Quick Plan"
+    description: "Fast planning workflow for rapid iteration"
+    nodes:
+      - key: "plan"
+        name: "Plan"
+        template: "v1-plan.md"
+  - namespace: "spec-workflow"
+    key: "cook"
+    version: "v1"
+    name: "Cook"
+    description: "Full implementation workflow with review"
+    nodes:
+      - key: "cook"
+        name: "Cook"
+        template: "v1-cook.md"
+  - namespace: "spec-workflow"
+    key: "research"
+    version: "v1"
+    name: "Research"
+    description: "Research and task discovery workflow"
+    nodes:
+      - key: "research"
+        name: "Research"
+        template: "v1-research.md"
+`),
+		},
+		"v1-plan.md":     &fstest.MapFile{Data: []byte("# Plan Template")},
+		"v1-cook.md":     &fstest.MapFile{Data: []byte("# Cook Template")},
+		"v1-research.md": &fstest.MapFile{Data: []byte("# Research Template")},
+	}
+}
+
+// createGoldenTestModelWithRegistry creates a Model with mocked dependencies and a domain registry.
 func createGoldenTestModelWithRegistry(t *testing.T, workflows []*controlplane.WorkflowInstance) Model {
 	t.Helper()
 	mockCP := newMockControlPlane()
@@ -228,32 +271,16 @@ func createGoldenTestModelWithRegistry(t *testing.T, workflows []*controlplane.W
 		LastHeartbeatAt: testNow,
 		LastProgressAt:  testNow,
 	}, true).Maybe()
-	registry := workflow.NewRegistry()
-	registry.Add(workflow.Workflow{
-		ID:          "quick-plan",
-		Name:        "Quick Plan",
-		Description: "Fast planning workflow for rapid iteration",
-		Category:    "Planning",
-		TargetMode:  workflow.TargetOrchestration,
-	})
-	registry.Add(workflow.Workflow{
-		ID:          "cook",
-		Name:        "Cook",
-		Description: "Full implementation workflow with review",
-		Category:    "Implementation",
-		TargetMode:  workflow.TargetOrchestration,
-	})
-	registry.Add(workflow.Workflow{
-		ID:          "research",
-		Name:        "Research",
-		Description: "Research and task discovery workflow",
-		Category:    "Research",
-		TargetMode:  workflow.TargetOrchestration,
-	})
+
+	registryFS := createGoldenTestRegistryFS()
+	workflowFS := createTestWorkflowTemplatesFS()
+	registryService, err := appreg.NewRegistryService(registryFS, workflowFS)
+	require.NoError(t, err)
+
 	cfg := Config{
-		ControlPlane: mockCP,
-		Services:     mode.Services{},
-		Registry:     registry,
+		ControlPlane:    mockCP,
+		Services:        mode.Services{},
+		RegistryService: registryService,
 	}
 	m := New(cfg)
 	m.workflows = workflows
@@ -514,6 +541,67 @@ func TestDashboard_View_Golden_WithWorkDirColumn(t *testing.T) {
 			1, 25000,
 			"", // Empty = current directory
 			"",
+		),
+	}
+	m := createGoldenTestModel(t, workflows)
+	m.width = 120
+	m.height = 20
+	view := m.View()
+	teatest.RequireEqualOutput(t, []byte(view))
+}
+
+// createTestWorkflowWithEpicID creates a workflow with EpicID field set.
+func createTestWorkflowWithEpicID(
+	id controlplane.WorkflowID,
+	name string,
+	state controlplane.WorkflowState,
+	activeWorkers int,
+	tokensUsed int64,
+	epicID string,
+) *controlplane.WorkflowInstance {
+	wf := &controlplane.WorkflowInstance{
+		ID:            id,
+		Name:          name,
+		State:         state,
+		TemplateID:    "test-template",
+		CreatedAt:     testNow,
+		UpdatedAt:     testNow,
+		ActiveWorkers: activeWorkers,
+		TokensUsed:    tokensUsed,
+		EpicID:        epicID,
+	}
+	if wf.IsActive() {
+		wf.LastHeartbeatAt = testNow
+	}
+	return wf
+}
+
+func TestDashboard_View_Golden_WithEpicIDColumn(t *testing.T) {
+	// Test with different EpicID configurations:
+	// 1. Workflow with EpicID set
+	// 2. Workflow with no EpicID (shows dash)
+	// 3. Workflow with different EpicID
+	workflows := []*controlplane.WorkflowInstance{
+		createTestWorkflowWithEpicID(
+			"wf-001",
+			"Epic-linked workflow",
+			controlplane.WorkflowRunning,
+			2, 50000,
+			"perles-abc.1",
+		),
+		createTestWorkflowWithEpicID(
+			"wf-002",
+			"Standalone workflow",
+			controlplane.WorkflowPending,
+			0, 0,
+			"", // No epic ID
+		),
+		createTestWorkflowWithEpicID(
+			"wf-003",
+			"Another epic workflow",
+			controlplane.WorkflowRunning,
+			1, 25000,
+			"epic-xyz",
 		),
 	}
 	m := createGoldenTestModel(t, workflows)

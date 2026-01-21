@@ -29,12 +29,15 @@ type TemplateContext struct {
 
 // RegistryService handles template registry operations
 type RegistryService struct {
-	registry   *registry.Registry
-	templateFS fs.FS
+	registry            *registry.Registry
+	templateFS          fs.FS // Registry templates (from internal/templates)
+	workflowTemplatesFS fs.FS // Workflow templates (from internal/orchestration/workflow/templates)
 }
 
-// NewRegistryService creates a new registry service with default registrations
-func NewRegistryService(templateFS fs.FS) (*RegistryService, error) {
+// NewRegistryService creates a new registry service with default registrations.
+// templateFS contains the registry.yaml and spec workflow templates.
+// workflowTemplatesFS contains epic_driven.md and other orchestration templates.
+func NewRegistryService(templateFS, workflowTemplatesFS fs.FS) (*RegistryService, error) {
 	reg := registry.NewRegistry()
 
 	// Load all registrations from YAML
@@ -48,8 +51,9 @@ func NewRegistryService(templateFS fs.FS) (*RegistryService, error) {
 	}
 
 	return &RegistryService{
-		registry:   reg,
-		templateFS: templateFS,
+		registry:            reg,
+		templateFS:          templateFS,
+		workflowTemplatesFS: workflowTemplatesFS,
 	}, nil
 }
 
@@ -195,4 +199,20 @@ func buildArtifactPaths(artifacts []*registry.Artifact, slug string) map[string]
 		paths[key] = fmt.Sprintf(".spec/%s/%s", slug, a.Filename())
 	}
 	return paths
+}
+
+// GetEpicDrivenTemplate returns the generic coordinator instructions template.
+// This is the base prompt for all epic-driven workflows, containing instructions
+// for how the coordinator should use MCP tools and follow epic-based workflows.
+//
+// The template is loaded from "epic_driven.md" in the workflow templates filesystem.
+func (s *RegistryService) GetEpicDrivenTemplate() (string, error) {
+	if s.workflowTemplatesFS == nil {
+		return "", fmt.Errorf("read epic_driven template: workflow templates FS not configured")
+	}
+	content, err := fs.ReadFile(s.workflowTemplatesFS, "epic_driven.md")
+	if err != nil {
+		return "", fmt.Errorf("read epic_driven template: %w", err)
+	}
+	return string(content), nil
 }

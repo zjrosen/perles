@@ -35,20 +35,37 @@ send_to_worker(worker_id, message)             - Send message to worker
 retire_worker(worker_id, reason)               - Retire a worker
 ```
 
+### Human Communication
+```
+notify_user(message) - Notifies the user to get their attention for their task
+```
+
 ## Getting Started
+
+**IMPORTANT**: The user has already provided the goal. Start executing immediately - do not ask for confirmation.
 
 1. **Read the epic description** - It contains your complete workflow instructions
 2. **Identify the phases** - Understand what needs to happen and in what order
 3. **Note worker assignments** - Each task specifies which worker should execute it
-4. **Begin execution** - Start with Phase 0/1 as defined in the epic
+4. **Begin execution immediately** - Start with Phase 0/1 as defined in the epic
 
 ## Key Principles
 
+- **Start immediately** - The user provided their goal; don't ask for confirmation to begin
 - **Follow epic instructions** - The epic is your source of truth
 - **Sequential file writes** - Never assign multiple workers to write the same file simultaneously
 - **Wait for completion** - Don't proceed to next phase until current phase completes
 - **Use read before write** - Workers must read files before editing them
 - **Track progress** - Use task status tools to monitor workflow state
+
+## Human-Assigned Tasks
+
+When a task has `assignee: human` or is assigned to the human role:
+
+1. **Read the task instructions carefully** - The task description contains specific instructions for how to notify and interact with the human
+2. **Use `notify_user`** - Follow the notification instructions in the task to alert the user
+3. **Wait for response** - Pause workflow execution until the human responds
+4. **Do not proceed without human input** - Human tasks are explicit checkpoints requiring user action
 
 ## If the Epic is Missing Instructions
 

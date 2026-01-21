@@ -4,22 +4,23 @@ package dashboard
 import (
 	"context"
 	"errors"
-	"strconv"
+	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	appgit "github.com/zjrosen/perles/internal/git/application"
 	"github.com/zjrosen/perles/internal/orchestration/controlplane"
-	"github.com/zjrosen/perles/internal/orchestration/workflow"
+	appreg "github.com/zjrosen/perles/internal/registry/application"
 	"github.com/zjrosen/perles/internal/ui/shared/formmodal"
 )
 
 // NewWorkflowModal holds the state for the new workflow creation modal.
 type NewWorkflowModal struct {
 	form            formmodal.Model
-	registry        *workflow.Registry
+	registryService *appreg.RegistryService // Registry for template listing, validation, and epic_driven.md access
 	controlPlane    controlplane.ControlPlane
 	gitExecutor     appgit.GitExecutor
+	workflowCreator *appreg.WorkflowCreator
 	worktreeEnabled bool // track if worktree options are available
 }
 
@@ -34,15 +35,23 @@ type CancelNewWorkflowMsg struct{}
 
 // NewNewWorkflowModal creates a new workflow creation modal.
 // gitExecutor is optional - if nil or if ListBranches() fails, worktree options are disabled.
-func NewNewWorkflowModal(registry *workflow.Registry, cp controlplane.ControlPlane, gitExecutor appgit.GitExecutor) *NewWorkflowModal {
+// workflowCreator is optional - if nil, epic creation is skipped.
+// registryService is optional - if nil, template listing returns empty options.
+func NewNewWorkflowModal(
+	registryService *appreg.RegistryService,
+	cp controlplane.ControlPlane,
+	gitExecutor appgit.GitExecutor,
+	workflowCreator *appreg.WorkflowCreator,
+) *NewWorkflowModal {
 	m := &NewWorkflowModal{
-		registry:     registry,
-		controlPlane: cp,
-		gitExecutor:  gitExecutor,
+		registryService: registryService,
+		controlPlane:    cp,
+		gitExecutor:     gitExecutor,
+		workflowCreator: workflowCreator,
 	}
 
-	// Build template options from registry
-	templateOptions := buildTemplateOptions(registry)
+	// Build template options from registry service
+	templateOptions := buildTemplateOptions(registryService)
 
 	// Build branch options from git executor (if available)
 	branchOptions, worktreeAvailable := buildBranchOptions(gitExecutor)
@@ -160,27 +169,23 @@ func buildBranchOptions(gitExecutor appgit.GitExecutor) ([]formmodal.ListOption,
 	return options, true
 }
 
-// buildTemplateOptions converts workflow templates to list options.
-func buildTemplateOptions(registry *workflow.Registry) []formmodal.ListOption {
-	if registry == nil {
+// buildTemplateOptions converts domain registry registrations to list options.
+// Uses GetByNamespace("spec-workflow") to get only workflow templates (not language guidelines).
+func buildTemplateOptions(registryService *appreg.RegistryService) []formmodal.ListOption {
+	if registryService == nil {
 		return []formmodal.ListOption{}
 	}
 
-	// Get all orchestration-compatible templates
-	templates := registry.ListByTargetMode(workflow.TargetOrchestration)
+	// Get spec-workflow registrations (workflow templates, not language guidelines)
+	registrations := registryService.GetByNamespace("spec-workflow")
 
-	// If no orchestration-specific templates, fall back to all templates
-	if len(templates) == 0 {
-		templates = registry.List()
-	}
-
-	options := make([]formmodal.ListOption, len(templates))
-	for i, tmpl := range templates {
+	options := make([]formmodal.ListOption, len(registrations))
+	for i, reg := range registrations {
 		options[i] = formmodal.ListOption{
-			Label:    tmpl.Name,
-			Subtext:  tmpl.Description,
-			Value:    tmpl.ID,
-			Selected: i == 0, // Select first template by default
+			Label:    reg.Name(),
+			Subtext:  reg.Description(),
+			Value:    reg.Key(), // Use key for WorkflowCreator.Create()
+			Selected: i == 0,    // Select first template by default
 		}
 	}
 
@@ -190,14 +195,14 @@ func buildTemplateOptions(registry *workflow.Registry) []formmodal.ListOption {
 // validate checks form values before submission.
 func (m *NewWorkflowModal) validate(values map[string]any) error {
 	// Template is required
-	templateID, ok := values["template"].(string)
-	if !ok || templateID == "" {
+	templateKey, ok := values["template"].(string)
+	if !ok || templateKey == "" {
 		return errors.New("template is required")
 	}
 
-	// Verify template exists
-	if m.registry != nil {
-		if _, found := m.registry.Get(templateID); !found {
+	// Verify template exists in domain registry
+	if m.registryService != nil {
+		if _, err := m.registryService.GetByKey("spec-workflow", templateKey); err != nil {
 			return errors.New("selected template not found")
 		}
 	}
@@ -206,22 +211,6 @@ func (m *NewWorkflowModal) validate(values map[string]any) error {
 	goal, ok := values["goal"].(string)
 	if !ok || goal == "" {
 		return errors.New("goal is required")
-	}
-
-	// Validate max_workers if provided (must be positive integer)
-	if maxWorkersStr, ok := values["max_workers"].(string); ok && maxWorkersStr != "" {
-		maxWorkers, err := strconv.Atoi(maxWorkersStr)
-		if err != nil || maxWorkers < 0 {
-			return errors.New("max workers must be a positive number")
-		}
-	}
-
-	// Validate token_budget if provided (must be positive integer)
-	if tokenBudgetStr, ok := values["token_budget"].(string); ok && tokenBudgetStr != "" {
-		tokenBudget, err := strconv.ParseInt(tokenBudgetStr, 10, 64)
-		if err != nil || tokenBudget < 0 {
-			return errors.New("token budget must be a positive number")
-		}
 	}
 
 	// Validate worktree fields if worktree is enabled
@@ -247,17 +236,50 @@ func (m *NewWorkflowModal) validate(values map[string]any) error {
 	return nil
 }
 
+// ErrorMsg is sent when workflow creation fails.
+type ErrorMsg struct {
+	Err error
+}
+
 // onSubmit creates the workflow from form values.
+// If WorkflowCreator is available, it first creates an epic and tasks in beads,
+// then builds the coordinator prompt from epic_driven.md + epic ID + user goal.
 func (m *NewWorkflowModal) onSubmit(values map[string]any) tea.Msg {
 	templateID := values["template"].(string)
 	name := values["name"].(string)
 	goal := values["goal"].(string)
 
+	var epicID string
+	var initialPrompt string
+
+	// If WorkflowCreator is available, create epic + tasks in beads first
+	if m.workflowCreator != nil {
+		// Use name as feature slug, or derive from templateID if empty
+		feature := name
+		if feature == "" {
+			feature = templateID
+		}
+
+		result, err := m.workflowCreator.Create(feature, templateID)
+		if err != nil {
+			return ErrorMsg{Err: fmt.Errorf("create epic: %w", err)}
+		}
+
+		epicID = result.Epic.ID
+
+		// Build coordinator prompt: epic_driven.md + epic ID section + user goal
+		initialPrompt = m.buildCoordinatorPrompt(epicID, goal)
+	} else {
+		// No WorkflowCreator, use goal directly as InitialGoal
+		initialPrompt = goal
+	}
+
 	// Build WorkflowSpec
 	spec := controlplane.WorkflowSpec{
 		TemplateID:  templateID,
-		InitialGoal: goal,
+		InitialGoal: initialPrompt,
 		Name:        name,
+		EpicID:      epicID,
 	}
 
 	// Set worktree fields if worktree options are available
@@ -285,6 +307,52 @@ func (m *NewWorkflowModal) onSubmit(values map[string]any) tea.Msg {
 		WorkflowID: workflowID,
 		Name:       spec.Name,
 	}
+}
+
+// buildCoordinatorPrompt assembles the coordinator prompt from:
+// 1. epic_driven.md content (generic coordinator instructions)
+// 2. Epic ID section (so coordinator can read detailed instructions via bd show)
+// 3. User's goal
+func (m *NewWorkflowModal) buildCoordinatorPrompt(epicID, goal string) string {
+	// Load epic_driven.md template if registry service is available
+	var epicDrivenContent string
+	if m.registryService != nil {
+		content, err := m.registryService.GetEpicDrivenTemplate()
+		if err == nil {
+			epicDrivenContent = content
+		}
+		// If error loading template, continue without it
+	}
+
+	// Build the full prompt
+	if epicDrivenContent != "" {
+		return fmt.Sprintf(`%s
+
+---
+
+# Your Epic
+
+Epic ID: %s
+
+Use `+"`bd show %s --json`"+` to read your detailed workflow instructions.
+
+# Your Goal
+
+%s
+`, epicDrivenContent, epicID, epicID, goal)
+	}
+
+	// Fallback if no epic_driven.md available
+	return fmt.Sprintf(`# Your Epic
+
+Epic ID: %s
+
+Use `+"`bd show %s --json`"+` to read your detailed workflow instructions.
+
+# Your Goal
+
+%s
+`, epicID, epicID, goal)
 }
 
 // SetSize sets the modal dimensions.

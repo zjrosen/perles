@@ -30,6 +30,7 @@ import (
 	v2 "github.com/zjrosen/perles/internal/orchestration/v2"
 	"github.com/zjrosen/perles/internal/orchestration/workflow"
 	"github.com/zjrosen/perles/internal/pubsub"
+	appreg "github.com/zjrosen/perles/internal/registry/application"
 	"github.com/zjrosen/perles/internal/sound"
 
 	"github.com/zjrosen/perles/internal/ui/shared/chatpanel"
@@ -91,12 +92,17 @@ type Model struct {
 
 	// Workflow registry (shared between chat panel and orchestration mode)
 	workflowRegistry *workflow.Registry
+
+	// DDD registry service for epic-driven workflows (template listing, validation, epic_driven.md)
+	registryService *appreg.RegistryService
+	workflowCreator *appreg.WorkflowCreator // Creates epics and tasks in beads
 }
 
 // NewWithConfig creates a new application model with the provided configuration.
 // dbPath is the path to the database file for watching changes.
 // configPath is the path to the config file for saving column changes.
 // debugMode enables the log overlay (Ctrl+X toggle).
+// registryService provides template listing, validation, and epic_driven.md access (can be nil).
 func NewWithConfig(
 	client *infrabeads.SQLiteClient,
 	cfg config.Config,
@@ -106,6 +112,7 @@ func NewWithConfig(
 	configPath,
 	workDir string,
 	debugMode bool,
+	registryService *appreg.RegistryService,
 ) Model {
 	// Initialize file watcher if auto-refresh is enabled
 	var (
@@ -140,6 +147,8 @@ func NewWithConfig(
 
 	flagService := flags.New(cfg.Flags)
 
+	beadsExec := infrabeads.NewBDExecutor(workDir, cfg.ResolvedBeadsDir)
+
 	// Create shared services
 	services := mode.Services{
 		Client:        client,
@@ -148,7 +157,7 @@ func NewWithConfig(
 		DBPath:        dbPath,
 		WorkDir:       workDir,
 		Executor:      bql.NewExecutor(client.DB(), bqlCache, depGraphCache),
-		BeadsExecutor: infrabeads.NewBDExecutor(workDir, cfg.ResolvedBeadsDir),
+		BeadsExecutor: beadsExec,
 		Clipboard:     shared.SystemClipboard{},
 		Clock:         shared.RealClock{},
 		Flags:         flagService,
@@ -183,6 +192,9 @@ func NewWithConfig(
 		// Continue without workflows - not a fatal error
 	}
 
+	// Create WorkflowCreator using the passed-in registryService
+	workflowCreator := appreg.NewWorkflowCreator(registryService, beadsExec)
+
 	// Create chat panel with config from services
 	// Panel defaults to hidden (visible = false)
 	chatPanelCfg := chatpanel.Config{
@@ -212,6 +224,8 @@ func NewWithConfig(
 		watcherCancel:    watcherCancel,
 		watcherListener:  watcherListener,
 		workflowRegistry: workflowRegistry,
+		registryService:  registryService,
+		workflowCreator:  workflowCreator,
 		quitModal: quitmodal.New(quitmodal.Config{
 			Title:   "Exit Application?",
 			Message: "Are you sure you want to quit?",
@@ -500,7 +514,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dashboard = dashboard.New(dashboard.Config{
 			ControlPlane:       m.controlPlane,
 			Services:           m.services,
-			Registry:           m.workflowRegistry,
+			RegistryService:    m.registryService,
+			WorkflowCreator:    m.workflowCreator,
 			GitExecutorFactory: m.services.GitExecutorFactory,
 			WorkDir:            m.services.WorkDir,
 		}).SetSize(m.width, m.height).(dashboard.Model)

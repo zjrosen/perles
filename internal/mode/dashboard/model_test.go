@@ -1484,12 +1484,12 @@ func TestModel_PassesGitExecutorToNewWorkflowModal(t *testing.T) {
 		return mockGitExecutor
 	}
 
-	registry := createTestRegistry(t)
+	registryService := createTestRegistryService(t)
 
 	cfg := Config{
 		ControlPlane:       mockCP,
 		Services:           mode.Services{},
-		Registry:           registry,
+		RegistryService:    registryService,
 		GitExecutorFactory: factory,
 		WorkDir:            "/test/workdir",
 	}
@@ -1517,13 +1517,13 @@ func TestModel_WorksNormallyWithNilGitExecutorFactory(t *testing.T) {
 	close(eventCh)
 	mockCP.On("Subscribe", mock.Anything).Return((<-chan controlplane.ControlPlaneEvent)(eventCh), func() {}).Maybe()
 
-	registry := createTestRegistry(t)
+	registryService := createTestRegistryService(t)
 
 	// Create config without GitExecutorFactory
 	cfg := Config{
-		ControlPlane: mockCP,
-		Services:     mode.Services{},
-		Registry:     registry,
+		ControlPlane:    mockCP,
+		Services:        mode.Services{},
+		RegistryService: registryService,
 		// GitExecutorFactory is nil
 		// WorkDir is empty
 	}

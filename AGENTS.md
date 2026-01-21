@@ -359,36 +359,31 @@ The codebase uses a hybrid architecture where most code follows the existing fla
 - Portable from sesh codebase where DDD patterns originated
 
 **Layer Responsibilities:**
-- `internal/domain/registry/`: Pure Go with stdlib-only imports. Contains Registration, Chain, Node types and domain algorithms. No file I/O.
-- `internal/application/registry/`: Service facade bridging domain to infrastructure. Handles YAML loading, template rendering, embed.FS access.
+- `internal/registry/domain/`: Pure Go with stdlib-only imports. Contains Registration, Chain, Node types and domain algorithms. No file I/O.
+- `internal/registry/application/`: Service facade bridging domain to infrastructure. Handles YAML loading, template rendering, embed.FS access, and GetEpicDrivenTemplate().
 
 **Two Registry Systems:**
 Perles has two distinct registry systems:
-1. `internal/domain/registry.Registry` - DDD registration registry (type+key+version lookups, labels, DAG chains)
+1. `internal/registry/domain.Registry` - DDD registration registry (type+key+version lookups, labels, DAG chains)
 2. `internal/orchestration/workflow.Registry` - Workflow template registry (ID-based lookups, categories, sources)
 
 **Import Aliasing Convention:**
-When importing both packages, use aliasing to disambiguate:
+When importing the registry application layer:
 
 ```go
 import (
-    domainreg "github.com/zjrosen/perles/internal/domain/registry"
+    appreg "github.com/zjrosen/perles/internal/registry/application"
     "github.com/zjrosen/perles/internal/orchestration/workflow"
+    "github.com/zjrosen/perles/internal/templates"
 )
 
-// Use domainreg.Registry for registration lookups
+// RegistryService requires two filesystems:
+// - templates.RegistryFS() for registry.yaml and spec workflow templates
+// - workflow.BuiltinTemplatesSubFS() for epic_driven.md and orchestration templates
+workflowFS, _ := workflow.BuiltinTemplatesSubFS()
+svc, err := appreg.NewRegistryService(templates.RegistryFS(), workflowFS)
+
 // Use workflow.Registry for workflow template management
-```
-
-Or when using the application layer:
-
-```go
-import (
-    appreg "github.com/zjrosen/perles/internal/application/registry"
-)
-
-// RegistryService handles template operations
-svc, err := appreg.NewRegistryService(templateFS)
 ```
 
 **Key Interfaces:**
