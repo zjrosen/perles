@@ -533,3 +533,185 @@ func TestBuildNodeOptions(t *testing.T) {
 		})
 	}
 }
+
+func TestYAMLLoader_ParsesInstructionsField(t *testing.T) {
+	yamlContent := `
+registry:
+  - namespace: "spec-workflow"
+    key: "with-instructions"
+    version: "v1"
+    name: "Workflow With Instructions"
+    description: "A workflow with instructions"
+    instructions: "coordinator_template.md"
+    nodes:
+      - key: "step1"
+        name: "Step 1"
+        template: "step1.md"
+        assignee: "worker-1"
+`
+	fs := fstest.MapFS{
+		"registry.yaml": &fstest.MapFile{
+			Data: []byte(yamlContent),
+		},
+	}
+
+	registrations, err := LoadRegistryFromYAML(fs)
+	require.NoError(t, err, "LoadRegistryFromYAML() unexpected error")
+	require.Len(t, registrations, 1, "expected 1 registration")
+
+	reg := registrations[0]
+	require.Equal(t, "coordinator_template.md", reg.Instructions(), "Instructions() should return parsed value")
+}
+
+func TestYAMLLoader_EmptyInstructions_AllowedForNonWorkflow(t *testing.T) {
+	// Non-orchestration workflow (no assignee fields) should not require instructions
+	yamlContent := `
+registry:
+  - namespace: "spec-workflow"
+    key: "no-assignee"
+    version: "v1"
+    name: "Non-Orchestration Workflow"
+    description: "A workflow without assignee"
+    nodes:
+      - key: "step1"
+        name: "Step 1"
+        template: "step1.md"
+`
+	fs := fstest.MapFS{
+		"registry.yaml": &fstest.MapFile{
+			Data: []byte(yamlContent),
+		},
+	}
+
+	registrations, err := LoadRegistryFromYAML(fs)
+	require.NoError(t, err, "LoadRegistryFromYAML() should not error for non-orchestration workflows without instructions")
+	require.Len(t, registrations, 1, "expected 1 registration")
+	require.Empty(t, registrations[0].Instructions(), "Instructions() should be empty")
+}
+
+func TestYAMLLoader_EmptyInstructions_ErrorForOrchestrationWorkflow(t *testing.T) {
+	// Orchestration workflow (has assignee) without instructions should fail
+	yamlContent := `
+registry:
+  - namespace: "spec-workflow"
+    key: "missing-instructions"
+    version: "v1"
+    name: "Orchestration Without Instructions"
+    description: "An orchestration workflow missing instructions"
+    nodes:
+      - key: "step1"
+        name: "Step 1"
+        template: "step1.md"
+        assignee: "worker-1"
+`
+	fs := fstest.MapFS{
+		"registry.yaml": &fstest.MapFile{
+			Data: []byte(yamlContent),
+		},
+	}
+
+	_, err := LoadRegistryFromYAML(fs)
+	require.Error(t, err, "LoadRegistryFromYAML() should error for orchestration workflows without instructions")
+	require.Contains(t, err.Error(), "requires 'instructions' field",
+		"error should mention 'instructions' field requirement")
+	require.Contains(t, err.Error(), "spec-workflow/missing-instructions",
+		"error should include namespace/key for context")
+}
+
+func TestIsOrchestrationWorkflow_TrueWhenAssigneePresent(t *testing.T) {
+	tests := []struct {
+		name string
+		def  WorkflowDef
+	}{
+		{
+			name: "single node with assignee",
+			def: WorkflowDef{
+				Nodes: []NodeDef{
+					{Key: "step1", Assignee: "worker-1"},
+				},
+			},
+		},
+		{
+			name: "multiple nodes, first has assignee",
+			def: WorkflowDef{
+				Nodes: []NodeDef{
+					{Key: "step1", Assignee: "worker-1"},
+					{Key: "step2"},
+				},
+			},
+		},
+		{
+			name: "multiple nodes, last has assignee",
+			def: WorkflowDef{
+				Nodes: []NodeDef{
+					{Key: "step1"},
+					{Key: "step2", Assignee: "worker-2"},
+				},
+			},
+		},
+		{
+			name: "multiple nodes, all have assignees",
+			def: WorkflowDef{
+				Nodes: []NodeDef{
+					{Key: "step1", Assignee: "worker-1"},
+					{Key: "step2", Assignee: "worker-2"},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isOrchestrationWorkflow(&tt.def)
+			require.True(t, result, "isOrchestrationWorkflow() should return true when any node has assignee")
+		})
+	}
+}
+
+func TestIsOrchestrationWorkflow_FalseWhenNoAssignee(t *testing.T) {
+	tests := []struct {
+		name string
+		def  WorkflowDef
+	}{
+		{
+			name: "empty nodes array",
+			def: WorkflowDef{
+				Nodes: []NodeDef{},
+			},
+		},
+		{
+			name: "single node without assignee",
+			def: WorkflowDef{
+				Nodes: []NodeDef{
+					{Key: "step1"},
+				},
+			},
+		},
+		{
+			name: "multiple nodes, none have assignee",
+			def: WorkflowDef{
+				Nodes: []NodeDef{
+					{Key: "step1"},
+					{Key: "step2"},
+					{Key: "step3"},
+				},
+			},
+		},
+		{
+			name: "nodes with other fields but no assignee",
+			def: WorkflowDef{
+				Nodes: []NodeDef{
+					{Key: "step1", Name: "Step 1", Template: "step1.md", Inputs: []string{"input.md"}},
+					{Key: "step2", Name: "Step 2", Template: "step2.md", Outputs: []string{"output.md"}},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isOrchestrationWorkflow(&tt.def)
+			require.False(t, result, "isOrchestrationWorkflow() should return false when no node has assignee")
+		})
+	}
+}

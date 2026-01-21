@@ -16,14 +16,15 @@ type RegistryFile struct {
 
 // WorkflowDef defines a single workflow registration in YAML
 type WorkflowDef struct {
-	Namespace   string    `yaml:"namespace"`   // e.g., "spec-workflow", "lang-guidelines"
-	Key         string    `yaml:"key"`         // e.g., "planning-standard"
-	Version     string    `yaml:"version"`     // e.g., "v1"
-	Name        string    `yaml:"name"`        // Human-readable name
-	Description string    `yaml:"description"` // Description for AI agents
-	Template    string    `yaml:"template"`    // Template filename for epic description
-	Labels      []string  `yaml:"labels"`      // Optional labels for filtering
-	Nodes       []NodeDef `yaml:"nodes"`       // Workflow nodes (chain)
+	Namespace    string    `yaml:"namespace"`    // e.g., "spec-workflow", "lang-guidelines"
+	Key          string    `yaml:"key"`          // e.g., "planning-standard"
+	Version      string    `yaml:"version"`      // e.g., "v1"
+	Name         string    `yaml:"name"`         // Human-readable name
+	Description  string    `yaml:"description"`  // Description for AI agents
+	Template     string    `yaml:"template"`     // Template filename for epic description
+	Instructions string    `yaml:"instructions"` // Template filename for coordinator instructions (required for orchestration workflows)
+	Labels       []string  `yaml:"labels"`       // Optional labels for filtering
+	Nodes        []NodeDef `yaml:"nodes"`        // Workflow nodes (chain)
 }
 
 // NodeDef defines a single node in a workflow chain
@@ -64,6 +65,11 @@ func LoadRegistryFromYAML(fsys fs.FS) ([]*registry.Registration, error) {
 
 // buildRegistrationFromDef converts a WorkflowDef into a registry.Registration.
 func buildRegistrationFromDef(def WorkflowDef) (*registry.Registration, error) {
+	// Validate instructions field for orchestration workflows
+	if isOrchestrationWorkflow(&def) && def.Instructions == "" {
+		return nil, fmt.Errorf("registration %s/%s requires 'instructions' field (orchestration workflows must specify coordinator instructions template)", def.Namespace, def.Key)
+	}
+
 	// Build the chain from node definitions
 	chainBuilder := registry.NewChain()
 	for _, node := range def.Nodes {
@@ -83,6 +89,7 @@ func buildRegistrationFromDef(def WorkflowDef) (*registry.Registration, error) {
 		Name(def.Name).
 		Description(def.Description).
 		Template(def.Template).
+		Instructions(def.Instructions).
 		SetChain(chain)
 
 	if len(def.Labels) > 0 {
@@ -90,6 +97,17 @@ func buildRegistrationFromDef(def WorkflowDef) (*registry.Registration, error) {
 	}
 
 	return builder.Build()
+}
+
+// isOrchestrationWorkflow checks if the workflow definition is an orchestration workflow.
+// Orchestration workflows have at least one node with an assignee field.
+func isOrchestrationWorkflow(def *WorkflowDef) bool {
+	for _, node := range def.Nodes {
+		if node.Assignee != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // buildNodeOptions converts NodeDef inputs/outputs/after/assignee into NodeOption functions.
