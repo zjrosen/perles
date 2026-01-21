@@ -12,14 +12,15 @@ var (
 
 // Builder provides a fluent API for creating registrations
 type Builder struct {
-	namespace   string
-	key         string
-	version     string
-	name        string
-	description string
-	template    string
-	dag         *Chain
-	labels      []string
+	namespace    string
+	key          string
+	version      string
+	name         string
+	description  string
+	template     string
+	instructions string
+	dag          *Chain
+	labels       []string
 }
 
 // NewBuilder creates a new registration builder
@@ -59,6 +60,12 @@ func (b *Builder) Template(t string) *Builder {
 	return b
 }
 
+// Instructions sets the template filename for coordinator instructions
+func (b *Builder) Instructions(i string) *Builder {
+	b.instructions = i
+	return b
+}
+
 // SetChain sets the workflow chain for the registration.
 func (b *Builder) SetChain(chain *Chain) *Builder {
 	b.dag = chain
@@ -86,5 +93,5 @@ func (b *Builder) Build() (*Registration, error) {
 		return nil, ErrEmptyChain
 	}
 
-	return newRegistration(b.namespace, b.key, b.version, b.name, b.description, b.template, b.dag, b.labels), nil
+	return newRegistration(b.namespace, b.key, b.version, b.name, b.description, b.template, b.instructions, b.dag, b.labels), nil
 }

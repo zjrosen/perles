@@ -13,7 +13,7 @@ func TestRegistration_Getters(t *testing.T) {
 		Build()
 	require.NoError(t, err)
 
-	reg := newRegistration("spec-workflow", "planning-standard", "v1", "Standard Planning Workflow", "Three-phase workflow: Research, Propose, Plan", "", chain, nil)
+	reg := newRegistration("spec-workflow", "planning-standard", "v1", "Standard Planning Workflow", "Three-phase workflow: Research, Propose, Plan", "", "", chain, nil)
 
 	require.Equal(t, "spec-workflow", reg.Namespace())
 	require.Equal(t, "planning-standard", reg.Key())
@@ -30,7 +30,7 @@ func TestRegistration_EmptyFields(t *testing.T) {
 	require.NoError(t, err)
 
 	// Registration allows empty name/description - validation is in builder
-	reg := newRegistration("spec-workflow", "simple", "v1", "", "", "", chain, nil)
+	reg := newRegistration("spec-workflow", "simple", "v1", "", "", "", "", chain, nil)
 
 	require.Equal(t, "spec-workflow", reg.Namespace())
 	require.Equal(t, "simple", reg.Key())
@@ -46,12 +46,26 @@ func TestRegistration_Template(t *testing.T) {
 		Build()
 	require.NoError(t, err)
 
-	reg := newRegistration("spec-workflow", "test", "v1", "Test", "Desc", "v1-epic-template.md", chain, nil)
+	reg := newRegistration("spec-workflow", "test", "v1", "Test", "Desc", "v1-epic-template.md", "", chain, nil)
 	require.Equal(t, "v1-epic-template.md", reg.Template())
 
 	// Empty template
-	regNoTemplate := newRegistration("spec-workflow", "test2", "v1", "Test", "Desc", "", chain, nil)
+	regNoTemplate := newRegistration("spec-workflow", "test2", "v1", "Test", "Desc", "", "", chain, nil)
 	require.Equal(t, "", regNoTemplate.Template())
+}
+
+func TestRegistration_Instructions_ReturnsValue(t *testing.T) {
+	chain, err := NewChain().
+		Node("plan", "Plan", "v1-plan.md").
+		Build()
+	require.NoError(t, err)
+
+	reg := newRegistration("spec-workflow", "test", "v1", "Test", "Desc", "", "epic_driven.md", chain, nil)
+	require.Equal(t, "epic_driven.md", reg.Instructions())
+
+	// Empty instructions is allowed at domain level
+	regNoInstructions := newRegistration("spec-workflow", "test2", "v1", "Test", "Desc", "", "", chain, nil)
+	require.Equal(t, "", regNoInstructions.Instructions())
 }
 
 func TestRegistration_DAGAccess(t *testing.T) {
@@ -62,7 +76,7 @@ func TestRegistration_DAGAccess(t *testing.T) {
 		Build()
 	require.NoError(t, err)
 
-	reg := newRegistration("spec-workflow", "planning-standard", "v1", "Standard", "Description", "", chain, nil)
+	reg := newRegistration("spec-workflow", "planning-standard", "v1", "Standard", "Description", "", "", chain, nil)
 
 	nodes := reg.DAG().Nodes()
 	require.Len(t, nodes, 3)

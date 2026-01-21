@@ -263,3 +263,58 @@ func TestBuilder_Labels_FluentChaining(t *testing.T) {
 	result := builder.Labels("lang:go")
 	require.Same(t, builder, result)
 }
+
+// Instructions Tests
+
+func TestBuilder_Instructions_SetsField(t *testing.T) {
+	chain := testChain(t, "step", "Step", "step.md")
+
+	reg, err := NewBuilder("spec-workflow").
+		Key("key").
+		Version("v1").
+		SetChain(chain).
+		Instructions("epic_driven.md").
+		Build()
+
+	require.NoError(t, err)
+	require.Equal(t, "epic_driven.md", reg.Instructions())
+}
+
+func TestBuilder_Instructions_EmptyAllowed(t *testing.T) {
+	chain := testChain(t, "step", "Step", "step.md")
+
+	// Empty instructions is valid at domain level (validation happens in application layer)
+	reg, err := NewBuilder("spec-workflow").
+		Key("key").
+		Version("v1").
+		SetChain(chain).
+		Instructions("").
+		Build()
+
+	require.NoError(t, err)
+	require.Equal(t, "", reg.Instructions())
+}
+
+func TestBuilder_Instructions_FluentChaining(t *testing.T) {
+	builder := NewBuilder("spec-workflow")
+	result := builder.Instructions("epic_driven.md")
+	require.Same(t, builder, result)
+}
+
+func TestBuilder_Build_IncludesInstructions(t *testing.T) {
+	chain := testChain(t, "step", "Step", "step.md")
+
+	reg, err := NewBuilder("spec-workflow").
+		Key("planning-standard").
+		Version("v1").
+		Name("Standard Planning").
+		Description("A workflow").
+		Template("v1-epic.md").
+		Instructions("epic_driven.md").
+		SetChain(chain).
+		Build()
+
+	require.NoError(t, err)
+	require.Equal(t, "v1-epic.md", reg.Template())
+	require.Equal(t, "epic_driven.md", reg.Instructions())
+}
