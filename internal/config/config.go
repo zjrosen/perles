@@ -653,6 +653,7 @@ func Defaults() Config {
 				"workflow_complete":      {Enabled: false},
 				"orchestration_welcome":  {Enabled: false},
 				"worker_out_of_context":  {Enabled: false},
+				"user_notification":      {Enabled: false},
 			},
 		},
 	}

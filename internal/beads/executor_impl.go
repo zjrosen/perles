@@ -204,3 +204,76 @@ func (e *RealExecutor) AddComment(issueID, author, text string) error {
 	}
 	return nil
 }
+
+// CreateEpic creates a new epic via bd CLI.
+func (e *RealExecutor) CreateEpic(title, description string, labels []string) (CreateResult, error) {
+	start := time.Now()
+	defer func() {
+		log.Debug(log.CatBeads, "CreateEpic completed", "title", title, "duration", time.Since(start))
+	}()
+
+	args := []string{"create", title, "-t", "epic", "-d", description, "--json"}
+	for _, l := range labels {
+		args = append(args, "--label", l)
+	}
+
+	output, err := e.runBeads(args...)
+	if err != nil {
+		log.Error(log.CatBeads, "CreateEpic failed", "title", title, "error", err)
+		return CreateResult{}, err
+	}
+
+	var result CreateResult
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		err = fmt.Errorf("failed to parse bd create output: %w", err)
+		log.Error(log.CatBeads, "CreateEpic parse failed", "error", err)
+		return CreateResult{}, err
+	}
+
+	return result, nil
+}
+
+// CreateTask creates a new task as a child of an epic via bd CLI.
+func (e *RealExecutor) CreateTask(title, description, parentID, assignee string, labels []string) (CreateResult, error) {
+	start := time.Now()
+	defer func() {
+		log.Debug(log.CatBeads, "CreateTask completed", "title", title, "parentID", parentID, "assignee", assignee, "duration", time.Since(start))
+	}()
+
+	args := []string{"create", title, "--parent", parentID, "-t", "task", "-d", description, "--json"}
+	if assignee != "" {
+		args = append(args, "--assignee", assignee)
+	}
+	for _, l := range labels {
+		args = append(args, "--label", l)
+	}
+
+	output, err := e.runBeads(args...)
+	if err != nil {
+		log.Error(log.CatBeads, "CreateTask failed", "title", title, "error", err)
+		return CreateResult{}, err
+	}
+
+	var result CreateResult
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		err = fmt.Errorf("failed to parse bd create output: %w", err)
+		log.Error(log.CatBeads, "CreateTask parse failed", "error", err)
+		return CreateResult{}, err
+	}
+
+	return result, nil
+}
+
+// AddDependency adds a dependency between two tasks via bd CLI.
+func (e *RealExecutor) AddDependency(taskID, dependsOnID string) error {
+	start := time.Now()
+	defer func() {
+		log.Debug(log.CatBeads, "AddDependency completed", "taskID", taskID, "dependsOnID", dependsOnID, "duration", time.Since(start))
+	}()
+
+	if _, err := e.runBeads("dep", "add", taskID, dependsOnID, "-t", "blocks"); err != nil {
+		log.Error(log.CatBeads, "AddDependency failed", "taskID", taskID, "dependsOnID", dependsOnID, "error", err)
+		return err
+	}
+	return nil
+}

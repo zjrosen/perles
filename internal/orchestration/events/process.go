@@ -32,6 +32,9 @@ const (
 	// and an automatic refresh is needed. This event is for TUI notification only;
 	// the actual refresh is triggered by the handler layer.
 	ProcessAutoRefreshRequired ProcessEventType = "auto_refresh_required"
+	// ProcessUserNotification is emitted when the coordinator requests user attention.
+	// This is used for human checkpoints in DAG workflows (e.g., clarification review).
+	ProcessUserNotification ProcessEventType = "user_notification"
 )
 
 // ProcessRole identifies what kind of process this is.

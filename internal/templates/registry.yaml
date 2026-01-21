@@ -1,0 +1,180 @@
+registry:
+  # Research Proposal Workflow - Multi-agent collaborative research
+  - namespace: "spec-workflow"
+    key: "research-proposal"
+    version: "v1"
+    name: "Research Proposal"
+    description: "Collaborative research with parallel exploration and structured synthesis for implementation plans"
+    template: "v1-research-proposal-epic.md"
+    labels:
+      - "category:planning"
+      - "workers:4"
+    nodes:
+      # Phase 1: Coordinator creates proposal directory and document
+      - key: "setup"
+        name: "Setup"
+        assignee: "worker-1"
+        template: "v1-research-proposal-setup.md"
+        outputs:
+          - "research-proposal.md"
+
+      # Phase 2: Three workers research in parallel (no writes)
+      - key: "research-lead"
+        name: "Research Lead Exploration"
+        template: "v1-research-proposal-research-lead.md"
+        assignee: "worker-2"
+        inputs:
+          - "research-proposal.md"
+        after:
+          - "setup"
+
+      - key: "architect"
+        name: "Architecture Designer Exploration"
+        template: "v1-research-proposal-architect.md"
+        assignee: "worker-3"
+        inputs:
+          - "research-proposal.md"
+        after:
+          - "setup"
+
+      - key: "risk-analyst"
+        name: "Risk Analyst Exploration"
+        template: "v1-research-proposal-risk-analyst.md"
+        assignee: "worker-4"
+        inputs:
+          - "research-proposal.md"
+        after:
+          - "setup"
+
+      # Phase 3: Sequential documentation (avoid file conflicts)
+      - key: "document-research"
+        name: "Document Research Findings"
+        template: "v1-research-proposal-document-research.md"
+        assignee: "worker-2"
+        inputs:
+          - "research-proposal.md"
+        after:
+          - "research-lead"
+
+      - key: "document-architecture"
+        name: "Document Architecture Findings"
+        template: "v1-research-proposal-document-architecture.md"
+        assignee: "worker-3"
+        inputs:
+          - "research-proposal.md"
+        after:
+          - "architect"
+          - "document-research"
+
+      - key: "document-risks"
+        name: "Document Risk Findings"
+        template: "v1-research-proposal-document-risks.md"
+        assignee: "worker-4"
+        inputs:
+          - "research-proposal.md"
+        after:
+          - "risk-analyst"
+          - "document-architecture"
+
+      # Phase 3.5: Optional clarification (human checkpoint)
+      - key: "clarification-review"
+        name: "Clarification Review"
+        template: "v1-human-review.md"
+        assignee: "worker-1"
+        inputs:
+          - "research-proposal.md"
+        after:
+          - "document-risks"
+
+      # Phase 4: Cross-review (sequential)
+      - key: "cross-review-architect"
+        name: "Architect Cross-Review"
+        template: "v1-research-proposal-cross-review-architect.md"
+        assignee: "worker-3"
+        inputs:
+          - "research-proposal.md"
+        after:
+          - "clarification-review"
+
+      - key: "cross-review-risk"
+        name: "Risk Analyst Cross-Review"
+        template: "v1-research-proposal-cross-review-risk.md"
+        assignee: "worker-4"
+        inputs:
+          - "research-proposal.md"
+        after:
+          - "cross-review-architect"
+
+      - key: "cross-review-research"
+        name: "Research Lead Cross-Review"
+        template: "v1-research-proposal-cross-review-research.md"
+        assignee: "worker-2"
+        inputs:
+          - "research-proposal.md"
+        after:
+          - "cross-review-risk"
+
+      # Phase 5: Synthesis
+      - key: "synthesis"
+        name: "Proposal Synthesis"
+        template: "v1-research-proposal-synthesis.md"
+        assignee: "worker-1"
+        inputs:
+          - "research-proposal.md"
+        after:
+          - "cross-review-research"
+
+      # Phase 6: Final review (sequential approval)
+      - key: "final-review-research"
+        name: "Research Lead Final Review"
+        template: "v1-research-proposal-final-review.md"
+        assignee: "worker-2"
+        inputs:
+          - "research-proposal.md"
+        after:
+          - "synthesis"
+
+      - key: "final-review-architect"
+        name: "Architect Final Review"
+        template: "v1-research-proposal-final-review.md"
+        assignee: "worker-3"
+        inputs:
+          - "research-proposal.md"
+        after:
+          - "final-review-research"
+
+      - key: "final-review-risk"
+        name: "Risk Analyst Final Review"
+        template: "v1-research-proposal-final-review.md"
+        assignee: "worker-4"
+        inputs:
+          - "research-proposal.md"
+        after:
+          - "final-review-architect"
+
+      # Phase 7: Finalize with acceptance criteria
+      - key: "finalize"
+        name: "Finalize Proposal"
+        template: "v1-research-proposal-finalize.md"
+        assignee: "worker-1"
+        inputs:
+          - "research-proposal.md"
+        after:
+          - "final-review-risk"
+
+  # Languages - Golang Guidelines
+  - namespace: "lang-guidelines"
+    key: "golang"
+    version: "v1"
+    name: "Guidelines when building in a project using Golang"
+    description: ""
+    labels:
+      - "lang:go"
+    nodes:
+      - key: "coding"
+        name: "Coding"
+        template: "v1-golang-coding-guidelines.md"
+
+      - key: "testing"
+        name: "Testing"
+        template: "v1-golang-testing-guidelines.md"

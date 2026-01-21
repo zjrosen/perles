@@ -86,6 +86,10 @@ perles/
 │   └── playground.go      # Playground command
 ├── internal/              # Internal packages (not exported)
 │   ├── app/              # Root application model & orchestration
+│   ├── application/      # DDD application layer (scoped to registry)
+│   │   └── registry/     # Registry service facade (YAML loading, template rendering)
+│   ├── domain/           # DDD domain layer (scoped to registry)
+│   │   └── registry/     # Pure domain types (Registration, Chain, Node)
 │   ├── mode/             # Application modes with Controller interface
 │   │   ├── kanban/       # Kanban board mode
 │   │   ├── search/       # Search mode
@@ -343,6 +347,52 @@ const (
     ModeDashboard
 )
 ```
+
+### Hybrid Architecture: DDD for Registry
+
+The codebase uses a hybrid architecture where most code follows the existing flat-package pattern, but the registry system uses Domain-Driven Design (DDD) layering:
+
+**Why DDD for Registry Only:**
+- Registry has complex domain logic (DAG topological sort, cycle detection)
+- Clear separation needed between domain types and I/O concerns (YAML, templates)
+- Enables thorough unit testing of domain logic without mocks
+- Portable from sesh codebase where DDD patterns originated
+
+**Layer Responsibilities:**
+- `internal/domain/registry/`: Pure Go with stdlib-only imports. Contains Registration, Chain, Node types and domain algorithms. No file I/O.
+- `internal/application/registry/`: Service facade bridging domain to infrastructure. Handles YAML loading, template rendering, embed.FS access.
+
+**Two Registry Systems:**
+Perles has two distinct registry systems:
+1. `internal/domain/registry.Registry` - DDD registration registry (type+key+version lookups, labels, DAG chains)
+2. `internal/orchestration/workflow.Registry` - Workflow template registry (ID-based lookups, categories, sources)
+
+**Import Aliasing Convention:**
+When importing both packages, use aliasing to disambiguate:
+
+```go
+import (
+    domainreg "github.com/zjrosen/perles/internal/domain/registry"
+    "github.com/zjrosen/perles/internal/orchestration/workflow"
+)
+
+// Use domainreg.Registry for registration lookups
+// Use workflow.Registry for workflow template management
+```
+
+Or when using the application layer:
+
+```go
+import (
+    appreg "github.com/zjrosen/perles/internal/application/registry"
+)
+
+// RegistryService handles template operations
+svc, err := appreg.NewRegistryService(templateFS)
+```
+
+**Key Interfaces:**
+- `RegistryProvider`: Read-only interface for `Registry` (enables mock injection in tests)
 
 ## AI Orchestration System
 

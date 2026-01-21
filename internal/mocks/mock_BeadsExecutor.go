@@ -68,6 +68,53 @@ func (_c *MockBeadsExecutor_AddComment_Call) RunAndReturn(run func(string, strin
 	return _c
 }
 
+// AddDependency provides a mock function with given fields: taskID, dependsOnID
+func (_m *MockBeadsExecutor) AddDependency(taskID string, dependsOnID string) error {
+	ret := _m.Called(taskID, dependsOnID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AddDependency")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, string) error); ok {
+		r0 = rf(taskID, dependsOnID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockBeadsExecutor_AddDependency_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddDependency'
+type MockBeadsExecutor_AddDependency_Call struct {
+	*mock.Call
+}
+
+// AddDependency is a helper method to define mock.On call
+//   - taskID string
+//   - dependsOnID string
+func (_e *MockBeadsExecutor_Expecter) AddDependency(taskID interface{}, dependsOnID interface{}) *MockBeadsExecutor_AddDependency_Call {
+	return &MockBeadsExecutor_AddDependency_Call{Call: _e.mock.On("AddDependency", taskID, dependsOnID)}
+}
+
+func (_c *MockBeadsExecutor_AddDependency_Call) Run(run func(taskID string, dependsOnID string)) *MockBeadsExecutor_AddDependency_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockBeadsExecutor_AddDependency_Call) Return(_a0 error) *MockBeadsExecutor_AddDependency_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBeadsExecutor_AddDependency_Call) RunAndReturn(run func(string, string) error) *MockBeadsExecutor_AddDependency_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CloseIssue provides a mock function with given fields: issueID, reason
 func (_m *MockBeadsExecutor) CloseIssue(issueID string, reason string) error {
 	ret := _m.Called(issueID, reason)
@@ -111,6 +158,124 @@ func (_c *MockBeadsExecutor_CloseIssue_Call) Return(_a0 error) *MockBeadsExecuto
 }
 
 func (_c *MockBeadsExecutor_CloseIssue_Call) RunAndReturn(run func(string, string) error) *MockBeadsExecutor_CloseIssue_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CreateEpic provides a mock function with given fields: title, description, labels
+func (_m *MockBeadsExecutor) CreateEpic(title string, description string, labels []string) (beads.CreateResult, error) {
+	ret := _m.Called(title, description, labels)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateEpic")
+	}
+
+	var r0 beads.CreateResult
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, string, []string) (beads.CreateResult, error)); ok {
+		return rf(title, description, labels)
+	}
+	if rf, ok := ret.Get(0).(func(string, string, []string) beads.CreateResult); ok {
+		r0 = rf(title, description, labels)
+	} else {
+		r0 = ret.Get(0).(beads.CreateResult)
+	}
+
+	if rf, ok := ret.Get(1).(func(string, string, []string) error); ok {
+		r1 = rf(title, description, labels)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockBeadsExecutor_CreateEpic_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateEpic'
+type MockBeadsExecutor_CreateEpic_Call struct {
+	*mock.Call
+}
+
+// CreateEpic is a helper method to define mock.On call
+//   - title string
+//   - description string
+//   - labels []string
+func (_e *MockBeadsExecutor_Expecter) CreateEpic(title interface{}, description interface{}, labels interface{}) *MockBeadsExecutor_CreateEpic_Call {
+	return &MockBeadsExecutor_CreateEpic_Call{Call: _e.mock.On("CreateEpic", title, description, labels)}
+}
+
+func (_c *MockBeadsExecutor_CreateEpic_Call) Run(run func(title string, description string, labels []string)) *MockBeadsExecutor_CreateEpic_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(string), args[2].([]string))
+	})
+	return _c
+}
+
+func (_c *MockBeadsExecutor_CreateEpic_Call) Return(_a0 beads.CreateResult, _a1 error) *MockBeadsExecutor_CreateEpic_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockBeadsExecutor_CreateEpic_Call) RunAndReturn(run func(string, string, []string) (beads.CreateResult, error)) *MockBeadsExecutor_CreateEpic_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CreateTask provides a mock function with given fields: title, description, parentID, assignee, labels
+func (_m *MockBeadsExecutor) CreateTask(title string, description string, parentID string, assignee string, labels []string) (beads.CreateResult, error) {
+	ret := _m.Called(title, description, parentID, assignee, labels)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateTask")
+	}
+
+	var r0 beads.CreateResult
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, string, string, string, []string) (beads.CreateResult, error)); ok {
+		return rf(title, description, parentID, assignee, labels)
+	}
+	if rf, ok := ret.Get(0).(func(string, string, string, string, []string) beads.CreateResult); ok {
+		r0 = rf(title, description, parentID, assignee, labels)
+	} else {
+		r0 = ret.Get(0).(beads.CreateResult)
+	}
+
+	if rf, ok := ret.Get(1).(func(string, string, string, string, []string) error); ok {
+		r1 = rf(title, description, parentID, assignee, labels)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockBeadsExecutor_CreateTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateTask'
+type MockBeadsExecutor_CreateTask_Call struct {
+	*mock.Call
+}
+
+// CreateTask is a helper method to define mock.On call
+//   - title string
+//   - description string
+//   - parentID string
+//   - assignee string
+//   - labels []string
+func (_e *MockBeadsExecutor_Expecter) CreateTask(title interface{}, description interface{}, parentID interface{}, assignee interface{}, labels interface{}) *MockBeadsExecutor_CreateTask_Call {
+	return &MockBeadsExecutor_CreateTask_Call{Call: _e.mock.On("CreateTask", title, description, parentID, assignee, labels)}
+}
+
+func (_c *MockBeadsExecutor_CreateTask_Call) Run(run func(title string, description string, parentID string, assignee string, labels []string)) *MockBeadsExecutor_CreateTask_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(string), args[2].(string), args[3].(string), args[4].([]string))
+	})
+	return _c
+}
+
+func (_c *MockBeadsExecutor_CreateTask_Call) Return(_a0 beads.CreateResult, _a1 error) *MockBeadsExecutor_CreateTask_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockBeadsExecutor_CreateTask_Call) RunAndReturn(run func(string, string, string, string, []string) (beads.CreateResult, error)) *MockBeadsExecutor_CreateTask_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -380,6 +380,29 @@ func (cs *CoordinatorServer) registerTools() {
 			Required: []string{"status", "summary"},
 		},
 	}, cs.handleSignalWorkflowComplete)
+
+	cs.RegisterTool(Tool{
+		Name:        "notify_user",
+		Description: "Request user attention for a human checkpoint. Use this during DAG workflow phases that require human review or input (e.g., clarification-review). Plays a notification sound and displays the message to the user.",
+		InputSchema: &InputSchema{
+			Type: "object",
+			Properties: map[string]*PropertySchema{
+				"message": {
+					Type:        "string",
+					Description: "Message to display to the user explaining what action is needed",
+				},
+				"phase": {
+					Type:        "string",
+					Description: "Optional: The workflow phase name (e.g., 'clarification-review')",
+				},
+				"task_id": {
+					Type:        "string",
+					Description: "Optional: The task ID associated with this notification",
+				},
+			},
+			Required: []string{"message"},
+		},
+	}, cs.handleNotifyUser)
 }
 
 // Tool argument structs for JSON parsing.
@@ -609,4 +632,12 @@ func (cs *CoordinatorServer) handleSignalWorkflowComplete(ctx context.Context, r
 		return nil, fmt.Errorf("v2Adapter required for signal_workflow_complete")
 	}
 	return cs.v2Adapter.HandleSignalWorkflowComplete(ctx, rawArgs)
+}
+
+// handleNotifyUser requests user attention for a human checkpoint.
+func (cs *CoordinatorServer) handleNotifyUser(ctx context.Context, rawArgs json.RawMessage) (*ToolCallResult, error) {
+	if cs.v2Adapter == nil {
+		return nil, fmt.Errorf("v2Adapter required for notify_user")
+	}
+	return cs.v2Adapter.HandleNotifyUser(ctx, rawArgs)
 }

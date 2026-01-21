@@ -226,6 +226,7 @@ func testAdapter(t *testing.T, opts ...Option) (*V2Adapter, *mockHandler, func()
 		command.CmdMarkTaskFailed,
 		command.CmdStopProcess,
 		command.CmdSignalWorkflowComplete,
+		command.CmdNotifyUser,
 	} {
 		p.RegisterHandler(cmdType, handler)
 	}
@@ -3136,5 +3137,144 @@ func TestHandleSignalWorkflowComplete(t *testing.T) {
 		require.NotNil(t, result)
 		assert.True(t, result.IsError)
 		assert.Contains(t, result.Content[0].Text, "workflow completion failed")
+	})
+}
+
+// ===========================================================================
+// HandleNotifyUser Tests
+// ===========================================================================
+
+func TestHandleNotifyUser(t *testing.T) {
+	t.Run("success_with_message_only", func(t *testing.T) {
+		adapter, handler, cleanup := testAdapter(t)
+		defer cleanup()
+
+		args := toJSON(t, map[string]any{
+			"message": "Human review required",
+		})
+
+		result, err := adapter.HandleNotifyUser(context.Background(), args)
+
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		assert.False(t, result.IsError)
+		assert.Contains(t, result.Content[0].Text, "User has been notified")
+
+		// Verify command was created correctly
+		cmds := handler.getCommands()
+		require.Len(t, cmds, 1)
+		notifyCmd, ok := cmds[0].(*command.NotifyUserCommand)
+		require.True(t, ok)
+		assert.Equal(t, "Human review required", notifyCmd.Message)
+		assert.Empty(t, notifyCmd.Phase)
+		assert.Empty(t, notifyCmd.TaskID)
+	})
+
+	t.Run("success_with_all_fields", func(t *testing.T) {
+		adapter, handler, cleanup := testAdapter(t)
+		defer cleanup()
+
+		args := toJSON(t, map[string]any{
+			"message": "Please review the research findings",
+			"phase":   "clarification-review",
+			"task_id": "perles-abc.1",
+		})
+
+		result, err := adapter.HandleNotifyUser(context.Background(), args)
+
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		assert.False(t, result.IsError)
+		assert.Contains(t, result.Content[0].Text, "User notified for phase: clarification-review")
+
+		// Verify command was created correctly
+		cmds := handler.getCommands()
+		require.Len(t, cmds, 1)
+		notifyCmd, ok := cmds[0].(*command.NotifyUserCommand)
+		require.True(t, ok)
+		assert.Equal(t, "Please review the research findings", notifyCmd.Message)
+		assert.Equal(t, "clarification-review", notifyCmd.Phase)
+		assert.Equal(t, "perles-abc.1", notifyCmd.TaskID)
+	})
+
+	t.Run("invalid_json", func(t *testing.T) {
+		adapter, _, cleanup := testAdapter(t)
+		defer cleanup()
+
+		result, err := adapter.HandleNotifyUser(context.Background(), []byte("invalid"))
+
+		require.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "invalid arguments")
+	})
+
+	t.Run("missing_message", func(t *testing.T) {
+		adapter, _, cleanup := testAdapter(t)
+		defer cleanup()
+
+		args := toJSON(t, map[string]any{
+			"phase": "some-phase",
+		})
+
+		result, err := adapter.HandleNotifyUser(context.Background(), args)
+
+		require.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "message is required")
+	})
+
+	t.Run("empty_message", func(t *testing.T) {
+		adapter, _, cleanup := testAdapter(t)
+		defer cleanup()
+
+		args := toJSON(t, map[string]any{
+			"message": "",
+			"phase":   "some-phase",
+		})
+
+		result, err := adapter.HandleNotifyUser(context.Background(), args)
+
+		require.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "message is required")
+	})
+
+	t.Run("handler_error", func(t *testing.T) {
+		adapter, handler, cleanup := testAdapter(t)
+		defer cleanup()
+
+		handler.returnErr = errors.New("handler failed")
+
+		args := toJSON(t, map[string]any{
+			"message": "Test message",
+		})
+
+		result, err := adapter.HandleNotifyUser(context.Background(), args)
+
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		assert.True(t, result.IsError)
+		assert.Contains(t, result.Content[0].Text, "handler failed")
+	})
+
+	t.Run("result_not_success", func(t *testing.T) {
+		adapter, handler, cleanup := testAdapter(t)
+		defer cleanup()
+
+		handler.returnResult = &command.CommandResult{
+			Success: false,
+			Error:   errors.New("notification failed"),
+		}
+
+		args := toJSON(t, map[string]any{
+			"message": "Test message",
+		})
+
+		result, err := adapter.HandleNotifyUser(context.Background(), args)
+
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		assert.True(t, result.IsError)
+		assert.Contains(t, result.Content[0].Text, "notification failed")
 	})
 }

@@ -6,20 +6,22 @@ import (
 	"os"
 	"path/filepath"
 
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
+
 	"github.com/zjrosen/perles/internal/app"
+	appreg "github.com/zjrosen/perles/internal/application/registry"
 	"github.com/zjrosen/perles/internal/beads"
 	"github.com/zjrosen/perles/internal/bql"
 	"github.com/zjrosen/perles/internal/cachemanager"
 	"github.com/zjrosen/perles/internal/config"
 	"github.com/zjrosen/perles/internal/log"
 	"github.com/zjrosen/perles/internal/paths"
+	"github.com/zjrosen/perles/internal/templates"
 	"github.com/zjrosen/perles/internal/ui/nobeads"
 	"github.com/zjrosen/perles/internal/ui/outdated"
-
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 func init() {
@@ -33,10 +35,11 @@ func init() {
 }
 
 var (
-	version   = "dev"
-	cfgFile   string
-	cfg       config.Config
-	debugFlag bool
+	version         = "dev"
+	cfgFile         string
+	cfg             config.Config
+	debugFlag       bool
+	registryService *appreg.RegistryService
 )
 
 var rootCmd = &cobra.Command{
@@ -48,7 +51,7 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
-	cobra.OnInitialize(initConfig)
+	cobra.OnInitialize(initConfig, initServices)
 
 	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "",
 		"config file (default: ~/.config/perles/config.yaml)")
@@ -112,6 +115,16 @@ func initConfig() {
 	}
 
 	_ = viper.Unmarshal(&cfg)
+}
+
+func initServices() {
+	// Initialize registry service with embedded registry templates
+	var err error
+	registryService, err = appreg.NewRegistryService(templates.RegistryFS())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error initializing registry service:", err)
+		os.Exit(1)
+	}
 }
 
 func runApp(cmd *cobra.Command, args []string) error {

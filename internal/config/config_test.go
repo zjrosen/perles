@@ -1215,10 +1215,10 @@ func TestDefaults_SoundEventConfigValues(t *testing.T) {
 	cfg := Defaults()
 
 	// All events should exist in the map
-	require.Len(t, cfg.Sound.Events, 6)
+	require.Len(t, cfg.Sound.Events, 7)
 
 	// Check each event has correct default values
-	for _, eventName := range []string{"review_verdict_approve", "review_verdict_deny", "chat_welcome", "workflow_complete", "orchestration_welcome", "worker_out_of_context"} {
+	for _, eventName := range []string{"review_verdict_approve", "review_verdict_deny", "chat_welcome", "workflow_complete", "orchestration_welcome", "worker_out_of_context", "user_notification"} {
 		eventConfig, exists := cfg.Sound.Events[eventName]
 		require.True(t, exists, "Event %q should exist in defaults", eventName)
 		require.False(t, eventConfig.Enabled, "Event %q should be disabled by default", eventName)

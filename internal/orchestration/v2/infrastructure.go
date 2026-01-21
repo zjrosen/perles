@@ -438,4 +438,11 @@ func registerHandlers(
 		handler.NewSignalWorkflowCompleteHandler(
 			handler.WithSessionMetadataProvider(sessionMetadataProvider),
 			handler.WithWorkflowSoundService(soundService)))
+
+	// ============================================================
+	// User Interaction handlers (1)
+	// ============================================================
+	cmdProcessor.RegisterHandler(command.CmdNotifyUser,
+		handler.NewNotifyUserHandler(
+			handler.WithNotifyUserSoundService(soundService)))
 }

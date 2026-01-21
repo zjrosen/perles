@@ -94,6 +94,11 @@ const (
 
 	// CmdSignalWorkflowComplete signals that the workflow has completed.
 	CmdSignalWorkflowComplete CommandType = "signal_workflow_complete"
+
+	// User Interaction Commands
+
+	// CmdNotifyUser requests user attention (e.g., for human review checkpoints).
+	CmdNotifyUser CommandType = "notify_user"
 )
 
 // String returns the string representation of the CommandType.

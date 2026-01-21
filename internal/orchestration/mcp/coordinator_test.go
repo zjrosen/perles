@@ -100,6 +100,7 @@ func TestCoordinatorServer_RegistersAllTools(t *testing.T) {
 		"stop_worker",
 		"generate_accountability_summary",
 		"signal_workflow_complete",
+		"notify_user",
 	}
 
 	for _, toolName := range expectedTools {

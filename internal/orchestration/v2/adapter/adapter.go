@@ -1078,6 +1078,54 @@ func (a *V2Adapter) HandleSignalWorkflowComplete(ctx context.Context, args json.
 }
 
 // ===========================================================================
+// User Interaction Handlers
+// ===========================================================================
+
+// HandleNotifyUser handles the notify_user MCP tool call.
+// This requests user attention for a human checkpoint in DAG workflows.
+// Routes through the v2 command processor using CmdNotifyUser.
+func (a *V2Adapter) HandleNotifyUser(ctx context.Context, args json.RawMessage) (*mcptypes.ToolCallResult, error) {
+	var parsed notifyUserArgs
+	if err := json.Unmarshal(args, &parsed); err != nil {
+		return nil, fmt.Errorf("invalid arguments: %w", err)
+	}
+
+	// Validate required fields
+	if parsed.Message == "" {
+		return nil, fmt.Errorf("message is required")
+	}
+
+	cmd := command.NewNotifyUserCommand(command.SourceMCPTool, parsed.Message, parsed.Phase, parsed.TaskID)
+	if err := cmd.Validate(); err != nil {
+		return nil, fmt.Errorf("notify_user command validation failed: %w", err)
+	}
+
+	result, err := a.submitWithTimeout(ctx, cmd)
+	if err != nil {
+		return nil, fmt.Errorf("notify_user command failed: %w", err)
+	}
+
+	if !result.Success {
+		return mcptypes.ErrorResult(result.Error.Error()), nil
+	}
+
+	// Build response message
+	msg := "User has been notified"
+	if parsed.Phase != "" {
+		msg = fmt.Sprintf("User notified for phase: %s", parsed.Phase)
+	}
+
+	return mcptypes.SuccessResult(msg), nil
+}
+
+// notifyUserArgs represents arguments for the notify_user MCP tool.
+type notifyUserArgs struct {
+	Message string `json:"message"`
+	Phase   string `json:"phase,omitempty"`
+	TaskID  string `json:"task_id,omitempty"`
+}
+
+// ===========================================================================
 // Helper Methods
 // ===========================================================================
 
