@@ -1,6 +1,7 @@
 package kanban
 
 import (
+	"runtime"
 	"testing"
 	"time"
 
@@ -798,6 +799,12 @@ func TestHandleBoardKey_Dashboard_FlagEnabled(t *testing.T) {
 // This is an integration test verifying that clicking an issue in the kanban board
 // correctly emits a SwitchToSearchMsg with SubModeTree, identical to pressing Enter.
 func TestKanban_ClickOpensTreeView(t *testing.T) {
+	// Skip on Windows: zone.Manager relies on terminal capabilities that behave
+	// differently on Windows, causing zone registration to fail in CI environments.
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on Windows: zone.Manager terminal detection not reliable in CI")
+	}
+
 	issueID := "click-integration-test-1"
 
 	cfg := config.Defaults()

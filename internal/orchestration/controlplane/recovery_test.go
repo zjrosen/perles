@@ -628,27 +628,29 @@ func TestHealthMonitor_RecoveryBackoffRespectedBetweenAttempts(t *testing.T) {
 
 	// Advance past progress timeout to trigger stuck
 	clock.Advance(150 * time.Millisecond)
-	time.Sleep(30 * time.Millisecond) // Wait for check loop
 
-	// First check - recovery count should be 1
-	status, _ := monitor.GetStatus("wf-1")
-	require.Equal(t, 1, status.RecoveryCount)
+	// Wait for first recovery (use Eventually for robustness on slow CI)
+	require.Eventually(t, func() bool {
+		status, _ := monitor.GetStatus("wf-1")
+		return status.RecoveryCount == 1
+	}, 500*time.Millisecond, 10*time.Millisecond, "expected recovery count to be 1")
 
 	// Advance only 100ms (less than backoff)
 	clock.Advance(100 * time.Millisecond)
-	time.Sleep(30 * time.Millisecond)
 
-	// Should still be 1 because backoff hasn't elapsed
-	status, _ = monitor.GetStatus("wf-1")
-	require.Equal(t, 1, status.RecoveryCount)
+	// Wait a bit and verify still at 1 (backoff not elapsed)
+	time.Sleep(50 * time.Millisecond)
+	status, _ := monitor.GetStatus("wf-1")
+	require.Equal(t, 1, status.RecoveryCount, "recovery count should still be 1 during backoff")
 
 	// Now advance past backoff
 	clock.Advance(500 * time.Millisecond)
-	time.Sleep(30 * time.Millisecond)
 
-	// Now should be 2
-	status, _ = monitor.GetStatus("wf-1")
-	require.Equal(t, 2, status.RecoveryCount)
+	// Wait for second recovery
+	require.Eventually(t, func() bool {
+		status, _ := monitor.GetStatus("wf-1")
+		return status.RecoveryCount == 2
+	}, 500*time.Millisecond, 10*time.Millisecond, "expected recovery count to be 2 after backoff")
 
 	monitor.Stop()
 }

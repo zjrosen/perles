@@ -89,6 +89,18 @@ func setupAgentProviderMock(t *testing.T, mockProvider *mocks.MockAgentProvider)
 	mockProvider.On("Extensions").Return(map[string]any{}).Maybe()
 }
 
+// cleanupSessionOnTestEnd registers a cleanup function to close the session
+// when the test ends. This is required on Windows where files cannot be deleted
+// while they are still open. Use this for tests that call Start() but not Stop().
+func cleanupSessionOnTestEnd(t *testing.T, inst *WorkflowInstance) {
+	t.Helper()
+	t.Cleanup(func() {
+		if inst.Session != nil {
+			_ = inst.Session.Close(session.StatusCompleted)
+		}
+	})
+}
+
 // createMinimalInfrastructure creates a minimal v2.Infrastructure suitable for testing.
 // It sets up the Core.Processor, Core.EventBus, Core.Adapter, and Internal.TurnEnforcer
 // so that Start/SubmitAndWait work.
@@ -215,6 +227,7 @@ func TestSupervisor_Start_TransitionsPendingToRunning(t *testing.T) {
 
 	inst := newTestInstance(t, "test-workflow")
 	require.Equal(t, WorkflowPending, inst.State)
+	cleanupSessionOnTestEnd(t, inst) // Close session before TempDir cleanup (Windows)
 
 	// Setup mock infrastructure
 	infra := createMinimalInfrastructure(t)
@@ -308,6 +321,7 @@ func TestSupervisor_Start_AcquiresPort(t *testing.T) {
 	require.NoError(t, err)
 
 	inst := newTestInstance(t, "test-workflow")
+	cleanupSessionOnTestEnd(t, inst) // Close session before TempDir cleanup (Windows)
 
 	// Setup mock infrastructure
 	infra := createMinimalInfrastructure(t)
@@ -337,6 +351,7 @@ func TestSupervisor_Start_CleansUpOnInfrastructureError(t *testing.T) {
 	require.NoError(t, err)
 
 	inst := newTestInstance(t, "test-workflow")
+	cleanupSessionOnTestEnd(t, inst) // Close session before TempDir cleanup (Windows)
 
 	// Make infrastructure creation fail
 	expectedErr := errors.New("infrastructure creation failed")
@@ -688,6 +703,7 @@ func TestSupervisor_Start_CreatesWorktreeWhenEnabled(t *testing.T) {
 	require.NoError(t, err)
 
 	inst := newTestInstanceWithWorktree(t, "worktree-test", "main", "")
+	cleanupSessionOnTestEnd(t, inst) // Close session before TempDir cleanup (Windows)
 	workflowID := inst.ID.String()
 	expectedPath := "/tmp/worktrees/" + workflowID
 	expectedBranch := "perles-workflow-" + workflowID[:8]
@@ -741,6 +757,7 @@ func TestSupervisor_Start_SkipsWorktreeWhenDisabled(t *testing.T) {
 
 	// Instance without worktree enabled
 	inst := newTestInstance(t, "no-worktree-test")
+	cleanupSessionOnTestEnd(t, inst) // Close session before TempDir cleanup (Windows)
 	require.False(t, inst.WorktreeEnabled)
 
 	// Setup mock infrastructure
@@ -784,6 +801,7 @@ func TestSupervisor_Start_UsesCustomBranchNameWhenSet(t *testing.T) {
 
 	customBranch := "my-custom-branch"
 	inst := newTestInstanceWithWorktree(t, "custom-branch-test", "develop", customBranch)
+	cleanupSessionOnTestEnd(t, inst) // Close session before TempDir cleanup (Windows)
 	workflowID := inst.ID.String()
 	expectedPath := "/tmp/worktrees/" + workflowID
 
@@ -832,6 +850,7 @@ func TestSupervisor_Start_AutoGeneratesBranchNameWhenEmpty(t *testing.T) {
 
 	// Empty WorktreeBranchName - should auto-generate
 	inst := newTestInstanceWithWorktree(t, "auto-branch-test", "main", "")
+	cleanupSessionOnTestEnd(t, inst) // Close session before TempDir cleanup (Windows)
 	workflowID := inst.ID.String()
 	expectedPath := "/tmp/worktrees/" + workflowID
 	expectedBranch := "perles-workflow-" + workflowID[:8]
@@ -881,6 +900,7 @@ func TestSupervisor_Start_SetsInstanceFieldsCorrectly(t *testing.T) {
 	require.NoError(t, err)
 
 	inst := newTestInstanceWithWorktree(t, "fields-test", "main", "custom-branch")
+	cleanupSessionOnTestEnd(t, inst) // Close session before TempDir cleanup (Windows)
 	workflowID := inst.ID.String()
 	worktreePath := "/tmp/custom-worktree-path"
 	branchName := "custom-branch"
@@ -931,6 +951,7 @@ func TestSupervisor_Start_CleansUpWorktreeOnSubsequentFailure(t *testing.T) {
 	require.NoError(t, err)
 
 	inst := newTestInstanceWithWorktree(t, "cleanup-test", "main", "")
+	cleanupSessionOnTestEnd(t, inst) // Close session before TempDir cleanup (Windows)
 	workflowID := inst.ID.String()
 	worktreePath := "/tmp/worktrees/" + workflowID
 	expectedBranch := "perles-workflow-" + workflowID[:8]
@@ -1294,6 +1315,7 @@ func TestSupervisor_Start_CreatesSessionWhenFactoryConfigured(t *testing.T) {
 	require.NoError(t, err)
 
 	inst := newTestInstance(t, "test-workflow-with-session")
+	cleanupSessionOnTestEnd(t, inst) // Close session before TempDir cleanup (Windows)
 
 	// Setup mock infrastructure
 	infra := createMinimalInfrastructure(t)

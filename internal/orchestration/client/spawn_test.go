@@ -24,8 +24,9 @@ func echoCommand() (string, []string) {
 
 func sleepCommand(seconds string) (string, []string) {
 	if runtime.GOOS == "windows" {
-		// Windows: use ping to localhost as a delay (ping -n 2 = ~1 second)
-		return "ping", []string{"-n", seconds, "127.0.0.1"}
+		// Windows: use timeout command for delay
+		// timeout /t N waits N seconds
+		return "cmd", []string{"/c", "timeout", "/t", seconds, "/nobreak", ">nul"}
 	}
 	return "/bin/sleep", []string{seconds}
 }

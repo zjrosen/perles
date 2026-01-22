@@ -218,6 +218,7 @@ func (s *defaultSupervisor) Start(ctx context.Context, inst *WorkflowInstance) e
 		listener     net.Listener
 		worktreePath string
 		gitExec      appgit.GitExecutor
+		sess         *session.Session
 	)
 
 	// Cleanup function for error cases
@@ -233,6 +234,10 @@ func (s *defaultSupervisor) Start(ctx context.Context, inst *WorkflowInstance) e
 		}
 		if releasePort != nil {
 			releasePort()
+		}
+		// Close session to release file handles
+		if sess != nil {
+			_ = sess.Close(session.StatusFailed)
 		}
 		// Clean up worktree if it was created
 		if worktreePath != "" && gitExec != nil {
@@ -327,7 +332,7 @@ func (s *defaultSupervisor) Start(ctx context.Context, inst *WorkflowInstance) e
 
 	// Step 3.5: Create session for this workflow
 	workDir := getWorkDir(inst)
-	sess, err := s.sessionFactory.Create(session.CreateOptions{
+	sess, err = s.sessionFactory.Create(session.CreateOptions{
 		SessionID: inst.ID.String(),
 		WorkDir:   workDir,
 	})

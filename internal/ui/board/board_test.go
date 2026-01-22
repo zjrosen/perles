@@ -1021,13 +1021,16 @@ func TestBoard_MouseClick_SelectsIssueAndEmitsMessage(t *testing.T) {
 
 	// Get zone to determine click position (with retry for zone manager stability)
 	var z *zone.ZoneInfo
-	for retries := 0; retries < 3; retries++ {
+	for retries := 0; retries < 10; retries++ {
 		z = zone.Get(zoneID)
 		if z != nil && !z.IsZero() {
 			break
 		}
 		// Re-render to ensure zones are registered
 		_ = m.View()
+		// Zone registration is asynchronous via a channel worker in bubblezone.
+		// A small delay allows the worker goroutine to process the channel.
+		time.Sleep(time.Millisecond)
 	}
 	require.NotNil(t, z, "zone should be registered after View()")
 	require.False(t, z.IsZero(), "zone should not be zero")
@@ -1104,13 +1107,15 @@ func TestBoard_MouseClick_ChangesColumnFocus(t *testing.T) {
 	// Get zone for the issue in column 0 (with retry for zone manager stability)
 	zoneID := makeZoneID(0, issueID)
 	var z *zone.ZoneInfo
-	for retries := 0; retries < 3; retries++ {
+	for retries := 0; retries < 10; retries++ {
 		z = zone.Get(zoneID)
 		if z != nil && !z.IsZero() {
 			break
 		}
 		// Re-render to ensure zones are registered
 		_ = m.View()
+		// Zone registration is asynchronous via a channel worker in bubblezone.
+		time.Sleep(time.Millisecond)
 	}
 	require.NotNil(t, z, "zone should be registered")
 	require.False(t, z.IsZero(), "zone should not be zero")
@@ -1178,12 +1183,15 @@ func TestBoard_MouseClick_ScrolledColumnZonesRefresh(t *testing.T) {
 	zoneID := makeZoneID(0, firstIssueID)
 
 	var z *zone.ZoneInfo
-	for retries := 0; retries < 3; retries++ {
+	for retries := 0; retries < 10; retries++ {
 		z = zone.Get(zoneID)
 		if z != nil && !z.IsZero() {
 			break
 		}
 		_ = m.View()
+		// Zone registration is asynchronous via a channel worker in bubblezone.
+		// A small delay allows the worker goroutine to process the channel.
+		time.Sleep(time.Millisecond)
 	}
 	require.NotNil(t, z, "first issue zone should be registered")
 
@@ -1253,24 +1261,28 @@ func TestBoard_MouseClick_DuplicateIssueAcrossColumns(t *testing.T) {
 	// Get zone for the issue in column 0 (High Priority)
 	zoneIDCol0 := makeZoneID(0, duplicateIssueID)
 	var zCol0 *zone.ZoneInfo
-	for retries := 0; retries < 3; retries++ {
+	for retries := 0; retries < 10; retries++ {
 		zCol0 = zone.Get(zoneIDCol0)
 		if zCol0 != nil && !zCol0.IsZero() {
 			break
 		}
 		_ = m.View()
+		// Zone registration is asynchronous via a channel worker in bubblezone.
+		time.Sleep(time.Millisecond)
 	}
 	require.NotNil(t, zCol0, "zone for issue in column 0 should be registered")
 
 	// Get zone for the issue in column 1 (Open Issues)
 	zoneIDCol1 := makeZoneID(1, duplicateIssueID)
 	var zCol1 *zone.ZoneInfo
-	for retries := 0; retries < 3; retries++ {
+	for retries := 0; retries < 10; retries++ {
 		zCol1 = zone.Get(zoneIDCol1)
 		if zCol1 != nil && !zCol1.IsZero() {
 			break
 		}
 		_ = m.View()
+		// Zone registration is asynchronous via a channel worker in bubblezone.
+		time.Sleep(time.Millisecond)
 	}
 	require.NotNil(t, zCol1, "zone for issue in column 1 should be registered")
 
@@ -1329,13 +1341,15 @@ func TestBoard_MouseClick_RapidSuccessiveClicks(t *testing.T) {
 	zoneID2 := makeZoneID(0, "rapid-click-2")
 
 	var z1, z2 *zone.ZoneInfo
-	for retries := 0; retries < 3; retries++ {
+	for retries := 0; retries < 10; retries++ {
 		z1 = zone.Get(zoneID1)
 		z2 = zone.Get(zoneID2)
 		if z1 != nil && !z1.IsZero() && z2 != nil && !z2.IsZero() {
 			break
 		}
 		_ = m.View()
+		// Zone registration is asynchronous via a channel worker in bubblezone.
+		time.Sleep(time.Millisecond)
 	}
 	require.NotNil(t, z1, "zone 1 should be registered")
 	require.NotNil(t, z2, "zone 2 should be registered")
@@ -1421,12 +1435,14 @@ func TestBoard_MouseClick_PerformanceWithManyIssues(t *testing.T) {
 	zoneID := makeZoneID(1, targetIssueID)
 
 	var z *zone.ZoneInfo
-	for retries := 0; retries < 3; retries++ {
+	for retries := 0; retries < 10; retries++ {
 		z = zone.Get(zoneID)
 		if z != nil && !z.IsZero() {
 			break
 		}
 		_ = m.View()
+		// Zone registration is asynchronous via a channel worker in bubblezone.
+		time.Sleep(time.Millisecond)
 	}
 	require.NotNil(t, z, "zone should be registered")
 

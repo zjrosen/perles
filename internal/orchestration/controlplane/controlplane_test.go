@@ -80,6 +80,18 @@ func setupTestAgentProviderMock(t *testing.T, mockProvider *mocks.MockAgentProvi
 	mockProvider.On("Extensions").Return(map[string]any{}).Maybe()
 }
 
+// cleanupWorkflowSessionOnTestEnd registers a cleanup function to close any session
+// created during the test. Required on Windows where files cannot be deleted while open.
+func cleanupWorkflowSessionOnTestEnd(t *testing.T, cp ControlPlane, id WorkflowID) {
+	t.Helper()
+	t.Cleanup(func() {
+		inst, err := cp.Get(context.Background(), id)
+		if err == nil && inst != nil && inst.Session != nil {
+			_ = inst.Session.Close(session.StatusCompleted)
+		}
+	})
+}
+
 // createTestInfrastructure creates a minimal v2.Infrastructure suitable for testing.
 // It includes Core.Adapter and Internal.TurnEnforcer required for MCP server setup.
 func createTestInfrastructure(t *testing.T) *v2.Infrastructure {
@@ -296,6 +308,7 @@ func TestControlPlane_Start_DelegatesToSupervisor(t *testing.T) {
 	}
 	id, err := cp.Create(context.Background(), spec)
 	require.NoError(t, err)
+	cleanupWorkflowSessionOnTestEnd(t, cp, id) // Close session before TempDir cleanup (Windows)
 
 	// Setup mock infrastructure
 	infra := createTestInfrastructure(t)
@@ -573,6 +586,7 @@ func TestControlPlane_Start_PropagatesInfrastructureError(t *testing.T) {
 	}
 	id, err := cp.Create(context.Background(), spec)
 	require.NoError(t, err)
+	cleanupWorkflowSessionOnTestEnd(t, cp, id) // Close session before TempDir cleanup (Windows)
 
 	// Setup mock to fail
 	expectedErr := errors.New("infrastructure creation failed")

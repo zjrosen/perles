@@ -1293,7 +1293,7 @@ func (i *Initializer) cleanupResources() {
 	// via Model.Cleanup() -> determineSessionStatus().
 	//
 	// If we didn't reach InitReady, the Model never got the session, so we must
-	// close it here to release file handles (important on Windows).
+	// close it here to release file handles
 	if sess != nil && phase != InitReady {
 		_ = sess.Close(session.StatusFailed)
 	}
