@@ -457,8 +457,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				for _, issue := range c.Items() {
 					zoneID := makeZoneID(colIdx, issue.ID)
 					if z := zone.Get(zoneID); z != nil && z.InBounds(msg) {
-						// Select the issue and emit click message
-						m, _ = m.SelectByID(issue.ID)
+						// Select the issue directly on this column (not searching all columns)
+						c, _ = c.SelectByID(issue.ID)
+						m.columns[colIdx] = c
+						m.focused = colIdx
 						return m, func() tea.Msg { return IssueClickedMsg{IssueID: issue.ID} }
 					}
 				}
@@ -470,8 +472,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				for _, issueID := range tc.VisibleIssueIDs() {
 					zoneID := makeZoneID(colIdx, issueID)
 					if z := zone.Get(zoneID); z != nil && z.InBounds(msg) {
-						// Select the issue and emit click message
-						m, _ = m.SelectByID(issueID)
+						// Select the issue directly on this tree column
+						tc.SelectByID(issueID)
+						m.columns[colIdx] = tc
+						m.focused = colIdx
 						return m, func() tea.Msg { return IssueClickedMsg{IssueID: issueID} }
 					}
 				}

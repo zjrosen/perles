@@ -352,3 +352,12 @@ func (c TreeColumn) VisibleIssueIDs() []string {
 	}
 	return c.tree.VisibleIssueIDs()
 }
+
+// SelectByID selects the issue with the given ID in the tree.
+// Returns true if found and selected, false otherwise.
+func (c TreeColumn) SelectByID(id string) bool {
+	if c.tree == nil {
+		return false
+	}
+	return c.tree.SelectByIssueID(id)
+}
