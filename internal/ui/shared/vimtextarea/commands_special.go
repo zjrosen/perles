@@ -193,8 +193,16 @@ type StartPendingCommand struct {
 }
 
 // Execute sets the pending operator.
+// For 'v' operator, also enters visual mode immediately so the mode indicator updates.
 func (c *StartPendingCommand) Execute(m *Model) ExecuteResult {
 	m.pendingBuilder.SetOperator(c.operator)
+	// Special case: 'v' operator enters visual mode immediately while also setting pending
+	// state for text object support (viw, vaw). This provides immediate visual feedback
+	// to the user while still supporting text object sequences.
+	if c.operator == 'v' {
+		m.visualAnchor = Position{Row: m.cursorRow, Col: m.cursorCol}
+		m.mode = ModeVisual
+	}
 	return Executed
 }
 
@@ -211,6 +219,11 @@ func (c *StartPendingCommand) Mode() Mode {
 // ID returns the hierarchical identifier for this command.
 func (c *StartPendingCommand) ID() string {
 	return "pending." + string(c.operator)
+}
+
+// IsModeChange returns true for 'v' operator since it enters visual mode.
+func (c *StartPendingCommand) IsModeChange() bool {
+	return c.operator == 'v'
 }
 
 // ============================================================================

@@ -911,9 +911,8 @@ func TestProperty_ContentIntegrity(t *testing.T) {
 // Visual Mode Entry Integration Tests
 // ============================================================================
 
-// TestVisualMode_Entry verifies pressing 'v' in normal mode enters pending state for text objects
-// With the v pending operator, 'v' now enters pending state first (for viw/vaw text object support).
-// Direct visual mode entry happens when 'v' is followed by a non-text-object key.
+// TestVisualMode_Entry verifies pressing 'v' in normal mode enters visual mode immediately
+// AND sets pending state for text object support (viw/vaw).
 func TestVisualMode_Entry(t *testing.T) {
 	m := newTestModelWithContent("hello world", "second line")
 	m.mode = ModeNormal
@@ -926,11 +925,12 @@ func TestVisualMode_Entry(t *testing.T) {
 
 	result := cmd.Execute(m)
 
-	// 'v' now enters pending state (for text object support like viw/vaw)
+	// 'v' enters visual mode immediately AND sets pending for text objects
 	assert.Equal(t, Executed, result)
 	assert.Equal(t, 'v', m.pendingBuilder.Operator())
-	assert.Equal(t, ModeNormal, m.mode) // Still in Normal mode, pending state
-	assert.False(t, cmd.IsModeChange()) // StartPendingCommand doesn't change mode
+	assert.Equal(t, ModeVisual, m.mode)                       // Now enters Visual mode immediately
+	assert.Equal(t, Position{Row: 0, Col: 6}, m.visualAnchor) // Anchor at cursor position
+	assert.True(t, cmd.IsModeChange())                        // 'v' now changes mode immediately
 }
 
 // TestVisualLineMode_Entry verifies pressing 'V' in normal mode enters ModeVisualLine with anchor.Col=0

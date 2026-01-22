@@ -218,7 +218,7 @@ func TestStartPendingCommand_Metadata(t *testing.T) {
 	require.False(t, cmd.IsModeChange())
 }
 
-// TestStartPendingCommand_V_Execute verifies setting v as pending operator
+// TestStartPendingCommand_V_Execute verifies setting v as pending operator AND entering visual mode
 func TestStartPendingCommand_V_Execute(t *testing.T) {
 	m := newTestModelWithContent("hello world")
 
@@ -227,8 +227,10 @@ func TestStartPendingCommand_V_Execute(t *testing.T) {
 
 	require.Equal(t, Executed, result)
 	require.Equal(t, 'v', m.pendingBuilder.Operator())
-	// Should NOT be in visual mode yet - just pending state
-	require.Equal(t, ModeNormal, m.mode)
+	// Should be in visual mode immediately (for instant mode indicator feedback)
+	require.Equal(t, ModeVisual, m.mode)
+	// Anchor should be set
+	require.Equal(t, Position{Row: 0, Col: 0}, m.visualAnchor)
 }
 
 // TestStartPendingCommand_V_Metadata verifies v operator metadata
@@ -239,7 +241,7 @@ func TestStartPendingCommand_V_Metadata(t *testing.T) {
 	require.Equal(t, "pending.v", cmd.ID())
 	require.False(t, cmd.IsUndoable())
 	require.False(t, cmd.ChangesContent())
-	require.False(t, cmd.IsModeChange())
+	require.True(t, cmd.IsModeChange()) // 'v' now changes mode immediately
 }
 
 // TestDefaultRegistry_V_IsPendingOperator verifies 'v' in DefaultRegistry returns StartPendingCommand
@@ -268,20 +270,20 @@ func newVisualIntegrationModel(content ...string) Model {
 func TestVisualOperatorFallback_NonTextObjectKey(t *testing.T) {
 	m := newVisualIntegrationModel("hello world", "second line")
 
-	// Press 'v' - enters pending state
+	// Press 'v' - enters visual mode immediately AND sets pending for text objects
 	vMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}}
 	m, _ = m.Update(vMsg)
 
-	// Verify we're in pending state (not visual mode yet)
-	require.Equal(t, ModeNormal, m.mode, "Should still be in Normal mode after 'v'")
-	require.Equal(t, 'v', m.pendingBuilder.Operator(), "Pending operator should be 'v'")
+	// Verify we're in visual mode immediately (for instant mode indicator feedback)
+	require.Equal(t, ModeVisual, m.mode, "Should enter visual mode immediately after 'v'")
+	require.Equal(t, 'v', m.pendingBuilder.Operator(), "Pending operator should be 'v' for text object support")
 
-	// Press 'j' - should fall back to visual mode and execute motion
+	// Press 'j' - should execute motion in visual mode
 	jMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}}
 	m, _ = m.Update(jMsg)
 
-	// Verify fallback behavior: entered visual mode
-	require.Equal(t, ModeVisual, m.mode, "'vj' should enter visual mode via fallback")
+	// Verify: still in visual mode, pending cleared
+	require.Equal(t, ModeVisual, m.mode, "'vj' should remain in visual mode")
 	require.True(t, m.pendingBuilder.IsEmpty(), "Pending should be cleared")
 }
 

@@ -3061,15 +3061,15 @@ func TestInsertMode_Space_VimDisabled(t *testing.T) {
 // Visual Mode Tests
 // ============================================================================
 
-func TestVisualMode_v_EntersPendingState(t *testing.T) {
+func TestVisualMode_v_EntersVisualModeImmediately(t *testing.T) {
 	m := New(Config{VimEnabled: true, DefaultMode: ModeNormal})
 	m.SetValue("hello world")
 	m.cursorCol = 0
 
 	m, _ = m.Update(keyMsg('v'))
 
-	// 'v' now enters pending state (for text object support like viw/vaw)
-	assert.Equal(t, ModeNormal, m.Mode())
+	// 'v' enters visual mode immediately AND sets pending for text objects
+	assert.Equal(t, ModeVisual, m.Mode())
 	assert.Equal(t, 'v', m.pendingBuilder.Operator())
 }
 
