@@ -54,6 +54,9 @@ func NewHandlerWithConfig(cfg HandlerConfig) *Handler {
 func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
 
+	// Templates
+	mux.HandleFunc("GET /templates", h.ListTemplates)
+
 	// Workflow CRUD
 	mux.HandleFunc("POST /workflows", h.Create)
 	mux.HandleFunc("GET /workflows", h.List)
@@ -79,9 +82,9 @@ type CreateWorkflowRequest struct {
 	TemplateID string `json:"template_id"`
 	// Name is the display name for the workflow (optional, defaults to template name).
 	Name string `json:"name,omitempty"`
-	// Goal is the user's goal for this workflow (required).
-	// This is combined with template instructions to form the initial coordinator prompt.
-	Goal string `json:"goal"`
+	// Args are template-defined argument values (e.g., {"goal": "Implement X"}).
+	// Required arguments are validated against the template's defined arguments.
+	Args map[string]string `json:"args,omitempty"`
 	// Labels are arbitrary key-value pairs for filtering (optional).
 	Labels map[string]string `json:"labels,omitempty"`
 	// WorktreeEnabled indicates whether to create a git worktree (optional).
@@ -138,6 +141,33 @@ type ErrorResponse struct {
 	Details string `json:"details,omitempty"`
 }
 
+// TemplateResponse is the response body for a single template.
+type TemplateResponse struct {
+	Key         string             `json:"key"`
+	Name        string             `json:"name"`
+	Description string             `json:"description,omitempty"`
+	Version     string             `json:"version"`
+	Source      string             `json:"source"` // "built-in" or "user"
+	Labels      []string           `json:"labels,omitempty"`
+	Arguments   []ArgumentResponse `json:"arguments,omitempty"`
+}
+
+// ArgumentResponse is the response body for a template argument.
+type ArgumentResponse struct {
+	Key          string `json:"key"`
+	Label        string `json:"label"`
+	Description  string `json:"description,omitempty"`
+	Type         string `json:"type"` // "text", "number", "textarea"
+	Required     bool   `json:"required"`
+	DefaultValue string `json:"default_value,omitempty"`
+}
+
+// ListTemplatesResponse is the response body for listing templates.
+type ListTemplatesResponse struct {
+	Templates []TemplateResponse `json:"templates"`
+	Total     int                `json:"total"`
+}
+
 // === Handlers ===
 
 // Create creates a new workflow in Pending state.
@@ -154,9 +184,13 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusBadRequest, "validation_error", "template_id is required", "")
 		return
 	}
-	if req.Goal == "" {
-		h.writeError(w, http.StatusBadRequest, "validation_error", "goal is required", "")
-		return
+
+	// Validate required template arguments if registry service is available
+	if h.registryService != nil {
+		if err := h.validateTemplateArgs(req.TemplateID, req.Args); err != nil {
+			h.writeError(w, http.StatusBadRequest, "validation_error", err.Error(), "")
+			return
+		}
 	}
 
 	var epicID string
@@ -170,7 +204,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 			feature = req.TemplateID
 		}
 
-		result, err := h.workflowCreator.Create(feature, req.TemplateID)
+		result, err := h.workflowCreator.CreateWithArgs(feature, req.TemplateID, req.Args)
 		if err != nil {
 			h.writeError(w, http.StatusInternalServerError, "epic_creation_failed", "Failed to create epic", err.Error())
 			return
@@ -179,8 +213,8 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		epicID = result.Epic.ID
 	}
 
-	// Build coordinator prompt: instructions template + epic ID section + user goal
-	initialPrompt = h.buildCoordinatorPrompt(req.TemplateID, epicID, req.Goal)
+	// Build coordinator prompt: instructions template + epic ID section + args
+	initialPrompt = h.buildCoordinatorPrompt(req.TemplateID, epicID, req.Args)
 
 	spec := controlplane.WorkflowSpec{
 		TemplateID:         req.TemplateID,
@@ -202,16 +236,83 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, http.StatusCreated, CreateWorkflowResponse{ID: string(id)})
 }
 
+// ListTemplates returns all available workflow templates.
+// GET /templates
+func (h *Handler) ListTemplates(w http.ResponseWriter, r *http.Request) {
+	if h.registryService == nil {
+		h.writeJSON(w, http.StatusOK, ListTemplatesResponse{
+			Templates: []TemplateResponse{},
+			Total:     0,
+		})
+		return
+	}
+
+	registrations := h.registryService.GetByNamespace("workflow")
+	templates := make([]TemplateResponse, 0, len(registrations))
+
+	for _, reg := range registrations {
+		tmpl := TemplateResponse{
+			Key:         reg.Key(),
+			Name:        reg.Name(),
+			Description: reg.Description(),
+			Version:     reg.Version(),
+			Source:      reg.Source().String(),
+			Labels:      reg.Labels(),
+		}
+
+		// Convert arguments
+		for _, arg := range reg.Arguments() {
+			tmpl.Arguments = append(tmpl.Arguments, ArgumentResponse{
+				Key:          arg.Key(),
+				Label:        arg.Label(),
+				Description:  arg.Description(),
+				Type:         string(arg.Type()),
+				Required:     arg.Required(),
+				DefaultValue: arg.DefaultValue(),
+			})
+		}
+
+		templates = append(templates, tmpl)
+	}
+
+	h.writeJSON(w, http.StatusOK, ListTemplatesResponse{
+		Templates: templates,
+		Total:     len(templates),
+	})
+}
+
+// validateTemplateArgs validates that required template arguments are present and non-empty.
+func (h *Handler) validateTemplateArgs(templateID string, args map[string]string) error {
+	reg, err := h.registryService.GetByKey("workflow", templateID)
+	if err != nil {
+		return fmt.Errorf("template not found: %s", templateID)
+	}
+
+	for _, arg := range reg.Arguments() {
+		if arg.Required() {
+			val := ""
+			if args != nil {
+				val = strings.TrimSpace(args[arg.Key()])
+			}
+			if val == "" {
+				return fmt.Errorf("%s is required", arg.Label())
+			}
+		}
+	}
+
+	return nil
+}
+
 // buildCoordinatorPrompt assembles the coordinator prompt from:
 // 1. Instructions template content (from registration's instructions field)
 // 2. Epic ID section (so coordinator can read detailed instructions via bd show)
-// 3. User's goal
-func (h *Handler) buildCoordinatorPrompt(templateID, epicID, goal string) string {
+// 3. Argument values (formatted as a section)
+func (h *Handler) buildCoordinatorPrompt(templateID, epicID string, args map[string]string) string {
 	// Load instructions template if registry service is available
 	var instructionsContent string
 	if h.registryService != nil {
 		// Get the registration for this template
-		reg, err := h.registryService.GetByKey("spec-workflow", templateID)
+		reg, err := h.registryService.GetByKey("workflow", templateID)
 		if err == nil {
 			content, err := h.registryService.GetInstructionsTemplate(reg)
 			if err == nil {
@@ -233,7 +334,15 @@ func (h *Handler) buildCoordinatorPrompt(templateID, epicID, goal string) string
 		parts = append(parts, epicSection)
 	}
 
-	parts = append(parts, "# Goal\n\n"+goal)
+	// Build arguments section if any args are present
+	if len(args) > 0 {
+		var sb strings.Builder
+		sb.WriteString("# Arguments\n\n")
+		for key, val := range args {
+			sb.WriteString(fmt.Sprintf("- **%s**: %s\n", key, val))
+		}
+		parts = append(parts, sb.String())
+	}
 
 	return strings.Join(parts, "\n\n")
 }

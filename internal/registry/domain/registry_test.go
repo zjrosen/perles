@@ -26,7 +26,7 @@ func TestNewRegistry(t *testing.T) {
 
 func TestRegistry_Add(t *testing.T) {
 	registry := NewRegistry()
-	registration, _ := NewBuilder("spec-workflow").
+	registration, _ := NewBuilder("workflow").
 		Key("planning-standard").
 		Version("v1").
 		SetChain(mkChain(t, "research", "Research", "v1-research.md")).
@@ -50,7 +50,7 @@ func TestRegistry_Add_NilRegistration(t *testing.T) {
 func TestRegistry_Add_DuplicateKey(t *testing.T) {
 	registry := NewRegistry()
 
-	reg1, _ := NewBuilder("spec-workflow").
+	reg1, _ := NewBuilder("workflow").
 		Key("planning-standard").
 		Version("v1").
 		SetChain(mkChain(t, "research", "Research", "v1-research.md")).
@@ -59,7 +59,7 @@ func TestRegistry_Add_DuplicateKey(t *testing.T) {
 	require.NoError(t, err)
 
 	// Same type and key, different version
-	reg2, _ := NewBuilder("spec-workflow").
+	reg2, _ := NewBuilder("workflow").
 		Key("planning-standard").
 		Version("v2").
 		SetChain(mkChain(t, "research", "Research", "v2-research.md")).
@@ -72,12 +72,12 @@ func TestRegistry_Add_DuplicateKey(t *testing.T) {
 func TestRegistry_Add_DifferentKeySameType(t *testing.T) {
 	registry := NewRegistry()
 
-	reg1, _ := NewBuilder("spec-workflow").
+	reg1, _ := NewBuilder("workflow").
 		Key("planning-standard").
 		Version("v1").
 		SetChain(mkChain(t, "research", "Research", "v1-research.md")).
 		Build()
-	reg2, _ := NewBuilder("spec-workflow").
+	reg2, _ := NewBuilder("workflow").
 		Key("planning-simple").
 		Version("v1").
 		SetChain(mkChain(t, "plan", "Plan", "v1-plan.md")).
@@ -94,7 +94,7 @@ func TestRegistry_Add_DifferentKeySameType(t *testing.T) {
 func TestRegistry_Add_SameKeyDifferentType(t *testing.T) {
 	registry := NewRegistry()
 
-	reg1, _ := NewBuilder("spec-workflow").
+	reg1, _ := NewBuilder("workflow").
 		Key("standard").
 		Version("v1").
 		SetChain(mkChain(t, "research", "Research", "v1-research.md")).
@@ -116,14 +116,14 @@ func TestRegistry_Add_SameKeyDifferentType(t *testing.T) {
 func TestRegistry_GetByNamespace_SingleMatch(t *testing.T) {
 	registry := NewRegistry()
 
-	reg, _ := NewBuilder("spec-workflow").
+	reg, _ := NewBuilder("workflow").
 		Key("planning-standard").
 		Version("v1").
 		SetChain(mkChain(t, "research", "Research", "v1-research.md")).
 		Build()
 	registry.Add(reg)
 
-	result := registry.GetByNamespace("spec-workflow")
+	result := registry.GetByNamespace("workflow")
 
 	require.Len(t, result, 1)
 	require.Equal(t, "planning-standard", result[0].Key())
@@ -132,12 +132,12 @@ func TestRegistry_GetByNamespace_SingleMatch(t *testing.T) {
 func TestRegistry_GetByNamespace_MultipleMatches(t *testing.T) {
 	registry := NewRegistry()
 
-	reg1, _ := NewBuilder("spec-workflow").
+	reg1, _ := NewBuilder("workflow").
 		Key("planning-standard").
 		Version("v1").
 		SetChain(mkChain(t, "research", "Research", "v1-research.md")).
 		Build()
-	reg2, _ := NewBuilder("spec-workflow").
+	reg2, _ := NewBuilder("workflow").
 		Key("planning-simple").
 		Version("v1").
 		SetChain(mkChain(t, "plan", "Plan", "v1-plan.md")).
@@ -146,7 +146,7 @@ func TestRegistry_GetByNamespace_MultipleMatches(t *testing.T) {
 	registry.Add(reg1)
 	registry.Add(reg2)
 
-	result := registry.GetByNamespace("spec-workflow")
+	result := registry.GetByNamespace("workflow")
 
 	require.Len(t, result, 2)
 }
@@ -162,13 +162,13 @@ func TestRegistry_GetByNamespace_NotFound(t *testing.T) {
 func TestRegistry_GetByKey(t *testing.T) {
 	registry := NewRegistry()
 
-	reg1, _ := NewBuilder("spec-workflow").
+	reg1, _ := NewBuilder("workflow").
 		Key("planning-standard").
 		Version("v1").
 		Name("Standard").
 		SetChain(mkChain(t, "research", "Research", "v1-research.md")).
 		Build()
-	reg2, _ := NewBuilder("spec-workflow").
+	reg2, _ := NewBuilder("workflow").
 		Key("planning-simple").
 		Version("v1").
 		Name("Simple").
@@ -178,7 +178,7 @@ func TestRegistry_GetByKey(t *testing.T) {
 	registry.Add(reg1)
 	registry.Add(reg2)
 
-	result, err := registry.GetByKey("spec-workflow", "planning-simple")
+	result, err := registry.GetByKey("workflow", "planning-simple")
 
 	require.NoError(t, err)
 	require.Equal(t, "planning-simple", result.Key())
@@ -188,14 +188,14 @@ func TestRegistry_GetByKey(t *testing.T) {
 func TestRegistry_GetByKey_NotFound(t *testing.T) {
 	registry := NewRegistry()
 
-	reg, _ := NewBuilder("spec-workflow").
+	reg, _ := NewBuilder("workflow").
 		Key("planning-standard").
 		Version("v1").
 		SetChain(mkChain(t, "research", "Research", "v1-research.md")).
 		Build()
 	registry.Add(reg)
 
-	result, err := registry.GetByKey("spec-workflow", "nonexistent")
+	result, err := registry.GetByKey("workflow", "nonexistent")
 
 	require.Nil(t, result)
 	require.ErrorIs(t, err, ErrNotFound)
@@ -204,7 +204,7 @@ func TestRegistry_GetByKey_NotFound(t *testing.T) {
 func TestRegistry_GetByKey_WrongType(t *testing.T) {
 	registry := NewRegistry()
 
-	reg, _ := NewBuilder("spec-workflow").
+	reg, _ := NewBuilder("workflow").
 		Key("standard").
 		Version("v1").
 		SetChain(mkChain(t, "research", "Research", "v1-research.md")).
@@ -220,7 +220,7 @@ func TestRegistry_GetByKey_WrongType(t *testing.T) {
 func TestRegistry_List(t *testing.T) {
 	registry := NewRegistry()
 
-	reg1, _ := NewBuilder("spec-workflow").
+	reg1, _ := NewBuilder("workflow").
 		Key("planning-standard").
 		Version("v1").
 		SetChain(mkChain(t, "research", "Research", "v1-research.md")).
@@ -244,13 +244,13 @@ func TestRegistry_List(t *testing.T) {
 func TestRegistry_GetByLabels_SingleLabel(t *testing.T) {
 	registry := NewRegistry()
 
-	reg1, _ := NewBuilder("spec-workflow").
+	reg1, _ := NewBuilder("workflow").
 		Key("go-workflow").
 		Version("v1").
 		SetChain(mkChain(t, "step", "Step", "step.md")).
 		Labels("lang:go").
 		Build()
-	reg2, _ := NewBuilder("spec-workflow").
+	reg2, _ := NewBuilder("workflow").
 		Key("python-workflow").
 		Version("v1").
 		SetChain(mkChain(t, "step", "Step", "step.md")).
@@ -270,21 +270,21 @@ func TestRegistry_GetByLabels_MultipleLabels_ANDLogic(t *testing.T) {
 	registry := NewRegistry()
 
 	// Has both labels
-	reg1, _ := NewBuilder("spec-workflow").
+	reg1, _ := NewBuilder("workflow").
 		Key("go-guidelines").
 		Version("v1").
 		SetChain(mkChain(t, "step", "Step", "step.md")).
 		Labels("lang:go", "category:guidelines").
 		Build()
 	// Has only one label
-	reg2, _ := NewBuilder("spec-workflow").
+	reg2, _ := NewBuilder("workflow").
 		Key("go-workflow").
 		Version("v1").
 		SetChain(mkChain(t, "step", "Step", "step.md")).
 		Labels("lang:go").
 		Build()
 	// Has neither
-	reg3, _ := NewBuilder("spec-workflow").
+	reg3, _ := NewBuilder("workflow").
 		Key("python-workflow").
 		Version("v1").
 		SetChain(mkChain(t, "step", "Step", "step.md")).
@@ -305,13 +305,13 @@ func TestRegistry_GetByLabels_MultipleLabels_ANDLogic(t *testing.T) {
 func TestRegistry_GetByLabels_NoLabels_ReturnsAll(t *testing.T) {
 	registry := NewRegistry()
 
-	reg1, _ := NewBuilder("spec-workflow").
+	reg1, _ := NewBuilder("workflow").
 		Key("workflow-1").
 		Version("v1").
 		SetChain(mkChain(t, "step", "Step", "step.md")).
 		Labels("lang:go").
 		Build()
-	reg2, _ := NewBuilder("spec-workflow").
+	reg2, _ := NewBuilder("workflow").
 		Key("workflow-2").
 		Version("v1").
 		SetChain(mkChain(t, "step", "Step", "step.md")).
@@ -329,7 +329,7 @@ func TestRegistry_GetByLabels_NoLabels_ReturnsAll(t *testing.T) {
 func TestRegistry_GetByLabels_NoMatches(t *testing.T) {
 	registry := NewRegistry()
 
-	reg1, _ := NewBuilder("spec-workflow").
+	reg1, _ := NewBuilder("workflow").
 		Key("go-workflow").
 		Version("v1").
 		SetChain(mkChain(t, "step", "Step", "step.md")).
@@ -341,4 +341,97 @@ func TestRegistry_GetByLabels_NoMatches(t *testing.T) {
 	result := registry.GetByLabels("lang:python")
 
 	require.Empty(t, result)
+}
+
+// AddOrReplace Tests
+
+func TestRegistry_AddOrReplace_Shadow(t *testing.T) {
+	registry := NewRegistry()
+
+	// Add initial registration
+	original, _ := NewBuilder("workflow").
+		Key("planning-standard").
+		Version("v1").
+		Name("Original").
+		SetChain(mkChain(t, "research", "Research", "v1-research.md")).
+		Build()
+	err := registry.Add(original)
+	require.NoError(t, err)
+
+	// Add replacement with same namespace+key
+	replacement, _ := NewBuilder("workflow").
+		Key("planning-standard").
+		Version("v2").
+		Name("Replacement").
+		SetChain(mkChain(t, "research", "Research", "v2-research.md")).
+		Build()
+
+	replaced := registry.AddOrReplace(replacement)
+
+	require.NotNil(t, replaced, "should return replaced registration when shadowing")
+	require.Equal(t, "Original", replaced.Name())
+	require.Equal(t, "v1", replaced.Version())
+}
+
+func TestRegistry_AddOrReplace_New(t *testing.T) {
+	registry := NewRegistry()
+
+	// Add a new registration (no existing with same namespace+key)
+	reg, _ := NewBuilder("workflow").
+		Key("planning-standard").
+		Version("v1").
+		SetChain(mkChain(t, "research", "Research", "v1-research.md")).
+		Build()
+
+	replaced := registry.AddOrReplace(reg)
+
+	require.Nil(t, replaced, "should return nil when adding new registration")
+	require.Len(t, registry.List(), 1)
+}
+
+func TestRegistry_AddOrReplace_Nil(t *testing.T) {
+	registry := NewRegistry()
+
+	// Add initial registration
+	reg, _ := NewBuilder("workflow").
+		Key("planning-standard").
+		Version("v1").
+		SetChain(mkChain(t, "research", "Research", "v1-research.md")).
+		Build()
+	registry.Add(reg)
+
+	// Attempt to add nil
+	replaced := registry.AddOrReplace(nil)
+
+	require.Nil(t, replaced, "should return nil for nil input")
+	require.Len(t, registry.List(), 1, "registry should be unchanged")
+}
+
+func TestRegistry_AddOrReplace_UpdatesRegistry(t *testing.T) {
+	registry := NewRegistry()
+
+	// Add initial registration
+	original, _ := NewBuilder("workflow").
+		Key("planning-standard").
+		Version("v1").
+		Name("Original").
+		SetChain(mkChain(t, "research", "Research", "v1-research.md")).
+		Build()
+	registry.Add(original)
+
+	// Add replacement
+	replacement, _ := NewBuilder("workflow").
+		Key("planning-standard").
+		Version("v2").
+		Name("Replacement").
+		SetChain(mkChain(t, "research", "Research", "v2-research.md")).
+		Build()
+	registry.AddOrReplace(replacement)
+
+	// Verify registry contains new registration, not old
+	result, err := registry.GetByKey("workflow", "planning-standard")
+	require.NoError(t, err)
+	require.Equal(t, "Replacement", result.Name())
+	require.Equal(t, "v2", result.Version())
+	require.Len(t, registry.List(), 1, "should still have only 1 registration")
 }

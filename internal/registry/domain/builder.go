@@ -19,8 +19,11 @@ type Builder struct {
 	description  string
 	template     string
 	instructions string
+	artifactPath string
 	dag          *Chain
 	labels       []string
+	arguments    []*Argument
+	source       Source
 }
 
 // NewBuilder creates a new registration builder
@@ -66,6 +69,12 @@ func (b *Builder) Instructions(i string) *Builder {
 	return b
 }
 
+// ArtifactPath sets the path prefix for artifacts (default: ".spec")
+func (b *Builder) ArtifactPath(p string) *Builder {
+	b.artifactPath = p
+	return b
+}
+
 // SetChain sets the workflow chain for the registration.
 func (b *Builder) SetChain(chain *Chain) *Builder {
 	b.dag = chain
@@ -75,6 +84,19 @@ func (b *Builder) SetChain(chain *Chain) *Builder {
 // Labels sets the registration labels for filtering
 func (b *Builder) Labels(labels ...string) *Builder {
 	b.labels = labels
+	return b
+}
+
+// Arguments sets the workflow's user-configurable parameters.
+func (b *Builder) Arguments(args ...*Argument) *Builder {
+	b.arguments = args
+	return b
+}
+
+// Source sets the registration source (built-in or user).
+// If not called, defaults to SourceBuiltIn.
+func (b *Builder) Source(s Source) *Builder {
+	b.source = s
 	return b
 }
 
@@ -93,5 +115,5 @@ func (b *Builder) Build() (*Registration, error) {
 		return nil, ErrEmptyChain
 	}
 
-	return newRegistration(b.namespace, b.key, b.version, b.name, b.description, b.template, b.instructions, b.dag, b.labels), nil
+	return newRegistration(b.namespace, b.key, b.version, b.name, b.description, b.template, b.instructions, b.artifactPath, b.dag, b.labels, b.arguments, b.source), nil
 }

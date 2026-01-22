@@ -289,6 +289,14 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 				break // Fall through to text input handler
 			}
 		}
+		// For text fields, arrow down moves to next field
+		if m.focusedIndex >= 0 && m.focusedIndex < len(m.fields) {
+			fs := &m.fields[m.focusedIndex]
+			if fs.config.Type == FieldTypeText {
+				m = m.nextField()
+				return m, m.blinkCmd()
+			}
+		}
 		// For list fields, navigate within the list or escape at boundary
 		if m.focusedIndex >= 0 && m.focusedIndex < len(m.fields) {
 			fs := &m.fields[m.focusedIndex]
@@ -329,6 +337,14 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 		if msg.String() == "k" && m.focusedIndex >= 0 && m.focusedIndex < len(m.fields) {
 			if m.fields[m.focusedIndex].config.Type == FieldTypeText {
 				break // Fall through to text input handler
+			}
+		}
+		// For text fields, arrow up moves to previous field
+		if m.focusedIndex >= 0 && m.focusedIndex < len(m.fields) {
+			fs := &m.fields[m.focusedIndex]
+			if fs.config.Type == FieldTypeText {
+				m = m.prevField()
+				return m, m.blinkCmd()
 			}
 		}
 		// For list fields, navigate within the list or escape at boundary
@@ -426,6 +442,22 @@ func (m Model) handleEnter() (Model, tea.Cmd) {
 			if fs.listCursor >= 0 && fs.listCursor < len(fs.listItems) {
 				for i := range fs.listItems {
 					fs.listItems[i].selected = (i == fs.listCursor)
+				}
+			}
+			return m, nil
+		}
+
+		// List field: toggle selection (same as Space)
+		if fs.config.Type == FieldTypeList {
+			if fs.listCursor >= 0 && fs.listCursor < len(fs.listItems) {
+				if fs.config.MultiSelect {
+					// Multi-select: toggle current item
+					fs.listItems[fs.listCursor].selected = !fs.listItems[fs.listCursor].selected
+				} else {
+					// Single-select: select current, deselect others
+					for i := range fs.listItems {
+						fs.listItems[i].selected = (i == fs.listCursor)
+					}
 				}
 			}
 			return m, nil
@@ -683,6 +715,13 @@ func (m Model) SetLoading(text string) Model {
 // IsLoading returns true if the form is in loading state.
 func (m Model) IsLoading() bool {
 	return m.loadingText != ""
+}
+
+// SetError sets the validation error message.
+// Pass empty string to clear the error.
+func (m Model) SetError(text string) Model {
+	m.validationError = text
+	return m
 }
 
 // listContains checks if the editable list already contains a value.

@@ -1,6 +1,6 @@
 registry:
   # Research to Tasks Workflow - Translate research docs into beads epics/tasks
-  - namespace: "spec-workflow"
+  - namespace: "workflow"
     key: "research-to-tasks"
     version: "v1"
     name: "Research to Tasks"
@@ -8,9 +8,7 @@ registry:
     template: "v1-research-to-tasks-epic.md"
     instructions: "v1-epic-instructions.md"
     labels:
-      - "category:planning"
-      - "workers:4"
-      - "output:beads-epic"
+      - "category:task-planning"
     nodes:
       # Phase 1: Mediator creates plan document
       - key: "setup"
@@ -18,7 +16,8 @@ registry:
         assignee: "worker-4"
         template: "v1-research-to-tasks-setup.md"
         outputs:
-          - "plan.md"
+          - key: "plan"
+            file: "plan.md"
 
       # Phase 2: Task Writer creates epic and tasks
       - key: "task-breakdown"
@@ -26,7 +25,8 @@ registry:
         assignee: "worker-1"
         template: "v1-research-to-tasks-breakdown.md"
         inputs:
-          - "plan.md"
+          - key: "plan"
+            file: "plan.md"
         after:
           - "setup"
 
@@ -36,7 +36,8 @@ registry:
         assignee: "worker-2"
         template: "v1-research-to-tasks-impl-review.md"
         inputs:
-          - "plan.md"
+          - key: "plan"
+            file: "plan.md"
         after:
           - "task-breakdown"
 
@@ -46,7 +47,8 @@ registry:
         assignee: "worker-3"
         template: "v1-research-to-tasks-test-review.md"
         inputs:
-          - "plan.md"
+          - key: "plan"
+            file: "plan.md"
         after:
           - "impl-review"
 
@@ -56,7 +58,8 @@ registry:
         assignee: "worker-1"
         template: "v1-research-to-tasks-revisions.md"
         inputs:
-          - "plan.md"
+          - key: "plan"
+            file: "plan.md"
         after:
           - "test-review"
 
@@ -66,7 +69,8 @@ registry:
         assignee: "worker-2"
         template: "v1-research-to-tasks-final-review.md"
         inputs:
-          - "plan.md"
+          - key: "plan"
+            file: "plan.md"
         after:
           - "revisions"
 
@@ -76,7 +80,8 @@ registry:
         assignee: "worker-3"
         template: "v1-research-to-tasks-final-review.md"
         inputs:
-          - "plan.md"
+          - key: "plan"
+            file: "plan.md"
         after:
           - "impl-final"
 
@@ -86,6 +91,7 @@ registry:
         assignee: "worker-4"
         template: "v1-research-to-tasks-summary.md"
         inputs:
-          - "plan.md"
+          - key: "plan"
+            file: "plan.md"
         after:
           - "test-final"

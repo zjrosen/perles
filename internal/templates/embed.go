@@ -5,9 +5,9 @@ import (
 	"io/fs"
 )
 
-// registryTemplates embeds all workflow registry.yaml files and templates.
+// registryTemplates embeds all workflow template.yaml files and templates.
 // The structure is:
-//   - workflows/<workflow-name>/registry.yaml
+//   - workflows/<workflow-name>/template.yaml
 //   - workflows/<workflow-name>/*.md (workflow-specific templates)
 //   - workflows/*.md (shared templates like v1-epic-instructions.md)
 //

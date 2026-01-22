@@ -11,7 +11,7 @@ Review the epic and tasks created by the Task Writer. Verify implementation feas
 ## Input
 
 - **Research Document:** (read from plan document's Source section)
-- **Plan Document:** `docs/proposals/{{ .Date }}--{{ .FeatureName }}/plan.md`
+- **Plan Document:** `docs/proposals/{{ .Date }}--{{ .Name }}/plan.md`
 
 ## Instructions
 

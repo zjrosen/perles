@@ -29,10 +29,10 @@ func TestWorkflowCreator_Create(t *testing.T) {
 			workflowKey: "research-proposal",
 			setupMock: func(m *mocks.MockIssueExecutor) {
 				m.EXPECT().CreateEpic(
-					"Plan: Test Feature",
+					"Research Proposal: Test Feature",
 					mock.AnythingOfType("string"),
 					[]string{"feature:test-feature", "workflow:research-proposal"},
-				).Return(beads.CreateResult{ID: "test-epic", Title: "Plan: Test Feature"}, nil)
+				).Return(beads.CreateResult{ID: "test-epic", Title: "Research Proposal: Test Feature"}, nil)
 
 				// Expect multiple task creations (16 nodes in research-proposal)
 				m.EXPECT().CreateTask(
@@ -49,7 +49,7 @@ func TestWorkflowCreator_Create(t *testing.T) {
 			wantTasks: 16,
 			checkResult: func(t *testing.T, result *WorkflowResultDTO, _ *mocks.MockIssueExecutor) {
 				require.Equal(t, "test-epic", result.Epic.ID)
-				require.Equal(t, "Plan: Test Feature", result.Epic.Title)
+				require.Equal(t, "Research Proposal: Test Feature", result.Epic.Title)
 				require.Equal(t, "test-feature", result.Epic.Feature)
 				require.Equal(t, "research-proposal", result.Workflow.Key)
 			},
@@ -107,7 +107,7 @@ func TestWorkflowCreator_Create(t *testing.T) {
 			tt.setupMock(mockExecutor)
 
 			// Create service with real registry
-			registrySvc, err := NewRegistryService(templates.RegistryFS())
+			registrySvc, err := NewRegistryService(templates.RegistryFS(), "")
 			require.NoError(t, err)
 
 			creator := NewWorkflowCreator(registrySvc, mockExecutor)

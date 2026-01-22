@@ -28,8 +28,8 @@ Examples:
   perles registry:list
 
   # Filter by namespace
-  perles registry:list --namespace spec-workflow
-  perles registry:list -n spec-workflow
+  perles registry:list --namespace workflow
+  perles registry:list -n workflow
 
   # Filter by single label
   perles registry:list --label lang:go
@@ -39,7 +39,7 @@ Examples:
   perles registry:list -l lang:go -l category:guidelines
 
   # Combine namespace and label filters
-  perles registry:list --namespace spec-workflow --label lang:go
+  perles registry:list --namespace coding-guidelines --label lang:go
 
   # Parse specific fields with jq
   perles registry:list | jq '.[].namespace'
@@ -71,7 +71,7 @@ Examples:
 }
 
 func init() {
-	registryListCmd.Flags().StringVarP(&regNamespace, "namespace", "n", "", "Filter by registration namespace (e.g., spec-workflow)")
+	registryListCmd.Flags().StringVarP(&regNamespace, "namespace", "n", "", "Filter by registration namespace (e.g., workflow)")
 	registryListCmd.Flags().StringArrayVarP(&regLabels, "label", "l", nil, "Filter by label (can be repeated, e.g., --label lang:go)")
 	rootCmd.AddCommand(registryListCmd)
 }

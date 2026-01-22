@@ -14,13 +14,13 @@ Read the research document and create a structured plan document that will captu
 
 ## Output
 
-- **Plan Document:** `docs/proposals/{{ .Date }}--{{ .FeatureName }}/plan.md`
+- **Plan Document:** `docs/proposals/{{ .Date }}--{{ .Name }}/plan.md`
 
 ## Instructions
 
 1. **Read the research document thoroughly** to understand what needs to be built
 
-2. **Create the plan document** at `docs/proposals/{{ .Date }}--{{ .FeatureName }}/plan.md` with the structure below
+2. **Create the plan document** at `docs/proposals/{{ .Date }}--{{ .Name }}/plan.md` with the structure below
 
 3. **Write a research summary** (2-3 paragraphs) based on what you read
 
@@ -31,7 +31,7 @@ Read the research document and create a structured plan document that will captu
 Create the document with this exact structure:
 
 ```markdown
-# Task Plan: {{ .FeatureName }}
+# Task Plan: {{ .Name }}
 
 ## Source
 
@@ -122,7 +122,7 @@ Every task in this plan includes its tests. We do NOT defer testing.
 ## Success Criteria
 
 - [ ] Read and understood the research document
-- [ ] Created plan document at `docs/proposals/{{ .Date }}--{{ .FeatureName }}/plan.md`
+- [ ] Created plan document at `docs/proposals/{{ .Date }}--{{ .Name }}/plan.md`
 - [ ] Research summary accurately reflects the research document
 - [ ] Key implementation points are extracted
 - [ ] All placeholder sections are present for subsequent phases

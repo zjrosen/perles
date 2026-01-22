@@ -95,6 +95,24 @@ func hasAllLabels(regLabels, targetLabels []string) bool {
 	return true
 }
 
+// AddOrReplace adds a registration, replacing any existing registration
+// with the same namespace+key. Returns the replaced registration if any.
+func (r *Registry) AddOrReplace(reg *Registration) *Registration {
+	if reg == nil {
+		return nil
+	}
+
+	for i, existing := range r.registrations {
+		if existing.Namespace() == reg.Namespace() && existing.Key() == reg.Key() {
+			r.registrations[i] = reg
+			return existing
+		}
+	}
+
+	r.registrations = append(r.registrations, reg)
+	return nil
+}
+
 // Labels returns all unique labels across all registrations, sorted alphabetically
 func (r *Registry) Labels() []string {
 	labelSet := make(map[string]bool)

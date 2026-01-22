@@ -1,0 +1,10 @@
+registry:
+  - namespace: "test"
+    key: "missing-template"
+    version: "v1"
+    name: "Missing Template Test"
+    description: "References non-existent template"
+    nodes:
+      - key: "step1"
+        name: "Step 1"
+        template: "nonexistent.md"

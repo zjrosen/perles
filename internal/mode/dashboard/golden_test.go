@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/exp/teatest"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+
 	"github.com/zjrosen/perles/internal/mode"
 	"github.com/zjrosen/perles/internal/orchestration/controlplane"
 	appreg "github.com/zjrosen/perles/internal/registry/application"
@@ -220,10 +221,10 @@ func TestDashboard_View_Golden_LargeTokenCounts(t *testing.T) {
 // createGoldenTestRegistryFS creates a MapFS for golden testing with workflow subdirectories
 func createGoldenTestRegistryFS() fstest.MapFS {
 	return fstest.MapFS{
-		"workflows/quick-plan/registry.yaml": &fstest.MapFile{
+		"workflows/quick-plan/template.yaml": &fstest.MapFile{
 			Data: []byte(`
 registry:
-  - namespace: "spec-workflow"
+  - namespace: "workflow"
     key: "quick-plan"
     version: "v1"
     name: "Quick Plan"
@@ -234,10 +235,10 @@ registry:
         template: "v1-plan.md"
 `),
 		},
-		"workflows/cook/registry.yaml": &fstest.MapFile{
+		"workflows/cook/template.yaml": &fstest.MapFile{
 			Data: []byte(`
 registry:
-  - namespace: "spec-workflow"
+  - namespace: "workflow"
     key: "cook"
     version: "v1"
     name: "Cook"
@@ -248,10 +249,10 @@ registry:
         template: "v1-cook.md"
 `),
 		},
-		"workflows/research/registry.yaml": &fstest.MapFile{
+		"workflows/research/template.yaml": &fstest.MapFile{
 			Data: []byte(`
 registry:
-  - namespace: "spec-workflow"
+  - namespace: "workflow"
     key: "research"
     version: "v1"
     name: "Research"
@@ -283,7 +284,7 @@ func createGoldenTestModelWithRegistry(t *testing.T, workflows []*controlplane.W
 	}, true).Maybe()
 
 	registryFS := createGoldenTestRegistryFS()
-	registryService, err := appreg.NewRegistryService(registryFS)
+	registryService, err := appreg.NewRegistryService(registryFS, "")
 	require.NoError(t, err)
 
 	cfg := Config{

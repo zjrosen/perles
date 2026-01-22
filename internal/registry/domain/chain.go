@@ -3,6 +3,7 @@ package registry
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // Validation errors returned by ChainBuilder.Build()
@@ -18,21 +19,43 @@ var (
 // NodeOption configures a Node during chain building.
 type NodeOption func(*Node)
 
-// Inputs adds input artifacts to a node.
+// Inputs adds input artifacts to a node using filenames.
+// The key is derived from the filename by stripping the .md extension.
+// For explicit keys, use InputArtifacts instead.
 func Inputs(filenames ...string) NodeOption {
 	return func(n *Node) {
 		for _, f := range filenames {
-			n.WithInputs(NewArtifact(f))
+			key := strings.TrimSuffix(f, ".md")
+			n.WithInputs(NewArtifact(key, f))
 		}
 	}
 }
 
-// Outputs adds output artifacts to a node.
+// Outputs adds output artifacts to a node using filenames.
+// The key is derived from the filename by stripping the .md extension.
+// For explicit keys, use OutputArtifacts instead.
 func Outputs(filenames ...string) NodeOption {
 	return func(n *Node) {
 		for _, f := range filenames {
-			n.WithOutputs(NewArtifact(f))
+			key := strings.TrimSuffix(f, ".md")
+			n.WithOutputs(NewArtifact(key, f))
 		}
+	}
+}
+
+// InputArtifacts adds input artifacts with explicit keys and filenames.
+// Use this when filenames contain template syntax and need stable keys.
+func InputArtifacts(artifacts ...*Artifact) NodeOption {
+	return func(n *Node) {
+		n.WithInputs(artifacts...)
+	}
+}
+
+// OutputArtifacts adds output artifacts with explicit keys and filenames.
+// Use this when filenames contain template syntax and need stable keys.
+func OutputArtifacts(artifacts ...*Artifact) NodeOption {
+	return func(n *Node) {
+		n.WithOutputs(artifacts...)
 	}
 }
 

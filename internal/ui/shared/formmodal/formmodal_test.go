@@ -539,6 +539,37 @@ func TestTextField_JK_TypesCharacters(t *testing.T) {
 	require.Equal(t, 0, m.focusedIndex, "should stay on text field")
 }
 
+func TestTextField_ArrowKeys_NavigateFields(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{Key: "field1", Type: FieldTypeText, Label: "Field 1"},
+			{Key: "field2", Type: FieldTypeText, Label: "Field 2"},
+			{Key: "field3", Type: FieldTypeText, Label: "Field 3"},
+		},
+	}
+	m := New(cfg)
+
+	// Start on first text field
+	require.Equal(t, 0, m.focusedIndex)
+
+	// Arrow down should move to next field
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	require.Equal(t, 1, m.focusedIndex, "arrow down should move to next field")
+
+	// Arrow down again
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	require.Equal(t, 2, m.focusedIndex, "arrow down should move to field 3")
+
+	// Arrow up should move to previous field
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	require.Equal(t, 1, m.focusedIndex, "arrow up should move to previous field")
+
+	// Arrow up again
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	require.Equal(t, 0, m.focusedIndex, "arrow up should move to field 1")
+}
+
 func TestEditableListField_JK_InInputTypesCharacters(t *testing.T) {
 	cfg := FormConfig{
 		Title: "Test Form",
@@ -594,6 +625,71 @@ func TestListField_Selection_MultiSelect(t *testing.T) {
 
 	// Both items should be selected (multi-select)
 	require.True(t, m.fields[0].listItems[0].selected, "expected item 0 to remain selected in multi-select")
+}
+
+func TestListField_Selection_MultiSelect_Enter(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:         "items",
+				Type:        FieldTypeList,
+				Label:       "Items",
+				MultiSelect: true,
+				Options: []ListOption{
+					{Label: "Item 1", Value: "1"},
+					{Label: "Item 2", Value: "2"},
+				},
+			},
+		},
+	}
+	m := New(cfg)
+
+	// Enter toggles selection (same as space)
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	require.True(t, m.fields[0].listItems[0].selected, "expected item 0 selected after enter")
+
+	// Move to item 2 and select it too with Enter
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	require.True(t, m.fields[0].listItems[1].selected, "expected item 1 selected after enter")
+
+	// Both items should be selected (multi-select)
+	require.True(t, m.fields[0].listItems[0].selected, "expected item 0 to remain selected in multi-select")
+}
+
+func TestListField_Selection_SingleSelect_Enter(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:         "items",
+				Type:        FieldTypeList,
+				Label:       "Items",
+				MultiSelect: false, // Single-select mode
+				Options: []ListOption{
+					{Label: "Item 1", Value: "1"},
+					{Label: "Item 2", Value: "2"},
+					{Label: "Item 3", Value: "3"},
+				},
+			},
+		},
+	}
+	m := New(cfg)
+
+	// Select first item with Enter
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	require.True(t, m.fields[0].listItems[0].selected, "expected item 0 selected")
+
+	// Move to second item and select with Enter
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// Second item should be selected
+	require.True(t, m.fields[0].listItems[1].selected, "expected item 1 selected")
+
+	// First item should be deselected (single-select behavior)
+	require.False(t, m.fields[0].listItems[0].selected, "expected item 0 deselected in single-select mode")
 }
 
 func TestListField_Selection_SingleSelect(t *testing.T) {
@@ -3783,4 +3879,75 @@ func TestGolden_VisibleWhen_VisibleField(t *testing.T) {
 	m := New(cfg).SetSize(80, 24)
 
 	compareGolden(t, "visible_when_visible", m.View())
+}
+
+// --- SetError Tests ---
+
+func TestSetError_SetsErrorMessage(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{Key: "name", Type: FieldTypeText, Label: "Name"},
+		},
+		SubmitLabel: "Save",
+	}
+	m := New(cfg).SetSize(80, 24)
+
+	// Initially no error
+	require.Empty(t, m.validationError)
+
+	// Set error
+	m = m.SetError("Something went wrong")
+	require.Equal(t, "Something went wrong", m.validationError)
+}
+
+func TestSetError_ClearsErrorWithEmptyString(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{Key: "name", Type: FieldTypeText, Label: "Name"},
+		},
+		SubmitLabel: "Save",
+	}
+	m := New(cfg).SetSize(80, 24)
+
+	// Set error
+	m = m.SetError("Something went wrong")
+	require.Equal(t, "Something went wrong", m.validationError)
+
+	// Clear error
+	m = m.SetError("")
+	require.Empty(t, m.validationError)
+}
+
+func TestSetError_ChainedWithSetLoading(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{Key: "name", Type: FieldTypeText, Label: "Name"},
+		},
+		SubmitLabel: "Save",
+	}
+	m := New(cfg).SetSize(80, 24)
+
+	// Chain SetLoading and SetError (common pattern for async error handling)
+	m = m.SetLoading("").SetError("Creation failed: template not found")
+
+	require.False(t, m.IsLoading())
+	require.Equal(t, "Creation failed: template not found", m.validationError)
+}
+
+func TestGolden_SetError(t *testing.T) {
+	cfg := FormConfig{
+		Title: "Create Workflow",
+		Fields: []FieldConfig{
+			{Key: "name", Type: FieldTypeText, Label: "Name", Hint: "Workflow name"},
+		},
+		SubmitLabel: "Create",
+		MinWidth:    50,
+	}
+	m := New(cfg).SetSize(80, 24)
+	m = m.SetError("create workflow: template \"v1-security-assessment.md\" not found")
+
+	compareGolden(t, "set_error", m.View())
 }

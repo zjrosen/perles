@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -12,8 +13,12 @@ import (
 	appgit "github.com/zjrosen/perles/internal/git/application"
 	"github.com/zjrosen/perles/internal/orchestration/controlplane"
 	appreg "github.com/zjrosen/perles/internal/registry/application"
+	"github.com/zjrosen/perles/internal/registry/domain"
 	"github.com/zjrosen/perles/internal/ui/shared/formmodal"
 )
+
+// argFieldPrefix is the prefix for argument field keys in form values.
+const argFieldPrefix = "arg_"
 
 // NewWorkflowModal holds the state for the new workflow creation modal.
 type NewWorkflowModal struct {
@@ -23,6 +28,10 @@ type NewWorkflowModal struct {
 	gitExecutor     appgit.GitExecutor
 	workflowCreator *appreg.WorkflowCreator
 	worktreeEnabled bool // track if worktree options are available
+
+	// templateArgs maps template key → slice of arguments for that template.
+	// Used to validate required arguments and build TemplateContext.Args on submit.
+	templateArgs map[string][]*registry.Argument
 
 	// Spinner animation state (for loading indicator)
 	spinnerFrame int
@@ -70,6 +79,7 @@ func NewNewWorkflowModal(
 		controlPlane:    cp,
 		gitExecutor:     gitExecutor,
 		workflowCreator: workflowCreator,
+		templateArgs:    make(map[string][]*registry.Argument),
 	}
 
 	// Build template options from registry service
@@ -97,16 +107,11 @@ func NewNewWorkflowModal(
 			Hint:        "optional",
 			Placeholder: "Workflow name (defaults to template name)",
 		},
-		{
-			Key:         "goal",
-			Type:        formmodal.FieldTypeTextArea,
-			Label:       "Goal",
-			Hint:        "required",
-			Placeholder: "What should this workflow accomplish?",
-			MaxHeight:   5,
-			VimEnabled:  true,
-		},
 	}
+
+	// Add argument fields for all templates (visibility controlled by VisibleWhen)
+	argFields := m.buildArgumentFields(registryService)
+	fields = append(fields, argFields...)
 
 	// Add worktree fields if git support is available
 	if worktreeAvailable {
@@ -163,6 +168,79 @@ func NewNewWorkflowModal(
 	return m
 }
 
+// buildArgumentFields creates form fields for all template arguments.
+// Each field uses VisibleWhen to only show when its template is selected.
+// Also populates m.templateArgs for validation and submission.
+func (m *NewWorkflowModal) buildArgumentFields(registryService *appreg.RegistryService) []formmodal.FieldConfig {
+	if registryService == nil {
+		return nil
+	}
+
+	var fields []formmodal.FieldConfig
+	registrations := registryService.GetByNamespace("workflow")
+
+	for _, reg := range registrations {
+		args := reg.Arguments()
+		if len(args) == 0 {
+			continue
+		}
+
+		// Store arguments for this template (used in validate and submit)
+		m.templateArgs[reg.Key()] = args
+
+		// Create a field for each argument
+		for _, arg := range args {
+			// Capture templateKey for closure
+			templateKey := reg.Key()
+
+			// Build visibility function: show only when this template is selected
+			visibleWhen := func(values map[string]any) bool {
+				selected, _ := values["template"].(string)
+				return selected == templateKey
+			}
+
+			// Map ArgumentType to formmodal.FieldType
+			field := formmodal.FieldConfig{
+				Key:          argFieldPrefix + arg.Key(),
+				Label:        arg.Label(),
+				Placeholder:  arg.Description(),
+				InitialValue: arg.DefaultValue(),
+				VisibleWhen:  visibleWhen,
+			}
+
+			// Set hint based on required status
+			if arg.Required() {
+				field.Hint = "required"
+			} else {
+				field.Hint = "optional"
+			}
+
+			// Map argument type to field type
+			switch arg.Type() {
+			case registry.ArgumentTypeText, registry.ArgumentTypeNumber:
+				field.Type = formmodal.FieldTypeText
+			case registry.ArgumentTypeTextarea:
+				field.Type = formmodal.FieldTypeTextArea
+				field.MaxHeight = 4
+				field.VimEnabled = true
+			case registry.ArgumentTypeSelect:
+				field.Type = formmodal.FieldTypeSelect
+				field.Options = buildSelectOptions(arg.Options(), arg.DefaultValue())
+			case registry.ArgumentTypeMultiSelect:
+				field.Type = formmodal.FieldTypeList
+				field.MultiSelect = true
+				field.Options = buildSelectOptions(arg.Options(), arg.DefaultValue())
+			default:
+				field.Type = formmodal.FieldTypeText
+			}
+
+			fields = append(fields, field)
+		}
+	}
+
+	return fields
+}
+
 // buildBranchOptions converts git branches to list options.
 // Returns the options and a boolean indicating if worktree support is available.
 func buildBranchOptions(gitExecutor appgit.GitExecutor) ([]formmodal.ListOption, bool) {
@@ -191,15 +269,29 @@ func buildBranchOptions(gitExecutor appgit.GitExecutor) ([]formmodal.ListOption,
 	return options, true
 }
 
+// buildSelectOptions converts argument options to formmodal ListOptions.
+// If defaultValue matches an option, that option is marked as selected.
+func buildSelectOptions(options []string, defaultValue string) []formmodal.ListOption {
+	listOptions := make([]formmodal.ListOption, len(options))
+	for i, opt := range options {
+		listOptions[i] = formmodal.ListOption{
+			Label:    opt,
+			Value:    opt,
+			Selected: opt == defaultValue || (defaultValue == "" && i == 0),
+		}
+	}
+	return listOptions
+}
+
 // buildTemplateOptions converts domain registry registrations to list options.
-// Uses GetByNamespace("spec-workflow") to get only workflow templates (not language guidelines).
+// Uses GetByNamespace("workflow") to get only workflow templates (not language guidelines).
 func buildTemplateOptions(registryService *appreg.RegistryService) []formmodal.ListOption {
 	if registryService == nil {
 		return []formmodal.ListOption{}
 	}
 
-	// Get spec-workflow registrations (workflow templates, not language guidelines)
-	registrations := registryService.GetByNamespace("spec-workflow")
+	// Get workflow registrations (workflow templates, not language guidelines)
+	registrations := registryService.GetByNamespace("workflow")
 
 	options := make([]formmodal.ListOption, len(registrations))
 	for i, reg := range registrations {
@@ -224,15 +316,31 @@ func (m *NewWorkflowModal) validate(values map[string]any) error {
 
 	// Verify template exists in domain registry
 	if m.registryService != nil {
-		if _, err := m.registryService.GetByKey("spec-workflow", templateKey); err != nil {
+		if _, err := m.registryService.GetByKey("workflow", templateKey); err != nil {
 			return errors.New("selected template not found")
 		}
 	}
 
-	// Goal is required
-	goal, ok := values["goal"].(string)
-	if !ok || goal == "" {
-		return errors.New("goal is required")
+	// Validate required arguments for the selected template
+	if args, hasArgs := m.templateArgs[templateKey]; hasArgs {
+		for _, arg := range args {
+			if arg.Required() {
+				fieldKey := argFieldPrefix + arg.Key()
+				// Handle both string (text/select) and []string (multi-select) values
+				switch v := values[fieldKey].(type) {
+				case string:
+					if strings.TrimSpace(v) == "" {
+						return fmt.Errorf("%s is required", arg.Label())
+					}
+				case []string:
+					if len(v) == 0 {
+						return fmt.Errorf("%s is required", arg.Label())
+					}
+				default:
+					return fmt.Errorf("%s is required", arg.Label())
+				}
+			}
+		}
 	}
 
 	// Validate worktree fields if worktree is enabled
@@ -276,7 +384,9 @@ func (m *NewWorkflowModal) createWorkflowAsync(values map[string]any) tea.Cmd {
 	return func() tea.Msg {
 		templateID := values["template"].(string)
 		name := values["name"].(string)
-		goal := values["goal"].(string)
+
+		// Extract argument values for the selected template
+		args := m.extractArgumentValues(templateID, values)
 
 		var epicID string
 		var initialPrompt string
@@ -289,18 +399,18 @@ func (m *NewWorkflowModal) createWorkflowAsync(values map[string]any) tea.Cmd {
 				feature = templateID
 			}
 
-			result, err := m.workflowCreator.Create(feature, templateID)
+			result, err := m.workflowCreator.CreateWithArgs(feature, templateID, args)
 			if err != nil {
 				return ErrorMsg{Err: fmt.Errorf("create epic: %w", err)}
 			}
 
 			epicID = result.Epic.ID
 
-			// Build coordinator prompt: instructions template + epic ID section + user goal
-			initialPrompt = m.buildCoordinatorPrompt(templateID, epicID, goal)
+			// Build coordinator prompt: instructions template + epic ID section + args
+			initialPrompt = m.buildCoordinatorPrompt(templateID, epicID, args)
 		} else {
-			// No WorkflowCreator, use goal directly as InitialGoal
-			initialPrompt = goal
+			// No WorkflowCreator, use goal from args if present, otherwise empty
+			initialPrompt = args["goal"]
 		}
 
 		// Build WorkflowSpec
@@ -338,16 +448,54 @@ func (m *NewWorkflowModal) createWorkflowAsync(values map[string]any) tea.Cmd {
 	}
 }
 
+// extractArgumentValues extracts argument values from form values for the selected template.
+// Returns a map of argument key → value (without the argFieldPrefix).
+func (m *NewWorkflowModal) extractArgumentValues(templateKey string, values map[string]any) map[string]string {
+	args := make(map[string]string)
+
+	// Get arguments for this template
+	templateArgs, hasArgs := m.templateArgs[templateKey]
+	if !hasArgs {
+		return args
+	}
+
+	// Extract values for each argument
+	for _, arg := range templateArgs {
+		fieldKey := argFieldPrefix + arg.Key()
+		// Handle both string (text/select) and []string (multi-select) values
+		switch v := values[fieldKey].(type) {
+		case string:
+			if v != "" {
+				args[arg.Key()] = v
+			} else if arg.DefaultValue() != "" {
+				args[arg.Key()] = arg.DefaultValue()
+			}
+		case []string:
+			if len(v) > 0 {
+				args[arg.Key()] = strings.Join(v, ", ")
+			} else if arg.DefaultValue() != "" {
+				args[arg.Key()] = arg.DefaultValue()
+			}
+		default:
+			if arg.DefaultValue() != "" {
+				args[arg.Key()] = arg.DefaultValue()
+			}
+		}
+	}
+
+	return args
+}
+
 // buildCoordinatorPrompt assembles the coordinator prompt from:
 // 1. Instructions template content (from registration's instructions field)
 // 2. Epic ID section (so coordinator can read detailed instructions via bd show)
-// 3. User's goal
-func (m *NewWorkflowModal) buildCoordinatorPrompt(templateID, epicID, goal string) string {
+// 3. Argument values (includes goal if defined as a template argument)
+func (m *NewWorkflowModal) buildCoordinatorPrompt(templateID, epicID string, args map[string]string) string {
 	// Load instructions template if registry service is available
 	var instructionsContent string
 	if m.registryService != nil {
 		// Get the registration for this template
-		reg, err := m.registryService.GetByKey("spec-workflow", templateID)
+		reg, err := m.registryService.GetByKey("workflow", templateID)
 		if err == nil {
 			content, err := m.registryService.GetInstructionsTemplate(reg)
 			if err == nil {
@@ -355,6 +503,17 @@ func (m *NewWorkflowModal) buildCoordinatorPrompt(templateID, epicID, goal strin
 			}
 		}
 		// If error loading template, continue without it
+	}
+
+	// Build argument section if any args are present
+	var argsSection string
+	if len(args) > 0 {
+		var sb strings.Builder
+		sb.WriteString("\n# Arguments\n\n")
+		for key, val := range args {
+			sb.WriteString(fmt.Sprintf("- **%s**: %s\n", key, val))
+		}
+		argsSection = sb.String()
 	}
 
 	// Build the full prompt
@@ -368,24 +527,16 @@ func (m *NewWorkflowModal) buildCoordinatorPrompt(templateID, epicID, goal strin
 Epic ID: %s
 
 Use `+"`bd show %s --json`"+` to read your detailed workflow instructions.
-
-# Your Goal
-
-%s
-`, instructionsContent, epicID, epicID, goal)
+%s`, instructionsContent, epicID, epicID, argsSection)
 	}
 
-	// Fallback if no epic_driven.md available
+	// Fallback if no instructions template available
 	return fmt.Sprintf(`# Your Epic
 
 Epic ID: %s
 
 Use `+"`bd show %s --json`"+` to read your detailed workflow instructions.
-
-# Your Goal
-
-%s
-`, epicID, epicID, goal)
+%s`, epicID, epicID, argsSection)
 }
 
 // SetSize sets the modal dimensions.
@@ -418,8 +569,8 @@ func (m *NewWorkflowModal) Update(msg tea.Msg) (*NewWorkflowModal, tea.Cmd) {
 		return m, nil
 
 	case ErrorMsg:
-		// Clear loading state on error
-		m.form = m.form.SetLoading("")
+		// Clear loading state and show error in the form
+		m.form = m.form.SetLoading("").SetError(msg.Err.Error())
 		return m, nil
 
 	case CreateWorkflowMsg:

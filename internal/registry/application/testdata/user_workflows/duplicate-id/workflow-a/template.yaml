@@ -1,0 +1,10 @@
+registry:
+  - namespace: "test"
+    key: "dup"
+    version: "v1"
+    name: "Duplicate A"
+    description: "First occurrence of duplicate ID"
+    nodes:
+      - key: "step1"
+        name: "Step 1"
+        template: "step1.md"

@@ -1,0 +1,2 @@
+# Empty registrations test fixture - empty array for testing graceful handling
+registry: []

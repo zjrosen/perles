@@ -7,47 +7,56 @@ import (
 )
 
 func TestNewArtifact(t *testing.T) {
+	key := "research"
 	filename := "research.md"
-	artifact := NewArtifact(filename)
+	artifact := NewArtifact(key, filename)
 
+	require.Equal(t, key, artifact.Key())
 	require.Equal(t, filename, artifact.Filename())
 }
 
-func TestArtifact_Filename(t *testing.T) {
+func TestArtifact_KeyAndFilename(t *testing.T) {
 	tests := []struct {
 		name     string
+		key      string
 		filename string
 	}{
 		{
-			name:     "markdown file",
+			name:     "simple artifact",
+			key:      "research",
 			filename: "research.md",
 		},
 		{
-			name:     "json file",
-			filename: "tasks.json",
+			name:     "dynamic filename",
+			key:      "report",
+			filename: "{{.Date}}-report.md",
 		},
 		{
 			name:     "file with path",
+			key:      "output",
 			filename: "output/report.md",
 		},
 		{
-			name:     "empty filename",
+			name:     "empty values",
+			key:      "",
 			filename: "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			artifact := NewArtifact(tt.filename)
+			artifact := NewArtifact(tt.key, tt.filename)
+			require.Equal(t, tt.key, artifact.Key())
 			require.Equal(t, tt.filename, artifact.Filename())
 		})
 	}
 }
 
 func TestArtifact_CaseSensitive(t *testing.T) {
-	lower := NewArtifact("research.md")
-	upper := NewArtifact("Research.md")
+	lower := NewArtifact("research", "research.md")
+	upper := NewArtifact("Research", "Research.md")
 
-	// Artifacts are compared by filename (case-sensitive)
+	// Keys and filenames are case-sensitive
+	require.NotEqual(t, lower.Key(), upper.Key())
 	require.NotEqual(t, lower.Filename(), upper.Filename())
 }

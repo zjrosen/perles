@@ -1,0 +1,21 @@
+registry:
+  - namespace: "workflow"
+    key: "planning-standard"
+    version: "v1"
+    name: "User Shadowed Planning Standard"
+    description: "User workflow that shadows the built-in planning-standard workflow"
+    nodes:
+      - key: "research"
+        name: "Research (User Override)"
+        template: "user-research.md"
+        outputs:
+          - "research.md"
+      - key: "plan"
+        name: "Plan (User Override)"
+        template: "user-plan.md"
+        inputs:
+          - "research.md"
+        outputs:
+          - "plan.md"
+        after:
+          - "research"

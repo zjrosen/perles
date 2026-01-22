@@ -1,0 +1,11 @@
+registry:
+  - namespace: "test"
+    key: "path-traversal"
+    version: "v1"
+    name: "Path Traversal Test"
+    description: "Attempts path traversal"
+    template: "../../../etc/passwd"
+    nodes:
+      - key: "step1"
+        name: "Step 1"
+        template: "step1.md"

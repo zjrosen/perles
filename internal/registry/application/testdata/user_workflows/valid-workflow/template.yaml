@@ -1,0 +1,21 @@
+registry:
+  - namespace: "user-workflow"
+    key: "valid-user"
+    version: "v1"
+    name: "Valid User Workflow"
+    description: "A valid user-defined workflow for testing"
+    nodes:
+      - key: "step1"
+        name: "Step 1"
+        template: "step1.md"
+        outputs:
+          - "output1.md"
+      - key: "step2"
+        name: "Step 2"
+        template: "step2.md"
+        inputs:
+          - "output1.md"
+        outputs:
+          - "output2.md"
+        after:
+          - "step1"

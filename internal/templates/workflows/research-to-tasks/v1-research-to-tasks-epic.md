@@ -1,4 +1,4 @@
-# Research to Tasks: {{.FeatureName}}
+# Research to Tasks: {{.Name}}
 
 You are the **Coordinator** for a multi-agent research-to-tasks workflow. Your job is to orchestrate 4 workers to translate a research document into a well-structured beads epic with tasks.
 
@@ -14,7 +14,7 @@ You are the **Coordinator** for a multi-agent research-to-tasks workflow. Your j
 ## Input Documents
 
 - **Research Document:** (provided by user when starting workflow)
-- **Plan Document:** `docs/proposals/{{ .Date }}--{{ .FeatureName }}/plan.md`
+- **Plan Document:** `docs/proposals/{{ .Date }}--{{ .Name }}/plan.md`
 
 ## Critical Philosophy
 
@@ -125,7 +125,7 @@ When Phase 7 completes, you MUST:
    ```
    signal_workflow_complete(
        status="success",
-       summary="Translated research document into epic with tasks. Both reviewers approved. Plan document at docs/proposals/{{ .Date }}--{{ .FeatureName }}/plan.md"
+       summary="Translated research document into epic with tasks. Both reviewers approved. Plan document at docs/proposals/{{ .Date }}--{{ .Name }}/plan.md"
    )
    ```
 

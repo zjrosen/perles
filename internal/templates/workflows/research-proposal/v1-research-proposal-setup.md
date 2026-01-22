@@ -10,11 +10,11 @@ Create the proposal directory and shared proposal document with problem statemen
 
 ## Instructions
 
-1. **Create the proposal directory** at `docs/proposals/{{ .Date }}--{{ .FeatureName }}/`
+1. **Create the proposal directory** at `docs/proposals/{{ .Date }}--{{ .Name }}/`
    - Format: `YYYY-MM-DD--feature-name` (e.g., `2026-01-10--workflow-templates`)
    - This keeps proposals organized chronologically and by feature
 
-2. **Create the proposal file** at `docs/proposals/{{ .Date }}--{{ .FeatureName }}/research-proposal.md`
+2. **Create the proposal file** at `docs/proposals/{{ .Date }}--{{ .Name }}/research-proposal.md`
 
 3. Write a clear problem statement (2-3 paragraphs explaining what needs to be built and why)
 
@@ -26,7 +26,7 @@ Create the proposal directory and shared proposal document with problem statemen
 
 ```
 docs/proposals/
-└── {{ .Date }}--{{ .FeatureName }}/
+└── {{ .Date }}--{{ .Name }}/
     └── research-proposal.md
 ```
 
@@ -35,7 +35,7 @@ docs/proposals/
 Create the proposal with this structure:
 
 ```markdown
-# Proposal: {{ .FeatureName }}
+# Proposal: {{ .Name }}
 
 ## Problem Statement
 [2-3 paragraphs explaining what needs to be built and why]
@@ -63,8 +63,8 @@ Create the proposal with this structure:
 
 ## Success Criteria
 
-- [ ] Proposal directory created at `docs/proposals/{{ .Date }}--{{ .FeatureName }}/`
-- [ ] Proposal file created at `docs/proposals/{{ .Date }}--{{ .FeatureName }}/research-proposal.md`
+- [ ] Proposal directory created at `docs/proposals/{{ .Date }}--{{ .Name }}/`
+- [ ] Proposal file created at `docs/proposals/{{ .Date }}--{{ .Name }}/research-proposal.md`
 - [ ] Problem statement clearly articulates the need
 - [ ] Research questions are specific and actionable for each role
 - [ ] Document structure follows the template

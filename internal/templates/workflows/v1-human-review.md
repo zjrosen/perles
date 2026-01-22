@@ -31,7 +31,7 @@ After calling `notify_user`:
 ## Proposal Location
 
 ```
-docs/proposals/{{ .Date }}--{{ .FeatureName }}/research-proposal.md
+docs/proposals/{{ .Date }}--{{ .Name }}/research-proposal.md
 ```
 
 ## When This Checkpoint Is Used

@@ -1,15 +1,21 @@
 registry:
   # Research Proposal Workflow - Multi-agent collaborative research
-  - namespace: "spec-workflow"
+  - namespace: "workflow"
     key: "research-proposal"
     version: "v1"
     name: "Research Proposal"
     description: "Collaborative research with parallel exploration and structured synthesis for implementation plans"
     template: "v1-research-proposal-epic.md"
     instructions: "v1-epic-instructions.md"
+    path: "docs/proposals"
     labels:
-      - "category:planning"
-      - "workers:4"
+      - "category:research"
+    arguments:
+      - key: "goal"
+        label: "Goal"
+        description: "What do you want to research?"
+        type: "textarea"
+        required: true
     nodes:
       # Phase 1: Coordinator creates proposal directory and document
       - key: "setup"
@@ -17,7 +23,8 @@ registry:
         assignee: "worker-1"
         template: "v1-research-proposal-setup.md"
         outputs:
-          - "research-proposal.md"
+          - key: "proposal"
+            file: "research-proposal.md"
 
       # Phase 2: Three workers research in parallel (no writes)
       - key: "research-lead"
@@ -25,7 +32,8 @@ registry:
         template: "v1-research-proposal-research-lead.md"
         assignee: "worker-2"
         inputs:
-          - "research-proposal.md"
+          - key: "proposal"
+            file: "research-proposal.md"
         after:
           - "setup"
 
@@ -34,7 +42,8 @@ registry:
         template: "v1-research-proposal-architect.md"
         assignee: "worker-3"
         inputs:
-          - "research-proposal.md"
+          - key: "proposal"
+            file: "research-proposal.md"
         after:
           - "setup"
 
@@ -43,7 +52,8 @@ registry:
         template: "v1-research-proposal-risk-analyst.md"
         assignee: "worker-4"
         inputs:
-          - "research-proposal.md"
+          - key: "proposal"
+            file: "research-proposal.md"
         after:
           - "setup"
 
@@ -53,7 +63,8 @@ registry:
         template: "v1-research-proposal-document-research.md"
         assignee: "worker-2"
         inputs:
-          - "research-proposal.md"
+          - key: "proposal"
+            file: "research-proposal.md"
         after:
           - "research-lead"
 
@@ -62,7 +73,8 @@ registry:
         template: "v1-research-proposal-document-architecture.md"
         assignee: "worker-3"
         inputs:
-          - "research-proposal.md"
+          - key: "proposal"
+            file: "research-proposal.md"
         after:
           - "architect"
           - "document-research"
@@ -72,7 +84,8 @@ registry:
         template: "v1-research-proposal-document-risks.md"
         assignee: "worker-4"
         inputs:
-          - "research-proposal.md"
+          - key: "proposal"
+            file: "research-proposal.md"
         after:
           - "risk-analyst"
           - "document-architecture"
@@ -83,7 +96,8 @@ registry:
         template: "v1-human-review.md"
         assignee: "human"
         inputs:
-          - "research-proposal.md"
+          - key: "proposal"
+            file: "research-proposal.md"
         after:
           - "document-risks"
 
@@ -93,7 +107,8 @@ registry:
         template: "v1-research-proposal-cross-review-architect.md"
         assignee: "worker-3"
         inputs:
-          - "research-proposal.md"
+          - key: "proposal"
+            file: "research-proposal.md"
         after:
           - "clarification-review"
 
@@ -102,7 +117,8 @@ registry:
         template: "v1-research-proposal-cross-review-risk.md"
         assignee: "worker-4"
         inputs:
-          - "research-proposal.md"
+          - key: "proposal"
+            file: "research-proposal.md"
         after:
           - "cross-review-architect"
 
@@ -111,7 +127,8 @@ registry:
         template: "v1-research-proposal-cross-review-research.md"
         assignee: "worker-2"
         inputs:
-          - "research-proposal.md"
+          - key: "proposal"
+            file: "research-proposal.md"
         after:
           - "cross-review-risk"
 
@@ -121,7 +138,8 @@ registry:
         template: "v1-research-proposal-synthesis.md"
         assignee: "worker-1"
         inputs:
-          - "research-proposal.md"
+          - key: "proposal"
+            file: "research-proposal.md"
         after:
           - "cross-review-research"
 
@@ -131,7 +149,8 @@ registry:
         template: "v1-research-proposal-final-review.md"
         assignee: "worker-2"
         inputs:
-          - "research-proposal.md"
+          - key: "proposal"
+            file: "research-proposal.md"
         after:
           - "synthesis"
 
@@ -140,7 +159,8 @@ registry:
         template: "v1-research-proposal-final-review.md"
         assignee: "worker-3"
         inputs:
-          - "research-proposal.md"
+          - key: "proposal"
+            file: "research-proposal.md"
         after:
           - "final-review-research"
 
@@ -149,7 +169,8 @@ registry:
         template: "v1-research-proposal-final-review.md"
         assignee: "worker-4"
         inputs:
-          - "research-proposal.md"
+          - key: "proposal"
+            file: "research-proposal.md"
         after:
           - "final-review-architect"
 
@@ -159,6 +180,7 @@ registry:
         template: "v1-research-proposal-finalize.md"
         assignee: "worker-1"
         inputs:
-          - "research-proposal.md"
+          - key: "proposal"
+            file: "research-proposal.md"
         after:
           - "final-review-risk"

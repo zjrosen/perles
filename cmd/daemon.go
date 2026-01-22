@@ -108,8 +108,12 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 	var beadsExec application.IssueExecutor
 	var workflowCreator *appreg.WorkflowCreator
 
-	// Create registry service for template instructions
-	registryService, err := appreg.NewRegistryService(templates.RegistryFS())
+	// Create registry service for template instructions with user-defined workflows
+	// User workflows are loaded from ~/.perles/workflows/*/template.yaml
+	registryService, err := appreg.NewRegistryService(
+		templates.RegistryFS(),
+		appreg.UserRegistryBaseDir(),
+	)
 	if err != nil {
 		log.Error(log.CatConfig, "Failed to create registry service", "error", err)
 		// Continue without registry service - prompts will work but without instructions

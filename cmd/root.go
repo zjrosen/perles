@@ -52,7 +52,7 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
-	cobra.OnInitialize(initConfig, initServices)
+	cobra.OnInitialize(initConfig)
 
 	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "",
 		"config file (default: ~/.config/perles/config.yaml)")
@@ -119,10 +119,14 @@ func initConfig() {
 }
 
 func initServices() {
-	// Initialize registry service with embedded templates
-	// templates.RegistryFS() contains registry.yaml, workflow templates, and coordinator instructions
+	// Initialize registry service with embedded templates and user-defined workflows
+	// templates.RegistryFS() contains template.yaml, workflow templates, and coordinator instructions
+	// User workflows are loaded from ~/.perles/workflows/*/template.yaml
 	var err error
-	registryService, err = appreg.NewRegistryService(templates.RegistryFS())
+	registryService, err = appreg.NewRegistryService(
+		templates.RegistryFS(),
+		appreg.UserRegistryBaseDir(),
+	)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error initializing registry service:", err)
 		os.Exit(1)
@@ -147,6 +151,9 @@ func runApp(cmd *cobra.Command, args []string) error {
 		// Log application startup
 		log.Info(log.CatConfig, "Perles starting", "version", version, "debug", true, "logPath", logPath)
 	}
+
+	// Initialize registry service after logging so debug output is captured
+	initServices()
 
 	if err := config.ValidateViews(cfg.Views); err != nil {
 		return fmt.Errorf("invalid view configuration: %w", err)

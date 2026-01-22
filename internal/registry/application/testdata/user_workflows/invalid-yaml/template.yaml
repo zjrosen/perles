@@ -1,0 +1,5 @@
+# Invalid YAML test fixture - malformed syntax for testing graceful error handling
+registry:
+  - namespace: invalid
+    key: [this is broken
+    not_valid_yaml: {unclosed

@@ -21,7 +21,7 @@ type IdentifierParts struct {
 
 // ParseIdentifier parses a double-colon-separated identifier into components.
 // Format: {namespace}::{key}::{version}::{chain-key}
-// Example: spec-workflow::planning-standard::v1::research
+// Example: workflow::planning-standard::v1::research
 //
 // All components use "::" as separator. Namespace should not contain "::".
 func ParseIdentifier(id string) (*IdentifierParts, error) {

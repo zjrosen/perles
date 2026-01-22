@@ -27,11 +27,11 @@
 //
 //	{type}::{key}::{version}::{chain-key}
 //
-// Example: spec-workflow::planning-standard::v1::research
+// Example: workflow::planning-standard::v1::research
 //
 // # YAML Configuration
 //
-// Registrations are loaded from registry.yaml embedded in the templates filesystem.
+// Registrations are loaded from template.yaml embedded in the templates filesystem.
 // The YAMLLoader handles parsing and converts YAML structures to domain Registration objects.
 //
 // # Import Aliasing

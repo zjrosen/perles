@@ -11,7 +11,7 @@ Read the research document, create a beads epic, break it down into implementabl
 ## Input
 
 - **Research Document:** (read from plan document's Source section)
-- **Plan Document:** `docs/proposals/{{ .Date }}--{{ .FeatureName }}/plan.md`
+- **Plan Document:** `docs/proposals/{{ .Date }}--{{ .Name }}/plan.md`
 
 ## Critical Rules
 
@@ -25,7 +25,7 @@ Read the research document, create a beads epic, break it down into implementabl
 ### Step 1: Create the Epic
 
 ```bash
-bd create "{{ .FeatureName }}" -t epic -d "
+bd create "{{ .Name }}" -t epic -d "
 ## Overview
 [Brief summary from research doc]
 
@@ -33,7 +33,7 @@ bd create "{{ .FeatureName }}" -t epic -d "
 See: [research document path from plan]
 
 ## Plan Document
-See: docs/proposals/{{ .Date }}--{{ .FeatureName }}/plan.md
+See: docs/proposals/{{ .Date }}--{{ .Name }}/plan.md
 
 ## Tasks
 This epic contains N tasks to implement the feature.
@@ -93,7 +93,7 @@ Use the Edit tool to update the plan document:
    ```markdown
    ### Epic Structure
    
-   - **Epic:** {epic-id} - {{ .FeatureName }}
+   - **Epic:** {epic-id} - {{ .Name }}
    - **Tasks:** {count} tasks
    
    ### Tasks

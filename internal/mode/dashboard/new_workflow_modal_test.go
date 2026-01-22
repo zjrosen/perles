@@ -24,10 +24,10 @@ import (
 // createTestRegistryServiceFS creates a MapFS for testing with workflow subdirectories
 func createTestRegistryServiceFS() fstest.MapFS {
 	return fstest.MapFS{
-		"workflows/quick-plan/registry.yaml": &fstest.MapFile{
+		"workflows/quick-plan/template.yaml": &fstest.MapFile{
 			Data: []byte(`
 registry:
-  - namespace: "spec-workflow"
+  - namespace: "workflow"
     key: "quick-plan"
     version: "v1"
     name: "Quick Plan"
@@ -38,10 +38,10 @@ registry:
         template: "v1-plan.md"
 `),
 		},
-		"workflows/cook/registry.yaml": &fstest.MapFile{
+		"workflows/cook/template.yaml": &fstest.MapFile{
 			Data: []byte(`
 registry:
-  - namespace: "spec-workflow"
+  - namespace: "workflow"
     key: "cook"
     version: "v1"
     name: "Cook"
@@ -52,10 +52,10 @@ registry:
         template: "v1-cook.md"
 `),
 		},
-		"workflows/research/registry.yaml": &fstest.MapFile{
+		"workflows/research/template.yaml": &fstest.MapFile{
 			Data: []byte(`
 registry:
-  - namespace: "spec-workflow"
+  - namespace: "workflow"
     key: "research"
     version: "v1"
     name: "Research"
@@ -76,7 +76,7 @@ registry:
 func createTestRegistryService(t *testing.T) *appreg.RegistryService {
 	t.Helper()
 	registryFS := createTestRegistryServiceFS()
-	registry, err := appreg.NewRegistryService(registryFS)
+	registry, err := appreg.NewRegistryService(registryFS, "")
 	require.NoError(t, err)
 	return registry
 }
@@ -194,36 +194,13 @@ func TestNewWorkflowModal_HandlesNilRegistry(t *testing.T) {
 
 // === Unit Tests: Form validation ===
 
-func TestNewWorkflowModal_ValidationRejectsEmptyGoal(t *testing.T) {
-	registryService := createTestRegistryService(t)
-	modal := NewNewWorkflowModal(registryService, nil, nil, nil)
-
-	// Validation should fail with empty goal
-	values := map[string]any{
-		"template":     "quick-plan",
-		"name":         "",
-		"goal":         "",
-		"priority":     "normal",
-		"max_workers":  "",
-		"token_budget": "",
-	}
-
-	err := modal.validate(values)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "goal is required")
-}
-
 func TestNewWorkflowModal_ValidationRejectsEmptyTemplate(t *testing.T) {
 	registryService := createTestRegistryService(t)
 	modal := NewNewWorkflowModal(registryService, nil, nil, nil)
 
 	values := map[string]any{
-		"template":     "",
-		"name":         "",
-		"goal":         "Test goal",
-		"priority":     "normal",
-		"max_workers":  "",
-		"token_budget": "",
+		"template": "",
+		"name":     "",
 	}
 
 	err := modal.validate(values)
@@ -238,7 +215,6 @@ func TestNewWorkflowModal_ValidationAcceptsValidInput(t *testing.T) {
 	values := map[string]any{
 		"template": "quick-plan",
 		"name":     "My Workflow",
-		"goal":     "Test goal",
 	}
 
 	err := modal.validate(values)
@@ -270,8 +246,9 @@ func TestNewWorkflowModal_CancelClosesModal(t *testing.T) {
 func TestNewWorkflowModal_CreateCallsControlPlane(t *testing.T) {
 	mockCP := newMockControlPlane()
 	mockCP.On("List", mock.Anything, mock.Anything).Return([]*controlplane.WorkflowInstance{}, nil).Maybe()
+	// Goal is no longer a hardcoded field - it's now a template argument
 	mockCP.On("Create", mock.Anything, mock.MatchedBy(func(spec controlplane.WorkflowSpec) bool {
-		return spec.TemplateID == "quick-plan" && spec.InitialGoal == "Test goal"
+		return spec.TemplateID == "quick-plan"
 	})).Return(controlplane.WorkflowID("new-workflow-id"), nil).Once()
 
 	eventCh := make(chan controlplane.ControlPlaneEvent)
@@ -283,12 +260,8 @@ func TestNewWorkflowModal_CreateCallsControlPlane(t *testing.T) {
 
 	// Simulate form submission (now async)
 	values := map[string]any{
-		"template":     "quick-plan",
-		"name":         "",
-		"goal":         "Test goal",
-		"priority":     "normal",
-		"max_workers":  "",
-		"token_budget": "",
+		"template": "quick-plan",
+		"name":     "",
 	}
 
 	msg := simulateAsyncSubmit(t, modal, values)
@@ -349,7 +322,6 @@ func TestNewWorkflowModal_ResourceLimitsOptional(t *testing.T) {
 	values := map[string]any{
 		"template":     "quick-plan",
 		"name":         "",
-		"goal":         "Test goal",
 		"priority":     "normal",
 		"max_workers":  "",
 		"token_budget": "",
@@ -422,11 +394,10 @@ func TestDashboard_ModalRendersAsOverlay(t *testing.T) {
 	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 	m = result.(Model)
 
-	// View should contain modal content
+	// View should contain modal content (Goal is now a template argument, not shown for all templates)
 	view := m.View()
 	require.Contains(t, view, "New Workflow")
 	require.Contains(t, view, "Template")
-	require.Contains(t, view, "Goal")
 }
 
 // === Unit Tests: Window resize updates modal ===
@@ -501,9 +472,9 @@ func TestDashboard_FullWorkflowCreationFlow(t *testing.T) {
 
 // Test that buildTemplateOptions handles empty registry
 func TestBuildTemplateOptions_EmptyRegistry(t *testing.T) {
-	// Create a domain registry with no spec-workflow registrations
+	// Create a domain registry with no workflow registrations
 	fs := fstest.MapFS{
-		"workflows/go-guidelines/registry.yaml": &fstest.MapFile{
+		"workflows/go-guidelines/template.yaml": &fstest.MapFile{
 			Data: []byte(`
 registry:
   - namespace: "lang-guidelines"
@@ -519,11 +490,11 @@ registry:
 		},
 		"workflows/go-guidelines/v1-coding.md": &fstest.MapFile{Data: []byte("# Coding Guidelines")},
 	}
-	registryService, err := appreg.NewRegistryService(fs)
+	registryService, err := appreg.NewRegistryService(fs, "")
 	require.NoError(t, err)
 
 	options := buildTemplateOptions(registryService)
-	require.Empty(t, options) // No spec-workflow registrations
+	require.Empty(t, options) // No workflow registrations
 }
 
 // Test that buildTemplateOptions creates correct options
@@ -598,8 +569,7 @@ func TestNewWorkflowModal_PopulatesBranchOptionsFromListBranches(t *testing.T) {
 	require.NotContains(t, view, "Branch Name")
 
 	// Navigate to the worktree toggle and switch to Yes
-	// Tab through: Template -> Name -> Goal -> Git Worktree
-	modal, _ = modal.Update(tea.KeyMsg{Type: tea.KeyTab})
+	// Tab through: Template -> Name -> Git Worktree (Goal is now a template argument, not a fixed field)
 	modal, _ = modal.Update(tea.KeyMsg{Type: tea.KeyTab})
 	modal, _ = modal.Update(tea.KeyMsg{Type: tea.KeyTab})
 	// Switch toggle to Yes (right arrow)
@@ -655,7 +625,6 @@ func TestNewWorkflowModal_OnSubmitSetsWorktreeEnabledCorrectly(t *testing.T) {
 	values := map[string]any{
 		"template":      "quick-plan",
 		"name":          "",
-		"goal":          "Test goal",
 		"use_worktree":  "true",
 		"base_branch":   "main",
 		"custom_branch": "my-feature",
@@ -683,7 +652,6 @@ func TestNewWorkflowModal_OnSubmitSetsWorktreeBaseBranchFromSearchSelect(t *test
 	values := map[string]any{
 		"template":      "quick-plan",
 		"name":          "",
-		"goal":          "Test goal",
 		"use_worktree":  "true",
 		"base_branch":   "develop",
 		"custom_branch": "",
@@ -711,7 +679,6 @@ func TestNewWorkflowModal_OnSubmitSetsWorktreeBranchNameFromTextField(t *testing
 	values := map[string]any{
 		"template":      "quick-plan",
 		"name":          "",
-		"goal":          "Test goal",
 		"use_worktree":  "true",
 		"base_branch":   "main",
 		"custom_branch": "perles-custom-branch",
@@ -734,7 +701,6 @@ func TestNewWorkflowModal_ValidationRequiresBaseBranchWhenWorktreeEnabled(t *tes
 	values := map[string]any{
 		"template":      "quick-plan",
 		"name":          "",
-		"goal":          "Test goal",
 		"use_worktree":  "true",
 		"base_branch":   "", // Missing base branch
 		"custom_branch": "",
@@ -758,7 +724,6 @@ func TestNewWorkflowModal_ValidationRejectsInvalidBranchNames(t *testing.T) {
 	values := map[string]any{
 		"template":      "quick-plan",
 		"name":          "",
-		"goal":          "Test goal",
 		"use_worktree":  "true",
 		"base_branch":   "main",
 		"custom_branch": "invalid..branch", // Invalid branch name
@@ -782,7 +747,6 @@ func TestNewWorkflowModal_ValidationAcceptsValidBranchName(t *testing.T) {
 	values := map[string]any{
 		"template":      "quick-plan",
 		"name":          "",
-		"goal":          "Test goal",
 		"use_worktree":  "true",
 		"base_branch":   "main",
 		"custom_branch": "feature/valid-branch",
@@ -801,7 +765,6 @@ func TestNewWorkflowModal_ValidationPassesWhenWorktreeDisabled(t *testing.T) {
 	values := map[string]any{
 		"template":      "quick-plan",
 		"name":          "",
-		"goal":          "Test goal",
 		"use_worktree":  "false", // Worktree disabled
 		"base_branch":   "",      // Empty but should be OK
 		"custom_branch": "",
@@ -891,10 +854,9 @@ func (m *MockRegistryService) GetInstructionsTemplate(reg *registry.Registration
 func TestNewWorkflowModal_OnSubmitCallsWorkflowCreator_LegacyPathWithoutCreator(t *testing.T) {
 	registryService := createTestRegistryService(t)
 	mockCP := newMockControlPlane()
-	// When WorkflowCreator is nil, the goal is passed directly as InitialGoal
+	// When WorkflowCreator is nil, goal from args (if any) is passed as InitialGoal
 	mockCP.On("Create", mock.Anything, mock.MatchedBy(func(spec controlplane.WorkflowSpec) bool {
 		return spec.EpicID == "" &&
-			spec.InitialGoal == "Test my feature" &&
 			spec.TemplateID == "quick-plan" &&
 			spec.Name == "test-feature"
 	})).Return(controlplane.WorkflowID("new-workflow-id"), nil).Once()
@@ -906,7 +868,6 @@ func TestNewWorkflowModal_OnSubmitCallsWorkflowCreator_LegacyPathWithoutCreator(
 	values := map[string]any{
 		"template": "quick-plan",
 		"name":     "test-feature",
-		"goal":     "Test my feature",
 	}
 
 	msg := simulateAsyncSubmit(t, modal, values)
@@ -958,18 +919,19 @@ func TestNewWorkflowModal_BuildCoordinatorPromptContainsAllSections(t *testing.T
 	registryService := createTestRegistryService(t)
 	modal := NewNewWorkflowModal(registryService, nil, nil, nil)
 
-	// Test the prompt building with a template that doesn't have instructions (fallback path)
-	prompt := modal.buildCoordinatorPrompt("quick-plan", "perles-abc123", "Build a cool feature")
+	// Test the prompt building with goal as an argument
+	args := map[string]string{"goal": "Build a cool feature"}
+	prompt := modal.buildCoordinatorPrompt("quick-plan", "perles-abc123", args)
 
 	// Verify prompt contains epic ID
 	require.Contains(t, prompt, "perles-abc123")
 	// Verify prompt contains bd show command
 	require.Contains(t, prompt, "bd show perles-abc123 --json")
-	// Verify prompt contains goal
+	// Verify prompt contains goal in arguments section
 	require.Contains(t, prompt, "Build a cool feature")
 	// Verify prompt structure
 	require.Contains(t, prompt, "# Your Epic")
-	require.Contains(t, prompt, "# Your Goal")
+	require.Contains(t, prompt, "# Arguments")
 }
 
 func TestNewWorkflowModal_OnSubmitReturnsErrorOnWorkflowCreatorFailure(t *testing.T) {
@@ -995,7 +957,7 @@ func TestNewWorkflowModal_EpicIDPassedToWorkflowSpec(t *testing.T) {
 	mockCP := newMockControlPlane()
 	// Match on EpicID being empty when no WorkflowCreator is present
 	mockCP.On("Create", mock.Anything, mock.MatchedBy(func(spec controlplane.WorkflowSpec) bool {
-		return spec.EpicID == "" && spec.InitialGoal == "Test goal"
+		return spec.EpicID == "" && spec.TemplateID == "quick-plan"
 	})).Return(controlplane.WorkflowID("workflow-123"), nil).Once()
 
 	modal := NewNewWorkflowModal(registryService, mockCP, nil, nil)
@@ -1003,7 +965,6 @@ func TestNewWorkflowModal_EpicIDPassedToWorkflowSpec(t *testing.T) {
 	values := map[string]any{
 		"template": "quick-plan",
 		"name":     "",
-		"goal":     "Test goal",
 	}
 
 	msg := simulateAsyncSubmit(t, modal, values)
@@ -1019,10 +980,10 @@ func TestNewWorkflowModal_EpicIDPassedToWorkflowSpec(t *testing.T) {
 func createTestRegistryServiceWithInstructions(t *testing.T) *appreg.RegistryService {
 	t.Helper()
 	registryFS := fstest.MapFS{
-		"workflows/quick-plan/registry.yaml": &fstest.MapFile{
+		"workflows/quick-plan/template.yaml": &fstest.MapFile{
 			Data: []byte(`
 registry:
-  - namespace: "spec-workflow"
+  - namespace: "workflow"
     key: "quick-plan"
     version: "v1"
     name: "Quick Plan"
@@ -1039,7 +1000,7 @@ registry:
 			Data: []byte("# Custom Instructions\n\nThis is a custom coordinator prompt."),
 		},
 	}
-	registry, err := appreg.NewRegistryService(registryFS)
+	registry, err := appreg.NewRegistryService(registryFS, "")
 	require.NoError(t, err)
 	return registry
 }
@@ -1049,25 +1010,28 @@ func TestBuildCoordinatorPrompt_UsesCustomInstructions(t *testing.T) {
 	modal := NewNewWorkflowModal(registryService, nil, nil, nil)
 
 	// Test the prompt building with a template that HAS instructions
-	prompt := modal.buildCoordinatorPrompt("quick-plan", "perles-abc123", "Build a cool feature")
+	args := map[string]string{"goal": "Build a cool feature"}
+	prompt := modal.buildCoordinatorPrompt("quick-plan", "perles-abc123", args)
 
 	// Verify prompt contains custom instructions content
 	require.Contains(t, prompt, "# Custom Instructions")
 	require.Contains(t, prompt, "This is a custom coordinator prompt")
-	// Verify prompt still contains epic ID and goal
+	// Verify prompt still contains epic ID and goal in arguments
 	require.Contains(t, prompt, "perles-abc123")
 	require.Contains(t, prompt, "Build a cool feature")
 	require.Contains(t, prompt, "# Your Epic")
-	require.Contains(t, prompt, "# Your Goal")
+	require.Contains(t, prompt, "# Arguments")
 }
 
-func TestBuildCoordinatorPrompt_HandlesInstructionsError(t *testing.T) {
+func TestNewRegistryService_FailsOnMissingInstructionsFile(t *testing.T) {
+	// YAML loader now validates template existence at load time (early validation).
+	// This is a security improvement: missing templates fail fast at load time, not at render time.
 	// Create a registry where the template specifies an instructions file that doesn't exist
 	registryFS := fstest.MapFS{
-		"workflows/broken-plan/registry.yaml": &fstest.MapFile{
+		"workflows/broken-plan/template.yaml": &fstest.MapFile{
 			Data: []byte(`
 registry:
-  - namespace: "spec-workflow"
+  - namespace: "workflow"
     key: "broken-plan"
     version: "v1"
     name: "Broken Plan"
@@ -1083,21 +1047,11 @@ registry:
 		// No "nonexistent.md" file - instructions file doesn't exist
 	}
 
-	registryService, err := appreg.NewRegistryService(registryFS)
-	require.NoError(t, err)
-
-	modal := NewNewWorkflowModal(registryService, nil, nil, nil)
-
-	// Test the prompt building - should fall back gracefully when instructions can't be loaded
-	prompt := modal.buildCoordinatorPrompt("broken-plan", "perles-abc123", "Build a cool feature")
-
-	// Verify prompt falls back to minimal prompt without instructions
-	require.Contains(t, prompt, "perles-abc123")
-	require.Contains(t, prompt, "Build a cool feature")
-	require.Contains(t, prompt, "# Your Epic")
-	require.Contains(t, prompt, "# Your Goal")
-	// Should NOT contain custom instructions content since file doesn't exist
-	require.NotContains(t, prompt, "# Custom Instructions")
+	// NewRegistryService should fail because instructions template doesn't exist (early validation)
+	_, err := appreg.NewRegistryService(registryFS, "")
+	require.Error(t, err, "NewRegistryService should fail when instructions template doesn't exist")
+	require.Contains(t, err.Error(), "instructions template", "error should mention instructions template")
+	require.Contains(t, err.Error(), "not found", "error should indicate file not found")
 }
 
 func TestBuildCoordinatorPrompt_HandlesNoInstructionsField(t *testing.T) {
@@ -1106,11 +1060,224 @@ func TestBuildCoordinatorPrompt_HandlesNoInstructionsField(t *testing.T) {
 	modal := NewNewWorkflowModal(registryService, nil, nil, nil)
 
 	// Test the prompt building - should fall back gracefully when no instructions field
-	prompt := modal.buildCoordinatorPrompt("quick-plan", "perles-abc123", "Build a cool feature")
+	args := map[string]string{"goal": "Build a cool feature"}
+	prompt := modal.buildCoordinatorPrompt("quick-plan", "perles-abc123", args)
 
 	// Verify prompt falls back to minimal prompt without instructions
 	require.Contains(t, prompt, "perles-abc123")
 	require.Contains(t, prompt, "Build a cool feature")
 	require.Contains(t, prompt, "# Your Epic")
-	require.Contains(t, prompt, "# Your Goal")
+	require.Contains(t, prompt, "# Arguments")
+}
+
+func TestNewWorkflowModal_ErrorMsgSetsFormError(t *testing.T) {
+	registryService := createTestRegistryService(t)
+	modal := NewNewWorkflowModal(registryService, nil, nil, nil)
+	modal = modal.SetSize(80, 24)
+
+	// Send ErrorMsg to modal
+	errMsg := ErrorMsg{Err: errors.New("create workflow: template not found")}
+	modal, _ = modal.Update(errMsg)
+
+	// Verify error is displayed in the form view
+	view := modal.View()
+	require.Contains(t, view, "create workflow: template not found")
+}
+
+func TestNewWorkflowModal_ErrorMsgClearsLoadingState(t *testing.T) {
+	registryService := createTestRegistryService(t)
+	modal := NewNewWorkflowModal(registryService, nil, nil, nil)
+	modal = modal.SetSize(80, 24)
+
+	// Simulate loading state by sending startSubmitMsg first
+	modal, _ = modal.Update(startSubmitMsg{values: map[string]any{"template": "quick-plan"}})
+
+	// Verify loading state is set
+	require.Contains(t, modal.View(), "Creating workflow")
+
+	// Send ErrorMsg
+	errMsg := ErrorMsg{Err: errors.New("something failed")}
+	modal, _ = modal.Update(errMsg)
+
+	// Verify loading state is cleared and error is shown
+	view := modal.View()
+	require.NotContains(t, view, "Creating workflow")
+	require.Contains(t, view, "something failed")
+}
+
+// === Argument Field Tests ===
+
+func TestNewWorkflowModal_BuildArgumentFields(t *testing.T) {
+	// Create registry with workflow containing arguments
+	registryFS := fstest.MapFS{
+		"workflows/with-args/template.yaml": &fstest.MapFile{
+			Data: []byte(`
+registry:
+  - namespace: "workflow"
+    key: "with-args"
+    version: "v1"
+    name: "Workflow With Args"
+    description: "Test workflow with arguments"
+    arguments:
+      - key: "feature_name"
+        label: "Feature Name"
+        description: "Name of the feature"
+        type: "text"
+        required: true
+      - key: "extra_notes"
+        label: "Extra Notes"
+        description: "Additional notes"
+        type: "textarea"
+        required: false
+        default: "default notes"
+    nodes:
+      - key: "task"
+        name: "Task"
+        template: "v1-task.md"
+`),
+		},
+		"workflows/with-args/v1-task.md": &fstest.MapFile{Data: []byte("# Task: {{.Args.feature_name}}")},
+	}
+
+	registryService, err := appreg.NewRegistryService(registryFS, "")
+	require.NoError(t, err)
+
+	modal := NewNewWorkflowModal(registryService, nil, nil, nil)
+
+	// Verify templateArgs was populated
+	require.Contains(t, modal.templateArgs, "with-args")
+	require.Len(t, modal.templateArgs["with-args"], 2)
+
+	// Verify first argument
+	arg1 := modal.templateArgs["with-args"][0]
+	require.Equal(t, "feature_name", arg1.Key())
+	require.Equal(t, "Feature Name", arg1.Label())
+	require.True(t, arg1.Required())
+
+	// Verify second argument
+	arg2 := modal.templateArgs["with-args"][1]
+	require.Equal(t, "extra_notes", arg2.Key())
+	require.Equal(t, "Extra Notes", arg2.Label())
+	require.False(t, arg2.Required())
+	require.Equal(t, "default notes", arg2.DefaultValue())
+}
+
+func TestNewWorkflowModal_ExtractArgumentValues(t *testing.T) {
+	// Create registry with workflow containing arguments
+	registryFS := fstest.MapFS{
+		"workflows/with-args/template.yaml": &fstest.MapFile{
+			Data: []byte(`
+registry:
+  - namespace: "workflow"
+    key: "with-args"
+    version: "v1"
+    name: "Workflow With Args"
+    description: "Test workflow"
+    arguments:
+      - key: "feature_name"
+        label: "Feature Name"
+        description: "Name of the feature"
+        type: "text"
+        required: true
+      - key: "optional_field"
+        label: "Optional Field"
+        description: "Optional"
+        type: "text"
+        required: false
+        default: "default_value"
+    nodes:
+      - key: "task"
+        name: "Task"
+        template: "v1-task.md"
+`),
+		},
+		"workflows/with-args/v1-task.md": &fstest.MapFile{Data: []byte("# Task")},
+	}
+
+	registryService, err := appreg.NewRegistryService(registryFS, "")
+	require.NoError(t, err)
+
+	modal := NewNewWorkflowModal(registryService, nil, nil, nil)
+
+	// Test extracting argument values
+	values := map[string]any{
+		"template":           "with-args",
+		"arg_feature_name":   "my-feature",
+		"arg_optional_field": "", // Empty, should use default
+	}
+
+	args := modal.extractArgumentValues("with-args", values)
+
+	// Verify extracted values
+	require.Equal(t, "my-feature", args["feature_name"])
+	require.Equal(t, "default_value", args["optional_field"])
+}
+
+func TestNewWorkflowModal_ValidateRequiredArguments(t *testing.T) {
+	// Create registry with workflow containing required argument
+	registryFS := fstest.MapFS{
+		"workflows/with-args/template.yaml": &fstest.MapFile{
+			Data: []byte(`
+registry:
+  - namespace: "workflow"
+    key: "with-args"
+    version: "v1"
+    name: "Workflow With Args"
+    description: "Test workflow"
+    arguments:
+      - key: "feature_name"
+        label: "Feature Name"
+        description: "Name of the feature"
+        type: "text"
+        required: true
+    nodes:
+      - key: "task"
+        name: "Task"
+        template: "v1-task.md"
+`),
+		},
+		"workflows/with-args/v1-task.md": &fstest.MapFile{Data: []byte("# Task")},
+	}
+
+	registryService, err := appreg.NewRegistryService(registryFS, "")
+	require.NoError(t, err)
+
+	modal := NewNewWorkflowModal(registryService, nil, nil, nil)
+
+	// Test validation fails when required argument is missing
+	values := map[string]any{
+		"template":         "with-args",
+		"arg_feature_name": "", // Required but empty
+	}
+
+	err = modal.validate(values)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "Feature Name is required")
+
+	// Test validation passes when required argument is provided
+	values["arg_feature_name"] = "my-feature"
+	err = modal.validate(values)
+	require.NoError(t, err)
+}
+
+func TestNewWorkflowModal_BuildCoordinatorPromptWithArgs(t *testing.T) {
+	registryService := createTestRegistryService(t)
+	modal := NewNewWorkflowModal(registryService, nil, nil, nil)
+
+	args := map[string]string{
+		"goal":     "Build feature",
+		"feature":  "auth-system",
+		"priority": "high",
+	}
+
+	prompt := modal.buildCoordinatorPrompt("quick-plan", "perles-abc123", args)
+
+	// Verify prompt contains arguments section
+	require.Contains(t, prompt, "# Arguments")
+	require.Contains(t, prompt, "goal")
+	require.Contains(t, prompt, "Build feature")
+	require.Contains(t, prompt, "feature")
+	require.Contains(t, prompt, "auth-system")
+	require.Contains(t, prompt, "priority")
+	require.Contains(t, prompt, "high")
 }

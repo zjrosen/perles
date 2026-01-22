@@ -10,7 +10,7 @@ Write the final summary synthesizing the planning process and confirming the epi
 
 ## Input
 
-- **Plan Document:** `docs/proposals/{{ .Date }}--{{ .FeatureName }}/plan.md`
+- **Plan Document:** `docs/proposals/{{ .Date }}--{{ .Name }}/plan.md`
 
 ## Instructions
 
@@ -40,7 +40,7 @@ Use the Edit tool to update "## Summary" in the plan document:
 ### Epic Created
 
 - **ID:** `{epic-id}`
-- **Title:** {{ .FeatureName }}
+- **Title:** {{ .Name }}
 - **Tasks:** {count} tasks
 
 ### Key Decisions Made

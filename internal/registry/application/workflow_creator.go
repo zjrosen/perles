@@ -53,28 +53,39 @@ func NewWorkflowCreator(registry *RegistryService, executor beads.IssueExecutor)
 
 // Create creates an epic with all workflow tasks and wires up dependencies.
 // Returns a WorkflowResultDTO with the created epic, tasks, and resolved dependency IDs.
+// This is a convenience wrapper around CreateWithArgs with no arguments.
 func (c *WorkflowCreator) Create(feature, workflowKey string) (*WorkflowResultDTO, error) {
+	return c.CreateWithArgs(feature, workflowKey, nil)
+}
+
+// CreateWithArgs creates an epic with all workflow tasks and wires up dependencies.
+// The args parameter contains user-provided argument values for template rendering.
+// Returns a WorkflowResultDTO with the created epic, tasks, and resolved dependency IDs.
+func (c *WorkflowCreator) CreateWithArgs(feature, workflowKey string, args map[string]string) (*WorkflowResultDTO, error) {
 	// 1. Get workflow registration
-	reg, err := c.registry.GetByKey("spec-workflow", workflowKey)
+	reg, err := c.registry.GetByKey("workflow", workflowKey)
 	if err != nil {
 		return nil, fmt.Errorf("workflow not found: %s: %w", workflowKey, err)
 	}
 
-	// 2. Render epic description from template (or use default)
+	// 2. Build template context with arguments
+	baseCtx := TemplateContext{
+		Slug: feature,
+		Name: feature,
+		Date: time.Now().Format("2006-01-02"),
+		Args: args, // User-provided argument values
+	}
+
+	// 3. Render epic description from template (or use default)
 	epicLabels := []string{
 		fmt.Sprintf("feature:%s", feature),
 		fmt.Sprintf("workflow:%s", workflowKey),
 	}
-	epicTitle := fmt.Sprintf("Plan: %s", toTitleCase(feature))
+	epicTitle := fmt.Sprintf("%s: %s", reg.Name(), toTitleCase(feature))
 
 	var epicDescription string
 	if reg.Template() != "" {
-		ctx := TemplateContext{
-			Slug:        feature,
-			FeatureName: feature,
-			Date:        time.Now().Format("2006-01-02"),
-		}
-		epicDescription, err = c.registry.RenderEpicTemplate(reg.Template(), ctx)
+		epicDescription, err = c.registry.RenderEpicTemplate(reg, baseCtx)
 		if err != nil {
 			return nil, fmt.Errorf("render epic template: %w", err)
 		}
@@ -97,14 +108,9 @@ func (c *WorkflowCreator) Create(feature, workflowKey string) (*WorkflowResultDT
 	var tasks []TaskResultDTO
 
 	for _, node := range dag.Nodes() {
-		// Render template with context
-		ctx := TemplateContext{
-			Slug:        feature,
-			FeatureName: feature,
-			Date:        time.Now().Format("2006-01-02"),
-		}
+		// Render template with context (reuse same context with args)
 		identifier := registry.BuildIdentifier(reg.Namespace(), reg.Key(), reg.Version(), node.Key())
-		content, err := c.registry.RenderTemplate(identifier, ctx)
+		content, err := c.registry.RenderTemplate(identifier, baseCtx)
 		if err != nil {
 			return nil, fmt.Errorf("render template %s: %w", node.Key(), err)
 		}

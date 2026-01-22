@@ -18,24 +18,24 @@ func TestParseIdentifier(t *testing.T) {
 	}{
 		{
 			name:          "full identifier",
-			input:         "spec-workflow::planning-standard::v1::research",
-			wantNamespace: "spec-workflow",
+			input:         "workflow::planning-standard::v1::research",
+			wantNamespace: "workflow",
 			wantKey:       "planning-standard",
 			wantVersion:   "v1",
 			wantChainKey:  "research",
 		},
 		{
 			name:          "identifier with hyphenated key",
-			input:         "spec-workflow::planning-simple::v1::plan",
-			wantNamespace: "spec-workflow",
+			input:         "workflow::planning-simple::v1::plan",
+			wantNamespace: "workflow",
 			wantKey:       "planning-simple",
 			wantVersion:   "v1",
 			wantChainKey:  "plan",
 		},
 		{
 			name:          "chain key with hyphen",
-			input:         "spec-workflow::planning-simple::v1::research-propose",
-			wantNamespace: "spec-workflow",
+			input:         "workflow::planning-simple::v1::research-propose",
+			wantNamespace: "workflow",
 			wantKey:       "planning-simple",
 			wantVersion:   "v1",
 			wantChainKey:  "research-propose",
@@ -47,17 +47,17 @@ func TestParseIdentifier(t *testing.T) {
 		},
 		{
 			name:    "only namespace (1 part)",
-			input:   "spec-workflow",
+			input:   "workflow",
 			wantErr: ErrInvalidIdentifier,
 		},
 		{
 			name:    "missing version and chain key (2 parts)",
-			input:   "spec-workflow::planning-standard",
+			input:   "workflow::planning-standard",
 			wantErr: ErrInvalidIdentifier,
 		},
 		{
 			name:    "missing chain key (3 parts)",
-			input:   "spec-workflow::planning-standard::v1",
+			input:   "workflow::planning-standard::v1",
 			wantErr: ErrInvalidIdentifier,
 		},
 		{
@@ -103,11 +103,11 @@ func TestBuildIdentifier(t *testing.T) {
 	}{
 		{
 			name:      "standard workflow",
-			namespace: "spec-workflow",
+			namespace: "workflow",
 			key:       "planning-standard",
 			version:   "v1",
 			chainKey:  "research",
-			want:      "spec-workflow::planning-standard::v1::research",
+			want:      "workflow::planning-standard::v1::research",
 		},
 		{
 			name:      "different namespace",
@@ -119,11 +119,11 @@ func TestBuildIdentifier(t *testing.T) {
 		},
 		{
 			name:      "hyphenated chain key",
-			namespace: "spec-workflow",
+			namespace: "workflow",
 			key:       "planning-simple",
 			version:   "v1",
 			chainKey:  "research-propose",
-			want:      "spec-workflow::planning-simple::v1::research-propose",
+			want:      "workflow::planning-simple::v1::research-propose",
 		},
 	}
 
@@ -143,10 +143,10 @@ func TestParseIdentifier_RoundTrip(t *testing.T) {
 		version   string
 		chainKey  string
 	}{
-		{"spec-workflow", "planning-standard", "v1", "research"},
-		{"spec-workflow", "planning-standard", "v1", "propose"},
-		{"spec-workflow", "planning-standard", "v1", "plan"},
-		{"spec-workflow", "planning-simple", "v1", "research-propose"},
+		{"workflow", "planning-standard", "v1", "research"},
+		{"workflow", "planning-standard", "v1", "propose"},
+		{"workflow", "planning-standard", "v1", "plan"},
+		{"workflow", "planning-simple", "v1", "research-propose"},
 	}
 
 	for _, id := range identifiers {

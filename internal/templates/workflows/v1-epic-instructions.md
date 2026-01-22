@@ -1,11 +1,3 @@
----
-name: "Epic-Driven Workflow"
-description: "Generic multi-agent workflow where coordinator follows instructions embedded in the epic"
-category: "General"
-workers: 4
-target_mode: "orchestration"
----
-
 # Epic-Driven Workflow
 
 You are the **Coordinator** for a multi-agent workflow. Your instructions are embedded in the **epic** that was created for this workflow.

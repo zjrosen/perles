@@ -56,20 +56,21 @@ func TestNode_Getters(t *testing.T) {
 
 func TestNode_WithInputs(t *testing.T) {
 	node := NewNode("propose", "Propose", "v1-proposal.md")
-	researchArtifact := NewArtifact("research.md")
+	researchArtifact := NewArtifact("research", "research.md")
 
 	result := node.WithInputs(researchArtifact)
 
 	// Returns same node for fluent chaining
 	require.Same(t, node, result)
 	require.Len(t, node.Inputs(), 1)
+	require.Equal(t, "research", node.Inputs()[0].Key())
 	require.Equal(t, "research.md", node.Inputs()[0].Filename())
 }
 
 func TestNode_WithInputs_Multiple(t *testing.T) {
 	node := NewNode("plan", "Plan", "v1-plan.md")
-	research := NewArtifact("research.md")
-	proposal := NewArtifact("proposal.md")
+	research := NewArtifact("research", "research.md")
+	proposal := NewArtifact("proposal", "proposal.md")
 
 	node.WithInputs(research, proposal)
 
@@ -80,8 +81,8 @@ func TestNode_WithInputs_Multiple(t *testing.T) {
 
 func TestNode_WithInputs_Appends(t *testing.T) {
 	node := NewNode("merge", "Merge", "v1-merge.md")
-	node.WithInputs(NewArtifact("a.md"))
-	node.WithInputs(NewArtifact("b.md"))
+	node.WithInputs(NewArtifact("a", "a.md"))
+	node.WithInputs(NewArtifact("b", "b.md"))
 
 	require.Len(t, node.Inputs(), 2)
 	require.Equal(t, "a.md", node.Inputs()[0].Filename())
@@ -90,20 +91,21 @@ func TestNode_WithInputs_Appends(t *testing.T) {
 
 func TestNode_WithOutputs(t *testing.T) {
 	node := NewNode("research", "Research", "v1-research.md")
-	output := NewArtifact("research.md")
+	output := NewArtifact("research", "research.md")
 
 	result := node.WithOutputs(output)
 
 	// Returns same node for fluent chaining
 	require.Same(t, node, result)
 	require.Len(t, node.Outputs(), 1)
+	require.Equal(t, "research", node.Outputs()[0].Key())
 	require.Equal(t, "research.md", node.Outputs()[0].Filename())
 }
 
 func TestNode_WithOutputs_Multiple(t *testing.T) {
 	node := NewNode("plan", "Plan", "v1-plan.md")
-	plan := NewArtifact("plan.md")
-	tasks := NewArtifact("tasks.json")
+	plan := NewArtifact("plan", "plan.md")
+	tasks := NewArtifact("tasks", "tasks.json")
 
 	node.WithOutputs(plan, tasks)
 
@@ -163,8 +165,8 @@ func TestNode_Assignee_Empty(t *testing.T) {
 func TestNode_FluentChaining(t *testing.T) {
 	// Test the full fluent API
 	node := NewNode("propose", "Propose", "v1-proposal.md").
-		WithInputs(NewArtifact("research.md")).
-		WithOutputs(NewArtifact("proposal.md")).
+		WithInputs(NewArtifact("research", "research.md")).
+		WithOutputs(NewArtifact("proposal", "proposal.md")).
 		WithAfter("setup").
 		WithAssignee("architect")
 
@@ -183,15 +185,15 @@ func TestNode_FluentChaining(t *testing.T) {
 func TestNode_ComplexWorkflow(t *testing.T) {
 	// Simulate the standard planning workflow nodes
 	research := NewNode("research", "Research", "v1-research.md").
-		WithOutputs(NewArtifact("research.md"))
+		WithOutputs(NewArtifact("research", "research.md"))
 
 	propose := NewNode("propose", "Propose", "v1-proposal.md").
-		WithInputs(NewArtifact("research.md")).
-		WithOutputs(NewArtifact("proposal.md"))
+		WithInputs(NewArtifact("research", "research.md")).
+		WithOutputs(NewArtifact("proposal", "proposal.md"))
 
 	plan := NewNode("plan", "Plan", "v1-plan.md").
-		WithInputs(NewArtifact("proposal.md")).
-		WithOutputs(NewArtifact("plan.md"), NewArtifact("tasks.json"))
+		WithInputs(NewArtifact("proposal", "proposal.md")).
+		WithOutputs(NewArtifact("plan", "plan.md"), NewArtifact("tasks", "tasks.json"))
 
 	notify := NewNode("notify", "Notify", "v1-notify.md").
 		WithAfter("plan")

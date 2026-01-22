@@ -10,7 +10,7 @@ Verify that your previous concerns (if any) have been addressed. Provide final a
 
 ## Input
 
-- **Plan Document:** `docs/proposals/{{ .Date }}--{{ .FeatureName }}/plan.md`
+- **Plan Document:** `docs/proposals/{{ .Date }}--{{ .Name }}/plan.md`
 
 ## Instructions
 

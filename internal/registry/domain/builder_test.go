@@ -19,14 +19,14 @@ func testChain(t *testing.T, nodes ...string) *Chain {
 }
 
 func TestNewBuilder(t *testing.T) {
-	builder := NewBuilder("spec-workflow")
+	builder := NewBuilder("workflow")
 	require.NotNil(t, builder)
 }
 
 func TestBuilder_Build_Success(t *testing.T) {
 	chain := testChain(t, "research", "Research", "v1-research.md")
 
-	reg, err := NewBuilder("spec-workflow").
+	reg, err := NewBuilder("workflow").
 		Key("planning-standard").
 		Version("v1").
 		Name("Standard Planning Workflow").
@@ -35,7 +35,7 @@ func TestBuilder_Build_Success(t *testing.T) {
 		Build()
 
 	require.NoError(t, err)
-	require.Equal(t, "spec-workflow", reg.Namespace())
+	require.Equal(t, "workflow", reg.Namespace())
 	require.Equal(t, "planning-standard", reg.Key())
 	require.Equal(t, "v1", reg.Version())
 	require.Equal(t, "Standard Planning Workflow", reg.Name())
@@ -47,7 +47,7 @@ func TestBuilder_Build_OptionalFields(t *testing.T) {
 	// Name and description are optional
 	chain := testChain(t, "step", "Step", "step.md")
 
-	reg, err := NewBuilder("spec-workflow").
+	reg, err := NewBuilder("workflow").
 		Key("minimal").
 		Version("v1").
 		SetChain(chain).
@@ -66,7 +66,7 @@ func TestBuilder_Build_MultipleChainItems(t *testing.T) {
 		"plan", "Plan", "v1-plan.md",
 	)
 
-	reg, err := NewBuilder("spec-workflow").
+	reg, err := NewBuilder("workflow").
 		Key("planning-standard").
 		Version("v1").
 		SetChain(chain).
@@ -99,7 +99,7 @@ func TestBuilder_Build_EmptyType(t *testing.T) {
 func TestBuilder_Build_EmptyKey(t *testing.T) {
 	chain := testChain(t, "step", "Step", "step.md")
 
-	reg, err := NewBuilder("spec-workflow").
+	reg, err := NewBuilder("workflow").
 		Version("v1").
 		SetChain(chain).
 		Build()
@@ -111,7 +111,7 @@ func TestBuilder_Build_EmptyKey(t *testing.T) {
 func TestBuilder_Build_EmptyVersion(t *testing.T) {
 	chain := testChain(t, "step", "Step", "step.md")
 
-	reg, err := NewBuilder("spec-workflow").
+	reg, err := NewBuilder("workflow").
 		Key("key").
 		SetChain(chain).
 		Build()
@@ -121,7 +121,7 @@ func TestBuilder_Build_EmptyVersion(t *testing.T) {
 }
 
 func TestBuilder_Build_EmptyChain(t *testing.T) {
-	reg, err := NewBuilder("spec-workflow").
+	reg, err := NewBuilder("workflow").
 		Key("key").
 		Version("v1").
 		Build()
@@ -134,7 +134,7 @@ func TestBuilder_FluentChaining(t *testing.T) {
 	chain := testChain(t, "step", "Step", "step.md")
 
 	// Verify methods return the builder for chaining
-	builder := NewBuilder("spec-workflow")
+	builder := NewBuilder("workflow")
 	result := builder.
 		Key("key").
 		Version("v1").
@@ -157,7 +157,7 @@ func TestBuilder_SetChain(t *testing.T) {
 	require.NoError(t, err)
 
 	// Use SetChain in Builder
-	reg, err := NewBuilder("spec-workflow").
+	reg, err := NewBuilder("workflow").
 		Key("planning-standard").
 		Version("v1").
 		SetChain(chain).
@@ -173,7 +173,7 @@ func TestBuilder_SetChain_FluentChaining(t *testing.T) {
 		Node("x", "X", "x.md").
 		Build()
 
-	builder := NewBuilder("spec-workflow")
+	builder := NewBuilder("workflow")
 	result := builder.SetChain(chain)
 	require.Same(t, builder, result)
 }
@@ -190,7 +190,7 @@ func TestRegistration_DAG_ReturnsChain(t *testing.T) {
 		).
 		Build()
 
-	reg, _ := NewBuilder("spec-workflow").
+	reg, _ := NewBuilder("workflow").
 		Key("test").
 		Version("v1").
 		SetChain(chain).
@@ -214,7 +214,7 @@ func TestRegistration_Chain_BackwardCompat(t *testing.T) {
 		Node("c", "C", "c.md").
 		Build()
 
-	reg, _ := NewBuilder("spec-workflow").
+	reg, _ := NewBuilder("workflow").
 		Key("test").
 		Version("v1").
 		SetChain(chain).
@@ -232,7 +232,7 @@ func TestRegistration_Chain_BackwardCompat(t *testing.T) {
 func TestBuilder_Labels(t *testing.T) {
 	chain := testChain(t, "step", "Step", "step.md")
 
-	reg, err := NewBuilder("spec-workflow").
+	reg, err := NewBuilder("workflow").
 		Key("key").
 		Version("v1").
 		SetChain(chain).
@@ -247,7 +247,7 @@ func TestBuilder_Labels_Empty(t *testing.T) {
 	chain := testChain(t, "step", "Step", "step.md")
 
 	// Empty labels slice is valid
-	reg, err := NewBuilder("spec-workflow").
+	reg, err := NewBuilder("workflow").
 		Key("key").
 		Version("v1").
 		SetChain(chain).
@@ -259,7 +259,7 @@ func TestBuilder_Labels_Empty(t *testing.T) {
 }
 
 func TestBuilder_Labels_FluentChaining(t *testing.T) {
-	builder := NewBuilder("spec-workflow")
+	builder := NewBuilder("workflow")
 	result := builder.Labels("lang:go")
 	require.Same(t, builder, result)
 }
@@ -269,7 +269,7 @@ func TestBuilder_Labels_FluentChaining(t *testing.T) {
 func TestBuilder_Instructions_SetsField(t *testing.T) {
 	chain := testChain(t, "step", "Step", "step.md")
 
-	reg, err := NewBuilder("spec-workflow").
+	reg, err := NewBuilder("workflow").
 		Key("key").
 		Version("v1").
 		SetChain(chain).
@@ -284,7 +284,7 @@ func TestBuilder_Instructions_EmptyAllowed(t *testing.T) {
 	chain := testChain(t, "step", "Step", "step.md")
 
 	// Empty instructions is valid at domain level (validation happens in application layer)
-	reg, err := NewBuilder("spec-workflow").
+	reg, err := NewBuilder("workflow").
 		Key("key").
 		Version("v1").
 		SetChain(chain).
@@ -296,7 +296,7 @@ func TestBuilder_Instructions_EmptyAllowed(t *testing.T) {
 }
 
 func TestBuilder_Instructions_FluentChaining(t *testing.T) {
-	builder := NewBuilder("spec-workflow")
+	builder := NewBuilder("workflow")
 	result := builder.Instructions("epic_driven.md")
 	require.Same(t, builder, result)
 }
@@ -304,7 +304,7 @@ func TestBuilder_Instructions_FluentChaining(t *testing.T) {
 func TestBuilder_Build_IncludesInstructions(t *testing.T) {
 	chain := testChain(t, "step", "Step", "step.md")
 
-	reg, err := NewBuilder("spec-workflow").
+	reg, err := NewBuilder("workflow").
 		Key("planning-standard").
 		Version("v1").
 		Name("Standard Planning").
@@ -317,4 +317,70 @@ func TestBuilder_Build_IncludesInstructions(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "v1-epic.md", reg.Template())
 	require.Equal(t, "epic_driven.md", reg.Instructions())
+}
+
+// Source Tests
+
+func TestBuilder_Source(t *testing.T) {
+	// Verify Source() method sets the source field
+	chain := testChain(t, "step", "Step", "step.md")
+
+	reg, err := NewBuilder("workflow").
+		Key("key").
+		Version("v1").
+		SetChain(chain).
+		Source(SourceUser).
+		Build()
+
+	require.NoError(t, err)
+	require.Equal(t, SourceUser, reg.Source())
+}
+
+func TestBuilder_DefaultSource(t *testing.T) {
+	// Verify omitting Source() defaults to SourceBuiltIn
+	chain := testChain(t, "step", "Step", "step.md")
+
+	reg, err := NewBuilder("workflow").
+		Key("key").
+		Version("v1").
+		SetChain(chain).
+		Build()
+
+	require.NoError(t, err)
+	require.Equal(t, SourceBuiltIn, reg.Source())
+}
+
+func TestBuilder_Build_WithSource(t *testing.T) {
+	// Verify built registration has correct source for both values
+	chain := testChain(t, "step", "Step", "step.md")
+
+	// Test with SourceBuiltIn explicitly
+	regBuiltIn, err := NewBuilder("workflow").
+		Key("built-in-key").
+		Version("v1").
+		SetChain(chain).
+		Source(SourceBuiltIn).
+		Build()
+
+	require.NoError(t, err)
+	require.Equal(t, SourceBuiltIn, regBuiltIn.Source())
+	require.Equal(t, "built-in", regBuiltIn.Source().String())
+
+	// Test with SourceUser
+	regUser, err := NewBuilder("workflow").
+		Key("user-key").
+		Version("v1").
+		SetChain(chain).
+		Source(SourceUser).
+		Build()
+
+	require.NoError(t, err)
+	require.Equal(t, SourceUser, regUser.Source())
+	require.Equal(t, "user", regUser.Source().String())
+}
+
+func TestBuilder_Source_FluentChaining(t *testing.T) {
+	builder := NewBuilder("workflow")
+	result := builder.Source(SourceUser)
+	require.Same(t, builder, result)
 }

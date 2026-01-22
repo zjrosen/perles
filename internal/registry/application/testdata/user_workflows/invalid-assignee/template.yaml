@@ -1,0 +1,12 @@
+registry:
+  - namespace: "test"
+    key: "invalid-assignee"
+    version: "v1"
+    name: "Invalid Assignee Test"
+    description: "Has invalid assignee format"
+    instructions: "instructions.md"
+    nodes:
+      - key: "step1"
+        name: "Step 1"
+        template: "step1.md"
+        assignee: "invalid-role"

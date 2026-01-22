@@ -377,10 +377,10 @@ import (
 )
 
 // RegistryService loads from templates.RegistryFS() which contains:
-// - registry.yaml (workflow definitions)
+// - template.yaml (workflow definitions)
 // - spec workflow templates (v1-*.md)
 // - coordinator instructions (v1-epic-instructions.md)
-svc, err := appreg.NewRegistryService(templates.RegistryFS())
+svc, err := appreg.NewRegistryService(templates.RegistryFS(), appreg.UserRegistryBaseDir())
 
 // Use workflow.Registry for workflow template management
 ```
