@@ -1466,10 +1466,10 @@ func TestBehaviorPreservation_TimeoutDetectionUsesErrorsIs(t *testing.T) {
 	// The code uses: errors.Is(p.ctx.Err(), context.DeadlineExceeded)
 	// This test documents that behavior
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Microsecond)
 	defer cancel()
 
-	time.Sleep(time.Millisecond) // Ensure timeout fires
+	time.Sleep(10 * time.Millisecond) // Ensure timeout fires (generous buffer for Windows CI)
 
 	// errors.Is correctly identifies timeout
 	require.True(t, errors.Is(ctx.Err(), context.DeadlineExceeded))

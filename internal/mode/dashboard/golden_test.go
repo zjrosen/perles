@@ -217,10 +217,10 @@ func TestDashboard_View_Golden_LargeTokenCounts(t *testing.T) {
 	teatest.RequireEqualOutput(t, []byte(view))
 }
 
-// createGoldenTestRegistryFS creates a MapFS for golden testing with a valid registry.yaml
+// createGoldenTestRegistryFS creates a MapFS for golden testing with workflow subdirectories
 func createGoldenTestRegistryFS() fstest.MapFS {
 	return fstest.MapFS{
-		"registry.yaml": &fstest.MapFile{
+		"workflows/quick-plan/registry.yaml": &fstest.MapFile{
 			Data: []byte(`
 registry:
   - namespace: "spec-workflow"
@@ -232,6 +232,11 @@ registry:
       - key: "plan"
         name: "Plan"
         template: "v1-plan.md"
+`),
+		},
+		"workflows/cook/registry.yaml": &fstest.MapFile{
+			Data: []byte(`
+registry:
   - namespace: "spec-workflow"
     key: "cook"
     version: "v1"
@@ -241,6 +246,11 @@ registry:
       - key: "cook"
         name: "Cook"
         template: "v1-cook.md"
+`),
+		},
+		"workflows/research/registry.yaml": &fstest.MapFile{
+			Data: []byte(`
+registry:
   - namespace: "spec-workflow"
     key: "research"
     version: "v1"
@@ -252,9 +262,9 @@ registry:
         template: "v1-research.md"
 `),
 		},
-		"v1-plan.md":     &fstest.MapFile{Data: []byte("# Plan Template")},
-		"v1-cook.md":     &fstest.MapFile{Data: []byte("# Cook Template")},
-		"v1-research.md": &fstest.MapFile{Data: []byte("# Research Template")},
+		"workflows/quick-plan/v1-plan.md":   &fstest.MapFile{Data: []byte("# Plan Template")},
+		"workflows/cook/v1-cook.md":         &fstest.MapFile{Data: []byte("# Cook Template")},
+		"workflows/research/v1-research.md": &fstest.MapFile{Data: []byte("# Research Template")},
 	}
 }
 

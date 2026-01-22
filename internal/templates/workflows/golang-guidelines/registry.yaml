@@ -1,0 +1,17 @@
+registry:
+  # Languages - Golang Guidelines
+  - namespace: "lang-guidelines"
+    key: "golang"
+    version: "v1"
+    name: "Guidelines when building in a project using Golang"
+    description: ""
+    labels:
+      - "lang:go"
+    nodes:
+      - key: "coding"
+        name: "Coding"
+        template: "v1-golang-coding-guidelines.md"
+
+      - key: "testing"
+        name: "Testing"
+        template: "v1-golang-testing-guidelines.md"

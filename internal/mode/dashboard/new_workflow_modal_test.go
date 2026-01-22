@@ -21,10 +21,10 @@ import (
 
 // === Test Helpers ===
 
-// createTestRegistryServiceFS creates a MapFS for testing with a valid registry.yaml
+// createTestRegistryServiceFS creates a MapFS for testing with workflow subdirectories
 func createTestRegistryServiceFS() fstest.MapFS {
 	return fstest.MapFS{
-		"registry.yaml": &fstest.MapFile{
+		"workflows/quick-plan/registry.yaml": &fstest.MapFile{
 			Data: []byte(`
 registry:
   - namespace: "spec-workflow"
@@ -36,6 +36,11 @@ registry:
       - key: "plan"
         name: "Plan"
         template: "v1-plan.md"
+`),
+		},
+		"workflows/cook/registry.yaml": &fstest.MapFile{
+			Data: []byte(`
+registry:
   - namespace: "spec-workflow"
     key: "cook"
     version: "v1"
@@ -45,6 +50,11 @@ registry:
       - key: "cook"
         name: "Cook"
         template: "v1-cook.md"
+`),
+		},
+		"workflows/research/registry.yaml": &fstest.MapFile{
+			Data: []byte(`
+registry:
   - namespace: "spec-workflow"
     key: "research"
     version: "v1"
@@ -56,9 +66,9 @@ registry:
         template: "v1-research.md"
 `),
 		},
-		"v1-plan.md":     &fstest.MapFile{Data: []byte("# Plan Template")},
-		"v1-cook.md":     &fstest.MapFile{Data: []byte("# Cook Template")},
-		"v1-research.md": &fstest.MapFile{Data: []byte("# Research Template")},
+		"workflows/quick-plan/v1-plan.md":   &fstest.MapFile{Data: []byte("# Plan Template")},
+		"workflows/cook/v1-cook.md":         &fstest.MapFile{Data: []byte("# Cook Template")},
+		"workflows/research/v1-research.md": &fstest.MapFile{Data: []byte("# Research Template")},
 	}
 }
 
@@ -493,7 +503,7 @@ func TestDashboard_FullWorkflowCreationFlow(t *testing.T) {
 func TestBuildTemplateOptions_EmptyRegistry(t *testing.T) {
 	// Create a domain registry with no spec-workflow registrations
 	fs := fstest.MapFS{
-		"registry.yaml": &fstest.MapFile{
+		"workflows/go-guidelines/registry.yaml": &fstest.MapFile{
 			Data: []byte(`
 registry:
   - namespace: "lang-guidelines"
@@ -507,7 +517,7 @@ registry:
         template: "v1-coding.md"
 `),
 		},
-		"v1-coding.md": &fstest.MapFile{Data: []byte("# Coding Guidelines")},
+		"workflows/go-guidelines/v1-coding.md": &fstest.MapFile{Data: []byte("# Coding Guidelines")},
 	}
 	registryService, err := appreg.NewRegistryService(fs)
 	require.NoError(t, err)
@@ -1009,7 +1019,7 @@ func TestNewWorkflowModal_EpicIDPassedToWorkflowSpec(t *testing.T) {
 func createTestRegistryServiceWithInstructions(t *testing.T) *appreg.RegistryService {
 	t.Helper()
 	registryFS := fstest.MapFS{
-		"registry.yaml": &fstest.MapFile{
+		"workflows/quick-plan/registry.yaml": &fstest.MapFile{
 			Data: []byte(`
 registry:
   - namespace: "spec-workflow"
@@ -1024,8 +1034,8 @@ registry:
         template: "v1-plan.md"
 `),
 		},
-		"v1-plan.md": &fstest.MapFile{Data: []byte("# Plan Template")},
-		"custom_instructions.md": &fstest.MapFile{
+		"workflows/quick-plan/v1-plan.md": &fstest.MapFile{Data: []byte("# Plan Template")},
+		"workflows/quick-plan/custom_instructions.md": &fstest.MapFile{
 			Data: []byte("# Custom Instructions\n\nThis is a custom coordinator prompt."),
 		},
 	}
@@ -1054,7 +1064,7 @@ func TestBuildCoordinatorPrompt_UsesCustomInstructions(t *testing.T) {
 func TestBuildCoordinatorPrompt_HandlesInstructionsError(t *testing.T) {
 	// Create a registry where the template specifies an instructions file that doesn't exist
 	registryFS := fstest.MapFS{
-		"registry.yaml": &fstest.MapFile{
+		"workflows/broken-plan/registry.yaml": &fstest.MapFile{
 			Data: []byte(`
 registry:
   - namespace: "spec-workflow"
@@ -1069,7 +1079,7 @@ registry:
         template: "v1-plan.md"
 `),
 		},
-		"v1-plan.md": &fstest.MapFile{Data: []byte("# Plan Template")},
+		"workflows/broken-plan/v1-plan.md": &fstest.MapFile{Data: []byte("# Plan Template")},
 		// No "nonexistent.md" file - instructions file doesn't exist
 	}
 

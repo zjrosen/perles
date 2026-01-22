@@ -3,6 +3,8 @@ package registry
 import (
 	"fmt"
 	"io/fs"
+	stdpath "path"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -38,29 +40,101 @@ type NodeDef struct {
 	Assignee string   `yaml:"assignee"` // Worker role to assign this task to
 }
 
-// LoadRegistryFromYAML loads workflow registrations from the embedded registry.yaml file.
-// It parses the YAML and builds registrations using the existing ChainBuilder and Builder APIs.
+// LoadRegistryFromYAML loads workflow registrations from all registry.yaml files in workflows subdirectories.
+// It scans for workflows/*/registry.yaml, parses them, and merges all registrations.
+// Template paths are adjusted to be relative to the workflows directory.
 func LoadRegistryFromYAML(fsys fs.FS) ([]*registry.Registration, error) {
-	content, err := fs.ReadFile(fsys, "registry.yaml")
-	if err != nil {
-		return nil, fmt.Errorf("read registry.yaml: %w", err)
-	}
+	var allRegistrations []*registry.Registration
 
-	var file RegistryFile
-	if err := yaml.Unmarshal(content, &file); err != nil {
-		return nil, fmt.Errorf("parse registry.yaml: %w", err)
-	}
-
-	registrations := make([]*registry.Registration, 0, len(file.Registrations))
-	for _, def := range file.Registrations {
-		reg, err := buildRegistrationFromDef(def)
+	// Find all registry.yaml files in workflows subdirectories
+	err := fs.WalkDir(fsys, "workflows", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil, fmt.Errorf("workflow %s: %w", def.Key, err)
+			return err
 		}
-		registrations = append(registrations, reg)
+
+		// Only process registry.yaml files
+		if d.IsDir() || d.Name() != "registry.yaml" {
+			return nil
+		}
+
+		content, err := fs.ReadFile(fsys, path)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", path, err)
+		}
+
+		var file RegistryFile
+		if err := yaml.Unmarshal(content, &file); err != nil {
+			return fmt.Errorf("parse %s: %w", path, err)
+		}
+
+		// Get the workflow directory for path resolution
+		// Use path.Dir (not filepath.Dir) since fs.FS always uses forward slashes
+		workflowDir := stdpath.Dir(path)
+
+		for _, def := range file.Registrations {
+			// Resolve template paths relative to the workflow directory
+			resolvedDef := resolveTemplatePaths(def, workflowDir, fsys)
+
+			reg, err := buildRegistrationFromDef(resolvedDef)
+			if err != nil {
+				return fmt.Errorf("workflow %s in %s: %w", def.Key, path, err)
+			}
+			allRegistrations = append(allRegistrations, reg)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("scan workflow registries: %w", err)
 	}
 
-	return registrations, nil
+	if len(allRegistrations) == 0 {
+		return nil, fmt.Errorf("no workflow registrations found in workflows/*/registry.yaml")
+	}
+
+	return allRegistrations, nil
+}
+
+// resolveTemplatePaths resolves template paths to be relative to the workflows directory.
+// It first checks if the template exists in the workflow's directory, then falls back to workflows/.
+func resolveTemplatePaths(def WorkflowDef, workflowDir string, fsys fs.FS) WorkflowDef {
+	def.Template = resolveTemplatePath(def.Template, workflowDir, fsys)
+	def.Instructions = resolveTemplatePath(def.Instructions, workflowDir, fsys)
+
+	for i := range def.Nodes {
+		def.Nodes[i].Template = resolveTemplatePath(def.Nodes[i].Template, workflowDir, fsys)
+	}
+
+	return def
+}
+
+// resolveTemplatePath resolves a single template path.
+// Returns the path relative to the workflows directory.
+func resolveTemplatePath(template, workflowDir string, fsys fs.FS) string {
+	if template == "" {
+		return ""
+	}
+
+	// If already a path (contains /), use as-is
+	if strings.Contains(template, "/") {
+		return template
+	}
+
+	// Check if template exists in workflow directory first
+	// Use path.Join (not filepath.Join) since fs.FS always uses forward slashes
+	workflowPath := stdpath.Join(workflowDir, template)
+	if _, err := fs.Stat(fsys, workflowPath); err == nil {
+		return workflowPath
+	}
+
+	// Fall back to shared templates in workflows/ directory
+	sharedPath := stdpath.Join("workflows", template)
+	if _, err := fs.Stat(fsys, sharedPath); err == nil {
+		return sharedPath
+	}
+
+	// Return the workflow-local path as default (will error on load if not found)
+	return workflowPath
 }
 
 // buildRegistrationFromDef converts a WorkflowDef into a registry.Registration.

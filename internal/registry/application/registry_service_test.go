@@ -10,10 +10,10 @@ import (
 	"github.com/zjrosen/perles/internal/registry/domain"
 )
 
-// createTestFS creates a MapFS for testing with a valid registry.yaml and templates
+// createTestFS creates a MapFS for testing with workflow subdirectories containing registry.yaml and templates
 func createTestFS() fstest.MapFS {
 	return fstest.MapFS{
-		"registry.yaml": &fstest.MapFile{
+		"workflows/planning-standard/registry.yaml": &fstest.MapFile{
 			Data: []byte(`
 registry:
   - namespace: "spec-workflow"
@@ -63,6 +63,11 @@ registry:
           - "plan.md"
         after:
           - "eval"
+`),
+		},
+		"workflows/planning-simple/registry.yaml": &fstest.MapFile{
+			Data: []byte(`
+registry:
   - namespace: "spec-workflow"
     key: "planning-simple"
     version: "v1"
@@ -91,6 +96,11 @@ registry:
           - "plan.md"
         after:
           - "plan"
+`),
+		},
+		"workflows/go-guidelines/registry.yaml": &fstest.MapFile{
+			Data: []byte(`
+registry:
   - namespace: "lang::guidelines"
     key: "go-guidelines"
     version: "v1"
@@ -105,13 +115,16 @@ registry:
         template: "go-coding.md"
 `),
 		},
-		"v1-research.md":          &fstest.MapFile{Data: []byte("# Research Template\nContent here")},
-		"v1-proposal.md":          &fstest.MapFile{Data: []byte("# Proposal Template\nContent here")},
-		"v1-plan.md":              &fstest.MapFile{Data: []byte("# Plan Template\nContent here")},
-		"v1-research-proposal.md": &fstest.MapFile{Data: []byte("# Research & Proposal Template\nContent here")},
-		"v1-evaluation.md":        &fstest.MapFile{Data: []byte("# Evaluation Template\nContent here")},
-		"v1-implement.md":         &fstest.MapFile{Data: []byte("# Implement Template\nContent here")},
-		"go-coding.md":            &fstest.MapFile{Data: []byte("# Go Coding Guidelines\nContent here")},
+		// Templates in their respective workflow directories
+		"workflows/planning-standard/v1-research.md":        &fstest.MapFile{Data: []byte("# Research Template\nContent here")},
+		"workflows/planning-standard/v1-proposal.md":        &fstest.MapFile{Data: []byte("# Proposal Template\nContent here")},
+		"workflows/planning-standard/v1-plan.md":            &fstest.MapFile{Data: []byte("# Plan Template\nContent here")},
+		"workflows/planning-standard/v1-evaluation.md":      &fstest.MapFile{Data: []byte("# Evaluation Template\nContent here")},
+		"workflows/planning-standard/v1-implement.md":       &fstest.MapFile{Data: []byte("# Implement Template\nContent here")},
+		"workflows/planning-simple/v1-research-proposal.md": &fstest.MapFile{Data: []byte("# Research & Proposal Template\nContent here")},
+		"workflows/planning-simple/v1-plan.md":              &fstest.MapFile{Data: []byte("# Plan Template\nContent here")},
+		"workflows/planning-simple/v1-implement.md":         &fstest.MapFile{Data: []byte("# Implement Template\nContent here")},
+		"workflows/go-guidelines/go-coding.md":              &fstest.MapFile{Data: []byte("# Go Coding Guidelines\nContent here")},
 	}
 }
 
@@ -209,8 +222,8 @@ func TestPlanningStandard_EvalNode(t *testing.T) {
 	require.Len(t, evalNode.Outputs(), 1, "eval should have exactly one output")
 	require.Equal(t, "evaluation.md", evalNode.Outputs()[0].Filename(), "eval output should be evaluation.md")
 
-	// Verify template
-	require.Equal(t, "v1-evaluation.md", evalNode.Template(), "eval template should be v1-evaluation.md")
+	// Verify template (full path after resolution)
+	require.Equal(t, "workflows/planning-standard/v1-evaluation.md", evalNode.Template(), "eval template should be resolved to full path")
 }
 
 func TestRegistryService_GetByNamespace(t *testing.T) {
@@ -577,7 +590,7 @@ func createTestChain() *registry.Chain {
 func TestGetInstructionsTemplate_ReturnsContent(t *testing.T) {
 	// Create test FS with instructions file included
 	testFS := fstest.MapFS{
-		"registry.yaml": &fstest.MapFile{
+		"workflows/test-wf/registry.yaml": &fstest.MapFile{
 			Data: []byte(`registry:
   - namespace: "test-ns"
     key: "test-key"
@@ -592,10 +605,10 @@ func TestGetInstructionsTemplate_ReturnsContent(t *testing.T) {
         assignee: "worker-1"
 `),
 		},
-		"my-instructions.md": &fstest.MapFile{
+		"workflows/test-wf/my-instructions.md": &fstest.MapFile{
 			Data: []byte("# My Instructions\n\nContent here."),
 		},
-		"test.md": &fstest.MapFile{Data: []byte("# Test")},
+		"workflows/test-wf/test.md": &fstest.MapFile{Data: []byte("# Test")},
 	}
 
 	svc, err := NewRegistryService(testFS)

@@ -10,6 +10,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// createWorkflowFS wraps YAML content in the expected workflows/test/registry.yaml structure
+func createWorkflowFS(yamlContent string) fstest.MapFS {
+	return fstest.MapFS{
+		"workflows/test/registry.yaml": &fstest.MapFile{
+			Data: []byte(yamlContent),
+		},
+	}
+}
+
 func TestLoadRegistryFromYAML(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -114,8 +123,9 @@ registry:
 			yamlContent: `
 registry: []
 `,
-			wantCount: 0,
-			wantErr:   false,
+			wantCount:   0,
+			wantErr:     true,
+			errContains: "no workflow registrations found",
 		},
 		{
 			name: "cycle detection - A after B, B after A",
@@ -318,12 +328,8 @@ registry:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create mock filesystem with registry.yaml
-			fs := fstest.MapFS{
-				"registry.yaml": &fstest.MapFile{
-					Data: []byte(tt.yamlContent),
-				},
-			}
+			// Create mock filesystem with workflows/test/registry.yaml
+			fs := createWorkflowFS(tt.yamlContent)
 
 			registrations, err := LoadRegistryFromYAML(fs)
 
@@ -342,13 +348,13 @@ registry:
 }
 
 func TestLoadRegistryFromYAML_FileNotFound(t *testing.T) {
-	// Empty filesystem - no registry.yaml
+	// Empty filesystem - no workflows directory
 	fs := fstest.MapFS{}
 
 	_, err := LoadRegistryFromYAML(fs)
 	require.Error(t, err, "LoadRegistryFromYAML() expected error for missing file")
-	require.Contains(t, err.Error(), "registry.yaml",
-		"LoadRegistryFromYAML() error = %q, want error mentioning registry.yaml", err.Error())
+	require.Contains(t, err.Error(), "workflow",
+		"LoadRegistryFromYAML() error = %q, want error mentioning workflows", err.Error())
 }
 
 func TestLoadRegistryFromYAML_RegistrationDetails(t *testing.T) {
@@ -376,11 +382,7 @@ registry:
         after:
           - "producer"
 `
-	fs := fstest.MapFS{
-		"registry.yaml": &fstest.MapFile{
-			Data: []byte(yamlContent),
-		},
-	}
+	fs := createWorkflowFS(yamlContent)
 
 	registrations, err := LoadRegistryFromYAML(fs)
 	require.NoError(t, err, "LoadRegistryFromYAML() unexpected error")
@@ -410,7 +412,7 @@ registry:
 	producer := nodes[0]
 	require.Equal(t, "producer", producer.Key(), "producer Key() mismatch")
 	require.Equal(t, "Producer", producer.Name(), "producer Name() mismatch")
-	require.Equal(t, "producer.md", producer.Template(), "producer Template() mismatch")
+	require.Equal(t, "workflows/test/producer.md", producer.Template(), "producer Template() mismatch (should be resolved to full path)")
 	outputs := producer.Outputs()
 	require.Len(t, outputs, 1, "producer should have 1 output")
 	require.Equal(t, "artifact.md", outputs[0].Filename(), "producer output filename mismatch")
@@ -549,18 +551,16 @@ registry:
         template: "step1.md"
         assignee: "worker-1"
 `
-	fs := fstest.MapFS{
-		"registry.yaml": &fstest.MapFile{
-			Data: []byte(yamlContent),
-		},
-	}
+	fs := createWorkflowFS(yamlContent)
+	// Add the instructions template file
+	fs["workflows/test/coordinator_template.md"] = &fstest.MapFile{Data: []byte("# Instructions")}
 
 	registrations, err := LoadRegistryFromYAML(fs)
 	require.NoError(t, err, "LoadRegistryFromYAML() unexpected error")
 	require.Len(t, registrations, 1, "expected 1 registration")
 
 	reg := registrations[0]
-	require.Equal(t, "coordinator_template.md", reg.Instructions(), "Instructions() should return parsed value")
+	require.Equal(t, "workflows/test/coordinator_template.md", reg.Instructions(), "Instructions() should return resolved path")
 }
 
 func TestYAMLLoader_EmptyInstructions_AllowedForNonWorkflow(t *testing.T) {
@@ -577,11 +577,7 @@ registry:
         name: "Step 1"
         template: "step1.md"
 `
-	fs := fstest.MapFS{
-		"registry.yaml": &fstest.MapFile{
-			Data: []byte(yamlContent),
-		},
-	}
+	fs := createWorkflowFS(yamlContent)
 
 	registrations, err := LoadRegistryFromYAML(fs)
 	require.NoError(t, err, "LoadRegistryFromYAML() should not error for non-orchestration workflows without instructions")
@@ -604,11 +600,7 @@ registry:
         template: "step1.md"
         assignee: "worker-1"
 `
-	fs := fstest.MapFS{
-		"registry.yaml": &fstest.MapFile{
-			Data: []byte(yamlContent),
-		},
-	}
+	fs := createWorkflowFS(yamlContent)
 
 	_, err := LoadRegistryFromYAML(fs)
 	require.Error(t, err, "LoadRegistryFromYAML() should error for orchestration workflows without instructions")
