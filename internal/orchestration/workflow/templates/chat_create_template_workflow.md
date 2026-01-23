@@ -344,7 +344,7 @@ The epic template is the coordinator's main instruction file, rendered with Go t
 
 You are the **Coordinator** for a multi-agent {workflow purpose} workflow. Your job is to orchestrate {N} workers through a structured process.
 
-## Context (from arguments)
+## Context
 
 The user has provided the following information:
 

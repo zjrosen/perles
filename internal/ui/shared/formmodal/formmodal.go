@@ -3,12 +3,15 @@ package formmodal
 import (
 	"strings"
 
+	zone "github.com/lrstanley/bubblezone"
+
 	"github.com/zjrosen/perles/internal/keys"
 	"github.com/zjrosen/perles/internal/ui/shared/colorpicker"
 	"github.com/zjrosen/perles/internal/ui/shared/vimtextarea"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -52,6 +55,9 @@ type Model struct {
 	// Viewport for overlay positioning
 	width, height int
 
+	// Body scrolling viewport
+	bodyViewport viewport.Model
+
 	// Sub-overlay (e.g., colorpicker)
 	colorPicker     colorpicker.Model
 	showColorPicker bool
@@ -79,6 +85,7 @@ func New(cfg FormConfig) Model {
 		fields:       make([]fieldState, len(cfg.Fields)),
 		focusedIndex: 0,
 		colorPicker:  colorpicker.New(),
+		bodyViewport: viewport.New(0, 0),
 	}
 
 	// Initialize field states
@@ -178,9 +185,31 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case tea.KeyMsg:
 		return m.handleKeyMsg(msg)
 
+	case tea.MouseMsg:
+		// Handle left-click release for zone clicks
+		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionRelease {
+			// Check for button clicks first
+			if cmd := m.handleButtonClick(msg); cmd != nil {
+				return m, cmd
+			}
+			// Check for item clicks (more specific zones)
+			if m.handleItemClick(msg) {
+				return m, nil
+			}
+			// Check for field clicks (focus the field)
+			if m.handleFieldClick(msg) {
+				return m, m.blinkCmd()
+			}
+		}
+		// Forward mouse events to viewport for scrolling
+		var cmd tea.Cmd
+		m.bodyViewport, cmd = m.bodyViewport.Update(msg)
+		return m, cmd
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.bodyViewport.Height = m.calculateMaxBodyHeight()
 	}
 
 	// Forward to focused text input if applicable
@@ -558,6 +587,7 @@ func (m Model) nextField() Model {
 			}
 		}
 	}
+	m.ensureFocusedFieldVisible()
 	return m
 }
 
@@ -649,6 +679,7 @@ func (m Model) prevField() Model {
 			}
 		}
 	}
+	m.ensureFocusedFieldVisible()
 	return m
 }
 
@@ -701,6 +732,8 @@ func (m Model) blinkCmd() tea.Cmd {
 func (m Model) SetSize(w, h int) Model {
 	m.width = w
 	m.height = h
+	// Update body viewport height (width is not constrained - content flows naturally)
+	m.bodyViewport.Height = m.calculateMaxBodyHeight()
 	return m
 }
 
@@ -1045,4 +1078,271 @@ func (m Model) handleKeyForTextArea(msg tea.KeyMsg, fs *fieldState) (Model, tea.
 	var cmd tea.Cmd
 	fs.textArea, cmd = fs.textArea.Update(msg)
 	return m, cmd
+}
+
+// handleMouseMsg processes mouse events for scrolling.
+// calculateMaxBodyHeight returns the maximum height available for the body content.
+// This accounts for title, header, buttons, and modal chrome.
+func (m Model) calculateMaxBodyHeight() int {
+	// Modal chrome (fixed parts that are always rendered):
+	// - 2 lines for top/bottom border
+	// - 1 line for title + padding
+	// - 1 line for title border
+	// - 2 lines for spacing after title border (blank line + first field margin)
+	// - 2 lines for buttons section (spacing + button line)
+	// - 1 line for closing padding
+	chrome := 9
+
+	// Add header height if present (estimate 4 lines typically)
+	if m.config.HeaderContent != nil {
+		chrome += 4
+	}
+
+	// Available height is window height minus chrome, with minimum of 5
+	return max(m.height-chrome, 5)
+}
+
+// ensureFocusedFieldVisible scrolls the viewport to keep the focused field visible.
+func (m *Model) ensureFocusedFieldVisible() {
+	if m.focusedIndex < 0 {
+		// On buttons - scroll to bottom
+		m.bodyViewport.GotoBottom()
+		return
+	}
+
+	// Estimate line position of focused field
+	// Each field is approximately 5 lines (label + content + spacing)
+	visibleIdx := 0
+	for i := 0; i < m.focusedIndex; i++ {
+		if m.isFieldVisible(i) {
+			visibleIdx++
+		}
+	}
+
+	// Scroll to approximately where the field should be
+	targetLine := visibleIdx * 5
+	if targetLine < m.bodyViewport.YOffset {
+		m.bodyViewport.SetYOffset(targetLine)
+	} else if targetLine >= m.bodyViewport.YOffset+m.bodyViewport.Height {
+		m.bodyViewport.SetYOffset(targetLine - m.bodyViewport.Height + 5)
+	}
+}
+
+// handleFieldClick checks if a field zone was clicked and focuses it.
+// Returns true if a field was focused.
+func (m *Model) handleFieldClick(msg tea.MouseMsg) bool {
+	for i := range m.fields {
+		if !m.isFieldVisible(i) {
+			continue
+		}
+
+		fs := &m.fields[i]
+
+		// Check for editable list input zone first (more specific than field zone)
+		if fs.config.Type == FieldTypeEditableList {
+			inputZoneID := makeFieldInputZoneID(i)
+			if z := zone.Get(inputZoneID); z != nil && z.InBounds(msg) {
+				// Blur current field
+				m.blurCurrentField()
+				// Focus this field's input sub-section
+				m.focusedIndex = i
+				fs.subFocus = SubFocusInput
+				fs.addInput.Focus()
+				return true
+			}
+		}
+
+		zoneID := makeFieldZoneID(i)
+		if z := zone.Get(zoneID); z != nil && z.InBounds(msg) {
+			// Blur current field
+			m.blurCurrentField()
+			// Focus new field
+			m.focusedIndex = i
+			m.focusField(i)
+
+			// Special handling for SearchSelect: toggle expanded state on click
+			if fs.config.Type == FieldTypeSearchSelect {
+				if fs.searchExpanded {
+					// Clicking when expanded collapses it
+					fs.searchExpanded = false
+					fs.searchInput.Blur()
+				} else {
+					// Clicking when collapsed expands it
+					fs.searchExpanded = true
+					fs.searchInput.SetValue("")
+					fs.searchInput.Focus()
+					// Reset filter to show all items
+					*m = m.updateSearchFilter(fs)
+					// Position cursor at selected item
+					for j, idx := range fs.searchFiltered {
+						if fs.listItems[idx].selected {
+							fs.listCursor = j
+							break
+						}
+					}
+					fs.scrollOffset = 0
+					*m = m.ensureSearchCursorVisible(fs)
+				}
+			}
+			return true
+		}
+	}
+	return false
+}
+
+// handleItemClick checks if a list item zone was clicked and handles it.
+// Returns true if an item was clicked and handled.
+func (m *Model) handleItemClick(msg tea.MouseMsg) bool {
+	for fieldIdx := range m.fields {
+		if !m.isFieldVisible(fieldIdx) {
+			continue
+		}
+		fs := &m.fields[fieldIdx]
+
+		// Check list/select/editable-list items
+		switch fs.config.Type {
+		case FieldTypeList, FieldTypeEditableList:
+			for itemIdx := range fs.listItems {
+				zoneID := makeItemZoneID(fieldIdx, itemIdx)
+				if z := zone.Get(zoneID); z != nil && z.InBounds(msg) {
+					// Focus this field first
+					m.blurCurrentField()
+					m.focusedIndex = fieldIdx
+					m.focusField(fieldIdx)
+					// Move cursor and toggle
+					fs.listCursor = itemIdx
+					fs.listItems[itemIdx].selected = !fs.listItems[itemIdx].selected
+					return true
+				}
+			}
+
+		case FieldTypeSelect:
+			for itemIdx := range fs.listItems {
+				zoneID := makeItemZoneID(fieldIdx, itemIdx)
+				if z := zone.Get(zoneID); z != nil && z.InBounds(msg) {
+					// Focus this field first
+					m.blurCurrentField()
+					m.focusedIndex = fieldIdx
+					m.focusField(fieldIdx)
+					// Deselect all and select clicked item
+					for i := range fs.listItems {
+						fs.listItems[i].selected = false
+					}
+					fs.listCursor = itemIdx
+					fs.listItems[itemIdx].selected = true
+					return true
+				}
+			}
+
+		case FieldTypeSearchSelect:
+			// Only handle clicks when expanded
+			if fs.searchExpanded {
+				for itemIdx := range fs.listItems {
+					// Check multiple row zones per item (label + subtext lines)
+					// Format: formmodal-item-{field}-{item}-r{row}
+					// We check up to 10 rows per item (should be plenty for wrapped subtext)
+					for rowIdx := range 10 {
+						zoneID := makeItemRowZoneID(fieldIdx, itemIdx, rowIdx)
+						if z := zone.Get(zoneID); z != nil && z.InBounds(msg) {
+							// Deselect all and select clicked item
+							for i := range fs.listItems {
+								fs.listItems[i].selected = false
+							}
+							fs.listItems[itemIdx].selected = true
+							// Collapse the search
+							fs.searchExpanded = false
+							fs.searchInput.Blur()
+							return true
+						}
+					}
+				}
+			}
+
+		case FieldTypeToggle:
+			// Check both toggle options (index 0 and 1)
+			for optIdx := range 2 {
+				zoneID := makeItemZoneID(fieldIdx, optIdx)
+				if z := zone.Get(zoneID); z != nil && z.InBounds(msg) {
+					// Focus this field and select the clicked option
+					m.blurCurrentField()
+					m.focusedIndex = fieldIdx
+					m.focusField(fieldIdx)
+					fs.toggleIndex = optIdx
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// blurCurrentField removes focus from the currently focused field.
+func (m *Model) blurCurrentField() {
+	if m.focusedIndex < 0 || m.focusedIndex >= len(m.fields) {
+		return
+	}
+	fs := &m.fields[m.focusedIndex]
+	switch fs.config.Type {
+	case FieldTypeText:
+		fs.textInput.Blur()
+	case FieldTypeTextArea:
+		fs.textArea.Blur()
+	case FieldTypeSearchSelect:
+		fs.searchInput.Blur()
+	case FieldTypeEditableList:
+		fs.addInput.Blur()
+	}
+}
+
+// focusField gives focus to the specified field.
+func (m *Model) focusField(index int) {
+	if index < 0 || index >= len(m.fields) {
+		return
+	}
+	fs := &m.fields[index]
+	switch fs.config.Type {
+	case FieldTypeText:
+		fs.textInput.Focus()
+	case FieldTypeTextArea:
+		fs.textArea.Focus()
+	case FieldTypeSearchSelect:
+		// Don't auto-expand, just focus
+		if fs.searchExpanded {
+			fs.searchInput.Focus()
+		}
+	case FieldTypeEditableList:
+		// Focus list section by default
+		fs.subFocus = SubFocusList
+	}
+}
+
+// handleButtonClick checks if a button zone was clicked and handles it.
+// Returns a tea.Cmd if a button was clicked, nil otherwise.
+func (m *Model) handleButtonClick(msg tea.MouseMsg) tea.Cmd {
+	// Check submit button
+	if z := zone.Get(zoneSubmitButton); z != nil && z.InBounds(msg) {
+		// Focus on buttons and select submit
+		m.blurCurrentField()
+		m.focusedIndex = -1
+		m.focusedButton = 0
+		// Trigger submit - must assign returned model back since submit() has value receiver
+		newM, cmd := m.submit()
+		*m = newM
+		return cmd
+	}
+
+	// Check cancel button
+	if z := zone.Get(zoneCancelButton); z != nil && z.InBounds(msg) {
+		// Focus on buttons and select cancel
+		m.blurCurrentField()
+		m.focusedIndex = -1
+		m.focusedButton = 1
+		// Trigger cancel
+		if m.config.OnCancel != nil {
+			return func() tea.Msg { return m.config.OnCancel() }
+		}
+		return func() tea.Msg { return CancelMsg{} }
+	}
+
+	return nil
 }

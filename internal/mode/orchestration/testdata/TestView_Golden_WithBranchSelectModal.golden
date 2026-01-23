@@ -11,13 +11,13 @@
                                  │ isolated copy from your chosen base branch. Your   │                                 
                                  │ current work remains untouched.                    │                                 
                                  │                                                    │                                 
-                                 │ ╭─ Base Branch (enter to change) ────────────────╮ │                                 
-                                 │ │ develop                                        │ │                                 
-                                 │ ╰────────────────────────────────────────────────╯ │                                 
+                                 │ ╭─ Base Branch (enter to change) ───────────────╮  │                                 
+                                 │ │ develop                                       │  │                                 
+                                 │ ╰───────────────────────────────────────────────╯  │                                 
                                  │                                                    │                                 
-                                 │ ╭─ Custom Branch Name (optional) ────────────────╮ │                                 
-                                 │ │e.g., feature/my-work                           │ │                                 
-                                 │ ╰────────────────────────────────────────────────╯ │                                 
+                                 │ ╭─ Custom Branch Name (optional) ───────────────╮  │                                 
+                                 │ │e.g., feature/my-work                          │  │                                 
+                                 │ ╰───────────────────────────────────────────────╯  │                                 
                                  │                                                    │                                 
                                  │    Continue      Cancel                            │                                 
                                  │                                                    │                                 

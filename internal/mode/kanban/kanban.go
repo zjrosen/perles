@@ -168,10 +168,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseMsg:
-		// Route mouse events to the board for click handling
-		if m.view == ViewBoard {
+		// Route mouse events based on current view
+		switch m.view {
+		case ViewBoard:
 			var cmd tea.Cmd
 			m.board, cmd = m.board.Update(msg)
+			return m, cmd
+		case ViewEditIssue:
+			var cmd tea.Cmd
+			m.issueEditor, cmd = m.issueEditor.Update(msg)
 			return m, cmd
 		}
 		return m, nil

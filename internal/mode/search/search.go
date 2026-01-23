@@ -563,8 +563,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m.handleKey(keyMsg)
 	}
 
-	// Handle mouse messages - forward wheel events to details regardless of focus
+	// Handle mouse messages - route to appropriate component
 	if mouseMsg, ok := msg.(tea.MouseMsg); ok {
+		// When issue editor is open, forward mouse events to it
+		if m.view == ViewEditIssue {
+			var cmd tea.Cmd
+			m.issueEditor, cmd = m.issueEditor.Update(mouseMsg)
+			return m, cmd
+		}
 		// Forward wheel events to details regardless of focus
 		if mouseMsg.Button == tea.MouseButtonWheelUp || mouseMsg.Button == tea.MouseButtonWheelDown {
 			var cmd tea.Cmd

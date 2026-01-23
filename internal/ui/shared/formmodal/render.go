@@ -1,8 +1,10 @@
 package formmodal
 
 import (
+	"fmt"
 	"strings"
 
+	zone "github.com/lrstanley/bubblezone"
 	"github.com/muesli/reflow/wordwrap"
 
 	"github.com/zjrosen/perles/internal/ui/shared/overlay"
@@ -11,8 +13,40 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// Zone ID prefixes for mouse click detection.
+const (
+	zoneFieldPrefix      = "formmodal-field-"
+	zoneFieldInputSuffix = "-input" // Suffix for input sub-section of editable list
+	zoneItemPrefix       = "formmodal-item-"
+	zoneSubmitButton     = "formmodal-submit"
+	zoneCancelButton     = "formmodal-cancel"
+)
+
+// makeFieldZoneID creates a zone ID for a field.
+func makeFieldZoneID(fieldIndex int) string {
+	return fmt.Sprintf("%s%d", zoneFieldPrefix, fieldIndex)
+}
+
+// makeItemZoneID creates a zone ID for a list item within a field.
+func makeItemZoneID(fieldIndex, itemIndex int) string {
+	return fmt.Sprintf("%s%d-%d", zoneItemPrefix, fieldIndex, itemIndex)
+}
+
+// makeItemRowZoneID creates a zone ID for a specific row within a list item.
+// Used for SearchSelect where items can have multiple rows (label + subtext lines).
+// Format: formmodal-item-{fieldIndex}-{itemIndex}-r{rowIndex}
+func makeItemRowZoneID(fieldIndex, itemIndex, rowIndex int) string {
+	return fmt.Sprintf("%s%d-%d-r%d", zoneItemPrefix, fieldIndex, itemIndex, rowIndex)
+}
+
+// makeFieldInputZoneID creates a zone ID for the input sub-section of an editable list.
+// Format: formmodal-field-{fieldIndex}-input
+func makeFieldInputZoneID(fieldIndex int) string {
+	return fmt.Sprintf("%s%d%s", zoneFieldPrefix, fieldIndex, zoneFieldInputSuffix)
+}
+
 // View renders the modal content (without overlay).
-func (m Model) View() string {
+func (m *Model) View() string {
 	width := m.config.MinWidth
 	if width == 0 {
 		width = 50
@@ -71,15 +105,9 @@ func (m Model) View() string {
 		content.WriteString("\n\n")
 	}
 
-	// Render each visible field
-	for i := range m.fields {
-		if !m.isFieldVisible(i) {
-			continue
-		}
-		fieldView := m.renderField(i, contentWidth)
-		content.WriteString(contentPadding.Render(fieldView))
-		content.WriteString("\n\n")
-	}
+	// Render scrollable body with fields
+	bodyView := m.renderScrollableBody(contentWidth, contentPadding)
+	content.WriteString(bodyView)
 
 	// Validation error (if any)
 	if m.validationError != "" {
@@ -109,18 +137,69 @@ func (m Model) View() string {
 	return boxStyle.Render(content.String())
 }
 
+// renderScrollableBody renders the fields with scrolling applied via viewport.
+func (m *Model) renderScrollableBody(contentWidth int, contentPadding lipgloss.Style) string {
+	// Render all visible fields
+	// Account for left padding (1 char) so fields don't overflow
+	fieldWidth := contentWidth - 1
+	var body strings.Builder
+	for i := range m.fields {
+		if !m.isFieldVisible(i) {
+			continue
+		}
+		fieldView := m.renderField(i, fieldWidth)
+		body.WriteString(contentPadding.Render(fieldView))
+		body.WriteString("\n\n")
+	}
+
+	content := body.String()
+
+	// If no size set, no scrolling - return content as-is
+	if m.height == 0 {
+		return content
+	}
+
+	lines := strings.Split(strings.TrimSuffix(content, "\n"), "\n")
+	contentHeight := len(lines)
+	maxBodyHeight := m.calculateMaxBodyHeight()
+
+	// If content fits, return as-is (modal will size to content)
+	if contentHeight <= maxBodyHeight {
+		return content
+	}
+
+	// Update viewport for scroll offset tracking
+	m.bodyViewport.Height = maxBodyHeight
+	m.bodyViewport.SetContent(content)
+
+	// Extract visible lines based on viewport offset
+	yOffset := m.bodyViewport.YOffset
+	endLine := min(yOffset+maxBodyHeight, len(lines))
+	visibleLines := lines[yOffset:endLine]
+
+	// Pad to exactly maxBodyHeight lines to maintain consistent modal height
+	for len(visibleLines) < maxBodyHeight {
+		visibleLines = append(visibleLines, "")
+	}
+
+	return strings.Join(visibleLines, "\n") + "\n\n"
+}
+
 // renderField renders a single field based on its type.
+// Fields are wrapped with zone marks for mouse click detection.
 func (m Model) renderField(index int, width int) string {
 	fs := &m.fields[index]
 	cfg := fs.config
 	focused := m.focusedIndex == index
+	fieldZoneID := makeFieldZoneID(index)
 
+	var rendered string
 	switch cfg.Type {
 	case FieldTypeText:
 		// Set input width to fill available space
 		// width - 2 for FormSection borders, - 1 for cursor padding
 		fs.textInput.Width = width - 3
-		return styles.FormSection(styles.FormSectionConfig{
+		rendered = styles.FormSection(styles.FormSectionConfig{
 			Content:            []string{fs.textInput.View()},
 			Width:              width,
 			TopLeft:            cfg.Label,
@@ -128,13 +207,14 @@ func (m Model) renderField(index int, width int) string {
 			Focused:            focused,
 			FocusedBorderColor: styles.BorderHighlightFocusColor,
 		})
+		return zone.Mark(fieldZoneID, rendered)
 
 	case FieldTypeColor:
 		swatch := lipgloss.NewStyle().
 			Background(lipgloss.Color(fs.selectedColor)).
 			Render("  ")
 		colorRow := swatch + " " + fs.selectedColor
-		return styles.FormSection(styles.FormSectionConfig{
+		rendered = styles.FormSection(styles.FormSectionConfig{
 			Content:            []string{colorRow},
 			Width:              width,
 			TopLeft:            cfg.Label,
@@ -142,6 +222,7 @@ func (m Model) renderField(index int, width int) string {
 			Focused:            focused,
 			FocusedBorderColor: styles.BorderHighlightFocusColor,
 		})
+		return zone.Mark(fieldZoneID, rendered)
 
 	case FieldTypeList:
 		var rows []string
@@ -154,8 +235,10 @@ func (m Model) renderField(index int, width int) string {
 			if item.selected {
 				checkbox = "[x]"
 			}
-			rows = append(rows, prefix+checkbox+" "+item.label)
-			// Add subtext on a separate line if present
+			row := prefix + checkbox + " " + item.label
+			// Wrap the main row with zone mark for click detection
+			rows = append(rows, zone.Mark(makeItemZoneID(index, i), row))
+			// Add subtext on a separate line if present (not clickable separately)
 			if item.subtext != "" {
 				subtextStyle := lipgloss.NewStyle().Foreground(styles.TextDescriptionColor)
 				indent := "      " // Align with label after "[x] "
@@ -165,7 +248,7 @@ func (m Model) renderField(index int, width int) string {
 		if len(rows) == 0 {
 			rows = []string{" (no items)"}
 		}
-		return styles.FormSection(styles.FormSectionConfig{
+		rendered = styles.FormSection(styles.FormSectionConfig{
 			Content:            rows,
 			Width:              width,
 			TopLeft:            cfg.Label,
@@ -173,6 +256,7 @@ func (m Model) renderField(index int, width int) string {
 			Focused:            focused,
 			FocusedBorderColor: styles.BorderHighlightFocusColor,
 		})
+		return zone.Mark(fieldZoneID, rendered)
 
 	case FieldTypeSelect:
 		var rows []string
@@ -194,8 +278,10 @@ func (m Model) renderField(index int, width int) string {
 				}
 				label = labelStyle.Render(item.label)
 			}
-			rows = append(rows, prefix+radio+" "+label)
-			// Add subtext on a separate line if present
+			row := prefix + radio + " " + label
+			// Wrap the main row with zone mark for click detection
+			rows = append(rows, zone.Mark(makeItemZoneID(index, i), row))
+			// Add subtext on a separate line if present (not clickable separately)
 			if item.subtext != "" {
 				subtextStyle := lipgloss.NewStyle().Foreground(styles.TextDescriptionColor)
 				indent := "      " // Align with label after "( ) "
@@ -205,7 +291,7 @@ func (m Model) renderField(index int, width int) string {
 		if len(rows) == 0 {
 			rows = []string{" (no items)"}
 		}
-		return styles.FormSection(styles.FormSectionConfig{
+		rendered = styles.FormSection(styles.FormSectionConfig{
 			Content:            rows,
 			Width:              width,
 			TopLeft:            cfg.Label,
@@ -213,18 +299,23 @@ func (m Model) renderField(index int, width int) string {
 			Focused:            focused,
 			FocusedBorderColor: styles.BorderHighlightFocusColor,
 		})
+		return zone.Mark(fieldZoneID, rendered)
 
 	case FieldTypeEditableList:
-		return m.renderEditableListField(fs, width, focused)
+		rendered = m.renderEditableListField(fs, index, width, focused)
+		return zone.Mark(fieldZoneID, rendered)
 
 	case FieldTypeToggle:
-		return m.renderToggleField(fs, width, focused)
+		rendered = m.renderToggleField(fs, index, width, focused)
+		return zone.Mark(fieldZoneID, rendered)
 
 	case FieldTypeSearchSelect:
-		return m.renderSearchSelectField(fs, width, focused)
+		rendered = m.renderSearchSelectField(fs, index, width, focused)
+		return zone.Mark(fieldZoneID, rendered)
 
 	case FieldTypeTextArea:
-		return m.renderTextAreaField(fs, width, focused)
+		rendered = m.renderTextAreaField(fs, width, focused)
+		return zone.Mark(fieldZoneID, rendered)
 	}
 
 	return ""
@@ -232,7 +323,7 @@ func (m Model) renderField(index int, width int) string {
 
 // renderEditableListField renders the editable list as two adjacent sections.
 // The list section shows items with checkboxes, the input section shows the add-item input.
-func (m Model) renderEditableListField(fs *fieldState, width int, focused bool) string {
+func (m Model) renderEditableListField(fs *fieldState, fieldIndex int, width int, focused bool) string {
 	cfg := fs.config
 
 	// Determine which sub-section is focused
@@ -250,7 +341,9 @@ func (m Model) renderEditableListField(fs *fieldState, width int, focused bool) 
 		if item.selected {
 			checkbox = "[x]"
 		}
-		listRows = append(listRows, prefix+checkbox+" "+item.label)
+		row := prefix + checkbox + " " + item.label
+		// Wrap with zone mark for click detection
+		listRows = append(listRows, zone.Mark(makeItemZoneID(fieldIndex, i), row))
 	}
 	if len(listRows) == 0 {
 		listRows = []string{" (no items)"}
@@ -280,6 +373,8 @@ func (m Model) renderEditableListField(fs *fieldState, width int, focused bool) 
 		Focused:            inputFocused,
 		FocusedBorderColor: styles.BorderHighlightFocusColor,
 	})
+	// Wrap input section with zone for click detection
+	inputSection = zone.Mark(makeFieldInputZoneID(fieldIndex), inputSection)
 
 	// Join with a small gap
 	return lipgloss.JoinVertical(lipgloss.Left, listSection, "", inputSection)
@@ -287,7 +382,7 @@ func (m Model) renderEditableListField(fs *fieldState, width int, focused bool) 
 
 // renderToggleField renders a binary toggle selector.
 // Visual pattern matches coleditor: ● Selected    ○ Unselected [←/→]
-func (m Model) renderToggleField(fs *fieldState, width int, focused bool) string {
+func (m Model) renderToggleField(fs *fieldState, fieldIndex int, width int, focused bool) string {
 	cfg := fs.config
 
 	// Ensure we have exactly 2 options
@@ -318,6 +413,10 @@ func (m Model) renderToggleField(fs *fieldState, width int, focused bool) string
 		opt0Label = unselectedStyle.Render("○ " + cfg.Options[0].Label)
 		opt1Label = selectedStyle.Render("● " + cfg.Options[1].Label)
 	}
+
+	// Wrap each option with zone mark for click detection
+	opt0Label = zone.Mark(makeItemZoneID(fieldIndex, 0), opt0Label)
+	opt1Label = zone.Mark(makeItemZoneID(fieldIndex, 1), opt1Label)
 
 	hint := hintStyle.Render(" [←/→]")
 	toggleRow := opt0Label + "    " + opt1Label + hint
@@ -354,7 +453,7 @@ func (m Model) renderButtons() string {
 			submitStyle = styles.PrimaryButtonFocusedStyle
 		}
 	}
-	submitBtn := submitStyle.Render(submitLabel)
+	submitBtn := zone.Mark(zoneSubmitButton, submitStyle.Render(submitLabel))
 
 	// Cancel button
 	cancelLabel := m.config.CancelLabel
@@ -365,7 +464,7 @@ func (m Model) renderButtons() string {
 	if onButtons && m.focusedButton == 1 {
 		cancelStyle = styles.SecondaryButtonFocusedStyle
 	}
-	cancelBtn := cancelStyle.Render(cancelLabel)
+	cancelBtn := zone.Mark(zoneCancelButton, cancelStyle.Render(cancelLabel))
 
 	return submitBtn + "  " + cancelBtn
 }
@@ -382,7 +481,7 @@ func (m Model) renderLoading(contentWidth int) string {
 }
 
 // Overlay renders the modal on top of a background view.
-func (m Model) Overlay(bg string) string {
+func (m *Model) Overlay(bg string) string {
 	fg := m.View()
 
 	var result string
@@ -405,21 +504,22 @@ func (m Model) Overlay(bg string) string {
 		result = m.colorPicker.Overlay(result)
 	}
 
-	return result
+	// Scan for zone markers to enable mouse click detection
+	return zone.Scan(result)
 }
 
 // renderSearchSelectField renders the searchable select field.
 // Has two states:
 //   - Collapsed: Shows selected value with hint to press Enter to change
 //   - Expanded: Shows search input + filtered list with scroll indicators
-func (m Model) renderSearchSelectField(fs *fieldState, width int, focused bool) string {
+func (m Model) renderSearchSelectField(fs *fieldState, fieldIndex int, width int, focused bool) string {
 	// Collapsed state: show selected value
 	if !fs.searchExpanded {
 		return m.renderSearchSelectCollapsed(fs, width, focused)
 	}
 
 	// Expanded state: show search + list
-	return m.renderSearchSelectExpanded(fs, width, focused)
+	return m.renderSearchSelectExpanded(fs, fieldIndex, width, focused)
 }
 
 // renderSearchSelectCollapsed renders the collapsed state showing selected value.
@@ -474,7 +574,7 @@ func (m Model) renderSearchSelectCollapsed(fs *fieldState, width int, focused bo
 }
 
 // renderSearchSelectExpanded renders the expanded state with search input and list.
-func (m Model) renderSearchSelectExpanded(fs *fieldState, width int, focused bool) string {
+func (m Model) renderSearchSelectExpanded(fs *fieldState, fieldIndex int, width int, focused bool) string {
 	cfg := fs.config
 	maxVisible := cfg.MaxVisibleItems
 	if maxVisible <= 0 {
@@ -510,50 +610,48 @@ func (m Model) renderSearchSelectExpanded(fs *fieldState, width int, focused boo
 			// Highlight the cursor row (what user is about to select)
 			isCursorRow := focused && i == fs.listCursor
 
-			// Build all content rows for this item (label + wrapped subtext)
-			var itemRows []string
+			// Track row index within this item for unique zone IDs
+			rowIdx := 0
 
-			// Label row
+			// Label row - padded to full width for larger click target
 			displayLabel := styles.TruncateString(item.label, innerWidth-1)
-			itemRows = append(itemRows, " "+displayLabel)
+			labelRow := " " + displayLabel
+			// Always pad to full width so the entire row is clickable
+			if lipgloss.Width(labelRow) < innerWidth {
+				labelRow = labelRow + strings.Repeat(" ", innerWidth-lipgloss.Width(labelRow))
+			}
+			if isCursorRow {
+				cursorStyle := lipgloss.NewStyle().Background(styles.SelectionBackgroundColor)
+				labelRow = cursorStyle.Render(labelRow)
+			}
+			// Each row gets a unique zone ID: item-{field}-{item}-r{row}
+			rows = append(rows, zone.Mark(makeItemRowZoneID(fieldIndex, actualIdx, rowIdx), labelRow))
+			rowIdx++
 
-			// Subtext rows (wrapped)
+			// Subtext rows (wrapped) - each gets its own unique zone ID
 			if item.subtext != "" {
-				// Wrap subtext to fit with indent of 3 spaces
-				// innerWidth already accounts for FormSection borders, subtract indent
 				wrapWidth := innerWidth - 4
 				if wrapWidth > 0 {
 					wrapped := wordwrap.String(item.subtext, wrapWidth)
 					for line := range strings.SplitSeq(wrapped, "\n") {
-						itemRows = append(itemRows, "   "+line)
+						subtextRow := "   " + line
+						// Pad to full width for clicking
+						if lipgloss.Width(subtextRow) < innerWidth {
+							subtextRow = subtextRow + strings.Repeat(" ", innerWidth-lipgloss.Width(subtextRow))
+						}
+						if isCursorRow {
+							cursorStyle := lipgloss.NewStyle().
+								Background(styles.SelectionBackgroundColor).
+								Foreground(styles.TextDescriptionColor)
+							subtextRow = cursorStyle.Render(subtextRow)
+						} else {
+							subtextStyle := lipgloss.NewStyle().Foreground(styles.TextDescriptionColor)
+							subtextRow = subtextStyle.Render(subtextRow)
+						}
+						rows = append(rows, zone.Mark(makeItemRowZoneID(fieldIndex, actualIdx, rowIdx), subtextRow))
+						rowIdx++
 					}
 				}
-			}
-
-			// Apply styling to all rows
-			for idx, row := range itemRows {
-				rowContent := row
-				isSubtext := idx > 0
-
-				if isCursorRow {
-					// Pad to full width for consistent highlight
-					rowWidth := lipgloss.Width(row)
-					if rowWidth < innerWidth {
-						rowContent = row + strings.Repeat(" ", innerWidth-rowWidth)
-					}
-					// Apply both foreground (for subtext) and background together
-					cursorStyle := lipgloss.NewStyle().
-						Background(styles.SelectionBackgroundColor)
-					if isSubtext {
-						cursorStyle = cursorStyle.Foreground(styles.TextDescriptionColor)
-					}
-					rowContent = cursorStyle.Render(rowContent)
-				} else if isSubtext {
-					// Apply description style to non-highlighted subtext
-					subtextStyle := lipgloss.NewStyle().Foreground(styles.TextDescriptionColor)
-					rowContent = subtextStyle.Render(row)
-				}
-				rows = append(rows, rowContent)
 			}
 		}
 

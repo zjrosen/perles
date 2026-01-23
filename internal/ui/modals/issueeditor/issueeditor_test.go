@@ -1,7 +1,11 @@
 package issueeditor
 
 import (
+	"os"
+	"regexp"
 	"testing"
+
+	zone "github.com/lrstanley/bubblezone"
 
 	beads "github.com/zjrosen/perles/internal/beads/domain"
 
@@ -9,6 +13,11 @@ import (
 	"github.com/charmbracelet/x/exp/teatest"
 	"github.com/stretchr/testify/require"
 )
+
+func TestMain(m *testing.M) {
+	zone.NewGlobal()
+	os.Exit(m.Run())
+}
 
 // testIssue creates a beads.Issue for testing with the given parameters.
 func testIssue(id string, labels []string, priority beads.Priority, status beads.Status) beads.Issue {
@@ -405,8 +414,8 @@ func TestSaveMsg_AddNewLabel(t *testing.T) {
 func TestIssueEditor_View_Golden(t *testing.T) {
 	issue := testIssue("test-123", []string{"bug", "feature"}, beads.PriorityHigh, beads.StatusOpen)
 	m := New(issue)
-	m = m.SetSize(80, 30)
-	view := m.View()
+	m = m.SetSize(80, 50) // Large enough to avoid scrolling
+	view := stripZoneMarkers(m.View())
 
 	teatest.RequireEqualOutput(t, []byte(view))
 }
@@ -414,8 +423,8 @@ func TestIssueEditor_View_Golden(t *testing.T) {
 func TestIssueEditor_View_EmptyLabels_Golden(t *testing.T) {
 	issue := testIssue("test-456", []string{}, beads.PriorityMedium, beads.StatusInProgress)
 	m := New(issue)
-	m = m.SetSize(80, 30)
-	view := m.View()
+	m = m.SetSize(80, 50) // Large enough to avoid scrolling
+	view := stripZoneMarkers(m.View())
 
 	teatest.RequireEqualOutput(t, []byte(view))
 }
@@ -424,8 +433,15 @@ func TestIssueEditor_View_ManyLabels_Golden(t *testing.T) {
 	labels := []string{"bug", "feature", "ui", "backend", "api", "database"}
 	issue := testIssue("test-789", labels, beads.PriorityCritical, beads.StatusClosed)
 	m := New(issue)
-	m = m.SetSize(80, 30)
-	view := m.View()
+	m = m.SetSize(80, 50) // Large enough to avoid scrolling
+	view := stripZoneMarkers(m.View())
 
 	teatest.RequireEqualOutput(t, []byte(view))
+}
+
+// stripZoneMarkers removes bubblezone escape sequences from output.
+// Zone IDs are global and vary based on test execution order, causing flakiness.
+func stripZoneMarkers(s string) string {
+	zonePattern := regexp.MustCompile(`\x1b\[\d+z`)
+	return zonePattern.ReplaceAllString(s, "")
 }
