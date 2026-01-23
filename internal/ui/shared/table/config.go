@@ -146,6 +146,11 @@ type TableConfig struct {
 	OnSelect   func(index int, row any) tea.Msg // Row selection callback
 	OnActivate func(index int, row any) tea.Msg // Enter key callback
 
+	// RowZoneID returns a bubblezone zone ID for a row (optional).
+	// When set, each row is wrapped with zone.Mark() for mouse click detection.
+	// Signature: (index int, row any) -> zoneID string
+	RowZoneID func(index int, row any) string
+
 	// Style overrides (optional - uses defaults from styles package)
 	HeaderStyle   lipgloss.Style         // Header row style
 	RowStyle      lipgloss.Style         // Normal row style

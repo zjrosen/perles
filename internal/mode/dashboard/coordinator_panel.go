@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/zjrosen/perles/internal/orchestration/controlplane"
 	"github.com/zjrosen/perles/internal/orchestration/events"
@@ -343,8 +344,8 @@ func (p *CoordinatorPanel) View() string {
 		BottomLeft:  bottomLeft,
 	})
 
-	// Render input pane
-	inputView := p.renderInputPane(p.width, inputHeight)
+	// Render input pane with zone mark for click detection
+	inputView := zone.Mark(zoneChatInput, p.renderInputPane(p.width, inputHeight))
 
 	return lipgloss.JoinVertical(lipgloss.Left, tabbedPane, inputView)
 }
@@ -364,6 +365,7 @@ func (p *CoordinatorPanel) buildTabs(contentHeight int) []panes.Tab {
 		Label:   coordLabel,
 		Content: p.renderCoordinatorContent(contentHeight),
 		Color:   coordinatorTitleColor,
+		ZoneID:  makeTabZoneID(TabCoordinator),
 	})
 
 	// Tab 1: Messages (no status indicator)
@@ -374,6 +376,7 @@ func (p *CoordinatorPanel) buildTabs(contentHeight int) []panes.Tab {
 	tabs = append(tabs, panes.Tab{
 		Label:   msgsLabel,
 		Content: p.renderMessageLogContent(contentHeight),
+		ZoneID:  makeTabZoneID(TabMessages),
 	})
 
 	// Dynamic worker tabs with status indicators
@@ -386,6 +389,7 @@ func (p *CoordinatorPanel) buildTabs(contentHeight int) []panes.Tab {
 			Label:   label,
 			Content: p.renderWorkerContent(workerID, contentHeight),
 			Color:   workerTitleColor,
+			ZoneID:  makeTabZoneID(tabIndex),
 		})
 	}
 

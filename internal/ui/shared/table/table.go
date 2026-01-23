@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	zone "github.com/lrstanley/bubblezone"
+
 	"github.com/zjrosen/perles/internal/ui/shared/panes"
 	"github.com/zjrosen/perles/internal/ui/styles"
 )
@@ -120,6 +122,15 @@ func (m Model) renderTable(selectedIndex int) string {
 		for i := range dataRowCount {
 			selected := i == selectedIndex
 			rowLine := renderRow(m.rows[i], visibleColumns, widths, selected, innerWidth)
+
+			// Wrap row with zone mark if RowZoneID callback is set
+			if m.config.RowZoneID != nil {
+				zoneID := m.config.RowZoneID(i, m.rows[i])
+				if zoneID != "" {
+					rowLine = zone.Mark(zoneID, rowLine)
+				}
+			}
+
 			lines = append(lines, rowLine)
 		}
 

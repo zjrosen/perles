@@ -15,6 +15,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	zone "github.com/lrstanley/bubblezone"
 
 	appgit "github.com/zjrosen/perles/internal/git/application"
 	domaingit "github.com/zjrosen/perles/internal/git/domain"
@@ -213,14 +214,9 @@ func (m Model) Update(msg tea.Msg) (mode.Controller, tea.Cmd) {
 		}
 	}
 
-	// If coordinator panel is open, handle mouse events for scrolling (regardless of focus)
-	if m.showCoordinatorPanel && m.coordinatorPanel != nil {
-		if mouseMsg, ok := msg.(tea.MouseMsg); ok {
-			// Forward mouse events for scrolling
-			var cmd tea.Cmd
-			m.coordinatorPanel, cmd = m.coordinatorPanel.Update(mouseMsg)
-			return m, cmd
-		}
+	// Handle mouse events for zone clicks and scrolling
+	if mouseMsg, ok := msg.(tea.MouseMsg); ok {
+		return m.handleMouseMsg(mouseMsg)
 	}
 
 	// If coordinator panel is open and focused, delegate key events to it
@@ -353,15 +349,16 @@ func (m Model) View() string {
 
 	// If help modal is showing, render it as an overlay
 	if m.showHelp {
-		return m.helpModal.Overlay(dashboardView)
+		return zone.Scan(m.helpModal.Overlay(dashboardView))
 	}
 
 	// If new workflow modal is open, render it as an overlay
+	// Note: formmodal already calls zone.Scan() internally, so we don't scan here
 	if m.newWorkflowModal != nil {
 		return m.newWorkflowModal.Overlay(dashboardView)
 	}
 
-	return dashboardView
+	return zone.Scan(dashboardView)
 }
 
 // SetSize handles terminal resize events.
@@ -587,6 +584,49 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (mode.Controller, tea.Cmd) {
 
 	case "q", "ctrl+c":
 		return m, func() tea.Msg { return QuitMsg{} }
+	}
+
+	return m, nil
+}
+
+// handleMouseMsg handles mouse input for zone clicks and scrolling.
+func (m Model) handleMouseMsg(msg tea.MouseMsg) (mode.Controller, tea.Cmd) {
+	// Only handle left-click release events for zone selection
+	if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionRelease {
+		// Check workflow row zones
+		filtered := m.getFilteredWorkflows()
+		for i := range filtered {
+			zoneID := makeWorkflowZoneID(i)
+			if z := zone.Get(zoneID); z != nil && z.InBounds(msg) {
+				m.handleWorkflowSelectionChange(i)
+				return m, nil
+			}
+		}
+
+		// Check tab zones (only if coordinator panel is open)
+		if m.showCoordinatorPanel && m.coordinatorPanel != nil {
+			tabCount := m.coordinatorPanel.tabCount()
+			for i := range tabCount {
+				zoneID := makeTabZoneID(i)
+				if z := zone.Get(zoneID); z != nil && z.InBounds(msg) {
+					m.coordinatorPanel.activeTab = i
+					return m, nil
+				}
+			}
+
+			// Check chat input zone - clicking focuses the input
+			if z := zone.Get(zoneChatInput); z != nil && z.InBounds(msg) {
+				m.coordinatorPanel.Focus()
+				return m, nil
+			}
+		}
+	}
+
+	// Forward scroll events to coordinator panel if open (for viewport scrolling)
+	if m.showCoordinatorPanel && m.coordinatorPanel != nil {
+		var cmd tea.Cmd
+		m.coordinatorPanel, cmd = m.coordinatorPanel.Update(msg)
+		return m, cmd
 	}
 
 	return m, nil

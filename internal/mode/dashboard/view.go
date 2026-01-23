@@ -197,6 +197,9 @@ func (m Model) createWorkflowTableConfig() table.TableConfig {
 		EmptyMessage: m.getEmptyMessage(),
 		BorderColor:  styles.BorderDefaultColor,
 		Title:        m.getTableTitle(),
+		RowZoneID: func(index int, _ any) string {
+			return makeWorkflowZoneID(index)
+		},
 	}
 }
 

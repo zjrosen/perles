@@ -104,7 +104,7 @@ func TestRenderChatContent_EmptyMessages(t *testing.T) {
 	}
 	content := renderChatContent(nil, 80, cfg)
 
-	require.Contains(t, content, "No messages yet")
+	require.Contains(t, content, "Waiting for the coordinator to initialize.")
 }
 
 func TestRenderChatContent_WithMessages(t *testing.T) {

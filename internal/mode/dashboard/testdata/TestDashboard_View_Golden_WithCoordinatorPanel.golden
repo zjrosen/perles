@@ -11,8 +11,8 @@
 │                                                          ││                                                          │
 │                                                          ││                                                          │
 │                                                          ││                                                          │
+│                                                          ││ Waiting for the coordinator to initialize.               │
 │                                                          ││                                                          │
-│                                                          ││No messages yet. The coordinator will appear here once the│
 │                                                          │╰──────────────────────────────────────────────────────────╯
 │                                                          │╭──────────────────────────────────────────────────────────╮
 │                                                          ││ Message coordinator...                                   │
