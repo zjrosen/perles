@@ -167,15 +167,21 @@ func (cp *defaultControlPlane) Start(ctx context.Context, id WorkflowID) error {
 		return ErrWorkflowNotFound
 	}
 
-	// Delegate to supervisor
-	if err := cp.supervisor.Start(ctx, inst); err != nil {
-		return fmt.Errorf("starting workflow: %w", err)
+	// Phase 1: Allocate resources (infrastructure, MCP server, session)
+	if err := cp.supervisor.AllocateResources(ctx, inst); err != nil {
+		return fmt.Errorf("allocating resources: %w", err)
 	}
 
-	// Attach workflow's event bus to the cross-workflow event bus
-	// This forwards infrastructure events (coordinator output, worker spawns, etc.)
-	// to the ControlPlane's subscribers (e.g., Dashboard detail view)
+	// Attach workflow's event bus to the cross-workflow event bus BEFORE spawning coordinator.
+	// This ensures subscribers (e.g., Dashboard) receive the coordinator spawned event.
 	cp.eventBus.AttachWorkflow(inst)
+
+	// Phase 2: Spawn coordinator (now the event will be captured)
+	if err := cp.supervisor.SpawnCoordinator(ctx, inst); err != nil {
+		// Detach on failure to avoid dangling subscriptions
+		cp.eventBus.DetachWorkflow(id)
+		return fmt.Errorf("spawning coordinator: %w", err)
+	}
 
 	return nil
 }

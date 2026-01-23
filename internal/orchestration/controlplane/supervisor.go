@@ -46,10 +46,16 @@ type StopOptions struct {
 // Supervisor handles workflow lifecycle operations.
 // It manages starting, pausing, resuming, and stopping workflow instances.
 type Supervisor interface {
-	// Start transitions a workflow from Pending to Running.
-	// Allocates resources, creates Infrastructure, and spawns the coordinator.
+	// AllocateResources prepares a workflow for execution.
+	// Creates infrastructure, MCP server, session, and stores resources on the instance.
+	// After this call succeeds, inst.Infrastructure is set and event buses can be attached.
 	// Returns an error if the workflow is not in Pending state.
-	Start(ctx context.Context, inst *WorkflowInstance) error
+	AllocateResources(ctx context.Context, inst *WorkflowInstance) error
+
+	// SpawnCoordinator spawns the coordinator process for a workflow.
+	// Must be called after AllocateResources. Transitions the workflow to Running state.
+	// Returns an error if resources have not been allocated (inst.Infrastructure is nil).
+	SpawnCoordinator(ctx context.Context, inst *WorkflowInstance) error
 
 	// Stop terminates a workflow and releases all resources.
 	// Drains the command processor, finalizes the session, and releases leases.
@@ -195,11 +201,13 @@ func NewSupervisor(cfg SupervisorConfig) (Supervisor, error) {
 	}, nil
 }
 
-// Start transitions a workflow from Pending to Running.
-func (s *defaultSupervisor) Start(ctx context.Context, inst *WorkflowInstance) error {
+// AllocateResources prepares a workflow for execution.
+// Creates infrastructure, MCP server, session, and stores resources on the instance.
+// After this call succeeds, inst.Infrastructure is set and event buses can be attached.
+func (s *defaultSupervisor) AllocateResources(ctx context.Context, inst *WorkflowInstance) error {
 	// Validate state is Pending
 	if inst.State != WorkflowPending {
-		return fmt.Errorf("%w: cannot start workflow in state %s, expected %s",
+		return fmt.Errorf("%w: cannot allocate resources for workflow in state %s, expected %s",
 			ErrInvalidState, inst.State, WorkflowPending)
 	}
 
@@ -414,7 +422,33 @@ func (s *defaultSupervisor) Start(ctx context.Context, inst *WorkflowInstance) e
 	}()
 	log.Debug(log.CatOrch, "MCP HTTP server started", "subsystem", "supervisor", "port", port, "workflowID", inst.ID)
 
-	// Step 9: Spawn coordinator
+	// Store resources in instance BEFORE spawning coordinator.
+	// This allows ControlPlane to attach event buses before coordinator spawn.
+	inst.Infrastructure = infra
+	inst.MCPPort = port
+	inst.Ctx = workflowCtx
+	inst.Cancel = cancel
+	inst.HTTPServer = httpServer
+	inst.MCPCoordServer = mcpCoordServer
+	inst.MessageRepo = messageRepo
+	inst.Session = sess // May be nil if session factory not configured
+
+	return nil
+}
+
+// SpawnCoordinator spawns the coordinator process for a workflow.
+// Must be called after AllocateResources. Transitions the workflow to Running state.
+func (s *defaultSupervisor) SpawnCoordinator(ctx context.Context, inst *WorkflowInstance) error {
+	// Validate resources have been allocated
+	if inst.Infrastructure == nil {
+		return fmt.Errorf("%w: AllocateResources must be called before SpawnCoordinator", ErrInvalidState)
+	}
+	if inst.State != WorkflowPending {
+		return fmt.Errorf("%w: cannot spawn coordinator for workflow in state %s, expected %s",
+			ErrInvalidState, inst.State, WorkflowPending)
+	}
+
+	// Spawn coordinator
 	spawnCmd := command.NewSpawnProcessCommand(command.SourceInternal, repository.RoleCoordinator, command.WithWorkflowConfig(&roles.WorkflowConfig{
 		// TODO we need to figure out what we want to do here, currently
 		// the InitialPrompt being used should is really the system prompt and the initial prompt
@@ -424,31 +458,18 @@ func (s *defaultSupervisor) Start(ctx context.Context, inst *WorkflowInstance) e
 		// SystemPromptOverride: "",
 		InitialPromptOverride: inst.InitialPrompt,
 	}))
-	result, err := infra.Core.Processor.SubmitAndWait(workflowCtx, spawnCmd)
+	result, err := inst.Infrastructure.Core.Processor.SubmitAndWait(inst.Ctx, spawnCmd)
 	if err != nil {
-		cleanup()
 		return fmt.Errorf("spawning coordinator: %w", err)
 	}
 	if !result.Success {
-		cleanup()
 		return fmt.Errorf("spawn coordinator failed: %w", result.Error)
 	}
 
-	// Step 9: Update instance state to Running
+	// Transition to Running state
 	if err := inst.TransitionTo(WorkflowRunning); err != nil {
-		cleanup()
 		return fmt.Errorf("transitioning to Running: %w", err)
 	}
-
-	// Store resources in instance
-	inst.Infrastructure = infra
-	inst.MCPPort = port
-	inst.Ctx = workflowCtx
-	inst.Cancel = cancel
-	inst.HTTPServer = httpServer
-	inst.MCPCoordServer = mcpCoordServer
-	inst.MessageRepo = messageRepo
-	inst.Session = sess // May be nil if session factory not configured
 
 	return nil
 }

@@ -72,7 +72,7 @@ func newTestControlPlane(t *testing.T) (ControlPlane, *mockInfrastructureFactory
 }
 
 // setupTestAgentProviderMock sets up common mock expectations for AgentProvider.
-// The Supervisor.Start() method calls Client() and Extensions() when creating the MCP server.
+// The Supervisor.AllocateResources() method calls Client() and Extensions() when creating the MCP server.
 func setupTestAgentProviderMock(t *testing.T, mockProvider *mocks.MockAgentProvider) {
 	t.Helper()
 	mockClient := mocks.NewMockHeadlessClient(t)

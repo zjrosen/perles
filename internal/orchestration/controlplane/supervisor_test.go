@@ -81,7 +81,7 @@ func newTestSupervisorConfig(t *testing.T) (SupervisorConfig, *mocks.MockAgentPr
 }
 
 // setupAgentProviderMock sets up common mock expectations for AgentProvider.
-// The Supervisor.Start() method calls Client() and Extensions() when creating the MCP server.
+// The Supervisor.AllocateResources() method calls Client() and Extensions() when creating the MCP server.
 func setupAgentProviderMock(t *testing.T, mockProvider *mocks.MockAgentProvider) {
 	t.Helper()
 	mockClient := mocks.NewMockHeadlessClient(t)
@@ -99,6 +99,15 @@ func cleanupSessionOnTestEnd(t *testing.T, inst *WorkflowInstance) {
 			_ = inst.Session.Close(session.StatusCompleted)
 		}
 	})
+}
+
+// startWorkflow is a test helper that calls both AllocateResources and SpawnCoordinator.
+// This simulates the full start flow that ControlPlane.Start() does.
+func startWorkflow(ctx context.Context, s Supervisor, inst *WorkflowInstance) error {
+	if err := s.AllocateResources(ctx, inst); err != nil {
+		return err
+	}
+	return s.SpawnCoordinator(ctx, inst)
 }
 
 // createMinimalInfrastructure creates a minimal v2.Infrastructure suitable for testing.
@@ -218,9 +227,9 @@ func TestNewSupervisor_DefaultInfrastructureFactory(t *testing.T) {
 	require.NotNil(t, supervisor)
 }
 
-// === Unit Tests: Start ===
+// === Unit Tests: AllocateResources + SpawnCoordinator ===
 
-func TestSupervisor_Start_TransitionsPendingToRunning(t *testing.T) {
+func TestSupervisor_FullStart_TransitionsPendingToRunning(t *testing.T) {
 	cfg, mockProvider, mockFactory := newTestSupervisorConfig(t)
 	supervisor, err := NewSupervisor(cfg)
 	require.NoError(t, err)
@@ -233,7 +242,7 @@ func TestSupervisor_Start_TransitionsPendingToRunning(t *testing.T) {
 	infra := createMinimalInfrastructure(t)
 	mockFactory.On("Create", mock.AnythingOfType("v2.InfrastructureConfig")).Return(infra, nil)
 
-	// Setup mock provider - Start() now calls Client() and Extensions()
+	// Setup mock provider - AllocateResources() calls Client() and Extensions()
 	setupAgentProviderMock(t, mockProvider)
 
 	// Start the processor for the test
@@ -242,8 +251,8 @@ func TestSupervisor_Start_TransitionsPendingToRunning(t *testing.T) {
 	go infra.Core.Processor.Run(ctx)
 	require.NoError(t, infra.Core.Processor.WaitForReady(ctx))
 
-	// Execute Start
-	err = supervisor.Start(ctx, inst)
+	// Execute full start (AllocateResources + SpawnCoordinator)
+	err = startWorkflow(ctx, supervisor, inst)
 
 	require.NoError(t, err)
 	require.Equal(t, WorkflowRunning, inst.State)
@@ -256,7 +265,7 @@ func TestSupervisor_Start_TransitionsPendingToRunning(t *testing.T) {
 	mockFactory.AssertExpectations(t)
 }
 
-func TestSupervisor_Start_RejectsNonPendingWorkflow(t *testing.T) {
+func TestSupervisor_AllocateResources_RejectsNonPendingWorkflow(t *testing.T) {
 	cfg, _, _ := newTestSupervisorConfig(t)
 	supervisor, err := NewSupervisor(cfg)
 	require.NoError(t, err)
@@ -265,7 +274,7 @@ func TestSupervisor_Start_RejectsNonPendingWorkflow(t *testing.T) {
 	// Force workflow to Running state (bypass transition)
 	inst.State = WorkflowRunning
 
-	err = supervisor.Start(context.Background(), inst)
+	err = supervisor.AllocateResources(context.Background(), inst)
 
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrInvalidState)
@@ -273,7 +282,7 @@ func TestSupervisor_Start_RejectsNonPendingWorkflow(t *testing.T) {
 	require.Contains(t, err.Error(), "pending")
 }
 
-func TestSupervisor_Start_RejectsStopped(t *testing.T) {
+func TestSupervisor_AllocateResources_RejectsStopped(t *testing.T) {
 	cfg, _, _ := newTestSupervisorConfig(t)
 	supervisor, err := NewSupervisor(cfg)
 	require.NoError(t, err)
@@ -281,13 +290,13 @@ func TestSupervisor_Start_RejectsStopped(t *testing.T) {
 	inst := newTestInstance(t, "test-workflow")
 	inst.State = WorkflowStopped
 
-	err = supervisor.Start(context.Background(), inst)
+	err = supervisor.AllocateResources(context.Background(), inst)
 
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrInvalidState)
 }
 
-func TestSupervisor_Start_RejectsCompleted(t *testing.T) {
+func TestSupervisor_AllocateResources_RejectsCompleted(t *testing.T) {
 	cfg, _, _ := newTestSupervisorConfig(t)
 	supervisor, err := NewSupervisor(cfg)
 	require.NoError(t, err)
@@ -295,13 +304,13 @@ func TestSupervisor_Start_RejectsCompleted(t *testing.T) {
 	inst := newTestInstance(t, "test-workflow")
 	inst.State = WorkflowCompleted
 
-	err = supervisor.Start(context.Background(), inst)
+	err = supervisor.AllocateResources(context.Background(), inst)
 
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrInvalidState)
 }
 
-func TestSupervisor_Start_RejectsFailed(t *testing.T) {
+func TestSupervisor_AllocateResources_RejectsFailed(t *testing.T) {
 	cfg, _, _ := newTestSupervisorConfig(t)
 	supervisor, err := NewSupervisor(cfg)
 	require.NoError(t, err)
@@ -309,13 +318,13 @@ func TestSupervisor_Start_RejectsFailed(t *testing.T) {
 	inst := newTestInstance(t, "test-workflow")
 	inst.State = WorkflowFailed
 
-	err = supervisor.Start(context.Background(), inst)
+	err = supervisor.AllocateResources(context.Background(), inst)
 
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrInvalidState)
 }
 
-func TestSupervisor_Start_AcquiresPort(t *testing.T) {
+func TestSupervisor_AllocateResources_AcquiresPort(t *testing.T) {
 	cfg, mockProvider, mockFactory := newTestSupervisorConfig(t)
 	supervisor, err := NewSupervisor(cfg)
 	require.NoError(t, err)
@@ -327,7 +336,7 @@ func TestSupervisor_Start_AcquiresPort(t *testing.T) {
 	infra := createMinimalInfrastructure(t)
 	mockFactory.On("Create", mock.AnythingOfType("v2.InfrastructureConfig")).Return(infra, nil)
 
-	// Setup mock provider - Start() now calls Client() and Extensions()
+	// Setup mock provider - AllocateResources() calls Client() and Extensions()
 	setupAgentProviderMock(t, mockProvider)
 
 	// Start the processor
@@ -336,8 +345,8 @@ func TestSupervisor_Start_AcquiresPort(t *testing.T) {
 	go infra.Core.Processor.Run(ctx)
 	require.NoError(t, infra.Core.Processor.WaitForReady(ctx))
 
-	// Execute Start
-	err = supervisor.Start(ctx, inst)
+	// Execute full start (AllocateResources + SpawnCoordinator)
+	err = startWorkflow(ctx, supervisor, inst)
 
 	require.NoError(t, err)
 	// Port should be in the default range (9000-9100)
@@ -345,7 +354,7 @@ func TestSupervisor_Start_AcquiresPort(t *testing.T) {
 	require.LessOrEqual(t, inst.MCPPort, DefaultPortRangeEnd)
 }
 
-func TestSupervisor_Start_CleansUpOnInfrastructureError(t *testing.T) {
+func TestSupervisor_AllocateResources_CleansUpOnInfrastructureError(t *testing.T) {
 	cfg, _, mockFactory := newTestSupervisorConfig(t)
 	supervisor, err := NewSupervisor(cfg)
 	require.NoError(t, err)
@@ -357,8 +366,8 @@ func TestSupervisor_Start_CleansUpOnInfrastructureError(t *testing.T) {
 	expectedErr := errors.New("infrastructure creation failed")
 	mockFactory.On("Create", mock.AnythingOfType("v2.InfrastructureConfig")).Return(nil, expectedErr)
 
-	// Execute Start
-	err = supervisor.Start(context.Background(), inst)
+	// Execute AllocateResources
+	err = supervisor.AllocateResources(context.Background(), inst)
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "creating infrastructure")
@@ -391,7 +400,7 @@ func TestSupervisor_Stop_TransitionsRunningToStopped(t *testing.T) {
 	go infra.Core.Processor.Run(ctx)
 	require.NoError(t, infra.Core.Processor.WaitForReady(ctx))
 
-	require.NoError(t, supervisor.Start(ctx, inst))
+	require.NoError(t, startWorkflow(ctx, supervisor, inst))
 	require.Equal(t, WorkflowRunning, inst.State)
 
 	// Now stop it
@@ -437,7 +446,7 @@ func TestSupervisor_Stop_ReleasesPort(t *testing.T) {
 	go infra.Core.Processor.Run(ctx)
 	require.NoError(t, infra.Core.Processor.WaitForReady(ctx))
 
-	require.NoError(t, supervisor.Start(ctx, inst))
+	require.NoError(t, startWorkflow(ctx, supervisor, inst))
 	allocatedPort := inst.MCPPort
 
 	// Verify port is allocated
@@ -466,7 +475,7 @@ func TestSupervisor_Stop_WithForce_SkipsGracefulShutdown(t *testing.T) {
 	go infra.Core.Processor.Run(ctx)
 	require.NoError(t, infra.Core.Processor.WaitForReady(ctx))
 
-	require.NoError(t, supervisor.Start(ctx, inst))
+	require.NoError(t, startWorkflow(ctx, supervisor, inst))
 
 	// Stop with Force=true
 	err = supervisor.Stop(ctx, inst, StopOptions{Force: true})
@@ -542,7 +551,7 @@ func TestSupervisor_StartStop_FullLifecycle(t *testing.T) {
 	require.NoError(t, infra.Core.Processor.WaitForReady(ctx))
 
 	// Start the workflow
-	err = supervisor.Start(ctx, inst)
+	err = startWorkflow(ctx, supervisor, inst)
 	require.NoError(t, err)
 	require.Equal(t, WorkflowRunning, inst.State)
 	require.NotNil(t, inst.StartedAt)
@@ -726,7 +735,7 @@ func TestSupervisor_Start_CreatesWorktreeWhenEnabled(t *testing.T) {
 	require.NoError(t, infra.Core.Processor.WaitForReady(ctx))
 
 	// Execute Start
-	err = supervisor.Start(ctx, inst)
+	err = startWorkflow(ctx, supervisor, inst)
 
 	require.NoError(t, err)
 	require.Equal(t, WorkflowRunning, inst.State)
@@ -771,7 +780,7 @@ func TestSupervisor_Start_SkipsWorktreeWhenDisabled(t *testing.T) {
 	require.NoError(t, infra.Core.Processor.WaitForReady(ctx))
 
 	// Execute Start
-	err = supervisor.Start(ctx, inst)
+	err = startWorkflow(ctx, supervisor, inst)
 
 	require.NoError(t, err)
 	require.Equal(t, WorkflowRunning, inst.State)
@@ -823,7 +832,7 @@ func TestSupervisor_Start_UsesCustomBranchNameWhenSet(t *testing.T) {
 	require.NoError(t, infra.Core.Processor.WaitForReady(ctx))
 
 	// Execute Start
-	err = supervisor.Start(ctx, inst)
+	err = startWorkflow(ctx, supervisor, inst)
 
 	require.NoError(t, err)
 	require.Equal(t, customBranch, inst.WorktreeBranch)
@@ -873,7 +882,7 @@ func TestSupervisor_Start_AutoGeneratesBranchNameWhenEmpty(t *testing.T) {
 	require.NoError(t, infra.Core.Processor.WaitForReady(ctx))
 
 	// Execute Start
-	err = supervisor.Start(ctx, inst)
+	err = startWorkflow(ctx, supervisor, inst)
 
 	require.NoError(t, err)
 	require.Equal(t, expectedBranch, inst.WorktreeBranch)
@@ -923,7 +932,7 @@ func TestSupervisor_Start_SetsInstanceFieldsCorrectly(t *testing.T) {
 	require.NoError(t, infra.Core.Processor.WaitForReady(ctx))
 
 	// Execute Start
-	err = supervisor.Start(ctx, inst)
+	err = startWorkflow(ctx, supervisor, inst)
 
 	require.NoError(t, err)
 	require.Equal(t, worktreePath, inst.WorktreePath, "WorktreePath should be set")
@@ -971,7 +980,7 @@ func TestSupervisor_Start_CleansUpWorktreeOnSubsequentFailure(t *testing.T) {
 	mockFactory.On("Create", mock.AnythingOfType("v2.InfrastructureConfig")).Return(nil, infrastructureErr)
 
 	// Execute Start
-	err = supervisor.Start(context.Background(), inst)
+	err = startWorkflow(context.Background(), supervisor, inst)
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "creating infrastructure")
@@ -1008,7 +1017,7 @@ func TestSupervisor_Start_HandlesErrBranchAlreadyCheckedOut(t *testing.T) {
 	).Return(fmt.Errorf("%w: already in use", domaingit.ErrBranchAlreadyCheckedOut))
 
 	// Execute Start
-	err = supervisor.Start(context.Background(), inst)
+	err = startWorkflow(context.Background(), supervisor, inst)
 
 	require.Error(t, err)
 	require.ErrorIs(t, err, domaingit.ErrBranchAlreadyCheckedOut)
@@ -1048,7 +1057,7 @@ func TestSupervisor_Start_HandlesTimeoutCorrectly(t *testing.T) {
 	).Return(domaingit.ErrWorktreeTimeout)
 
 	// Execute Start
-	err = supervisor.Start(context.Background(), inst)
+	err = startWorkflow(context.Background(), supervisor, inst)
 
 	require.Error(t, err)
 	require.ErrorIs(t, err, domaingit.ErrWorktreeTimeout)
@@ -1328,8 +1337,8 @@ func TestSupervisor_Start_CreatesSessionWhenFactoryConfigured(t *testing.T) {
 	go infra.Core.Processor.Run(ctx)
 	require.NoError(t, infra.Core.Processor.WaitForReady(ctx))
 
-	// Execute Start
-	err = supervisor.Start(ctx, inst)
+	// Execute full start (AllocateResources + SpawnCoordinator)
+	err = startWorkflow(ctx, supervisor, inst)
 
 	require.NoError(t, err)
 	require.Equal(t, WorkflowRunning, inst.State)
@@ -1369,7 +1378,7 @@ func TestSupervisor_Stop_ClosesSession(t *testing.T) {
 	go infra.Core.Processor.Run(ctx)
 	require.NoError(t, infra.Core.Processor.WaitForReady(ctx))
 
-	err = supervisor.Start(ctx, inst)
+	err = startWorkflow(ctx, supervisor, inst)
 	require.NoError(t, err)
 	require.NotNil(t, inst.Session)
 

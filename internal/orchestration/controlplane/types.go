@@ -205,7 +205,7 @@ type WorkflowInstance struct {
 	WorktreeBaseBranch string // Branch to base worktree on
 	WorktreeBranchName string // Custom branch name (may be empty)
 
-	// Worktree state (set by Supervisor.Start() when worktree is created)
+	// Worktree state (set by Supervisor.AllocateResources() when worktree is created)
 	WorktreePath   string // Path to created worktree (empty if not using worktree)
 	WorktreeBranch string // Actual branch name (auto-generated or custom)
 

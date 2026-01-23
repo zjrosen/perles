@@ -555,7 +555,7 @@ func TestNewWorkflowInstance_PreservesWorktreeFields(t *testing.T) {
 	require.Equal(t, "develop", inst.WorktreeBaseBranch)
 	require.Equal(t, "feature/custom-branch", inst.WorktreeBranchName)
 
-	// Verify worktree state fields are empty (set by Supervisor.Start())
+	// Verify worktree state fields are empty (set by Supervisor.AllocateResources())
 	require.Empty(t, inst.WorktreePath)
 	require.Empty(t, inst.WorktreeBranch)
 }
