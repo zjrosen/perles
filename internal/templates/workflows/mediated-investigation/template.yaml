@@ -1,0 +1,131 @@
+registry:
+  # Mediated Investigation Workflow - Rigorous adversarial investigation
+  # 6 workers with devil's advocate, counter-investigation, parallel review, and external validation
+  - namespace: "workflow"
+    key: "mediated-investigation"
+    version: "v1"
+    name: "Mediated Investigation"
+    description: "High-quality investigation with devil's advocate, counter-investigation, parallel review, and external validation. Quality over speed - every conclusion is challenged."
+    epic_template: "v1-mediated-investigation-epic.md"
+    system_prompt: "v1-epic-instructions.md"
+    path: "docs/investigations"
+    labels:
+      - "category:analysis"
+      - "category:investigation"
+    arguments:
+      - key: "problem"
+        label: "Problem to Investigate"
+        description: "Describe the problem or question you want to investigate"
+        type: "textarea"
+        required: true
+    nodes:
+      # Phase 1: Mediator creates investigation outline with hypothesis list
+      - key: "create-outline"
+        name: "Create Investigation Outline"
+        assignee: "worker-1"
+        template: "v1-mediated-investigation-outline.md"
+        outputs:
+          - key: "outline"
+            file: "{{.Date}}-{{.Slug}}-outline.md"
+
+      # Phase 2A: Researcher does broad exploration
+      - key: "broad-research"
+        name: "Broad Research Exploration"
+        assignee: "worker-2"
+        template: "v1-mediated-investigation-broad-research.md"
+        inputs:
+          - key: "outline"
+            file: "{{.Date}}-{{.Slug}}-outline.md"
+        after:
+          - "create-outline"
+
+      # Phase 2B: Researcher does deep dive on high-confidence areas
+      - key: "deep-dive"
+        name: "Deep Dive Research"
+        assignee: "worker-2"
+        template: "v1-mediated-investigation-deep-dive.md"
+        inputs:
+          - key: "outline"
+            file: "{{.Date}}-{{.Slug}}-outline.md"
+        after:
+          - "broad-research"
+
+      # Phase 3: Devil's Advocate challenges findings
+      - key: "devils-advocate"
+        name: "Devil's Advocate Challenge"
+        assignee: "worker-3"
+        template: "v1-mediated-investigation-devils-advocate.md"
+        inputs:
+          - key: "outline"
+            file: "{{.Date}}-{{.Slug}}-outline.md"
+        after:
+          - "deep-dive"
+
+      # Phase 3B: Researcher addresses challenges
+      - key: "address-challenges"
+        name: "Address Challenges"
+        assignee: "worker-2"
+        template: "v1-mediated-investigation-address-challenges.md"
+        inputs:
+          - key: "outline"
+            file: "{{.Date}}-{{.Slug}}-outline.md"
+        after:
+          - "devils-advocate"
+
+      # Phase 4: Counter-Researcher tries to prove conclusion is WRONG
+      - key: "counter-investigation"
+        name: "Counter-Investigation"
+        assignee: "worker-4"
+        template: "v1-mediated-investigation-counter.md"
+        inputs:
+          - key: "outline"
+            file: "{{.Date}}-{{.Slug}}-outline.md"
+        after:
+          - "address-challenges"
+
+      # Phase 5: Reviewer with parallel sub-agents (3 dimensions)
+      - key: "parallel-review"
+        name: "Parallel Sub-Agent Review"
+        assignee: "worker-5"
+        template: "v1-mediated-investigation-review.md"
+        inputs:
+          - key: "outline"
+            file: "{{.Date}}-{{.Slug}}-outline.md"
+        after:
+          - "counter-investigation"
+
+      # Phase 6: External Validator - fresh eyes validation
+      - key: "external-validation"
+        name: "External Validation"
+        assignee: "worker-6"
+        template: "v1-mediated-investigation-external.md"
+        inputs:
+          - key: "outline"
+            file: "{{.Date}}-{{.Slug}}-outline.md"
+        after:
+          - "parallel-review"
+
+      # Phase 6B: Mediator fixes if external validation finds issues
+      - key: "fix-documentation"
+        name: "Fix Documentation (if needed)"
+        assignee: "worker-1"
+        template: "v1-mediated-investigation-fix-docs.md"
+        inputs:
+          - key: "outline"
+            file: "{{.Date}}-{{.Slug}}-outline.md"
+        after:
+          - "external-validation"
+
+      # Phase 7: Mediator synthesizes implementation plan
+      - key: "implementation-plan"
+        name: "Create Implementation Plan"
+        assignee: "worker-1"
+        template: "v1-mediated-investigation-plan.md"
+        inputs:
+          - key: "outline"
+            file: "{{.Date}}-{{.Slug}}-outline.md"
+        outputs:
+          - key: "plan"
+            file: "{{.Date}}-{{.Slug}}-plan.md"
+        after:
+          - "fix-documentation"
