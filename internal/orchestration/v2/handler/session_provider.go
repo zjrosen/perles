@@ -11,32 +11,36 @@ import (
 
 // ProcessRegistrySessionProvider implements the SessionProvider interface
 // using the process.ProcessRegistry to look up process session information.
-// Supports both coordinator and worker processes.
+// Supports both coordinator and worker processes with different clients.
 type ProcessRegistrySessionProvider struct {
-	registry *process.ProcessRegistry
-	client   client.HeadlessClient
-	workDir  string
-	port     int
+	registry          *process.ProcessRegistry
+	coordinatorClient client.HeadlessClient
+	workerClient      client.HeadlessClient
+	workDir           string
+	port              int
 }
 
 // NewProcessRegistrySessionProvider creates a new ProcessRegistrySessionProvider.
 //
 // Parameters:
 //   - registry: ProcessRegistry for looking up process sessions
-//   - aiClient: HeadlessClient for determining MCP config format (Amp vs HTTP)
+//   - coordinatorClient: HeadlessClient for coordinator MCP config format
+//   - workerClient: HeadlessClient for worker MCP config format
 //   - workDir: Working directory for processes
 //   - port: MCP server port for process connections
 func NewProcessRegistrySessionProvider(
 	registry *process.ProcessRegistry,
-	aiClient client.HeadlessClient,
+	coordinatorClient client.HeadlessClient,
+	workerClient client.HeadlessClient,
 	workDir string,
 	port int,
 ) *ProcessRegistrySessionProvider {
 	return &ProcessRegistrySessionProvider{
-		registry: registry,
-		client:   aiClient,
-		workDir:  workDir,
-		port:     port,
+		registry:          registry,
+		coordinatorClient: coordinatorClient,
+		workerClient:      workerClient,
+		workDir:           workDir,
+		port:              port,
 	}
 }
 
@@ -67,10 +71,10 @@ func (p *ProcessRegistrySessionProvider) GenerateProcessMCPConfig(processID stri
 
 // generateCoordinatorMCPConfig generates the coordinator-specific MCP config.
 func (p *ProcessRegistrySessionProvider) generateCoordinatorMCPConfig() (string, error) {
-	if p.client == nil {
+	if p.coordinatorClient == nil {
 		return mcp.GenerateCoordinatorConfigHTTP(p.port)
 	}
-	switch p.client.Type() {
+	switch p.coordinatorClient.Type() {
 	case client.ClientAmp:
 		return mcp.GenerateCoordinatorConfigAmp(p.port)
 	case client.ClientCodex:
@@ -86,10 +90,10 @@ func (p *ProcessRegistrySessionProvider) generateCoordinatorMCPConfig() (string,
 
 // generateWorkerMCPConfig generates the worker-specific MCP config.
 func (p *ProcessRegistrySessionProvider) generateWorkerMCPConfig(workerID string) (string, error) {
-	if p.client == nil {
+	if p.workerClient == nil {
 		return mcp.GenerateWorkerConfigHTTP(p.port, workerID)
 	}
-	switch p.client.Type() {
+	switch p.workerClient.Type() {
 	case client.ClientAmp:
 		return mcp.GenerateWorkerConfigAmp(p.port, workerID)
 	case client.ClientCodex:

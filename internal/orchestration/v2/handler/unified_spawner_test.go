@@ -30,12 +30,12 @@ func TestUnifiedProcessSpawner_SpawnProcess_Worker(t *testing.T) {
 	submitter := &mockCommandSubmitter{}
 
 	spawner := NewUnifiedProcessSpawner(UnifiedSpawnerConfig{
-		Client:     mockClient,
-		WorkDir:    "/test/workdir",
-		Port:       8080,
-		Extensions: nil,
-		Submitter:  submitter,
-		EventBus:   eventBus,
+		CoordinatorClient: mockClient,
+		WorkerClient:      mockClient,
+		WorkDir:           "/test/workdir",
+		Port:              8080,
+		Submitter:         submitter,
+		EventBus:          eventBus,
 	})
 
 	proc, err := spawner.SpawnProcess(context.Background(), "worker-1", repository.RoleWorker, SpawnOptions{})
@@ -54,12 +54,12 @@ func TestUnifiedProcessSpawner_SpawnProcess_Coordinator(t *testing.T) {
 	submitter := &mockCommandSubmitter{}
 
 	spawner := NewUnifiedProcessSpawner(UnifiedSpawnerConfig{
-		Client:     mockClient,
-		WorkDir:    "/test/workdir",
-		Port:       8080,
-		Extensions: nil,
-		Submitter:  submitter,
-		EventBus:   eventBus,
+		CoordinatorClient: mockClient,
+		WorkerClient:      mockClient,
+		WorkDir:           "/test/workdir",
+		Port:              8080,
+		Submitter:         submitter,
+		EventBus:          eventBus,
 	})
 
 	proc, err := spawner.SpawnProcess(context.Background(), repository.CoordinatorID, repository.RoleCoordinator, SpawnOptions{})
@@ -77,12 +77,12 @@ func TestUnifiedProcessSpawner_SpawnProcess_NilClient(t *testing.T) {
 	submitter := &mockCommandSubmitter{}
 
 	spawner := NewUnifiedProcessSpawner(UnifiedSpawnerConfig{
-		Client:     nil,
-		WorkDir:    "/test/workdir",
-		Port:       8080,
-		Extensions: nil,
-		Submitter:  submitter,
-		EventBus:   eventBus,
+		CoordinatorClient: nil,
+		WorkerClient:      nil,
+		WorkDir:           "/test/workdir",
+		Port:              8080,
+		Submitter:         submitter,
+		EventBus:          eventBus,
 	})
 
 	proc, err := spawner.SpawnProcess(context.Background(), "worker-1", repository.RoleWorker, SpawnOptions{})
@@ -122,12 +122,12 @@ func TestUnifiedProcessSpawner_SpawnProcess_WithAgentType(t *testing.T) {
 			submitter := &mockCommandSubmitter{}
 
 			spawner := NewUnifiedProcessSpawner(UnifiedSpawnerConfig{
-				Client:     mockClient,
-				WorkDir:    "/test/workdir",
-				Port:       8080,
-				Extensions: nil,
-				Submitter:  submitter,
-				EventBus:   eventBus,
+				CoordinatorClient: mockClient,
+				WorkerClient:      mockClient,
+				WorkDir:           "/test/workdir",
+				Port:              8080,
+				Submitter:         submitter,
+				EventBus:          eventBus,
 			})
 
 			opts := SpawnOptions{AgentType: tc.agentType}
@@ -146,12 +146,12 @@ func TestUnifiedProcessSpawner_SpawnProcess_WithAgentType(t *testing.T) {
 func TestUnifiedProcessSpawner_GenerateMCPConfig_HTTP(t *testing.T) {
 	mockClient := mock.NewClient()
 	spawner := &UnifiedProcessSpawnerImpl{
-		client:  mockClient,
-		port:    9999,
-		workDir: "/test",
+		workerClient: mockClient,
+		port:         9999,
+		workDir:      "/test",
 	}
 
-	config, err := spawner.generateMCPConfig("worker-1")
+	config, err := spawner.generateWorkerMCPConfig("worker-1")
 	require.NoError(t, err)
 	assert.Contains(t, config, "9999")
 	assert.Contains(t, config, "worker-1")
@@ -169,12 +169,12 @@ func (c *openCodeMockClient) Type() client.ClientType {
 func TestUnifiedProcessSpawner_GenerateMCPConfig_OpenCode(t *testing.T) {
 	mockClient := &openCodeMockClient{Client: mock.NewClient()}
 	spawner := &UnifiedProcessSpawnerImpl{
-		client:  mockClient,
-		port:    9999,
-		workDir: "/test",
+		workerClient: mockClient,
+		port:         9999,
+		workDir:      "/test",
 	}
 
-	config, err := spawner.generateMCPConfig("worker-1")
+	config, err := spawner.generateWorkerMCPConfig("worker-1")
 	require.NoError(t, err)
 	// OpenCode format uses {"mcp": {...}} wrapper, not {"mcpServers": {...}}
 	assert.Contains(t, config, `"mcp"`)
@@ -189,9 +189,9 @@ func TestUnifiedProcessSpawner_GenerateMCPConfig_OpenCode(t *testing.T) {
 func TestUnifiedProcessSpawner_GenerateCoordinatorMCPConfig_OpenCode(t *testing.T) {
 	mockClient := &openCodeMockClient{Client: mock.NewClient()}
 	spawner := &UnifiedProcessSpawnerImpl{
-		client:  mockClient,
-		port:    9999,
-		workDir: "/test",
+		coordinatorClient: mockClient,
+		port:              9999,
+		workDir:           "/test",
 	}
 
 	config, err := spawner.generateCoordinatorMCPConfig()
@@ -217,12 +217,12 @@ func TestUnifiedProcessSpawner_SpawnCoordinator_UsesSystemPromptOverride(t *test
 	submitter := &mockCommandSubmitter{}
 
 	spawner := NewUnifiedProcessSpawner(UnifiedSpawnerConfig{
-		Client:     mockClient,
-		WorkDir:    "/test/workdir",
-		Port:       8080,
-		Extensions: nil,
-		Submitter:  submitter,
-		EventBus:   eventBus,
+		CoordinatorClient: mockClient,
+		WorkerClient:      mockClient,
+		WorkDir:           "/test/workdir",
+		Port:              8080,
+		Submitter:         submitter,
+		EventBus:          eventBus,
 	})
 
 	customSystemPrompt := "Custom system prompt for coordinator"
@@ -255,12 +255,12 @@ func TestUnifiedProcessSpawner_SpawnCoordinator_UsesInitialPromptOverride(t *tes
 	submitter := &mockCommandSubmitter{}
 
 	spawner := NewUnifiedProcessSpawner(UnifiedSpawnerConfig{
-		Client:     mockClient,
-		WorkDir:    "/test/workdir",
-		Port:       8080,
-		Extensions: nil,
-		Submitter:  submitter,
-		EventBus:   eventBus,
+		CoordinatorClient: mockClient,
+		WorkerClient:      mockClient,
+		WorkDir:           "/test/workdir",
+		Port:              8080,
+		Submitter:         submitter,
+		EventBus:          eventBus,
 	})
 
 	customInitialPrompt := "Custom initial prompt for coordinator"
@@ -293,12 +293,12 @@ func TestUnifiedProcessSpawner_SpawnCoordinator_UsesDefaultWhenNoOverride(t *tes
 	submitter := &mockCommandSubmitter{}
 
 	spawner := NewUnifiedProcessSpawner(UnifiedSpawnerConfig{
-		Client:     mockClient,
-		WorkDir:    "/test/workdir",
-		Port:       8080,
-		Extensions: nil,
-		Submitter:  submitter,
-		EventBus:   eventBus,
+		CoordinatorClient: mockClient,
+		WorkerClient:      mockClient,
+		WorkDir:           "/test/workdir",
+		Port:              8080,
+		Submitter:         submitter,
+		EventBus:          eventBus,
 	})
 
 	// Empty SpawnOptions - no overrides
@@ -332,13 +332,13 @@ func TestUnifiedProcessSpawner_SpawnCoordinator_PassesBeadsDir(t *testing.T) {
 	submitter := &mockCommandSubmitter{}
 
 	spawner := NewUnifiedProcessSpawner(UnifiedSpawnerConfig{
-		Client:     mockClient,
-		WorkDir:    "/test/workdir",
-		Port:       8080,
-		Extensions: nil,
-		Submitter:  submitter,
-		EventBus:   eventBus,
-		BeadsDir:   "/custom/beads/path",
+		CoordinatorClient: mockClient,
+		WorkerClient:      mockClient,
+		WorkDir:           "/test/workdir",
+		Port:              8080,
+		Submitter:         submitter,
+		EventBus:          eventBus,
+		BeadsDir:          "/custom/beads/path",
 	})
 
 	proc, err := spawner.SpawnProcess(context.Background(), repository.CoordinatorID, repository.RoleCoordinator, SpawnOptions{})
@@ -364,13 +364,13 @@ func TestUnifiedProcessSpawner_SpawnWorker_PassesBeadsDir(t *testing.T) {
 	submitter := &mockCommandSubmitter{}
 
 	spawner := NewUnifiedProcessSpawner(UnifiedSpawnerConfig{
-		Client:     mockClient,
-		WorkDir:    "/test/workdir",
-		Port:       8080,
-		Extensions: nil,
-		Submitter:  submitter,
-		EventBus:   eventBus,
-		BeadsDir:   "/custom/beads/path",
+		CoordinatorClient: mockClient,
+		WorkerClient:      mockClient,
+		WorkDir:           "/test/workdir",
+		Port:              8080,
+		Submitter:         submitter,
+		EventBus:          eventBus,
+		BeadsDir:          "/custom/beads/path",
 	})
 
 	proc, err := spawner.SpawnProcess(context.Background(), "worker-1", repository.RoleWorker, SpawnOptions{})
@@ -396,12 +396,12 @@ func TestUnifiedProcessSpawner_SpawnCoordinator_UsesWorkflowConfigSystemPromptOv
 	submitter := &mockCommandSubmitter{}
 
 	spawner := NewUnifiedProcessSpawner(UnifiedSpawnerConfig{
-		Client:     mockClient,
-		WorkDir:    "/test/workdir",
-		Port:       8080,
-		Extensions: nil,
-		Submitter:  submitter,
-		EventBus:   eventBus,
+		CoordinatorClient: mockClient,
+		WorkerClient:      mockClient,
+		WorkDir:           "/test/workdir",
+		Port:              8080,
+		Submitter:         submitter,
+		EventBus:          eventBus,
 	})
 
 	workflowSystemPrompt := "Workflow-level system prompt override"
@@ -436,12 +436,12 @@ func TestUnifiedProcessSpawner_SpawnCoordinator_UsesWorkflowConfigInitialPromptO
 	submitter := &mockCommandSubmitter{}
 
 	spawner := NewUnifiedProcessSpawner(UnifiedSpawnerConfig{
-		Client:     mockClient,
-		WorkDir:    "/test/workdir",
-		Port:       8080,
-		Extensions: nil,
-		Submitter:  submitter,
-		EventBus:   eventBus,
+		CoordinatorClient: mockClient,
+		WorkerClient:      mockClient,
+		WorkDir:           "/test/workdir",
+		Port:              8080,
+		Submitter:         submitter,
+		EventBus:          eventBus,
 	})
 
 	workflowInitialPrompt := "Workflow-level initial prompt override"
@@ -476,12 +476,12 @@ func TestUnifiedProcessSpawner_SpawnCoordinator_WorkflowConfigTakesPrecedenceOve
 	submitter := &mockCommandSubmitter{}
 
 	spawner := NewUnifiedProcessSpawner(UnifiedSpawnerConfig{
-		Client:     mockClient,
-		WorkDir:    "/test/workdir",
-		Port:       8080,
-		Extensions: nil,
-		Submitter:  submitter,
-		EventBus:   eventBus,
+		CoordinatorClient: mockClient,
+		WorkerClient:      mockClient,
+		WorkDir:           "/test/workdir",
+		Port:              8080,
+		Submitter:         submitter,
+		EventBus:          eventBus,
 	})
 
 	directSystemPrompt := "Direct system prompt override (should be ignored)"
@@ -522,12 +522,12 @@ func TestUnifiedProcessSpawner_SpawnCoordinator_WorkflowConfigBothOverrides(t *t
 	submitter := &mockCommandSubmitter{}
 
 	spawner := NewUnifiedProcessSpawner(UnifiedSpawnerConfig{
-		Client:     mockClient,
-		WorkDir:    "/test/workdir",
-		Port:       8080,
-		Extensions: nil,
-		Submitter:  submitter,
-		EventBus:   eventBus,
+		CoordinatorClient: mockClient,
+		WorkerClient:      mockClient,
+		WorkDir:           "/test/workdir",
+		Port:              8080,
+		Submitter:         submitter,
+		EventBus:          eventBus,
 	})
 
 	workflowSystemPrompt := "Workflow system prompt"
@@ -564,12 +564,12 @@ func TestUnifiedProcessSpawner_SpawnProcess_EmptyBeadsDir(t *testing.T) {
 	submitter := &mockCommandSubmitter{}
 
 	spawner := NewUnifiedProcessSpawner(UnifiedSpawnerConfig{
-		Client:     mockClient,
-		WorkDir:    "/test/workdir",
-		Port:       8080,
-		Extensions: nil,
-		Submitter:  submitter,
-		EventBus:   eventBus,
+		CoordinatorClient: mockClient,
+		WorkerClient:      mockClient,
+		WorkDir:           "/test/workdir",
+		Port:              8080,
+		Submitter:         submitter,
+		EventBus:          eventBus,
 		// BeadsDir not set - should be empty string
 	})
 

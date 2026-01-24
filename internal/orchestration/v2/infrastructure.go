@@ -42,8 +42,11 @@ func (a *eventBusAdapter) Publish(eventType string, payload any) {
 type InfrastructureConfig struct {
 	// Port is the MCP server port for process communication.
 	Port int
-	// AgentProvider creates and configures AI processes.
-	AgentProvider client.AgentProvider
+	// CoordinatorProvider creates and configures AI processes for the coordinator.
+	CoordinatorProvider client.AgentProvider
+	// WorkerProvider creates and configures AI processes for workers.
+	// If nil, uses CoordinatorProvider for workers as well (backward compatibility).
+	WorkerProvider client.AgentProvider
 	// WorkDir is the working directory for the orchestration session.
 	WorkDir string
 	// BeadsDir is the path to the beads database directory.
@@ -82,9 +85,10 @@ func (c *InfrastructureConfig) Validate() error {
 	if c.Port == 0 {
 		return fmt.Errorf("port is required")
 	}
-	if c.AgentProvider == nil {
-		return fmt.Errorf("AgentProvider is required")
+	if c.CoordinatorProvider == nil {
+		return fmt.Errorf("CoordinatorProvider is required")
 	}
+	// WorkerProvider is optional - will fall back to CoordinatorProvider if nil
 	if c.MessageRepo == nil {
 		return fmt.Errorf("message repository is required")
 	}
@@ -153,12 +157,23 @@ func NewInfrastructure(cfg InfrastructureConfig) (*Infrastructure, error) {
 		return nil, fmt.Errorf("invalid infrastructure config: %w", err)
 	}
 
-	// Get client and extensions from AgentProvider
-	aiClient, err := cfg.AgentProvider.Client()
+	// Get coordinator client and extensions
+	coordinatorClient, err := cfg.CoordinatorProvider.Client()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get AI client: %w", err)
+		return nil, fmt.Errorf("failed to get coordinator client: %w", err)
 	}
-	extensions := cfg.AgentProvider.Extensions()
+	coordinatorExtensions := cfg.CoordinatorProvider.Extensions()
+
+	// Get worker client and extensions (fall back to coordinator if not set)
+	workerProvider := cfg.WorkerProvider
+	if workerProvider == nil {
+		workerProvider = cfg.CoordinatorProvider
+	}
+	workerClient, err := workerProvider.Client()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get worker client: %w", err)
+	}
+	workerExtensions := workerProvider.Extensions()
 
 	// Create repositories
 	taskRepo := repository.NewMemoryTaskRepository()
@@ -206,8 +221,10 @@ func NewInfrastructure(cfg InfrastructureConfig) (*Infrastructure, error) {
 		queueRepo,
 		processRegistry,
 		turnEnforcer,
-		aiClient,
-		extensions,
+		coordinatorClient,
+		workerClient,
+		coordinatorExtensions,
+		workerExtensions,
 		beadsExec,
 		cfg.Port,
 		eventBus,
@@ -319,8 +336,10 @@ func registerHandlers(
 	queueRepo repository.QueueRepository,
 	processRegistry *process.ProcessRegistry,
 	turnEnforcer handler.TurnCompletionEnforcer,
-	aiClient client.HeadlessClient,
-	extensions map[string]any,
+	coordinatorClient client.HeadlessClient,
+	workerClient client.HeadlessClient,
+	coordinatorExtensions map[string]any,
+	workerExtensions map[string]any,
 	beadsExec appbeads.IssueExecutor,
 	port int,
 	eventBus *pubsub.Broker[any],
@@ -388,21 +407,42 @@ func registerHandlers(
 	// Process Management handlers (7)
 	// ============================================================
 
-	// Create process spawner with the actual port
+	// Create process spawner with separate coordinator/worker clients
 	processSpawner := handler.NewUnifiedProcessSpawner(handler.UnifiedSpawnerConfig{
-		Client:     aiClient,
-		WorkDir:    workDir,
-		Port:       port,
-		Extensions: extensions,
-		Submitter:  cmdSubmitter,
-		EventBus:   eventBus,
-		BeadsDir:   beadsDir,
+		CoordinatorClient:     coordinatorClient,
+		WorkerClient:          workerClient,
+		CoordinatorExtensions: coordinatorExtensions,
+		WorkerExtensions:      workerExtensions,
+		WorkDir:               workDir,
+		Port:                  port,
+		Submitter:             cmdSubmitter,
+		EventBus:              eventBus,
+		BeadsDir:              beadsDir,
 	})
 
 	// MessageDeliverer for delivering messages to processes via session resume
-	sessionProvider := handler.NewProcessRegistrySessionProvider(processRegistry, aiClient, workDir, port)
-	messageDeliverer := integration.NewProcessSessionDeliverer(sessionProvider, aiClient, processRegistry, extensions,
-		integration.WithBeadsDir(beadsDir))
+	// Uses role-based client selection (coordinator vs worker)
+	sessionProvider := handler.NewProcessRegistrySessionProvider(processRegistry, coordinatorClient, workerClient, workDir, port)
+
+	// Role lookup function to determine if a process is coordinator
+	roleLookup := func(processID string) (isCoordinator bool, found bool) {
+		proc := processRegistry.Get(processID)
+		if proc == nil {
+			return false, false
+		}
+		return proc.Role == repository.RoleCoordinator, true
+	}
+
+	messageDeliverer := integration.NewProcessSessionDeliverer(
+		sessionProvider,
+		coordinatorClient,
+		workerClient,
+		processRegistry,
+		coordinatorExtensions,
+		workerExtensions,
+		roleLookup,
+		integration.WithBeadsDir(beadsDir),
+	)
 
 	cmdProcessor.RegisterHandler(command.CmdSpawnProcess,
 		handler.NewSpawnProcessHandler(processRepo, processRegistry,

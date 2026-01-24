@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -34,7 +35,8 @@ type Config struct {
 	DisallowedTools    []string
 	SkipPermissions    bool
 	Timeout            time.Duration
-	MCPConfig          string // JSON string for --mcp-config flag
+	MCPConfig          string            // JSON string for --mcp-config flag
+	Env                map[string]string // Custom environment variables (supports ${VAR} expansion)
 }
 
 // FormatToolDisplay returns a formatted string for displaying a tool call in the TUI.
@@ -163,6 +165,20 @@ func Spawn(ctx context.Context, cfg Config) (*Process, error) {
 
 	// Build environment variables (BEADS_DIR if set)
 	env := client.BuildEnvVars(client.Config{BeadsDir: cfg.BeadsDir})
+
+	// Add custom env vars from config, expanding ${VAR} references
+	for k, v := range cfg.Env {
+		expanded := os.ExpandEnv(v)
+		env = append(env, k+"="+expanded)
+		// Log non-sensitive env vars (mask tokens/keys)
+		logVal := expanded
+		if strings.Contains(strings.ToLower(k), "token") ||
+			strings.Contains(strings.ToLower(k), "key") ||
+			strings.Contains(strings.ToLower(k), "secret") {
+			logVal = "[REDACTED]"
+		}
+		log.Debug(log.CatOrch, "custom env var", "key", k, "value", logVal)
+	}
 
 	// Create Process wrapper FIRST (needed for OnInitEvent hook closure)
 	p := &Process{}

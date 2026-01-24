@@ -35,7 +35,7 @@ func TestInfrastructureConfig_Validate(t *testing.T) {
 	t.Run("valid config", func(t *testing.T) {
 		cfg := InfrastructureConfig{
 			Port:          8080,
-			AgentProvider: createTestAgentProvider(t),
+			CoordinatorProvider: createTestAgentProvider(t),
 			WorkDir:       "/tmp/test",
 			MessageRepo:   repository.NewMemoryMessageRepository(),
 		}
@@ -46,7 +46,7 @@ func TestInfrastructureConfig_Validate(t *testing.T) {
 	t.Run("missing port returns error", func(t *testing.T) {
 		cfg := InfrastructureConfig{
 			Port:          0, // Invalid: zero port
-			AgentProvider: createTestAgentProvider(t),
+			CoordinatorProvider: createTestAgentProvider(t),
 			WorkDir:       "/tmp/test",
 			MessageRepo:   repository.NewMemoryMessageRepository(),
 		}
@@ -58,19 +58,19 @@ func TestInfrastructureConfig_Validate(t *testing.T) {
 	t.Run("nil AgentProvider returns error", func(t *testing.T) {
 		cfg := InfrastructureConfig{
 			Port:          8080,
-			AgentProvider: nil, // Invalid: nil provider
+			CoordinatorProvider: nil, // Invalid: nil provider
 			WorkDir:       "/tmp/test",
 			MessageRepo:   repository.NewMemoryMessageRepository(),
 		}
 		err := cfg.Validate()
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "AgentProvider is required")
+		assert.Contains(t, err.Error(), "CoordinatorProvider is required")
 	})
 
 	t.Run("nil MessageRepo returns error", func(t *testing.T) {
 		cfg := InfrastructureConfig{
 			Port:          8080,
-			AgentProvider: createTestAgentProvider(t),
+			CoordinatorProvider: createTestAgentProvider(t),
 			WorkDir:       "/tmp/test",
 			MessageRepo:   nil, // Invalid: nil message repo
 		}
@@ -82,7 +82,7 @@ func TestInfrastructureConfig_Validate(t *testing.T) {
 	t.Run("empty WorkDir returns error", func(t *testing.T) {
 		cfg := InfrastructureConfig{
 			Port:          8080,
-			AgentProvider: createTestAgentProvider(t),
+			CoordinatorProvider: createTestAgentProvider(t),
 			WorkDir:       "", // Invalid: empty work dir
 			MessageRepo:   repository.NewMemoryMessageRepository(),
 		}
@@ -100,7 +100,7 @@ func TestNewInfrastructure(t *testing.T) {
 	t.Run("creates infrastructure with valid config", func(t *testing.T) {
 		cfg := InfrastructureConfig{
 			Port:          8080,
-			AgentProvider: createTestAgentProvider(t),
+			CoordinatorProvider: createTestAgentProvider(t),
 			WorkDir:       "/tmp/test",
 			MessageRepo:   repository.NewMemoryMessageRepository(),
 		}
@@ -128,7 +128,7 @@ func TestNewInfrastructure(t *testing.T) {
 	t.Run("creates nudger with default debounce when NudgeDebounce is zero", func(t *testing.T) {
 		cfg := InfrastructureConfig{
 			Port:          8080,
-			AgentProvider: createTestAgentProvider(t),
+			CoordinatorProvider: createTestAgentProvider(t),
 			WorkDir:       "/tmp/test",
 			MessageRepo:   repository.NewMemoryMessageRepository(),
 			NudgeDebounce: 0, // Should use default
@@ -145,7 +145,7 @@ func TestNewInfrastructure(t *testing.T) {
 	t.Run("creates nudger with custom debounce", func(t *testing.T) {
 		cfg := InfrastructureConfig{
 			Port:          8080,
-			AgentProvider: createTestAgentProvider(t),
+			CoordinatorProvider: createTestAgentProvider(t),
 			WorkDir:       "/tmp/test",
 			MessageRepo:   repository.NewMemoryMessageRepository(),
 			NudgeDebounce: 500 * time.Millisecond,
@@ -171,7 +171,7 @@ func TestNewInfrastructure(t *testing.T) {
 	t.Run("returns error for nil AgentProvider", func(t *testing.T) {
 		cfg := InfrastructureConfig{
 			Port:          8080,
-			AgentProvider: nil,
+			CoordinatorProvider: nil,
 			WorkDir:       "/tmp/test",
 			MessageRepo:   repository.NewMemoryMessageRepository(),
 		}
@@ -179,13 +179,13 @@ func TestNewInfrastructure(t *testing.T) {
 		infra, err := NewInfrastructure(cfg)
 		assert.Error(t, err)
 		assert.Nil(t, infra)
-		assert.Contains(t, err.Error(), "AgentProvider is required")
+		assert.Contains(t, err.Error(), "CoordinatorProvider is required")
 	})
 
 	t.Run("returns error for nil MessageRepo", func(t *testing.T) {
 		cfg := InfrastructureConfig{
 			Port:          8080,
-			AgentProvider: createTestAgentProvider(t),
+			CoordinatorProvider: createTestAgentProvider(t),
 			WorkDir:       "/tmp/test",
 			MessageRepo:   nil,
 		}
@@ -199,7 +199,7 @@ func TestNewInfrastructure(t *testing.T) {
 	t.Run("returns error for zero Port", func(t *testing.T) {
 		cfg := InfrastructureConfig{
 			Port:          0,
-			AgentProvider: createTestAgentProvider(t),
+			CoordinatorProvider: createTestAgentProvider(t),
 			WorkDir:       "/tmp/test",
 			MessageRepo:   repository.NewMemoryMessageRepository(),
 		}
@@ -219,7 +219,7 @@ func TestInfrastructure_Start(t *testing.T) {
 	t.Run("starts processor and waits for ready", func(t *testing.T) {
 		cfg := InfrastructureConfig{
 			Port:          8080,
-			AgentProvider: createTestAgentProvider(t),
+			CoordinatorProvider: createTestAgentProvider(t),
 			WorkDir:       "/tmp/test",
 			MessageRepo:   repository.NewMemoryMessageRepository(),
 		}
@@ -247,7 +247,7 @@ func TestInfrastructure_Start(t *testing.T) {
 	t.Run("starts nudger after processor is ready", func(t *testing.T) {
 		cfg := InfrastructureConfig{
 			Port:          8080,
-			AgentProvider: createTestAgentProvider(t),
+			CoordinatorProvider: createTestAgentProvider(t),
 			WorkDir:       "/tmp/test",
 			MessageRepo:   repository.NewMemoryMessageRepository(),
 		}
@@ -275,7 +275,7 @@ func TestInfrastructure_Start(t *testing.T) {
 	t.Run("returns error when context is cancelled during start", func(t *testing.T) {
 		cfg := InfrastructureConfig{
 			Port:          8080,
-			AgentProvider: createTestAgentProvider(t),
+			CoordinatorProvider: createTestAgentProvider(t),
 			WorkDir:       "/tmp/test",
 			MessageRepo:   repository.NewMemoryMessageRepository(),
 		}
@@ -297,7 +297,7 @@ func TestInfrastructure_Drain(t *testing.T) {
 	t.Run("gracefully shuts down processor", func(t *testing.T) {
 		cfg := InfrastructureConfig{
 			Port:          8080,
-			AgentProvider: createTestAgentProvider(t),
+			CoordinatorProvider: createTestAgentProvider(t),
 			WorkDir:       "/tmp/test",
 			MessageRepo:   repository.NewMemoryMessageRepository(),
 		}
@@ -322,7 +322,7 @@ func TestInfrastructure_Drain(t *testing.T) {
 	t.Run("handles drain on unstarted infrastructure", func(t *testing.T) {
 		cfg := InfrastructureConfig{
 			Port:          8080,
-			AgentProvider: createTestAgentProvider(t),
+			CoordinatorProvider: createTestAgentProvider(t),
 			WorkDir:       "/tmp/test",
 			MessageRepo:   repository.NewMemoryMessageRepository(),
 		}
@@ -341,7 +341,7 @@ func TestInfrastructure_Shutdown(t *testing.T) {
 	t.Run("stops nudger before process registry", func(t *testing.T) {
 		cfg := InfrastructureConfig{
 			Port:          8080,
-			AgentProvider: createTestAgentProvider(t),
+			CoordinatorProvider: createTestAgentProvider(t),
 			WorkDir:       "/tmp/test",
 			MessageRepo:   repository.NewMemoryMessageRepository(),
 		}
@@ -370,7 +370,7 @@ func TestInfrastructure_Shutdown(t *testing.T) {
 	t.Run("handles shutdown on unstarted infrastructure", func(t *testing.T) {
 		cfg := InfrastructureConfig{
 			Port:          8080,
-			AgentProvider: createTestAgentProvider(t),
+			CoordinatorProvider: createTestAgentProvider(t),
 			WorkDir:       "/tmp/test",
 			MessageRepo:   repository.NewMemoryMessageRepository(),
 		}
@@ -387,7 +387,7 @@ func TestInfrastructure_Shutdown(t *testing.T) {
 	t.Run("can be called multiple times safely", func(t *testing.T) {
 		cfg := InfrastructureConfig{
 			Port:          8080,
-			AgentProvider: createTestAgentProvider(t),
+			CoordinatorProvider: createTestAgentProvider(t),
 			WorkDir:       "/tmp/test",
 			MessageRepo:   repository.NewMemoryMessageRepository(),
 		}
@@ -414,7 +414,7 @@ func TestInfrastructure_Shutdown(t *testing.T) {
 func TestAllHandlersRegistered(t *testing.T) {
 	cfg := InfrastructureConfig{
 		Port:          8080,
-		AgentProvider: createTestAgentProvider(t),
+		CoordinatorProvider: createTestAgentProvider(t),
 		WorkDir:       "/tmp/test",
 		MessageRepo:   repository.NewMemoryMessageRepository(),
 	}
@@ -463,10 +463,10 @@ func TestInfrastructure_Integration(t *testing.T) {
 		provider := mockProvider
 
 		cfg := InfrastructureConfig{
-			Port:          8080,
-			AgentProvider: provider,
-			WorkDir:       "/tmp/test",
-			MessageRepo:   repository.NewMemoryMessageRepository(),
+			Port:                8080,
+			CoordinatorProvider: provider,
+			WorkDir:             "/tmp/test",
+			MessageRepo:         repository.NewMemoryMessageRepository(),
 		}
 
 		// Create
@@ -501,7 +501,7 @@ func TestInfrastructure_Integration(t *testing.T) {
 
 		cfg := InfrastructureConfig{
 			Port:                  8080,
-			AgentProvider:         mockProvider,
+			CoordinatorProvider:   mockProvider,
 			WorkDir:               "/tmp/test",
 			MessageRepo:           repository.NewMemoryMessageRepository(),
 			WorkflowStateProvider: workflowProvider,

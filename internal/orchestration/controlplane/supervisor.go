@@ -103,7 +103,14 @@ const (
 // SupervisorConfig configures the Supervisor.
 type SupervisorConfig struct {
 	// AgentProvider creates AI clients for workflow processes.
+	// If CoordinatorProvider/WorkerProvider not set, this is used for both.
 	AgentProvider client.AgentProvider
+	// CoordinatorProvider creates AI clients for coordinator processes.
+	// Takes precedence over AgentProvider for coordinators.
+	CoordinatorProvider client.AgentProvider
+	// WorkerProvider creates AI clients for worker processes.
+	// Takes precedence over AgentProvider for workers.
+	WorkerProvider client.AgentProvider
 	// InfrastructureFactory creates v2 infrastructure instances.
 	// If nil, DefaultInfrastructureFactory is used.
 	InfrastructureFactory InfrastructureFactory
@@ -143,7 +150,8 @@ type SupervisorConfig struct {
 
 // defaultSupervisor is the default implementation of Supervisor.
 type defaultSupervisor struct {
-	agentProvider         client.AgentProvider
+	coordinatorProvider   client.AgentProvider
+	workerProvider        client.AgentProvider
 	infrastructureFactory InfrastructureFactory
 	listenerFactory       ListenerFactory
 	workflowRegistry      *workflow.Registry
@@ -157,8 +165,20 @@ type defaultSupervisor struct {
 
 // NewSupervisor creates a new Supervisor with the given configuration.
 func NewSupervisor(cfg SupervisorConfig) (Supervisor, error) {
-	if cfg.AgentProvider == nil {
-		return nil, fmt.Errorf("AgentProvider is required")
+	// Resolve coordinator/worker providers with fallback to AgentProvider
+	coordinatorProvider := cfg.CoordinatorProvider
+	if coordinatorProvider == nil {
+		coordinatorProvider = cfg.AgentProvider
+	}
+	workerProvider := cfg.WorkerProvider
+	if workerProvider == nil {
+		workerProvider = cfg.AgentProvider
+	}
+	if coordinatorProvider == nil {
+		return nil, fmt.Errorf("AgentProvider or CoordinatorProvider is required")
+	}
+	if workerProvider == nil {
+		return nil, fmt.Errorf("AgentProvider or WorkerProvider is required")
 	}
 	if cfg.SessionFactory == nil {
 		return nil, fmt.Errorf("SessionFactory is required")
@@ -181,7 +201,8 @@ func NewSupervisor(cfg SupervisorConfig) (Supervisor, error) {
 	}
 
 	return &defaultSupervisor{
-		agentProvider:         cfg.AgentProvider,
+		coordinatorProvider:   coordinatorProvider,
+		workerProvider:        workerProvider,
 		infrastructureFactory: infraFactory,
 		listenerFactory:       listenerFactory,
 		workflowRegistry:      cfg.WorkflowRegistry,
@@ -338,7 +359,8 @@ func (s *defaultSupervisor) AllocateResources(ctx context.Context, inst *Workflo
 	// Step 4: Create InfrastructureConfig
 	infraCfg := v2.InfrastructureConfig{
 		Port:                    port,
-		AgentProvider:           s.agentProvider,
+		CoordinatorProvider:     s.coordinatorProvider,
+		WorkerProvider:          s.workerProvider,
 		WorkDir:                 workDir,
 		BeadsDir:                s.beadsDir,
 		MessageRepo:             messageRepo,
@@ -367,13 +389,13 @@ func (s *defaultSupervisor) AllocateResources(ctx context.Context, inst *Workflo
 	}
 
 	// Step 7: Create and start MCP HTTP server
-	// Get client and extensions from provider
-	aiClient, err := s.agentProvider.Client()
+	// Get coordinator client and extensions from provider
+	aiClient, err := s.coordinatorProvider.Client()
 	if err != nil {
 		cleanup()
 		return fmt.Errorf("getting AI client: %w", err)
 	}
-	extensions := s.agentProvider.Extensions()
+	extensions := s.coordinatorProvider.Extensions()
 
 	// Create coordinator MCP server with the v2 adapter
 	// Note: BeadsDir is empty here; the v2 infrastructure config handles BEADS_DIR for spawned processes

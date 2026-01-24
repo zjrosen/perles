@@ -50,6 +50,7 @@ func configFromClient(cfg client.Config) Config {
 		SkipPermissions:    cfg.SkipPermissions,
 		Timeout:            cfg.Timeout,
 		MCPConfig:          cfg.MCPConfig,
+		Env:                cfg.ClaudeEnv(),
 	}
 }
 

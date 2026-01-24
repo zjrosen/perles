@@ -473,7 +473,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.orchestration = orchestration.New(orchestration.Config{
 			Services:             m.services,
 			WorkDir:              m.services.WorkDir,
-			AgentProvider:        orchConfig.AgentProvider(),
+			CoordinatorProvider:  orchConfig.CoordinatorProvider(),
+			WorkerProvider:       orchConfig.WorkerProvider(),
 			WorkflowRegistry:     m.workflowRegistry,
 			VimMode:              m.services.Config.UI.VimMode,
 			DebugMode:            m.debugMode,

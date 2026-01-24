@@ -61,9 +61,12 @@ type InitializerConfig struct {
 	// BeadsDir is the resolved beads directory path for propagation to spawned processes.
 	// When set, spawned AI processes receive BEADS_DIR environment variable.
 	BeadsDir string
-	// AgentProvider creates and configures AI processes.
-	AgentProvider client.AgentProvider
-	Timeouts      config.TimeoutsConfig
+	// CoordinatorProvider creates and configures AI processes for the coordinator.
+	CoordinatorProvider client.AgentProvider
+	// WorkerProvider creates and configures AI processes for workers.
+	// If nil, uses CoordinatorProvider for workers as well (backward compatibility).
+	WorkerProvider client.AgentProvider
+	Timeouts       config.TimeoutsConfig
 	// Worktree configuration
 	WorktreeBaseBranch string             // Branch to base worktree on. Empty = skip worktree creation
 	WorktreeBranchName string             // Optional custom branch name (empty = auto-generate)
@@ -78,13 +81,21 @@ type InitializerConfig struct {
 	SoundService sound.SoundService
 }
 
-// getAgentProvider returns the AgentProvider.
-// Panics if AgentProvider is nil (it is a required field).
-func (c *InitializerConfig) getAgentProvider() client.AgentProvider {
-	if c.AgentProvider == nil {
-		panic("InitializerConfig.AgentProvider is required")
+// getCoordinatorProvider returns the CoordinatorProvider.
+// Panics if CoordinatorProvider is nil (it is a required field).
+func (c *InitializerConfig) getCoordinatorProvider() client.AgentProvider {
+	if c.CoordinatorProvider == nil {
+		panic("InitializerConfig.CoordinatorProvider is required")
 	}
-	return c.AgentProvider
+	return c.CoordinatorProvider
+}
+
+// getWorkerProvider returns the WorkerProvider, or CoordinatorProvider as fallback.
+func (c *InitializerConfig) getWorkerProvider() client.AgentProvider {
+	if c.WorkerProvider != nil {
+		return c.WorkerProvider
+	}
+	return c.getCoordinatorProvider()
 }
 
 // InitializerResources holds the resources created during initialization.
@@ -194,7 +205,8 @@ type InitializerConfigBuilder struct {
 func NewInitializerConfigFromModel(
 	workDir string,
 	beadsDir string,
-	agentProvider client.AgentProvider,
+	coordinatorProvider client.AgentProvider,
+	workerProvider client.AgentProvider,
 	worktreeBaseBranch string,
 	worktreeCustomBranch string,
 	tracingConfig config.TracingConfig,
@@ -202,13 +214,14 @@ func NewInitializerConfigFromModel(
 ) *InitializerConfigBuilder {
 	return &InitializerConfigBuilder{
 		cfg: InitializerConfig{
-			WorkDir:            workDir,
-			BeadsDir:           beadsDir,
-			AgentProvider:      agentProvider,
-			WorktreeBaseBranch: worktreeBaseBranch,
-			WorktreeBranchName: worktreeCustomBranch,
-			TracingConfig:      tracingConfig,
-			SessionStorage:     sessionStorageConfig,
+			WorkDir:             workDir,
+			BeadsDir:            beadsDir,
+			CoordinatorProvider: coordinatorProvider,
+			WorkerProvider:      workerProvider,
+			WorktreeBaseBranch:  worktreeBaseBranch,
+			WorktreeBranchName:  worktreeCustomBranch,
+			TracingConfig:       tracingConfig,
+			SessionStorage:      sessionStorageConfig,
 		},
 	}
 }
@@ -787,16 +800,16 @@ func (i *Initializer) createMCPListener() (*MCPListenerResult, error) {
 
 // MCPServerConfig holds the configuration for createMCPServer().
 type MCPServerConfig struct {
-	Listener      net.Listener                        // Pre-created TCP listener
-	Port          int                                 // Port the listener is bound to
-	AgentProvider client.AgentProvider                // Agent provider for coordinator server
-	MsgRepo       *repository.MemoryMessageRepository // Message repository for coordinator server
-	Session       *session.Session                    // Session for reflection writing
-	V2Adapter     *adapter.V2Adapter                  // V2 adapter for routing
-	TurnEnforcer  mcp.ToolCallRecorder                // Turn completion enforcer for workers
-	WorkDir       string                              // Working directory
-	BeadsDir      string                              // Path to .beads directory for BEADS_DIR env var
-	Tracer        trace.Tracer                        // Tracer for distributed tracing (optional)
+	Listener            net.Listener                        // Pre-created TCP listener
+	Port                int                                 // Port the listener is bound to
+	CoordinatorProvider client.AgentProvider                // Agent provider for coordinator server
+	MsgRepo             *repository.MemoryMessageRepository // Message repository for coordinator server
+	Session             *session.Session                    // Session for reflection writing
+	V2Adapter           *adapter.V2Adapter                  // V2 adapter for routing
+	TurnEnforcer        mcp.ToolCallRecorder                // Turn completion enforcer for workers
+	WorkDir             string                              // Working directory
+	BeadsDir            string                              // Path to .beads directory for BEADS_DIR env var
+	Tracer              trace.Tracer                        // Tracer for distributed tracing (optional)
 }
 
 // createMCPServer creates the MCP server with HTTP routes for coordinator and worker endpoints.
@@ -806,19 +819,19 @@ func (i *Initializer) createMCPServer(cfg MCPServerConfig) (*MCPServerResult, er
 	if cfg.Listener == nil {
 		return nil, fmt.Errorf("listener is required")
 	}
-	if cfg.AgentProvider == nil {
-		return nil, fmt.Errorf("AgentProvider is required")
+	if cfg.CoordinatorProvider == nil {
+		return nil, fmt.Errorf("CoordinatorProvider is required")
 	}
 	if cfg.MsgRepo == nil {
 		return nil, fmt.Errorf("message repository is required")
 	}
 
-	// Get client and extensions from provider
-	aiClient, err := cfg.AgentProvider.Client()
+	// Get client and extensions from coordinator provider (MCP server is for coordinator)
+	aiClient, err := cfg.CoordinatorProvider.Client()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get AI client: %w", err)
 	}
-	extensions := cfg.AgentProvider.Extensions()
+	extensions := cfg.CoordinatorProvider.Extensions()
 
 	// Create coordinator server with the dynamic port and v2 adapter
 	mcpCoordServer := mcp.NewCoordinatorServerWithV2Adapter(
@@ -923,9 +936,10 @@ func (i *Initializer) createWorkspaceWithContext(ctx context.Context) error {
 	}
 
 	// ============================================================
-	// Step 1: Get AgentProvider from config
+	// Step 1: Get providers from config
 	// ============================================================
-	provider := i.cfg.getAgentProvider()
+	coordinatorProvider := i.cfg.getCoordinatorProvider()
+	workerProvider := i.cfg.getWorkerProvider()
 
 	// ============================================================
 	// Step 2: Create message repository for inter-agent messaging
@@ -966,7 +980,8 @@ func (i *Initializer) createWorkspaceWithContext(ctx context.Context) error {
 
 	v2Infra, err := v2.NewInfrastructure(v2.InfrastructureConfig{
 		Port:                    port,
-		AgentProvider:           provider,
+		CoordinatorProvider:     coordinatorProvider,
+		WorkerProvider:          workerProvider,
 		WorkDir:                 effectiveWorkDir, // Use worktree path when enabled
 		BeadsDir:                i.cfg.BeadsDir,   // Propagated to spawned AI processes as BEADS_DIR env var
 		MessageRepo:             msgRepo,
@@ -1046,16 +1061,16 @@ func (i *Initializer) createWorkspaceWithContext(ctx context.Context) error {
 	// Step 6: Create MCP server with HTTP routes
 	// ============================================================
 	mcpResult, err := i.createMCPServer(MCPServerConfig{
-		Listener:      listenerResult.Listener,
-		Port:          port,
-		AgentProvider: provider,
-		MsgRepo:       msgRepo,
-		Session:       sess,
-		V2Adapter:     v2Infra.Core.Adapter,
-		TurnEnforcer:  v2Infra.Internal.TurnEnforcer,
-		WorkDir:       effectiveWorkDir, // Use worktree path when enabled
-		BeadsDir:      i.cfg.BeadsDir,   // Propagate beads directory for BEADS_DIR env var
-		Tracer:        tracer,           // nil when tracing disabled - server handles this gracefully
+		Listener:            listenerResult.Listener,
+		Port:                port,
+		CoordinatorProvider: coordinatorProvider,
+		MsgRepo:             msgRepo,
+		Session:             sess,
+		V2Adapter:           v2Infra.Core.Adapter,
+		TurnEnforcer:        v2Infra.Internal.TurnEnforcer,
+		WorkDir:             effectiveWorkDir, // Use worktree path when enabled
+		BeadsDir:            i.cfg.BeadsDir,   // Propagate beads directory for BEADS_DIR env var
+		Tracer:              tracer,           // nil when tracing disabled - server handles this gracefully
 	})
 	if err != nil {
 		_ = listenerResult.Listener.Close()

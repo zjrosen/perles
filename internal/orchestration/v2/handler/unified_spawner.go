@@ -41,24 +41,34 @@ type SpawnOptions struct {
 
 // UnifiedProcessSpawnerImpl implements UnifiedProcessSpawner for spawning real AI processes.
 // It creates process.Process instances that manage the AI event loop.
+// Supports different clients for coordinator and workers.
 type UnifiedProcessSpawnerImpl struct {
-	client     client.HeadlessClient
-	workDir    string
-	port       int
-	extensions map[string]any
-	submitter  process.CommandSubmitter
-	eventBus   *pubsub.Broker[any]
-	beadsDir   string
+	coordinatorClient     client.HeadlessClient
+	workerClient          client.HeadlessClient
+	coordinatorExtensions map[string]any
+	workerExtensions      map[string]any
+	workDir               string
+	port                  int
+	submitter             process.CommandSubmitter
+	eventBus              *pubsub.Broker[any]
+	beadsDir              string
 }
 
 // UnifiedSpawnerConfig holds configuration for creating a UnifiedProcessSpawnerImpl.
 type UnifiedSpawnerConfig struct {
-	Client     client.HeadlessClient
-	WorkDir    string
-	Port       int
-	Extensions map[string]any
-	Submitter  process.CommandSubmitter
-	EventBus   *pubsub.Broker[any]
+	// CoordinatorClient is the AI client for spawning coordinators.
+	CoordinatorClient client.HeadlessClient
+	// WorkerClient is the AI client for spawning workers.
+	// If nil, uses CoordinatorClient for workers as well.
+	WorkerClient client.HeadlessClient
+	// CoordinatorExtensions holds provider-specific config for coordinator.
+	CoordinatorExtensions map[string]any
+	// WorkerExtensions holds provider-specific config for workers.
+	WorkerExtensions map[string]any
+	WorkDir          string
+	Port             int
+	Submitter        process.CommandSubmitter
+	EventBus         *pubsub.Broker[any]
 	// BeadsDir is the path to the beads database directory.
 	// When set, spawned processes receive BEADS_DIR environment variable.
 	BeadsDir string
@@ -66,23 +76,48 @@ type UnifiedSpawnerConfig struct {
 
 // NewUnifiedProcessSpawner creates a new UnifiedProcessSpawnerImpl.
 func NewUnifiedProcessSpawner(cfg UnifiedSpawnerConfig) *UnifiedProcessSpawnerImpl {
+	// Fall back to coordinator client if worker client not set
+	workerClient := cfg.WorkerClient
+	if workerClient == nil {
+		workerClient = cfg.CoordinatorClient
+	}
+	workerExtensions := cfg.WorkerExtensions
+	if workerExtensions == nil {
+		workerExtensions = cfg.CoordinatorExtensions
+	}
+
 	return &UnifiedProcessSpawnerImpl{
-		client:     cfg.Client,
-		workDir:    cfg.WorkDir,
-		port:       cfg.Port,
-		extensions: cfg.Extensions,
-		submitter:  cfg.Submitter,
-		eventBus:   cfg.EventBus,
-		beadsDir:   cfg.BeadsDir,
+		coordinatorClient:     cfg.CoordinatorClient,
+		workerClient:          workerClient,
+		coordinatorExtensions: cfg.CoordinatorExtensions,
+		workerExtensions:      workerExtensions,
+		workDir:               cfg.WorkDir,
+		port:                  cfg.Port,
+		submitter:             cfg.Submitter,
+		eventBus:              cfg.EventBus,
+		beadsDir:              cfg.BeadsDir,
 	}
 }
 
 // SpawnProcess creates and starts a new AI process.
 // The opts parameter provides optional configuration like AgentType for worker specialization.
 // Returns the created process.Process instance.
+// Uses different clients for coordinator vs workers based on configuration.
 func (s *UnifiedProcessSpawnerImpl) SpawnProcess(ctx context.Context, id string, role repository.ProcessRole, opts SpawnOptions) (*process.Process, error) {
-	if s.client == nil {
-		return nil, fmt.Errorf("client is nil")
+	// Select client and extensions based on role
+	var aiClient client.HeadlessClient
+	var extensions map[string]any
+
+	if role == repository.RoleCoordinator {
+		aiClient = s.coordinatorClient
+		extensions = s.coordinatorExtensions
+	} else {
+		aiClient = s.workerClient
+		extensions = s.workerExtensions
+	}
+
+	if aiClient == nil {
+		return nil, fmt.Errorf("client is nil for role %s", role)
 	}
 
 	// Generate appropriate config based on role
@@ -132,11 +167,11 @@ func (s *UnifiedProcessSpawnerImpl) SpawnProcess(ctx context.Context, id string,
 			MCPConfig:       mcpConfig,
 			SkipPermissions: true,
 			DisallowedTools: []string{"AskUserQuestion"},
-			Extensions:      s.extensions,
+			Extensions:      extensions,
 		}
 	} else {
 		// Worker uses role-specific prompts based on AgentType
-		mcpConfig, err := s.generateMCPConfig(id)
+		mcpConfig, err := s.generateWorkerMCPConfig(id)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate MCP config: %w", err)
 		}
@@ -156,12 +191,12 @@ func (s *UnifiedProcessSpawnerImpl) SpawnProcess(ctx context.Context, id string,
 			MCPConfig:       mcpConfig,
 			SkipPermissions: true,
 			DisallowedTools: []string{"AskUserQuestion"},
-			Extensions:      s.extensions,
+			Extensions:      extensions,
 		}
 	}
 
 	// Spawn the underlying AI process
-	headlessProc, err := s.client.Spawn(ctx, cfg)
+	headlessProc, err := aiClient.Spawn(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to spawn AI process: %w", err)
 	}
@@ -177,10 +212,10 @@ func (s *UnifiedProcessSpawnerImpl) SpawnProcess(ctx context.Context, id string,
 
 // generateCoordinatorMCPConfig returns the appropriate MCP config for the coordinator.
 func (s *UnifiedProcessSpawnerImpl) generateCoordinatorMCPConfig() (string, error) {
-	if s.client == nil {
+	if s.coordinatorClient == nil {
 		return mcp.GenerateCoordinatorConfigHTTP(s.port)
 	}
-	switch s.client.Type() {
+	switch s.coordinatorClient.Type() {
 	case client.ClientAmp:
 		return mcp.GenerateCoordinatorConfigAmp(s.port)
 	case client.ClientCodex:
@@ -194,12 +229,12 @@ func (s *UnifiedProcessSpawnerImpl) generateCoordinatorMCPConfig() (string, erro
 	}
 }
 
-// generateMCPConfig returns the appropriate MCP config format for workers based on client type.
-func (s *UnifiedProcessSpawnerImpl) generateMCPConfig(processID string) (string, error) {
-	if s.client == nil {
+// generateWorkerMCPConfig returns the appropriate MCP config format for workers based on client type.
+func (s *UnifiedProcessSpawnerImpl) generateWorkerMCPConfig(processID string) (string, error) {
+	if s.workerClient == nil {
 		return mcp.GenerateWorkerConfigHTTP(s.port, processID)
 	}
-	switch s.client.Type() {
+	switch s.workerClient.Type() {
 	case client.ClientAmp:
 		return mcp.GenerateWorkerConfigAmp(s.port, processID)
 	case client.ClientCodex:

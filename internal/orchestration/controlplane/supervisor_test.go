@@ -182,14 +182,14 @@ func TestNewSupervisor_ValidConfig(t *testing.T) {
 func TestNewSupervisor_MissingAgentProvider(t *testing.T) {
 	cfg := SupervisorConfig{
 		SessionFactory: session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()}),
-		// AgentProvider is nil
+		// AgentProvider, CoordinatorProvider, and WorkerProvider are all nil
 	}
 
 	supervisor, err := NewSupervisor(cfg)
 
 	require.Error(t, err)
 	require.Nil(t, supervisor)
-	require.Contains(t, err.Error(), "AgentProvider is required")
+	require.Contains(t, err.Error(), "AgentProvider or CoordinatorProvider is required")
 }
 
 func TestNewSupervisor_DefaultInfrastructureFactory(t *testing.T) {

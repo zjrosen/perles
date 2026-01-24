@@ -153,23 +153,27 @@ func DefaultTimeoutsConfig() TimeoutsConfig {
 
 // OrchestrationConfig holds orchestration mode configuration.
 type OrchestrationConfig struct {
-	Client           string               `mapstructure:"client"`            // "claude" (default), "amp", "codex", or "gemini"
-	DisableWorktrees bool                 `mapstructure:"disable_worktrees"` // Skip worktree prompt (default: false)
-	APIPort          int                  `mapstructure:"api_port"`          // HTTP API port (0 = auto-assign, default: 0)
-	Claude           ClaudeClientConfig   `mapstructure:"claude"`
-	Codex            CodexClientConfig    `mapstructure:"codex"`
-	Amp              AmpClientConfig      `mapstructure:"amp"`
-	Gemini           GeminiClientConfig   `mapstructure:"gemini"`
-	OpenCode         OpenCodeClientConfig `mapstructure:"opencode"`
-	Workflows        []WorkflowConfig     `mapstructure:"workflows"`       // Workflow template configurations
-	Tracing          TracingConfig        `mapstructure:"tracing"`         // Distributed tracing configuration
-	SessionStorage   SessionStorageConfig `mapstructure:"session_storage"` // Session storage location configuration
-	Timeouts         TimeoutsConfig       `mapstructure:"timeouts"`        // Initialization phase timeout configuration
+	Client            string               `mapstructure:"client"`             // "claude" (default), "amp", "codex", or "gemini" - backward compat
+	CoordinatorClient string               `mapstructure:"coordinator_client"` // Client for coordinator (overrides Client)
+	WorkerClient      string               `mapstructure:"worker_client"`      // Client for workers (overrides Client)
+	DisableWorktrees  bool                 `mapstructure:"disable_worktrees"`  // Skip worktree prompt (default: false)
+	APIPort           int                  `mapstructure:"api_port"`           // HTTP API port (0 = auto-assign, default: 0)
+	Claude            ClaudeClientConfig   `mapstructure:"claude"`
+	ClaudeWorker      ClaudeClientConfig   `mapstructure:"claude_worker"` // Worker-specific Claude config (uses claude config if empty)
+	Codex             CodexClientConfig    `mapstructure:"codex"`
+	Amp               AmpClientConfig      `mapstructure:"amp"`
+	Gemini            GeminiClientConfig   `mapstructure:"gemini"`
+	OpenCode          OpenCodeClientConfig `mapstructure:"opencode"`
+	Workflows         []WorkflowConfig     `mapstructure:"workflows"`       // Workflow template configurations
+	Tracing           TracingConfig        `mapstructure:"tracing"`         // Distributed tracing configuration
+	SessionStorage    SessionStorageConfig `mapstructure:"session_storage"` // Session storage location configuration
+	Timeouts          TimeoutsConfig       `mapstructure:"timeouts"`        // Initialization phase timeout configuration
 }
 
 // ClaudeClientConfig holds Claude-specific settings.
 type ClaudeClientConfig struct {
-	Model string `mapstructure:"model"` // sonnet (default), opus, haiku
+	Model string            `mapstructure:"model"` // sonnet (default), opus, haiku
+	Env   map[string]string `mapstructure:"env"`   // Custom environment variables (supports ${VAR} expansion)
 }
 
 // CodexClientConfig holds Claude-specific settings.
@@ -195,6 +199,7 @@ type OpenCodeClientConfig struct {
 
 // AgentProvider returns an AgentProvider configured from user settings.
 // This is the preferred way to get an AI client for orchestration or chat.
+// Deprecated: Use CoordinatorProvider() and WorkerProvider() for split client configuration.
 func (o OrchestrationConfig) AgentProvider() client.AgentProvider {
 	clientType := client.ClientType(o.Client)
 	if clientType == "" {
@@ -202,6 +207,7 @@ func (o OrchestrationConfig) AgentProvider() client.AgentProvider {
 	}
 	extensions := client.NewFromClientConfigs(clientType, client.ClientConfigs{
 		ClaudeModel:   o.Claude.Model,
+		ClaudeEnv:     o.Claude.Env,
 		CodexModel:    o.Codex.Model,
 		AmpModel:      o.Amp.Model,
 		AmpMode:       o.Amp.Mode,
@@ -209,6 +215,92 @@ func (o OrchestrationConfig) AgentProvider() client.AgentProvider {
 		OpenCodeModel: o.OpenCode.Model,
 	})
 	return client.NewAgentProvider(clientType, extensions)
+}
+
+// CoordinatorClientType returns the client type for the coordinator.
+// Resolution priority: coordinator_client > client > "claude"
+func (o OrchestrationConfig) CoordinatorClientType() client.ClientType {
+	if o.CoordinatorClient != "" {
+		return client.ClientType(o.CoordinatorClient)
+	}
+	if o.Client != "" {
+		return client.ClientType(o.Client)
+	}
+	return client.ClientClaude
+}
+
+// WorkerClientType returns the client type for workers.
+// Resolution priority: worker_client > client > "claude"
+func (o OrchestrationConfig) WorkerClientType() client.ClientType {
+	if o.WorkerClient != "" {
+		return client.ClientType(o.WorkerClient)
+	}
+	if o.Client != "" {
+		return client.ClientType(o.Client)
+	}
+	return client.ClientClaude
+}
+
+// CoordinatorProvider returns an AgentProvider for the coordinator.
+func (o OrchestrationConfig) CoordinatorProvider() client.AgentProvider {
+	clientType := o.CoordinatorClientType()
+	extensions := o.extensionsForClient(clientType, false) // isWorker=false
+	return client.NewAgentProvider(clientType, extensions)
+}
+
+// WorkerProvider returns an AgentProvider for workers.
+func (o OrchestrationConfig) WorkerProvider() client.AgentProvider {
+	clientType := o.WorkerClientType()
+	extensions := o.extensionsForClient(clientType, true) // isWorker=true
+	return client.NewAgentProvider(clientType, extensions)
+}
+
+// extensionsForClient builds extensions for the given client type.
+// If isWorker and client is claude, uses claude_worker config when env is set.
+func (o OrchestrationConfig) extensionsForClient(clientType client.ClientType, isWorker bool) map[string]any {
+	extensions := make(map[string]any)
+
+	switch clientType {
+	case client.ClientClaude:
+		cfg := o.Claude
+		// For workers, use claude_worker config if it has env vars configured
+		if isWorker && len(o.ClaudeWorker.Env) > 0 {
+			cfg = o.ClaudeWorker
+			// If worker model is empty, inherit from main claude config
+			if cfg.Model == "" {
+				cfg.Model = o.Claude.Model
+			}
+		}
+		if cfg.Model != "" {
+			extensions[client.ExtClaudeModel] = cfg.Model
+		}
+		if len(cfg.Env) > 0 {
+			extensions[client.ExtClaudeEnv] = cfg.Env
+		}
+	case client.ClientCodex:
+		if o.Codex.Model != "" {
+			extensions[client.ExtCodexModel] = o.Codex.Model
+		}
+	case client.ClientAmp:
+		if o.Amp.Model != "" {
+			extensions[client.ExtAmpModel] = o.Amp.Model
+		}
+		if o.Amp.Mode != "" {
+			// Note: Amp mode key is defined in amp package, but we use the literal here
+			// to avoid import cycle. The value is "amp.mode".
+			extensions["amp.mode"] = o.Amp.Mode
+		}
+	case client.ClientGemini:
+		if o.Gemini.Model != "" {
+			extensions[client.ExtGeminiModel] = o.Gemini.Model
+		}
+	case client.ClientOpenCode:
+		if o.OpenCode.Model != "" {
+			extensions[client.ExtOpenCodeModel] = o.OpenCode.Model
+		}
+	}
+
+	return extensions
 }
 
 // WorkflowConfig defines configuration for a workflow template.

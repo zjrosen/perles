@@ -1,6 +1,9 @@
 package client
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Config holds provider-agnostic configuration for spawning a process.
 type Config struct {
@@ -49,6 +52,9 @@ type Config struct {
 const (
 	// ExtClaudeModel specifies the Claude model (string: "sonnet", "opus", "haiku").
 	ExtClaudeModel = "claude.model"
+	// ExtClaudeEnv specifies custom environment variables for Claude (map[string]string).
+	// Values support ${VAR} expansion from the current environment.
+	ExtClaudeEnv = "claude.env"
 
 	// ExtAmpModel specifies the Amp model selection (string).
 	ExtAmpModel = "amp.model"
@@ -74,6 +80,37 @@ func (c *Config) ClaudeModel() string {
 		return v
 	}
 	return "opus"
+}
+
+// ClaudeEnv returns custom environment variables for Claude from Extensions.
+// Returns nil if not set.
+// Note: Keys are uppercased because Viper lowercases YAML map keys,
+// but env vars are case-sensitive on Linux.
+func (c *Config) ClaudeEnv() map[string]string {
+	if c.Extensions == nil {
+		return nil
+	}
+	// Direct type assertion for map[string]string
+	if env, ok := c.Extensions[ExtClaudeEnv].(map[string]string); ok {
+		// Uppercase keys to fix Viper's lowercasing
+		result := make(map[string]string, len(env))
+		for k, v := range env {
+			result[strings.ToUpper(k)] = v
+		}
+		return result
+	}
+	// Handle map[string]any from YAML unmarshaling
+	if env, ok := c.Extensions[ExtClaudeEnv].(map[string]any); ok {
+		result := make(map[string]string)
+		for k, v := range env {
+			if s, ok := v.(string); ok {
+				// Uppercase keys to fix Viper's lowercasing
+				result[strings.ToUpper(k)] = s
+			}
+		}
+		return result
+	}
+	return nil
 }
 
 // CodexModel returns the Codex model from Extensions, or "gpt-5.2-codex" as default.
@@ -156,12 +193,13 @@ func (c *Config) GetExtensionString(key string) string {
 // ClientConfigs groups all client-specific configuration structs.
 // This is used by NewFromClientConfigs to consolidate extensions building logic.
 type ClientConfigs struct {
-	ClaudeModel   string // Claude model (sonnet, opus, haiku)
-	CodexModel    string // Codex model (gpt-5.2-codex, o4-mini)
-	AmpModel      string // Amp model (opus, sonnet)
-	AmpMode       string // Amp mode (free, rush, smart)
-	GeminiModel   string // Gemini model (gemini-3-pro-preview, gemini-2.5-flash)
-	OpenCodeModel string // OpenCode model (anthropic/claude-opus-4-5)
+	ClaudeModel   string            // Claude model (sonnet, opus, haiku)
+	ClaudeEnv     map[string]string // Claude custom environment variables
+	CodexModel    string            // Codex model (gpt-5.2-codex, o4-mini)
+	AmpModel      string            // Amp model (opus, sonnet)
+	AmpMode       string            // Amp mode (free, rush, smart)
+	GeminiModel   string            // Gemini model (gemini-3-pro-preview, gemini-2.5-flash)
+	OpenCodeModel string            // OpenCode model (anthropic/claude-opus-4-5)
 }
 
 // NewFromClientConfigs builds a provider-specific Extensions map based on the client type.
@@ -183,6 +221,9 @@ func NewFromClientConfigs(clientType ClientType, configs ClientConfigs) map[stri
 	case ClientClaude:
 		if configs.ClaudeModel != "" {
 			extensions[ExtClaudeModel] = configs.ClaudeModel
+		}
+		if len(configs.ClaudeEnv) > 0 {
+			extensions[ExtClaudeEnv] = configs.ClaudeEnv
 		}
 	case ClientCodex:
 		if configs.CodexModel != "" {

@@ -14,14 +14,14 @@ func TestProcessRegistrySessionProvider_New(t *testing.T) {
 	registry := process.NewProcessRegistry()
 	aiClient := &mockHeadlessClient{clientType: client.ClientClaude}
 
-	provider := NewProcessRegistrySessionProvider(registry, aiClient, "/work/dir", 8765)
+	provider := NewProcessRegistrySessionProvider(registry, aiClient, aiClient, "/work/dir", 8765)
 
 	require.NotNil(t, provider)
 }
 
 func TestProcessRegistrySessionProvider_GetProcessSessionID(t *testing.T) {
 	registry := process.NewProcessRegistry()
-	provider := NewProcessRegistrySessionProvider(registry, nil, "/work/dir", 8765)
+	provider := NewProcessRegistrySessionProvider(registry, nil, nil, "/work/dir", 8765)
 
 	// Create a mock headless process and wrap it in a Process
 	mockProc := newMockHeadlessProcess("session-ref")
@@ -38,7 +38,7 @@ func TestProcessRegistrySessionProvider_GetProcessSessionID(t *testing.T) {
 
 func TestProcessRegistrySessionProvider_GetProcessSessionID_NotFound(t *testing.T) {
 	registry := process.NewProcessRegistry()
-	provider := NewProcessRegistrySessionProvider(registry, nil, "/work/dir", 8765)
+	provider := NewProcessRegistrySessionProvider(registry, nil, nil, "/work/dir", 8765)
 
 	sessionID, err := provider.GetProcessSessionID("nonexistent")
 	require.Error(t, err)
@@ -48,7 +48,7 @@ func TestProcessRegistrySessionProvider_GetProcessSessionID_NotFound(t *testing.
 
 func TestProcessRegistrySessionProvider_GetProcessSessionID_EmptyID(t *testing.T) {
 	registry := process.NewProcessRegistry()
-	provider := NewProcessRegistrySessionProvider(registry, nil, "/work/dir", 8765)
+	provider := NewProcessRegistrySessionProvider(registry, nil, nil, "/work/dir", 8765)
 
 	sessionID, err := provider.GetProcessSessionID("")
 	require.Error(t, err)
@@ -59,7 +59,7 @@ func TestProcessRegistrySessionProvider_GetProcessSessionID_EmptyID(t *testing.T
 func TestProcessRegistrySessionProvider_GenerateProcessMCPConfig_Worker_HTTP(t *testing.T) {
 	registry := process.NewProcessRegistry()
 	aiClient := &mockHeadlessClient{clientType: client.ClientClaude}
-	provider := NewProcessRegistrySessionProvider(registry, aiClient, "/work/dir", 8765)
+	provider := NewProcessRegistrySessionProvider(registry, aiClient, aiClient, "/work/dir", 8765)
 
 	config, err := provider.GenerateProcessMCPConfig("worker-1")
 	require.NoError(t, err)
@@ -71,7 +71,7 @@ func TestProcessRegistrySessionProvider_GenerateProcessMCPConfig_Worker_HTTP(t *
 func TestProcessRegistrySessionProvider_GenerateProcessMCPConfig_Worker_Amp(t *testing.T) {
 	registry := process.NewProcessRegistry()
 	aiClient := &mockHeadlessClient{clientType: client.ClientAmp}
-	provider := NewProcessRegistrySessionProvider(registry, aiClient, "/work/dir", 9999)
+	provider := NewProcessRegistrySessionProvider(registry, aiClient, aiClient, "/work/dir", 9999)
 
 	config, err := provider.GenerateProcessMCPConfig("worker-2")
 	require.NoError(t, err)
@@ -84,7 +84,7 @@ func TestProcessRegistrySessionProvider_GenerateProcessMCPConfig_Worker_Amp(t *t
 func TestProcessRegistrySessionProvider_GenerateProcessMCPConfig_Coordinator_HTTP(t *testing.T) {
 	registry := process.NewProcessRegistry()
 	aiClient := &mockHeadlessClient{clientType: client.ClientClaude}
-	provider := NewProcessRegistrySessionProvider(registry, aiClient, "/work/dir", 8765)
+	provider := NewProcessRegistrySessionProvider(registry, aiClient, aiClient, "/work/dir", 8765)
 
 	// Use the well-known coordinator ID
 	config, err := provider.GenerateProcessMCPConfig(repository.CoordinatorID)
@@ -97,7 +97,7 @@ func TestProcessRegistrySessionProvider_GenerateProcessMCPConfig_Coordinator_HTT
 func TestProcessRegistrySessionProvider_GenerateProcessMCPConfig_Coordinator_Amp(t *testing.T) {
 	registry := process.NewProcessRegistry()
 	aiClient := &mockHeadlessClient{clientType: client.ClientAmp}
-	provider := NewProcessRegistrySessionProvider(registry, aiClient, "/work/dir", 9999)
+	provider := NewProcessRegistrySessionProvider(registry, aiClient, aiClient, "/work/dir", 9999)
 
 	config, err := provider.GenerateProcessMCPConfig(repository.CoordinatorID)
 	require.NoError(t, err)
@@ -110,7 +110,7 @@ func TestProcessRegistrySessionProvider_GenerateProcessMCPConfig_Coordinator_Amp
 func TestProcessRegistrySessionProvider_GenerateProcessMCPConfig_NilClient(t *testing.T) {
 	registry := process.NewProcessRegistry()
 	// nil client should default to HTTP format
-	provider := NewProcessRegistrySessionProvider(registry, nil, "/work/dir", 8765)
+	provider := NewProcessRegistrySessionProvider(registry, nil, nil, "/work/dir", 8765)
 
 	config, err := provider.GenerateProcessMCPConfig("worker-1")
 	require.NoError(t, err)
@@ -120,14 +120,14 @@ func TestProcessRegistrySessionProvider_GenerateProcessMCPConfig_NilClient(t *te
 
 func TestProcessRegistrySessionProvider_GetWorkDir(t *testing.T) {
 	registry := process.NewProcessRegistry()
-	provider := NewProcessRegistrySessionProvider(registry, nil, "/my/work/dir", 8765)
+	provider := NewProcessRegistrySessionProvider(registry, nil, nil, "/my/work/dir", 8765)
 
 	require.Equal(t, "/my/work/dir", provider.GetWorkDir())
 }
 
 func TestProcessRegistrySessionProvider_GetWorkDir_Empty(t *testing.T) {
 	registry := process.NewProcessRegistry()
-	provider := NewProcessRegistrySessionProvider(registry, nil, "", 8765)
+	provider := NewProcessRegistrySessionProvider(registry, nil, nil, "", 8765)
 
 	require.Equal(t, "", provider.GetWorkDir())
 }
@@ -136,7 +136,7 @@ func TestProcessRegistrySessionProvider_GetWorkDir_Empty(t *testing.T) {
 // by checking it has all the required methods via a local interface definition.
 func TestProcessRegistrySessionProvider_ImplementsSessionProvider(t *testing.T) {
 	registry := process.NewProcessRegistry()
-	provider := NewProcessRegistrySessionProvider(registry, nil, "/work", 8765)
+	provider := NewProcessRegistrySessionProvider(registry, nil, nil, "/work", 8765)
 
 	// Define a local interface matching the integration.SessionProvider
 	type SessionProvider interface {
@@ -153,7 +153,7 @@ func TestProcessRegistrySessionProvider_ImplementsSessionProvider(t *testing.T) 
 func TestProcessRegistrySessionProvider_SessionCorrectlyWrapsProcess(t *testing.T) {
 	registry := process.NewProcessRegistry()
 	aiClient := &mockHeadlessClient{clientType: client.ClientClaude}
-	provider := NewProcessRegistrySessionProvider(registry, aiClient, "/project", 8765)
+	provider := NewProcessRegistrySessionProvider(registry, aiClient, aiClient, "/project", 8765)
 
 	// Create and register a process
 	mockProc := newMockHeadlessProcess("session-ref")
