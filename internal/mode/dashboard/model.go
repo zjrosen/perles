@@ -753,11 +753,20 @@ func (m Model) handleMouseMsg(msg tea.MouseMsg) (mode.Controller, tea.Cmd) {
 		for i := range filtered {
 			zoneID := makeWorkflowZoneID(i)
 			if z := zone.Get(zoneID); z != nil && z.InBounds(msg) {
+				m.focus = FocusTable
+				m.updateComponentFocusStates()
 				cmd := m.handleWorkflowSelectionChange(i)
 				// Clear notification flag for the clicked workflow
 				m.clearNotificationForWorkflow(filtered[i].ID)
 				return m, cmd
 			}
+		}
+
+		// Check workflow table zone (container click - focuses table)
+		if z := zone.Get(zoneWorkflowTable); z != nil && z.InBounds(msg) {
+			m.focus = FocusTable
+			m.updateComponentFocusStates()
+			return m, nil
 		}
 
 		// Check epic zone clicks

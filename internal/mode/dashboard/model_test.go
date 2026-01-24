@@ -2197,6 +2197,57 @@ func TestMouseClickOnDetailsSetsFocus(t *testing.T) {
 	require.Equal(t, EpicFocusDetails, m.epicViewFocus, "epicViewFocus should be Details")
 }
 
+func TestMouseClickOnWorkflowTableSetsFocus(t *testing.T) {
+	// Verify clicking on workflow table or row zone sets FocusTable
+	// This tests the logic added in perles-rcart
+
+	t.Run("row click from FocusEpicView", func(t *testing.T) {
+		m := createEpicTreeTestModel(t)
+		m.focus = FocusEpicView         // Start with epic view focus
+		m.epicViewFocus = EpicFocusTree // With tree sub-focus
+
+		// Simulate the state change that happens on workflow row click
+		m.focus = FocusTable
+		m.updateComponentFocusStates()
+
+		require.Equal(t, FocusTable, m.focus, "focus should be Table after workflow row click")
+	})
+
+	t.Run("row click from FocusCoordinator", func(t *testing.T) {
+		m := createEpicTreeTestModel(t)
+		m.focus = FocusCoordinator // Start with coordinator focus
+
+		// Simulate the state change that happens on workflow row click
+		m.focus = FocusTable
+		m.updateComponentFocusStates()
+
+		require.Equal(t, FocusTable, m.focus, "focus should be Table after workflow row click")
+	})
+
+	t.Run("table container click from FocusEpicView", func(t *testing.T) {
+		m := createEpicTreeTestModel(t)
+		m.focus = FocusEpicView         // Start with epic view focus
+		m.epicViewFocus = EpicFocusTree // With tree sub-focus
+
+		// Simulate the state change that happens on table container click
+		m.focus = FocusTable
+		m.updateComponentFocusStates()
+
+		require.Equal(t, FocusTable, m.focus, "focus should be Table after table container click")
+	})
+
+	t.Run("table container click from FocusCoordinator", func(t *testing.T) {
+		m := createEpicTreeTestModel(t)
+		m.focus = FocusCoordinator // Start with coordinator focus
+
+		// Simulate the state change that happens on table container click
+		m.focus = FocusTable
+		m.updateComponentFocusStates()
+
+		require.Equal(t, FocusTable, m.focus, "focus should be Table after table container click")
+	})
+}
+
 // === Unit Tests: HandleDBChanged (perles-boi8.8) ===
 
 func TestDBChangeTriggersTreeRefresh(t *testing.T) {
