@@ -841,12 +841,16 @@ func TestKanban_ClickOpensTreeView(t *testing.T) {
 	// Get zone to determine click position (with retry for zone manager stability)
 	zoneID := board.MakeZoneID(0, issueID)
 	var z *zone.ZoneInfo
-	for retries := 0; retries < 3; retries++ {
+	for retries := 0; retries < 10; retries++ {
 		z = zone.Get(zoneID)
 		if z != nil && !z.IsZero() {
 			break
 		}
+		// Re-render to ensure zones are registered
 		_ = m.View()
+		// Zone registration is asynchronous via a channel worker in bubblezone.
+		// A small delay allows the worker goroutine to process the channel.
+		time.Sleep(time.Millisecond)
 	}
 	require.NotNil(t, z, "zone should be registered after View()")
 	require.False(t, z.IsZero(), "zone should not be zero")
@@ -945,12 +949,16 @@ func TestKanban_ClickBehaviorMatchesEnterKey(t *testing.T) {
 
 	zoneID := board.MakeZoneID(0, issueID)
 	var z *zone.ZoneInfo
-	for retries := 0; retries < 3; retries++ {
+	for retries := 0; retries < 10; retries++ {
 		z = zone.Get(zoneID)
 		if z != nil && !z.IsZero() {
 			break
 		}
+		// Re-render to ensure zones are registered
 		_ = mClick.View()
+		// Zone registration is asynchronous via a channel worker in bubblezone.
+		// A small delay allows the worker goroutine to process the channel.
+		time.Sleep(time.Millisecond)
 	}
 	require.NotNil(t, z, "zone should be registered")
 
