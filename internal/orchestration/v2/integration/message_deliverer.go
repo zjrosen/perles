@@ -8,8 +8,10 @@ import (
 	"maps"
 	"time"
 
+	"github.com/zjrosen/perles/internal/log"
 	"github.com/zjrosen/perles/internal/orchestration/client"
 	"github.com/zjrosen/perles/internal/orchestration/v2/handler"
+	"github.com/zjrosen/perles/internal/orchestration/v2/repository"
 )
 
 // Compile-time check that ProcessSessionDeliverer implements MessageDeliverer.
@@ -41,22 +43,18 @@ type ProcessResumer interface {
 	ResumeProcess(processID string, proc client.HeadlessProcess) error
 }
 
-// RoleLookup returns the role for a given process ID.
-type RoleLookup func(processID string) (isCoordinator bool, found bool)
-
 // ProcessSessionDeliverer implements the MessageDeliverer interface
 // by resuming process sessions with the message content.
 // Works for both coordinator and worker processes.
 type ProcessSessionDeliverer struct {
-	sessionProvider      SessionProvider
-	coordinatorClient    client.HeadlessClient
-	workerClient         client.HeadlessClient
-	resumer              ProcessResumer
-	timeout              time.Duration
+	sessionProvider       SessionProvider
+	coordinatorClient     client.HeadlessClient
+	workerClient          client.HeadlessClient
+	resumer               ProcessResumer
+	timeout               time.Duration
 	coordinatorExtensions map[string]any
-	workerExtensions     map[string]any
-	beadsDir             string
-	roleLookup           RoleLookup
+	workerExtensions      map[string]any
+	beadsDir              string
 }
 
 // ProcessSessionDelivererOption configures ProcessSessionDeliverer.
@@ -85,7 +83,6 @@ func WithBeadsDir(beadsDir string) ProcessSessionDelivererOption {
 //   - resumer: ProcessResumer for resuming processes (typically ProcessRegistry)
 //   - coordinatorExtensions: provider-specific configuration for coordinator
 //   - workerExtensions: provider-specific configuration for workers
-//   - roleLookup: function to look up whether a process is coordinator
 //   - opts: optional configuration
 func NewProcessSessionDeliverer(
 	sessionProvider SessionProvider,
@@ -94,7 +91,6 @@ func NewProcessSessionDeliverer(
 	resumer ProcessResumer,
 	coordinatorExtensions map[string]any,
 	workerExtensions map[string]any,
-	roleLookup RoleLookup,
 	opts ...ProcessSessionDelivererOption,
 ) *ProcessSessionDeliverer {
 	// Defensive shallow copies to prevent accidental mutation races
@@ -111,7 +107,6 @@ func NewProcessSessionDeliverer(
 		timeout:               DefaultDeliveryTimeout,
 		coordinatorExtensions: coordExtCopy,
 		workerExtensions:      workerExtCopy,
-		roleLookup:            roleLookup,
 	}
 	for _, opt := range opts {
 		opt(d)
@@ -176,20 +171,12 @@ func (d *ProcessSessionDeliverer) Deliver(ctx context.Context, processID, conten
 	var aiClient client.HeadlessClient
 	var extensions map[string]any
 
-	if d.roleLookup != nil {
-		isCoordinator, found := d.roleLookup(processID)
-		if !found {
-			return fmt.Errorf("process %s not found in registry", processID)
-		}
-		if isCoordinator {
-			aiClient = d.coordinatorClient
-			extensions = d.coordinatorExtensions
-		} else {
-			aiClient = d.workerClient
-			extensions = d.workerExtensions
-		}
+	if processID == repository.CoordinatorID {
+		log.Error(log.CatOrch, "is coordinator process", "processId", processID, "isCoord", true)
+		aiClient = d.coordinatorClient
+		extensions = d.coordinatorExtensions
 	} else {
-		// Fallback: use worker client (backward compatibility)
+		log.Error(log.CatOrch, "is coordinator process", "processId", processID, "isCoord", false)
 		aiClient = d.workerClient
 		extensions = d.workerExtensions
 	}

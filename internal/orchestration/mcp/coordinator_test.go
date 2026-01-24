@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/zjrosen/perles/internal/mocks"
-	"github.com/zjrosen/perles/internal/orchestration/client/providers/claude"
 	"github.com/zjrosen/perles/internal/orchestration/events"
 	"github.com/zjrosen/perles/internal/orchestration/message"
 	"github.com/zjrosen/perles/internal/orchestration/v2/adapter"
@@ -43,7 +42,7 @@ type messageLogEntry struct {
 // newCoordinatorServerWithV2 creates a CoordinatorServer with a properly configured v2Adapter for testing.
 func newCoordinatorServerWithV2(t *testing.T, msgRepo repository.MessageRepository) *CoordinatorServer {
 	t.Helper()
-	cs := NewCoordinatorServer(claude.NewClient(), msgRepo, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(msgRepo, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 	proc := processor.NewCommandProcessor()
 	v2Adapter := adapter.NewV2Adapter(proc, adapter.WithMessageRepository(msgRepo))
 	cs.SetV2Adapter(v2Adapter)
@@ -70,7 +69,7 @@ type workerStateResponse struct {
 func TestNewCoordinatorServer_ProvidedBeadsExecutorIsUsed(t *testing.T) {
 	mockExec := mocks.NewMockIssueExecutor(t)
 
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mockExec)
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mockExec)
 
 	// beadsExecutor should be the mock we provided
 	require.NotNil(t, cs.beadsExecutor, "beadsExecutor should not be nil")
@@ -79,7 +78,7 @@ func TestNewCoordinatorServer_ProvidedBeadsExecutorIsUsed(t *testing.T) {
 
 // TestCoordinatorServer_RegistersAllTools verifies all coordinator tools are registered.
 func TestCoordinatorServer_RegistersAllTools(t *testing.T) {
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 
 	expectedTools := []string{
 		"spawn_worker",
@@ -115,7 +114,7 @@ func TestCoordinatorServer_RegistersAllTools(t *testing.T) {
 
 // TestCoordinatorServer_ToolSchemas verifies tool schemas are valid.
 func TestCoordinatorServer_ToolSchemas(t *testing.T) {
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 
 	for name, tool := range cs.tools {
 		t.Run(name, func(t *testing.T) {
@@ -132,7 +131,7 @@ func TestCoordinatorServer_ToolSchemas(t *testing.T) {
 // TestCoordinatorServer_SpawnWorker tests spawn_worker (takes no args).
 // Note: With v2 routing, spawn_worker routes to v2 adapter.
 func TestCoordinatorServer_SpawnWorker(t *testing.T) {
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 
 	// Inject v2 adapter for test
 	v2handler, cleanup := injectV2AdapterToCoordinator(t, cs)
@@ -155,7 +154,7 @@ func TestCoordinatorServer_SpawnWorker(t *testing.T) {
 
 // TestCoordinatorServer_AssignTaskValidation tests input validation for assign_task.
 func TestCoordinatorServer_AssignTaskValidation(t *testing.T) {
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 	handler := cs.handlers["assign_task"]
 
 	tests := []struct {
@@ -201,7 +200,7 @@ func TestCoordinatorServer_AssignTaskValidation(t *testing.T) {
 // TestCoordinatorServer_ReplaceWorkerValidation tests input validation for replace_worker.
 // Note: With v2 routing, validation happens in v2 adapter.
 func TestCoordinatorServer_ReplaceWorkerValidation(t *testing.T) {
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 
 	// Inject v2 adapter for test
 	_, cleanup := injectV2AdapterToCoordinator(t, cs)
@@ -239,7 +238,7 @@ func TestCoordinatorServer_ReplaceWorkerValidation(t *testing.T) {
 // TestCoordinatorServer_SendToWorkerValidation tests input validation for send_to_worker.
 // Note: With v2 routing, validation happens in v2 adapter.
 func TestCoordinatorServer_SendToWorkerValidation(t *testing.T) {
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 
 	// Inject v2 adapter for test
 	_, cleanup := injectV2AdapterToCoordinator(t, cs)
@@ -278,7 +277,7 @@ func TestCoordinatorServer_SendToWorkerValidation(t *testing.T) {
 // Note: With v2 routing, validation happens in v2 adapter.
 func TestCoordinatorServer_PostMessageValidation(t *testing.T) {
 	// No message issue available
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 
 	// Inject v2 adapter for test
 	_, cleanup := injectV2AdapterToCoordinator(t, cs)
@@ -315,7 +314,7 @@ func TestCoordinatorServer_PostMessageValidation(t *testing.T) {
 
 // TestCoordinatorServer_GetTaskStatusValidation tests input validation for get_task_status.
 func TestCoordinatorServer_GetTaskStatusValidation(t *testing.T) {
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 	handler := cs.handlers["get_task_status"]
 
 	tests := []struct {
@@ -345,7 +344,7 @@ func TestCoordinatorServer_GetTaskStatusValidation(t *testing.T) {
 
 // TestCoordinatorServer_MarkTaskCompleteValidation tests input validation for mark_task_complete.
 func TestCoordinatorServer_MarkTaskCompleteValidation(t *testing.T) {
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 	handler := cs.handlers["mark_task_complete"]
 
 	tests := []struct {
@@ -375,7 +374,7 @@ func TestCoordinatorServer_MarkTaskCompleteValidation(t *testing.T) {
 
 // TestCoordinatorServer_MarkTaskFailedValidation tests input validation for mark_task_failed.
 func TestCoordinatorServer_MarkTaskFailedValidation(t *testing.T) {
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 	handler := cs.handlers["mark_task_failed"]
 
 	tests := []struct {
@@ -415,7 +414,7 @@ func TestCoordinatorServer_MarkTaskFailedValidation(t *testing.T) {
 
 // TestCoordinatorServer_ReadMessageLogNoIssue tests read_message_log when no issue is available.
 func TestCoordinatorServer_ReadMessageLogNoIssue(t *testing.T) {
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 	handler := cs.handlers["read_message_log"]
 
 	_, err := handler(context.Background(), json.RawMessage(`{}`))
@@ -424,14 +423,14 @@ func TestCoordinatorServer_ReadMessageLogNoIssue(t *testing.T) {
 
 // TestCoordinatorServer_GetMessageRepository tests the message repository accessor.
 func TestCoordinatorServer_GetMessageRepository(t *testing.T) {
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 
 	require.Nil(t, cs.msgRepo, "msgRepo should return nil when no repository is set")
 }
 
 // TestCoordinatorServer_Instructions tests that instructions are set correctly.
 func TestCoordinatorServer_Instructions(t *testing.T) {
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 
 	require.NotEmpty(t, cs.instructions, "Instructions should be set")
 	require.Equal(t, "perles-orchestrator", cs.info.Name, "Server name mismatch")
@@ -484,7 +483,7 @@ func TestIsValidTaskID(t *testing.T) {
 // Note: Task ID format validation is now in v2 handler, not coordinator.
 // Security validation tests should be in v2 handler tests.
 func TestCoordinatorServer_AssignTaskRouting(t *testing.T) {
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 
 	// Inject v2 adapter for test
 	v2handler, cleanup := injectV2AdapterToCoordinator(t, cs)
@@ -514,7 +513,7 @@ func TestCoordinatorServer_AssignTaskRouting(t *testing.T) {
 // TestPrepareHandoff_PostsMessage verifies tool posts message with correct type and content.
 func TestPrepareHandoff_PostsMessage(t *testing.T) {
 	msgIssue := repository.NewMemoryMessageRepository()
-	cs := NewCoordinatorServer(claude.NewClient(), msgIssue, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(msgIssue, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 	handler := cs.handlers["prepare_handoff"]
 
 	summary := "Worker 1 is processing task perles-abc. Task is 50% complete."
@@ -540,7 +539,7 @@ func TestPrepareHandoff_PostsMessage(t *testing.T) {
 // TestPrepareHandoff_EmptySummary verifies error returned when summary is empty.
 func TestPrepareHandoff_EmptySummary(t *testing.T) {
 	msgIssue := repository.NewMemoryMessageRepository()
-	cs := NewCoordinatorServer(claude.NewClient(), msgIssue, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(msgIssue, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 	handler := cs.handlers["prepare_handoff"]
 
 	tests := []struct {
@@ -568,7 +567,7 @@ func TestPrepareHandoff_EmptySummary(t *testing.T) {
 // TestPrepareHandoff_NoMessageIssue verifies error when message issue is nil.
 func TestPrepareHandoff_NoMessageIssue(t *testing.T) {
 	// No message issue
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 	handler := cs.handlers["prepare_handoff"]
 
 	args := `{"summary": "Test summary"}`
@@ -737,7 +736,7 @@ func TestQueryWorkerState_ReturnsReadyWorkers(t *testing.T) {
 // TestAssignTaskReview_Routing verifies assign_task_review routes to v2 adapter.
 // Note: Self-review rejection is now a v2 handler responsibility, tested in v2 handler tests.
 func TestAssignTaskReview_Routing(t *testing.T) {
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 
 	// Inject v2 adapter for test
 	v2handler, cleanup := injectV2AdapterToCoordinator(t, cs)
@@ -767,7 +766,7 @@ func TestAssignTaskReview_Routing(t *testing.T) {
 // TestAssignTaskReview_ValidationRequired verifies required field validation.
 // Note: Business logic validation (task not awaiting review, self-review, invalid task_id) is now in v2 handler tests.
 func TestAssignTaskReview_ValidationRequired(t *testing.T) {
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 
 	// Inject v2 adapter for test
 	_, cleanup := injectV2AdapterToCoordinator(t, cs)
@@ -796,7 +795,7 @@ func TestAssignTaskReview_ValidationRequired(t *testing.T) {
 // TestAssignReviewFeedback_ValidationRequired verifies required field validation.
 // Note: Business logic tests (task not denied, etc.) are now in v2 handler tests.
 func TestAssignReviewFeedback_ValidationRequired(t *testing.T) {
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 
 	// Inject v2 adapter for test
 	_, cleanup := injectV2AdapterToCoordinator(t, cs)
@@ -825,7 +824,7 @@ func TestAssignReviewFeedback_ValidationRequired(t *testing.T) {
 // TestApproveCommit_ValidationRequired verifies required field validation.
 // Note: Business logic tests (task not approved, implementer mismatch) are now in v2 handler tests.
 func TestApproveCommit_ValidationRequired(t *testing.T) {
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 
 	// Inject v2 adapter for test
 	_, cleanup := injectV2AdapterToCoordinator(t, cs)
@@ -875,7 +874,7 @@ func containsInternal(s, substr string) bool {
 // TestReplaceWorker_Routing verifies replace_worker routes to v2 adapter.
 // Note: Business logic tests (cleans up assignments) are now in v2 handler tests.
 func TestReplaceWorker_Routing(t *testing.T) {
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 
 	// Inject v2 adapter for test
 	v2handler, cleanup := injectV2AdapterToCoordinator(t, cs)
@@ -939,7 +938,7 @@ func TestTaskAssignmentPrompt_AllSections(t *testing.T) {
 
 // TestCoordinatorServer_AssignTaskSchemaIncludesSummary verifies the tool schema includes summary parameter.
 func TestCoordinatorServer_AssignTaskSchemaIncludesSummary(t *testing.T) {
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 
 	tool, ok := cs.tools["assign_task"]
 	require.True(t, ok, "assign_task tool not registered")
@@ -1193,7 +1192,7 @@ func TestCommitApprovalPrompt_WithCommitMessage(t *testing.T) {
 
 // TestCoordinatorMCP_StopWorkerTool_Registered verifies stop_worker tool is registered.
 func TestCoordinatorMCP_StopWorkerTool_Registered(t *testing.T) {
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 
 	// Verify tool is registered
 	tool, ok := cs.tools["stop_worker"]
@@ -1220,7 +1219,7 @@ func TestCoordinatorMCP_StopWorkerTool_Registered(t *testing.T) {
 
 // TestCoordinatorMCP_StopWorkerTool_CallsAdapter verifies stop_worker calls adapter.HandleStopProcess.
 func TestCoordinatorMCP_StopWorkerTool_CallsAdapter(t *testing.T) {
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 
 	// Inject v2 adapter for test
 	v2handler, cleanup := injectV2AdapterToCoordinator(t, cs)
@@ -1252,7 +1251,7 @@ func TestCoordinatorMCP_StopWorkerTool_CallsAdapter(t *testing.T) {
 
 // TestCoordinatorMCP_StopWorkerTool_RequiresWorkerID verifies validation error without worker_id.
 func TestCoordinatorMCP_StopWorkerTool_RequiresWorkerID(t *testing.T) {
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 
 	// Inject v2 adapter for test (required even for validation tests)
 	_, cleanup := injectV2AdapterToCoordinator(t, cs)
@@ -1300,7 +1299,7 @@ func TestCoordinatorMCP_StopWorkerTool_RequiresWorkerID(t *testing.T) {
 
 // TestCoordinatorMCP_SpawnWorkerSchema_IncludesAgentType verifies spawn_worker schema has agent_type property.
 func TestCoordinatorMCP_SpawnWorkerSchema_IncludesAgentType(t *testing.T) {
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 
 	tool, ok := cs.tools["spawn_worker"]
 	require.True(t, ok, "spawn_worker tool not registered")
@@ -1340,7 +1339,7 @@ func TestCoordinatorMCP_SpawnWorkerSchema_IncludesAgentType(t *testing.T) {
 
 // TestSignalWorkflowComplete_ToolRegistered verifies signal_workflow_complete tool is registered with correct name.
 func TestSignalWorkflowComplete_ToolRegistered(t *testing.T) {
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 
 	// Verify tool is registered
 	tool, ok := cs.tools["signal_workflow_complete"]
@@ -1355,7 +1354,7 @@ func TestSignalWorkflowComplete_ToolRegistered(t *testing.T) {
 
 // TestSignalWorkflowComplete_SchemaHasRequiredFields verifies input schema has correct required/optional fields.
 func TestSignalWorkflowComplete_SchemaHasRequiredFields(t *testing.T) {
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 
 	tool, ok := cs.tools["signal_workflow_complete"]
 	require.True(t, ok, "signal_workflow_complete tool not registered")
@@ -1398,7 +1397,7 @@ func TestSignalWorkflowComplete_SchemaHasRequiredFields(t *testing.T) {
 
 // TestSignalWorkflowComplete_ValidCall verifies valid tool call succeeds and routes to v2 adapter.
 func TestSignalWorkflowComplete_ValidCall(t *testing.T) {
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 
 	// Inject v2 adapter for test
 	v2handler, cleanup := injectV2AdapterToCoordinator(t, cs)
@@ -1428,7 +1427,7 @@ func TestSignalWorkflowComplete_ValidCall(t *testing.T) {
 
 // TestSignalWorkflowComplete_MissingStatusReturnsError verifies missing required 'status' field returns error.
 func TestSignalWorkflowComplete_MissingStatusReturnsError(t *testing.T) {
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 
 	// Inject v2 adapter for test (validation happens in adapter)
 	_, cleanup := injectV2AdapterToCoordinator(t, cs)
@@ -1445,7 +1444,7 @@ func TestSignalWorkflowComplete_MissingStatusReturnsError(t *testing.T) {
 
 // TestSignalWorkflowComplete_MissingSummaryReturnsError verifies missing required 'summary' field returns error.
 func TestSignalWorkflowComplete_MissingSummaryReturnsError(t *testing.T) {
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 
 	// Inject v2 adapter for test (validation happens in adapter)
 	_, cleanup := injectV2AdapterToCoordinator(t, cs)
@@ -1462,7 +1461,7 @@ func TestSignalWorkflowComplete_MissingSummaryReturnsError(t *testing.T) {
 
 // TestSignalWorkflowComplete_InvalidStatusEnumReturnsError verifies invalid status enum value returns validation error.
 func TestSignalWorkflowComplete_InvalidStatusEnumReturnsError(t *testing.T) {
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 
 	// Inject v2 adapter for test (validation happens in adapter)
 	_, cleanup := injectV2AdapterToCoordinator(t, cs)
@@ -1480,7 +1479,7 @@ func TestSignalWorkflowComplete_InvalidStatusEnumReturnsError(t *testing.T) {
 // TestSignalWorkflowComplete_CoordinatorOnly verifies tool is NOT available to workers.
 func TestSignalWorkflowComplete_CoordinatorOnly(t *testing.T) {
 	// Create coordinator server and verify tool is registered
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 	_, coordHas := cs.tools["signal_workflow_complete"]
 	require.True(t, coordHas, "Coordinator should have signal_workflow_complete tool")
 
@@ -1492,7 +1491,7 @@ func TestSignalWorkflowComplete_CoordinatorOnly(t *testing.T) {
 
 // TestSignalWorkflowComplete_WithOptionalFields verifies optional fields are handled correctly.
 func TestSignalWorkflowComplete_WithOptionalFields(t *testing.T) {
-	cs := NewCoordinatorServer(claude.NewClient(), nil, "/tmp/test", 8765, nil, mocks.NewMockIssueExecutor(t))
+	cs := NewCoordinatorServer(nil, "/tmp/test", 8765, mocks.NewMockIssueExecutor(t))
 
 	// Inject v2 adapter for test
 	v2handler, cleanup := injectV2AdapterToCoordinator(t, cs)

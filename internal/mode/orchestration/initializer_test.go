@@ -29,8 +29,10 @@ func TestInitializer_CreatesSession(t *testing.T) {
 
 	// Create an initializer with minimal config
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 	})
 
 	// Start initialization (this will fail because we don't have a real AI client,
@@ -79,8 +81,10 @@ func TestInitializer_Retry_ResetsSession(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 	})
 
 	// Verify session is nil initially
@@ -93,8 +97,10 @@ func TestInitializer_Retry_ResetsSession(t *testing.T) {
 
 func TestNewInitializer(t *testing.T) {
 	cfg := InitializerConfig{
-		WorkDir:       "/test/dir",
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: "/test/dir",
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 	}
 
 	init := NewInitializer(cfg)
@@ -106,8 +112,10 @@ func TestNewInitializer(t *testing.T) {
 
 func TestNewInitializer_DefaultWorkers(t *testing.T) {
 	cfg := InitializerConfig{
-		WorkDir:       "/test/dir",
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: "/test/dir",
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 	}
 
 	init := NewInitializer(cfg)
@@ -122,12 +130,15 @@ func TestNewInitializerConfigFromModel_AllFields(t *testing.T) {
 	provider := client.NewAgentProvider(client.ClientClaude, map[string]any{
 		client.ExtClaudeModel: "opus",
 	})
+	providers := client.AgentProviders{
+		client.RoleCoordinator: provider,
+		client.RoleWorker:      provider,
+	}
 
 	builder := NewInitializerConfigFromModel(
 		"/work/dir",
 		"/beads/dir", // beadsDir
-		provider,     // coordinatorProvider
-		provider,     // workerProvider (same for this test)
+		providers,
 		"main",                              // worktreeBaseBranch
 		"custom-branch",                     // worktreeCustomBranch
 		config.TracingConfig{Enabled: true}, // tracingConfig
@@ -138,8 +149,8 @@ func TestNewInitializerConfigFromModel_AllFields(t *testing.T) {
 
 	require.Equal(t, "/work/dir", cfg.WorkDir)
 	require.Equal(t, "/beads/dir", cfg.BeadsDir)
-	require.Equal(t, client.ClientClaude, cfg.CoordinatorProvider.Type())
-	require.Equal(t, "opus", cfg.CoordinatorProvider.Extensions()[client.ExtClaudeModel])
+	require.Equal(t, client.ClientClaude, cfg.AgentProviders.Coordinator().Type())
+	require.Equal(t, "opus", cfg.AgentProviders.Coordinator().Extensions()[client.ExtClaudeModel])
 	require.Equal(t, "main", cfg.WorktreeBaseBranch)
 	require.Equal(t, "custom-branch", cfg.WorktreeBranchName)
 	require.True(t, cfg.TracingConfig.Enabled)
@@ -149,12 +160,14 @@ func TestNewInitializerConfigFromModel_AllFields(t *testing.T) {
 func TestNewInitializerConfigFromModel_EmptyExtensions(t *testing.T) {
 	// Test builder handles empty/nil extensions
 	provider := client.NewAgentProvider(client.ClientCodex, nil)
+	providers := client.AgentProviders{
+		client.RoleCoordinator: provider,
+	}
 
 	builder := NewInitializerConfigFromModel(
 		"/work/dir",
-		"", // beadsDir - empty
-		provider,                      // coordinatorProvider
-		provider,                      // workerProvider
+		"",                            // beadsDir - empty
+		providers,                     // agentProviders
 		"",                            // no worktree
 		"",                            // no custom branch
 		config.TracingConfig{},        // disabled
@@ -164,16 +177,19 @@ func TestNewInitializerConfigFromModel_EmptyExtensions(t *testing.T) {
 	cfg := builder.Build()
 
 	require.Equal(t, "/work/dir", cfg.WorkDir)
-	require.Equal(t, client.ClientCodex, cfg.CoordinatorProvider.Type())
-	require.Empty(t, cfg.CoordinatorProvider.Extensions()) // Empty map, not nil
+	require.Equal(t, client.ClientCodex, cfg.AgentProviders.Coordinator().Type())
+	require.Empty(t, cfg.AgentProviders.Coordinator().Extensions()) // Empty map, not nil
 	require.Empty(t, cfg.WorktreeBaseBranch)
 	require.Empty(t, cfg.WorktreeBranchName)
 }
 
 func TestInitializerConfigBuilder_WithTimeout(t *testing.T) {
 	provider := client.NewAgentProvider(client.ClientClaude, nil)
+	providers := client.AgentProviders{
+		client.RoleCoordinator: provider,
+	}
 	builder := NewInitializerConfigFromModel(
-		"/work/dir", "", provider, provider,
+		"/work/dir", "", providers,
 		"", "", config.TracingConfig{}, config.SessionStorageConfig{},
 	)
 
@@ -186,8 +202,11 @@ func TestInitializerConfigBuilder_WithTimeout(t *testing.T) {
 func TestWithTimeouts_SetsAllFields(t *testing.T) {
 	// Test that WithTimeouts sets all timeout configuration values
 	provider := client.NewAgentProvider(client.ClientClaude, nil)
+	providers := client.AgentProviders{
+		client.RoleCoordinator: provider,
+	}
 	builder := NewInitializerConfigFromModel(
-		"/work/dir", "", provider, provider,
+		"/work/dir", "", providers,
 		"", "", config.TracingConfig{}, config.SessionStorageConfig{},
 	)
 
@@ -210,8 +229,11 @@ func TestWithTimeout_BackwardsCompatible(t *testing.T) {
 	// Test that WithTimeout() continues to work for backwards compatibility
 	// and maps to Timeouts.CoordinatorStart
 	provider := client.NewAgentProvider(client.ClientClaude, nil)
+	providers := client.AgentProviders{
+		client.RoleCoordinator: provider,
+	}
 	builder := NewInitializerConfigFromModel(
-		"/work/dir", "", provider, provider,
+		"/work/dir", "", providers,
 		"", "", config.TracingConfig{}, config.SessionStorageConfig{},
 	)
 
@@ -230,8 +252,10 @@ func TestNewInitializer_DefaultTimeouts(t *testing.T) {
 	provider := client.NewAgentProvider(client.ClientClaude, nil)
 
 	cfg := InitializerConfig{
-		WorkDir:             "/work/dir",
-		CoordinatorProvider: provider,
+		WorkDir: "/work/dir",
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: provider,
+		},
 		// Timeouts is zero-value, so all fields should get defaults
 	}
 
@@ -251,8 +275,10 @@ func TestNewInitializer_PartialTimeoutsGetDefaults(t *testing.T) {
 	provider := client.NewAgentProvider(client.ClientClaude, nil)
 
 	cfg := InitializerConfig{
-		WorkDir:             "/work/dir",
-		CoordinatorProvider: provider,
+		WorkDir: "/work/dir",
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: provider,
+		},
 		Timeouts: config.TimeoutsConfig{
 			CoordinatorStart: 90 * time.Second, // Explicitly set
 			// Other fields are zero, should get defaults
@@ -282,9 +308,11 @@ func TestNewInitializer_CustomTimeoutsPreserved(t *testing.T) {
 	}
 
 	cfg := InitializerConfig{
-		WorkDir:             "/work/dir",
-		CoordinatorProvider: provider,
-		Timeouts:            customTimeouts,
+		WorkDir: "/work/dir",
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: provider,
+		},
+		Timeouts: customTimeouts,
 	}
 
 	init := NewInitializer(cfg)
@@ -299,9 +327,12 @@ func TestNewInitializer_CustomTimeoutsPreserved(t *testing.T) {
 func TestInitializerConfigBuilder_WithGitExecutor(t *testing.T) {
 	mockExecutor := &mocks.MockGitExecutor{}
 	provider := client.NewAgentProvider(client.ClientClaude, nil)
+	providers := client.AgentProviders{
+		client.RoleCoordinator: provider,
+	}
 
 	builder := NewInitializerConfigFromModel(
-		"/work/dir", "", provider, provider,
+		"/work/dir", "", providers,
 		"", "", config.TracingConfig{}, config.SessionStorageConfig{},
 	)
 
@@ -317,9 +348,12 @@ func TestInitializerConfigBuilder_WithRestoredSession(t *testing.T) {
 		},
 	}
 	provider := client.NewAgentProvider(client.ClientClaude, nil)
+	providers := client.AgentProviders{
+		client.RoleCoordinator: provider,
+	}
 
 	builder := NewInitializerConfigFromModel(
-		"/work/dir", "", provider, provider,
+		"/work/dir", "", providers,
 		"", "", config.TracingConfig{}, config.SessionStorageConfig{},
 	)
 
@@ -331,9 +365,12 @@ func TestInitializerConfigBuilder_WithRestoredSession(t *testing.T) {
 func TestInitializerConfigBuilder_WithSoundService(t *testing.T) {
 	mockSound := &mocks.MockSoundService{}
 	provider := client.NewAgentProvider(client.ClientClaude, nil)
+	providers := client.AgentProviders{
+		client.RoleCoordinator: provider,
+	}
 
 	builder := NewInitializerConfigFromModel(
-		"/work/dir", "", provider, provider,
+		"/work/dir", "", providers,
 		"", "", config.TracingConfig{}, config.SessionStorageConfig{},
 	)
 
@@ -355,12 +392,14 @@ func TestInitializerConfigBuilder_Chaining(t *testing.T) {
 	provider := client.NewAgentProvider(client.ClientGemini, map[string]any{
 		client.ExtGeminiModel: "gemini-2.5-flash",
 	})
+	providers := client.AgentProviders{
+		client.RoleCoordinator: provider,
+	}
 
 	cfg := NewInitializerConfigFromModel(
 		"/work/dir",
 		"", // beadsDir - empty
-		provider,
-		provider, // workerProvider
+		providers,
 		"develop",
 		"feature-branch",
 		config.TracingConfig{Enabled: true, Exporter: "file"},
@@ -374,8 +413,8 @@ func TestInitializerConfigBuilder_Chaining(t *testing.T) {
 
 	// Verify all static fields
 	require.Equal(t, "/work/dir", cfg.WorkDir)
-	require.Equal(t, client.ClientGemini, cfg.CoordinatorProvider.Type())
-	require.Equal(t, "gemini-2.5-flash", cfg.CoordinatorProvider.Extensions()[client.ExtGeminiModel])
+	require.Equal(t, client.ClientGemini, cfg.AgentProviders.Coordinator().Type())
+	require.Equal(t, "gemini-2.5-flash", cfg.AgentProviders.Coordinator().Extensions()[client.ExtGeminiModel])
 	require.Equal(t, "develop", cfg.WorktreeBaseBranch)
 	require.Equal(t, "feature-branch", cfg.WorktreeBranchName)
 	require.True(t, cfg.TracingConfig.Enabled)
@@ -394,9 +433,12 @@ func TestInitializerConfigBuilder_RuntimeFieldsDefaultToZero(t *testing.T) {
 	provider := client.NewAgentProvider(client.ClientClaude, map[string]any{
 		client.ExtClaudeModel: "opus",
 	})
+	providers := client.AgentProviders{
+		client.RoleCoordinator: provider,
+	}
 
 	cfg := NewInitializerConfigFromModel(
-		"/work/dir", "", provider, provider,
+		"/work/dir", "", providers,
 		"", "", config.TracingConfig{}, config.SessionStorageConfig{},
 	).Build()
 
@@ -408,24 +450,26 @@ func TestInitializerConfigBuilder_RuntimeFieldsDefaultToZero(t *testing.T) {
 
 	// Static fields should be set
 	require.Equal(t, "/work/dir", cfg.WorkDir)
-	require.Equal(t, client.ClientClaude, cfg.CoordinatorProvider.Type())
-	require.Equal(t, "opus", cfg.CoordinatorProvider.Extensions()[client.ExtClaudeModel])
+	require.Equal(t, client.ClientClaude, cfg.AgentProviders.Coordinator().Type())
+	require.Equal(t, "opus", cfg.AgentProviders.Coordinator().Extensions()[client.ExtClaudeModel])
 }
 
 func TestInitializerConfigBuilder_PartialModelState(t *testing.T) {
 	// Test builder with partial state (simulating edge case where only some fields are set)
-	// CoordinatorProvider must have a type, but can have extensions without a type being explicitly named
+	// AgentProviders.Coordinator() must have a type, but can have extensions without a type being explicitly named
 	provider := client.NewAgentProvider("", map[string]any{
 		client.ExtClaudeModel: "haiku",
 	})
+	providers := client.AgentProviders{
+		client.RoleCoordinator: provider,
+	}
 
 	cfg := NewInitializerConfigFromModel(
 		"", // empty workDir
 		"", // empty beadsDir
-		provider,
-		provider, // workerProvider
-		"main",   // worktree branch set
-		"",       // no custom branch
+		providers,
+		"main", // worktree branch set
+		"",     // no custom branch
 		config.TracingConfig{},
 		config.SessionStorageConfig{},
 	).
@@ -433,8 +477,8 @@ func TestInitializerConfigBuilder_PartialModelState(t *testing.T) {
 		Build()
 
 	require.Empty(t, cfg.WorkDir)
-	require.Empty(t, cfg.CoordinatorProvider.Type())
-	require.Equal(t, "haiku", cfg.CoordinatorProvider.Extensions()[client.ExtClaudeModel])
+	require.Empty(t, cfg.AgentProviders.Coordinator().Type())
+	require.Equal(t, "haiku", cfg.AgentProviders.Coordinator().Extensions()[client.ExtClaudeModel])
 	require.Equal(t, "main", cfg.WorktreeBaseBranch)
 	require.Equal(t, 30*time.Second, cfg.Timeouts.CoordinatorStart)
 }
@@ -447,26 +491,28 @@ func TestInitializerConfigBuilder_ProducesEquivalentConfig(t *testing.T) {
 	provider := client.NewAgentProvider(client.ClientClaude, map[string]any{
 		client.ExtClaudeModel: "opus",
 	})
+	providers := client.AgentProviders{
+		client.RoleCoordinator: provider,
+	}
 
 	// Build config using inline construction
 	inlineConfig := InitializerConfig{
-		WorkDir:             "/work/dir",
-		CoordinatorProvider: provider,
-		Timeouts:            config.TimeoutsConfig{CoordinatorStart: timeout},
-		WorktreeBaseBranch:  "main",
-		WorktreeBranchName:  "custom",
-		GitExecutor:         mockExecutor,
-		TracingConfig:       config.TracingConfig{Enabled: true},
-		SessionStorage:      config.SessionStorageConfig{BaseDir: "/tmp"},
-		SoundService:        mockSound,
+		WorkDir:            "/work/dir",
+		AgentProviders:     providers,
+		Timeouts:           config.TimeoutsConfig{CoordinatorStart: timeout},
+		WorktreeBaseBranch: "main",
+		WorktreeBranchName: "custom",
+		GitExecutor:        mockExecutor,
+		TracingConfig:      config.TracingConfig{Enabled: true},
+		SessionStorage:     config.SessionStorageConfig{BaseDir: "/tmp"},
+		SoundService:       mockSound,
 	}
 
 	// Build config using builder pattern
 	builderConfig := NewInitializerConfigFromModel(
 		"/work/dir",
 		"", // beadsDir - empty
-		provider,
-		provider, // workerProvider
+		providers,
 		"main",
 		"custom",
 		config.TracingConfig{Enabled: true},
@@ -479,9 +525,9 @@ func TestInitializerConfigBuilder_ProducesEquivalentConfig(t *testing.T) {
 
 	// Compare all fields
 	require.Equal(t, inlineConfig.WorkDir, builderConfig.WorkDir)
-	require.Equal(t, inlineConfig.CoordinatorProvider.Type(), builderConfig.CoordinatorProvider.Type())
+	require.Equal(t, inlineConfig.AgentProviders.Coordinator().Type(), builderConfig.AgentProviders.Coordinator().Type())
 	require.Equal(t, inlineConfig.Timeouts.CoordinatorStart, builderConfig.Timeouts.CoordinatorStart)
-	require.Equal(t, inlineConfig.CoordinatorProvider.Extensions(), builderConfig.CoordinatorProvider.Extensions())
+	require.Equal(t, inlineConfig.AgentProviders.Coordinator().Extensions(), builderConfig.AgentProviders.Coordinator().Extensions())
 	require.Equal(t, inlineConfig.WorktreeBaseBranch, builderConfig.WorktreeBaseBranch)
 	require.Equal(t, inlineConfig.WorktreeBranchName, builderConfig.WorktreeBranchName)
 	require.Same(t, inlineConfig.GitExecutor, builderConfig.GitExecutor)
@@ -492,8 +538,10 @@ func TestInitializerConfigBuilder_ProducesEquivalentConfig(t *testing.T) {
 
 func TestInitializerPhase(t *testing.T) {
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       "/test/dir",
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: "/test/dir",
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 	})
 
 	require.Equal(t, InitNotStarted, init.Phase())
@@ -538,9 +586,11 @@ func TestInitializer_Retry_ResetsV2Infrastructure(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
-		Timeouts:      config.TimeoutsConfig{CoordinatorStart: 100 * time.Millisecond}, // Short timeout for test
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
+		Timeouts: config.TimeoutsConfig{CoordinatorStart: 100 * time.Millisecond}, // Short timeout for test
 	})
 
 	// Verify v2 infrastructure is nil initially
@@ -559,8 +609,10 @@ func TestInitializer_Retry_ResetsV2Infrastructure(t *testing.T) {
 func TestInitializer_V2FieldsExist(t *testing.T) {
 	// Compile-time check that v2Infra field exists and getter works
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       "/test/dir",
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: "/test/dir",
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 	})
 
 	// GetV2Infra should exist and return nil before Start
@@ -570,8 +622,10 @@ func TestInitializer_V2FieldsExist(t *testing.T) {
 func TestInitializer_V2FieldsNilBeforeStart(t *testing.T) {
 	// Verify v2 infrastructure is nil before Start() is called
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       t.TempDir(),
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: t.TempDir(),
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 	})
 
 	// Before Start, v2Infra should be nil (accessed via getter)
@@ -581,8 +635,10 @@ func TestInitializer_V2FieldsNilBeforeStart(t *testing.T) {
 func TestInitializer_CleanupDrainsProcessor(t *testing.T) {
 	// This test verifies that cleanupResources() properly handles nil cmdProcessor
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       t.TempDir(),
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: t.TempDir(),
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 	})
 
 	// cleanupResources() should not panic when cmdProcessor is nil
@@ -598,8 +654,10 @@ func TestInitializer_CleanupDrainsProcessor(t *testing.T) {
 func TestInitializer_GetV2EventBus_NilBeforeStart(t *testing.T) {
 	// Verify GetV2EventBus() returns nil before Start() is called
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       t.TempDir(),
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: t.TempDir(),
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 	})
 
 	// Before Start, GetV2EventBus should return nil
@@ -609,8 +667,10 @@ func TestInitializer_GetV2EventBus_NilBeforeStart(t *testing.T) {
 func TestInitializer_GetV2EventBus_ThreadSafe(t *testing.T) {
 	// Verify GetV2EventBus() uses read lock for thread safety
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       t.TempDir(),
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: t.TempDir(),
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 	})
 
 	// Concurrent calls should not race (verified with -race flag)
@@ -631,8 +691,10 @@ func TestInitializer_GetV2EventBus_ThreadSafe(t *testing.T) {
 func TestInitializer_V2EventBusFieldExists(t *testing.T) {
 	// Compile-time check that GetV2EventBus getter exists
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       t.TempDir(),
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: t.TempDir(),
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 	})
 
 	// GetV2EventBus should exist and return nil before Start
@@ -642,9 +704,11 @@ func TestInitializer_V2EventBusFieldExists(t *testing.T) {
 func TestInitializer_Retry_ResetsV2EventBus(t *testing.T) {
 	// Verify v2EventBus is reset when Retry() is called (via v2Infra reset)
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       t.TempDir(),
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
-		Timeouts:      config.TimeoutsConfig{CoordinatorStart: 100 * time.Millisecond},
+		WorkDir: t.TempDir(),
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
+		Timeouts: config.TimeoutsConfig{CoordinatorStart: 100 * time.Millisecond},
 	})
 
 	// v2EventBus should be nil initially (via getter which checks v2Infra)
@@ -675,8 +739,10 @@ func TestInitializer_ProcessRepoFieldExists(t *testing.T) {
 func TestInitializer_ProcessRepoNilBeforeStart(t *testing.T) {
 	// Verify processRepo is nil before Start() is called (via getter)
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       t.TempDir(),
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: t.TempDir(),
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 	})
 
 	// Before Start, processRepo should be nil (accessed via getter which checks v2Infra)
@@ -686,9 +752,11 @@ func TestInitializer_ProcessRepoNilBeforeStart(t *testing.T) {
 func TestInitializer_Retry_ResetsProcessRepo(t *testing.T) {
 	// Verify processRepo is reset when Retry() is called (via v2Infra reset)
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       t.TempDir(),
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
-		Timeouts:      config.TimeoutsConfig{CoordinatorStart: 100 * time.Millisecond},
+		WorkDir: t.TempDir(),
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
+		Timeouts: config.TimeoutsConfig{CoordinatorStart: 100 * time.Millisecond},
 	})
 
 	// processRepo should be nil initially (via getter which checks v2Infra)
@@ -716,8 +784,10 @@ func TestInitializer_CreateSession_Success(t *testing.T) {
 	sessionsBaseDir := t.TempDir() // Centralized sessions directory
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 		SessionStorage: config.SessionStorageConfig{
 			BaseDir:         sessionsBaseDir,
 			ApplicationName: "test-app",
@@ -766,8 +836,10 @@ func TestInitializer_CreateSession_ReturnsErrorOnFailure(t *testing.T) {
 	require.NoError(t, err, "setup: should create blocking file")
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 		SessionStorage: config.SessionStorageConfig{
 			BaseDir:         sessionsBaseDir,
 			ApplicationName: "test-app", // This will try to create under the blocking file
@@ -796,8 +868,10 @@ func TestInitializer_CreateSession_UniqueIDs(t *testing.T) {
 	sessionsBaseDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 		SessionStorage: config.SessionStorageConfig{
 			BaseDir:         sessionsBaseDir,
 			ApplicationName: "test-app",
@@ -838,8 +912,10 @@ func TestInitializer_CreateSession_DirectoryStructure(t *testing.T) {
 	sessionsBaseDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 		SessionStorage: config.SessionStorageConfig{
 			BaseDir:         sessionsBaseDir,
 			ApplicationName: "test-app",
@@ -966,8 +1042,10 @@ func TestInitializer_CreateMCPListener_Success(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 	})
 
 	// Call createMCPListener directly
@@ -1000,8 +1078,10 @@ func TestInitializer_CreateMCPListener_BindsToLocalhost(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 	})
 
 	result, err := init.createMCPListener()
@@ -1019,8 +1099,10 @@ func TestInitializer_CreateMCPListener_UniquePortsOnMultipleCalls(t *testing.T) 
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 	})
 
 	// Create multiple listeners
@@ -1041,8 +1123,10 @@ func TestInitializer_CreateMCPListener_ListenerAcceptsConnections(t *testing.T) 
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 	})
 
 	result, err := init.createMCPListener()
@@ -1064,8 +1148,10 @@ func TestInitializer_CreateMCPServer_Success(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 		SessionStorage: config.SessionStorageConfig{
 			BaseDir:         t.TempDir(),
 			ApplicationName: "test-app",
@@ -1089,13 +1175,12 @@ func TestInitializer_CreateMCPServer_Success(t *testing.T) {
 
 	// Call createMCPServer (v2Adapter can be nil for this test since we're just testing structure)
 	result, err := init.createMCPServer(MCPServerConfig{
-		Listener:      listenerResult.Listener,
-		Port:          listenerResult.Port,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
-		MsgRepo:       msgRepo,
-		Session:       sess,
-		V2Adapter:     nil, // Worker cache handles nil v2Adapter
-		WorkDir:       workDir,
+		Listener:  listenerResult.Listener,
+		Port:      listenerResult.Port,
+		MsgRepo:   msgRepo,
+		Session:   sess,
+		V2Adapter: nil, // Worker cache handles nil v2Adapter
+		WorkDir:   workDir,
 	})
 
 	// Verify no error
@@ -1115,8 +1200,10 @@ func TestInitializer_CreateMCPServer_ConfiguresHTTPRoutes(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 		SessionStorage: config.SessionStorageConfig{
 			BaseDir:         t.TempDir(),
 			ApplicationName: "test-app",
@@ -1135,13 +1222,12 @@ func TestInitializer_CreateMCPServer_ConfiguresHTTPRoutes(t *testing.T) {
 	msgRepo := repository.NewMemoryMessageRepository()
 
 	result, err := init.createMCPServer(MCPServerConfig{
-		Listener:      listenerResult.Listener,
-		Port:          listenerResult.Port,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
-		MsgRepo:       msgRepo,
-		Session:       sess,
-		V2Adapter:     nil,
-		WorkDir:       workDir,
+		Listener:  listenerResult.Listener,
+		Port:      listenerResult.Port,
+		MsgRepo:   msgRepo,
+		Session:   sess,
+		V2Adapter: nil,
+		WorkDir:   workDir,
 	})
 
 	// Verify the HTTP server has a handler
@@ -1176,8 +1262,10 @@ func TestInitializer_CreateMCPServer_ReadHeaderTimeout(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 		SessionStorage: config.SessionStorageConfig{
 			BaseDir:         t.TempDir(),
 			ApplicationName: "test-app",
@@ -1196,13 +1284,12 @@ func TestInitializer_CreateMCPServer_ReadHeaderTimeout(t *testing.T) {
 	msgRepo := repository.NewMemoryMessageRepository()
 
 	result, err := init.createMCPServer(MCPServerConfig{
-		Listener:      listenerResult.Listener,
-		Port:          listenerResult.Port,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
-		MsgRepo:       msgRepo,
-		Session:       sess,
-		V2Adapter:     nil,
-		WorkDir:       workDir,
+		Listener:  listenerResult.Listener,
+		Port:      listenerResult.Port,
+		MsgRepo:   msgRepo,
+		Session:   sess,
+		V2Adapter: nil,
+		WorkDir:   workDir,
 	})
 
 	// Verify ReadHeaderTimeout is set (should be 10 seconds)
@@ -1249,23 +1336,23 @@ func TestInitializer_MCPServerConfig_ContainsAllFields(t *testing.T) {
 	// These should compile - verifies the struct fields exist
 	_ = cfg.Listener
 	_ = cfg.Port
-	_ = cfg.CoordinatorProvider
 	_ = cfg.MsgRepo
 	_ = cfg.Session
 	_ = cfg.V2Adapter
 	_ = cfg.TurnEnforcer
 	_ = cfg.WorkDir
+	_ = cfg.BeadsDir
 	_ = cfg.Tracer
 
 	// Verify they are nil/zero by default
 	require.Nil(t, cfg.Listener)
 	require.Equal(t, 0, cfg.Port)
-	require.Nil(t, cfg.CoordinatorProvider)
 	require.Nil(t, cfg.MsgRepo)
 	require.Nil(t, cfg.Session)
 	require.Nil(t, cfg.V2Adapter)
 	require.Nil(t, cfg.TurnEnforcer)
 	require.Empty(t, cfg.WorkDir)
+	require.Empty(t, cfg.BeadsDir)
 	require.Nil(t, cfg.Tracer)
 }
 
@@ -1274,20 +1361,21 @@ func TestInitializer_CreateMCPServer_RequiresListener(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 	})
 
 	msgRepo := repository.NewMemoryMessageRepository()
 
 	result, err := init.createMCPServer(MCPServerConfig{
-		Listener:      nil, // Missing listener
-		Port:          8080,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
-		MsgRepo:       msgRepo,
-		Session:       nil,
-		V2Adapter:     nil,
-		WorkDir:       workDir,
+		Listener:  nil, // Missing listener
+		Port:      8080,
+		MsgRepo:   msgRepo,
+		Session:   nil,
+		V2Adapter: nil,
+		WorkDir:   workDir,
 	})
 
 	require.Error(t, err, "createMCPServer should return error when listener is nil")
@@ -1295,43 +1383,15 @@ func TestInitializer_CreateMCPServer_RequiresListener(t *testing.T) {
 	require.Contains(t, err.Error(), "listener is required")
 }
 
-func TestInitializer_CreateMCPServer_RequiresCoordinatorProvider(t *testing.T) {
-	// Verify createMCPServer() returns error when CoordinatorProvider is nil
-	workDir := t.TempDir()
-
-	init := NewInitializer(InitializerConfig{
-		WorkDir:             workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
-	})
-
-	listenerResult, err := init.createMCPListener()
-	require.NoError(t, err)
-	defer listenerResult.Listener.Close()
-
-	msgRepo := repository.NewMemoryMessageRepository()
-
-	result, err := init.createMCPServer(MCPServerConfig{
-		Listener:            listenerResult.Listener,
-		Port:                listenerResult.Port,
-		CoordinatorProvider: nil, // Missing CoordinatorProvider
-		MsgRepo:             msgRepo,
-		Session:             nil,
-		V2Adapter:           nil,
-		WorkDir:             workDir,
-	})
-
-	require.Error(t, err, "createMCPServer should return error when CoordinatorProvider is nil")
-	require.Nil(t, result, "result should be nil on error")
-	require.Contains(t, err.Error(), "CoordinatorProvider is required")
-}
-
 func TestInitializer_CreateMCPServer_RequiresMsgRepo(t *testing.T) {
 	// Verify createMCPServer() returns error when MsgRepo is nil
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 	})
 
 	listenerResult, err := init.createMCPListener()
@@ -1339,13 +1399,12 @@ func TestInitializer_CreateMCPServer_RequiresMsgRepo(t *testing.T) {
 	defer listenerResult.Listener.Close()
 
 	result, err := init.createMCPServer(MCPServerConfig{
-		Listener:      listenerResult.Listener,
-		Port:          listenerResult.Port,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
-		MsgRepo:       nil, // Missing MsgRepo
-		Session:       nil,
-		V2Adapter:     nil,
-		WorkDir:       workDir,
+		Listener:  listenerResult.Listener,
+		Port:      listenerResult.Port,
+		MsgRepo:   nil, // Missing MsgRepo
+		Session:   nil,
+		V2Adapter: nil,
+		WorkDir:   workDir,
 	})
 
 	require.Error(t, err, "createMCPServer should return error when MsgRepo is nil")
@@ -1358,8 +1417,10 @@ func TestInitializer_SpinnerData_ReturnsPhase(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 	})
 
 	// Get spinner data - should return InitNotStarted
@@ -1384,9 +1445,11 @@ func TestRun_CancelsOnContextCancellation(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
-		Timeouts:      config.TimeoutsConfig{CoordinatorStart: 10 * time.Second}, // Long timeout
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
+		Timeouts: config.TimeoutsConfig{CoordinatorStart: 10 * time.Second}, // Long timeout
 	})
 
 	// Verify we can cancel the initializer
@@ -1418,8 +1481,10 @@ func TestCleanupResources_Idempotent(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 	})
 
 	// First call should not panic
@@ -1443,8 +1508,10 @@ func TestCleanupResources_ClearsFields(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 	})
 
 	// Manually set fields to simulate initialized state
@@ -1467,8 +1534,10 @@ func TestCancel_StopsContextAndCleansUp(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 	})
 
 	// Manually set up context like Start() does
@@ -1503,8 +1572,10 @@ func TestCancel_DoubleCallDoesNotPanic(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 	})
 
 	// Manually set up context like Start() does
@@ -1533,8 +1604,10 @@ func TestCancel_Idempotent_CancelFuncCalledOnce(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 	})
 
 	// Set up context
@@ -1556,8 +1629,10 @@ func TestCleanupResources_WithPartialInitialization(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 	})
 
 	// Simulate partial initialization - only some fields set
@@ -1583,8 +1658,10 @@ func TestCleanupResources_WithNoInitialization(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 	})
 
 	// All fields are nil by default - cleanup should handle this gracefully
@@ -1598,8 +1675,10 @@ func TestCleanupResources_ThreadSafe(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 	})
 
 	// Simulate partial initialization
@@ -1689,8 +1768,10 @@ func TestRetry_CallsCancel(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 	})
 
 	// Manually set up context like Start() does
@@ -2253,8 +2334,10 @@ func TestInitializer_WithoutRestoredSession_UsesNew(t *testing.T) {
 	sessionsBaseDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 		SessionStorage: config.SessionStorageConfig{
 			BaseDir:         sessionsBaseDir,
 			ApplicationName: "test-app",
@@ -2318,8 +2401,10 @@ func TestInitializer_WithRestoredSession_UsesReopen(t *testing.T) {
 	}
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 		SessionStorage: config.SessionStorageConfig{
 			BaseDir:         sessionsBaseDir,
 			ApplicationName: "test-app",
@@ -2459,8 +2544,10 @@ func TestInitializer_RestoredSessionWithNoWorkers(t *testing.T) {
 	}
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 		SessionStorage: config.SessionStorageConfig{
 			BaseDir:         sessionsBaseDir,
 			ApplicationName: "test-app",
@@ -2495,8 +2582,10 @@ func TestInitializer_ReopenSession_PropagatesError(t *testing.T) {
 	}
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 		SessionStorage: config.SessionStorageConfig{
 			BaseDir:         t.TempDir(),
 			ApplicationName: "test-app",
@@ -2543,8 +2632,10 @@ func TestInitializer_ReopenSession_SetsSessionIDAndDir(t *testing.T) {
 	}
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 		SessionStorage: config.SessionStorageConfig{
 			BaseDir:         sessionsBaseDir,
 			ApplicationName: "test-app",
@@ -2589,10 +2680,12 @@ func TestInitializer_WorktreeTimeout(t *testing.T) {
 		Return(context.DeadlineExceeded)
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:             workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
-		WorktreeBaseBranch:  "main",
-		GitExecutor:         mockGit,
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
+		WorktreeBaseBranch: "main",
+		GitExecutor:        mockGit,
 		Timeouts: config.TimeoutsConfig{
 			WorktreeCreation: 100 * time.Millisecond, // Short timeout for test
 			CoordinatorStart: 60 * time.Second,
@@ -2654,8 +2747,10 @@ func TestInitializer_CoordinatorTimeout(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 		Timeouts: config.TimeoutsConfig{
 			WorktreeCreation: 30 * time.Second,
 			CoordinatorStart: 200 * time.Millisecond,
@@ -2697,8 +2792,10 @@ func TestInitializer_WorkspaceSetupTimeout(t *testing.T) {
 	workDir := t.TempDir()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:       workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
 		Timeouts: config.TimeoutsConfig{
 			WorktreeCreation: 30 * time.Second,
 			CoordinatorStart: 60 * time.Second,
@@ -2753,10 +2850,12 @@ func TestInitializer_MaxTotalCutoff(t *testing.T) {
 		Return(context.DeadlineExceeded)
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:             workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
-		WorktreeBaseBranch:  "main",
-		GitExecutor:         mockGit,
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
+		WorktreeBaseBranch: "main",
+		GitExecutor:        mockGit,
 		Timeouts: config.TimeoutsConfig{
 			WorktreeCreation: 5 * time.Second, // Long timeout - won't fire
 			CoordinatorStart: 60 * time.Second,
@@ -2834,10 +2933,12 @@ func TestInitializer_AllPhasesSucceed(t *testing.T) {
 	mockGit.EXPECT().GetRemoteURL("origin").Return("https://github.com/test/repo.git", nil).Maybe()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:             workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
-		WorktreeBaseBranch:  "main",
-		GitExecutor:         mockGit,
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
+		WorktreeBaseBranch: "main",
+		GitExecutor:        mockGit,
 		// NOTE: No RestoredSession - this will fail at coordinator spawn, but
 		// we're testing that worktree and workspace phases work correctly with timeouts
 		Timeouts: config.TimeoutsConfig{
@@ -2913,10 +3014,12 @@ func TestInitializer_NoGoroutineLeakOnSuccess(t *testing.T) {
 	mockGit.EXPECT().GetRemoteURL("origin").Return("https://github.com/test/repo.git", nil).Maybe()
 
 	init := NewInitializer(InitializerConfig{
-		WorkDir:             workDir,
-		CoordinatorProvider: client.NewAgentProvider(client.ClientClaude, nil),
-		WorktreeBaseBranch:  "main",
-		GitExecutor:         mockGit,
+		WorkDir: workDir,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: client.NewAgentProvider(client.ClientClaude, nil),
+		},
+		WorktreeBaseBranch: "main",
+		GitExecutor:        mockGit,
 		// Will timeout at coordinator phase, which is expected
 		Timeouts: config.TimeoutsConfig{
 			WorktreeCreation: 30 * time.Second,

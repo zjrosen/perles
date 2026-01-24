@@ -4,6 +4,37 @@ import (
 	"sync"
 )
 
+// AgentProviderRole identifies the role for an AgentProvider.
+type AgentProviderRole string
+
+const (
+	// RoleCoordinator is the coordinator role.
+	RoleCoordinator = AgentProviderRole("COORDINATOR")
+	// RoleWorker is the worker role.
+	RoleWorker = AgentProviderRole("WORKER")
+)
+
+// AgentProviders maps roles to their providers.
+// This is the preferred way to pass agent configuration through the orchestration stack.
+type AgentProviders map[AgentProviderRole]AgentProvider
+
+// Coordinator returns the coordinator provider.
+// Panics if not set.
+func (p AgentProviders) Coordinator() AgentProvider {
+	if provider, ok := p[RoleCoordinator]; ok {
+		return provider
+	}
+	panic("AgentProviders: coordinator provider not set")
+}
+
+// Worker returns the worker provider, falling back to coordinator if not set.
+func (p AgentProviders) Worker() AgentProvider {
+	if provider, ok := p[RoleWorker]; ok {
+		return provider
+	}
+	return p.Coordinator()
+}
+
 // AgentProvider creates and configures AI agent processes.
 // It combines the client factory with provider-specific configuration,
 // providing a single object that can be passed through the orchestration

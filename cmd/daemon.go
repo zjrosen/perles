@@ -204,8 +204,6 @@ func createDaemonControlPlane(cfg *config.Config, _ string) (controlplane.Contro
 	registry := controlplane.NewInMemoryRegistry()
 	eventBus := controlplane.NewCrossWorkflowEventBus()
 
-	agentProvider := orchConfig.AgentProvider()
-
 	sessionFactory := session.NewFactory(session.FactoryConfig{
 		BaseDir: orchConfig.SessionStorage.BaseDir,
 		// Note: GitExecutor not available in daemon mode without git context
@@ -214,7 +212,7 @@ func createDaemonControlPlane(cfg *config.Config, _ string) (controlplane.Contro
 	soundService := sound.NewSystemSoundService(cfg.Sound.Events)
 
 	supervisor, err := controlplane.NewSupervisor(controlplane.SupervisorConfig{
-		AgentProvider:    agentProvider,
+		AgentProviders:   orchConfig.AgentProviders(),
 		WorkflowRegistry: workflowRegistry,
 		SessionFactory:   sessionFactory,
 		SoundService:     soundService,

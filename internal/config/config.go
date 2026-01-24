@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -197,26 +198,6 @@ type OpenCodeClientConfig struct {
 	Model string `mapstructure:"model"` // anthropic/claude-opus-4-5 (default)
 }
 
-// AgentProvider returns an AgentProvider configured from user settings.
-// This is the preferred way to get an AI client for orchestration or chat.
-// Deprecated: Use CoordinatorProvider() and WorkerProvider() for split client configuration.
-func (o OrchestrationConfig) AgentProvider() client.AgentProvider {
-	clientType := client.ClientType(o.Client)
-	if clientType == "" {
-		clientType = client.ClientClaude
-	}
-	extensions := client.NewFromClientConfigs(clientType, client.ClientConfigs{
-		ClaudeModel:   o.Claude.Model,
-		ClaudeEnv:     o.Claude.Env,
-		CodexModel:    o.Codex.Model,
-		AmpModel:      o.Amp.Model,
-		AmpMode:       o.Amp.Mode,
-		GeminiModel:   o.Gemini.Model,
-		OpenCodeModel: o.OpenCode.Model,
-	})
-	return client.NewAgentProvider(clientType, extensions)
-}
-
 // CoordinatorClientType returns the client type for the coordinator.
 // Resolution priority: coordinator_client > client > "claude"
 func (o OrchestrationConfig) CoordinatorClientType() client.ClientType {
@@ -241,18 +222,16 @@ func (o OrchestrationConfig) WorkerClientType() client.ClientType {
 	return client.ClientClaude
 }
 
-// CoordinatorProvider returns an AgentProvider for the coordinator.
-func (o OrchestrationConfig) CoordinatorProvider() client.AgentProvider {
-	clientType := o.CoordinatorClientType()
-	extensions := o.extensionsForClient(clientType, false) // isWorker=false
-	return client.NewAgentProvider(clientType, extensions)
-}
+// AgentProviders returns the AgentProviders map for coordinator and worker roles.
+// This is the preferred way to get AI clients for orchestration.
+func (o OrchestrationConfig) AgentProviders() client.AgentProviders {
+	coordType := o.CoordinatorClientType()
+	workerType := o.WorkerClientType()
 
-// WorkerProvider returns an AgentProvider for workers.
-func (o OrchestrationConfig) WorkerProvider() client.AgentProvider {
-	clientType := o.WorkerClientType()
-	extensions := o.extensionsForClient(clientType, true) // isWorker=true
-	return client.NewAgentProvider(clientType, extensions)
+	return client.AgentProviders{
+		client.RoleCoordinator: client.NewAgentProvider(coordType, o.extensionsForClient(coordType, false)),
+		client.RoleWorker:      client.NewAgentProvider(workerType, o.extensionsForClient(workerType, true)),
+	}
 }
 
 // extensionsForClient builds extensions for the given client type.
@@ -468,10 +447,28 @@ func ValidateViews(views []ViewConfig) error {
 
 // ValidateOrchestration checks orchestration configuration for errors.
 // Returns nil if the configuration is valid (empty values use defaults).
+// allowedClients is the list of valid AI client types for orchestration.
+var allowedClients = []string{"claude", "amp", "codex", "gemini", "opencode"}
+
+// isAllowedClient checks if the given client type is in the allowed list.
+func isAllowedClient(c string) bool {
+	return slices.Contains(allowedClients, c)
+}
+
 func ValidateOrchestration(orch OrchestrationConfig) error {
-	// Validate client type
-	if orch.Client != "" && orch.Client != "claude" && orch.Client != "amp" && orch.Client != "codex" && orch.Client != "gemini" && orch.Client != "opencode" {
-		return fmt.Errorf("orchestration.client must be \"claude\", \"amp\", \"codex\", \"gemini\", or \"opencode\", got %q", orch.Client)
+	// Validate client type (legacy field)
+	if orch.Client != "" && !isAllowedClient(orch.Client) {
+		return fmt.Errorf("orchestration.client must be one of %v, got %q", allowedClients, orch.Client)
+	}
+
+	// Validate coordinator_client
+	if orch.CoordinatorClient != "" && !isAllowedClient(orch.CoordinatorClient) {
+		return fmt.Errorf("orchestration.coordinator_client must be one of %v, got %q", allowedClients, orch.CoordinatorClient)
+	}
+
+	// Validate worker_client
+	if orch.WorkerClient != "" && !isAllowedClient(orch.WorkerClient) {
+		return fmt.Errorf("orchestration.worker_client must be one of %v, got %q", allowedClients, orch.WorkerClient)
 	}
 
 	// Validate Amp mode
@@ -711,7 +708,8 @@ func Defaults() Config {
 		},
 		Views: DefaultViews(),
 		Orchestration: OrchestrationConfig{
-			Client: "claude",
+			CoordinatorClient: "claude",
+			WorkerClient:      "claude",
 			Claude: ClaudeClientConfig{
 				Model: "claude-opus-4-5",
 			},
@@ -841,8 +839,11 @@ views:
 # Orchestration mode settings
 # Configure which AI client to use when entering orchestration mode
 orchestration:
-  # AI client provider: "claude" (default), "amp", "codex", "gemini", or "opencode"
-  client: claude
+  # AI client provider for the coordinator: "claude" (default), "amp", "codex", "opencode", or "opencode"
+  coordinator_client: claude
+
+  # AI client provider for the workers: "claude" (default), "amp", "codex", "opencode", or "opencode"
+  worker_client: claude
 
   # Skip worktree prompt and always run in current directory (default: false)
   # disable_worktrees: true

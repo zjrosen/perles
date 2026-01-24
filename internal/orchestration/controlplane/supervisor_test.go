@@ -15,6 +15,7 @@ import (
 	appgit "github.com/zjrosen/perles/internal/git/application"
 	domaingit "github.com/zjrosen/perles/internal/git/domain"
 	"github.com/zjrosen/perles/internal/mocks"
+	"github.com/zjrosen/perles/internal/orchestration/client"
 	"github.com/zjrosen/perles/internal/orchestration/session"
 	v2 "github.com/zjrosen/perles/internal/orchestration/v2"
 	"github.com/zjrosen/perles/internal/orchestration/v2/adapter"
@@ -71,7 +72,9 @@ func newTestSupervisorConfig(t *testing.T) (SupervisorConfig, *mocks.MockAgentPr
 	sessionFactory := session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()})
 
 	return SupervisorConfig{
-		AgentProvider:         mockProvider,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: mockProvider,
+		},
 		InfrastructureFactory: mockFactory,
 		ListenerFactory:       &mockListenerFactory{},
 		SessionFactory:        sessionFactory,
@@ -182,21 +185,23 @@ func TestNewSupervisor_ValidConfig(t *testing.T) {
 func TestNewSupervisor_MissingAgentProvider(t *testing.T) {
 	cfg := SupervisorConfig{
 		SessionFactory: session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()}),
-		// AgentProvider, CoordinatorProvider, and WorkerProvider are all nil
+		// AgentProviders is nil
 	}
 
 	supervisor, err := NewSupervisor(cfg)
 
 	require.Error(t, err)
 	require.Nil(t, supervisor)
-	require.Contains(t, err.Error(), "AgentProvider or CoordinatorProvider is required")
+	require.Contains(t, err.Error(), "AgentProviders is required")
 }
 
 func TestNewSupervisor_DefaultInfrastructureFactory(t *testing.T) {
 	mockProvider := mocks.NewMockAgentProvider(t)
 
 	cfg := SupervisorConfig{
-		AgentProvider:  mockProvider,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: mockProvider,
+		},
 		SessionFactory: session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()}),
 		// InfrastructureFactory is nil - should use default
 	}
@@ -530,7 +535,9 @@ func TestSupervisor_Config_AcceptsGitExecutorFactory(t *testing.T) {
 	}
 
 	cfg := SupervisorConfig{
-		AgentProvider:      mockProvider,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: mockProvider,
+		},
 		SessionFactory:     session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()}),
 		GitExecutorFactory: gitFactory,
 	}
@@ -554,7 +561,9 @@ func TestSupervisor_Config_DefaultWorktreeTimeout(t *testing.T) {
 
 	// Create config without specifying WorktreeTimeout
 	cfg := SupervisorConfig{
-		AgentProvider:  mockProvider,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: mockProvider,
+		},
 		SessionFactory: session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()}),
 	}
 
@@ -574,7 +583,9 @@ func TestSupervisor_Config_CustomWorktreeTimeout(t *testing.T) {
 
 	customTimeout := 60 * time.Second
 	cfg := SupervisorConfig{
-		AgentProvider:   mockProvider,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: mockProvider,
+		},
 		SessionFactory:  session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()}),
 		WorktreeTimeout: customTimeout,
 	}
@@ -596,7 +607,9 @@ func TestSupervisor_Config_AcceptsFlags(t *testing.T) {
 	})
 
 	cfg := SupervisorConfig{
-		AgentProvider:  mockProvider,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: mockProvider,
+		},
 		SessionFactory: session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()}),
 		Flags:          flagsRegistry,
 	}
@@ -639,7 +652,9 @@ func TestSupervisor_Start_CreatesWorktreeWhenEnabled(t *testing.T) {
 	mockFactory := &mockInfrastructureFactory{}
 
 	cfg := SupervisorConfig{
-		AgentProvider:         mockProvider,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: mockProvider,
+		},
 		ListenerFactory:       &mockListenerFactory{},
 		InfrastructureFactory: mockFactory,
 		SessionFactory:        session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()}),
@@ -690,7 +705,9 @@ func TestSupervisor_Start_SkipsWorktreeWhenDisabled(t *testing.T) {
 
 	factoryCalled := false
 	cfg := SupervisorConfig{
-		AgentProvider:         mockProvider,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: mockProvider,
+		},
 		ListenerFactory:       &mockListenerFactory{},
 		InfrastructureFactory: mockFactory,
 		SessionFactory:        session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()}),
@@ -734,7 +751,9 @@ func TestSupervisor_Start_UsesCustomBranchNameWhenSet(t *testing.T) {
 	mockFactory := &mockInfrastructureFactory{}
 
 	cfg := SupervisorConfig{
-		AgentProvider:         mockProvider,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: mockProvider,
+		},
 		ListenerFactory:       &mockListenerFactory{},
 		InfrastructureFactory: mockFactory,
 		SessionFactory:        session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()}),
@@ -782,7 +801,9 @@ func TestSupervisor_Start_AutoGeneratesBranchNameWhenEmpty(t *testing.T) {
 	mockFactory := &mockInfrastructureFactory{}
 
 	cfg := SupervisorConfig{
-		AgentProvider:         mockProvider,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: mockProvider,
+		},
 		ListenerFactory:       &mockListenerFactory{},
 		InfrastructureFactory: mockFactory,
 		SessionFactory:        session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()}),
@@ -832,7 +853,9 @@ func TestSupervisor_Start_SetsInstanceFieldsCorrectly(t *testing.T) {
 	mockFactory := &mockInfrastructureFactory{}
 
 	cfg := SupervisorConfig{
-		AgentProvider:         mockProvider,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: mockProvider,
+		},
 		ListenerFactory:       &mockListenerFactory{},
 		InfrastructureFactory: mockFactory,
 		SessionFactory:        session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()}),
@@ -882,7 +905,9 @@ func TestSupervisor_Start_CleansUpWorktreeOnSubsequentFailure(t *testing.T) {
 	mockFactory := &mockInfrastructureFactory{}
 
 	cfg := SupervisorConfig{
-		AgentProvider:         mockProvider,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: mockProvider,
+		},
 		ListenerFactory:       &mockListenerFactory{},
 		InfrastructureFactory: mockFactory,
 		SessionFactory:        session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()}),
@@ -928,7 +953,9 @@ func TestSupervisor_Start_HandlesErrBranchAlreadyCheckedOut(t *testing.T) {
 	mockProvider := mocks.NewMockAgentProvider(t)
 
 	cfg := SupervisorConfig{
-		AgentProvider:   mockProvider,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: mockProvider,
+		},
 		ListenerFactory: &mockListenerFactory{},
 		SessionFactory:  session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()}),
 		GitExecutorFactory: func(workDir string) appgit.GitExecutor {
@@ -965,7 +992,9 @@ func TestSupervisor_Start_HandlesTimeoutCorrectly(t *testing.T) {
 	mockProvider := mocks.NewMockAgentProvider(t)
 
 	cfg := SupervisorConfig{
-		AgentProvider:   mockProvider,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: mockProvider,
+		},
 		ListenerFactory: &mockListenerFactory{},
 		SessionFactory:  session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()}),
 		WorktreeTimeout: 100 * time.Millisecond, // Short timeout for test
@@ -1005,7 +1034,9 @@ func TestSupervisor_Stop_ReturnsErrUncommittedChanges(t *testing.T) {
 	mockProvider := mocks.NewMockAgentProvider(t)
 
 	cfg := SupervisorConfig{
-		AgentProvider:   mockProvider,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: mockProvider,
+		},
 		ListenerFactory: &mockListenerFactory{},
 		SessionFactory:  session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()}),
 		GitExecutorFactory: func(workDir string) appgit.GitExecutor {
@@ -1042,7 +1073,9 @@ func TestSupervisor_Stop_BypassesUncommittedCheckWhenForceTrue(t *testing.T) {
 	mockProvider := mocks.NewMockAgentProvider(t)
 
 	cfg := SupervisorConfig{
-		AgentProvider:   mockProvider,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: mockProvider,
+		},
 		ListenerFactory: &mockListenerFactory{},
 		SessionFactory:  session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()}),
 		GitExecutorFactory: func(workDir string) appgit.GitExecutor {
@@ -1083,7 +1116,9 @@ func TestSupervisor_Stop_RemovesWorktreeWhenFlagEnabled(t *testing.T) {
 	})
 
 	cfg := SupervisorConfig{
-		AgentProvider:   mockProvider,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: mockProvider,
+		},
 		ListenerFactory: &mockListenerFactory{},
 		Flags:           flagsRegistry,
 		SessionFactory:  session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()}),
@@ -1125,7 +1160,9 @@ func TestSupervisor_Stop_PreservesWorktreeWhenFlagDisabled(t *testing.T) {
 	})
 
 	cfg := SupervisorConfig{
-		AgentProvider:   mockProvider,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: mockProvider,
+		},
 		ListenerFactory: &mockListenerFactory{},
 		Flags:           flagsRegistry,
 		SessionFactory:  session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()}),
@@ -1168,7 +1205,9 @@ func TestSupervisor_Stop_HandlesRemoveWorktreeErrorsGracefully(t *testing.T) {
 	})
 
 	cfg := SupervisorConfig{
-		AgentProvider:   mockProvider,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: mockProvider,
+		},
 		ListenerFactory: &mockListenerFactory{},
 		Flags:           flagsRegistry,
 		SessionFactory:  session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()}),
@@ -1205,7 +1244,9 @@ func TestSupervisor_Stop_WorksNormallyWhenWorktreePathEmpty(t *testing.T) {
 
 	factoryCalled := false
 	cfg := SupervisorConfig{
-		AgentProvider:   mockProvider,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: mockProvider,
+		},
 		ListenerFactory: &mockListenerFactory{},
 		Flags:           flags.New(map[string]bool{flags.FlagRemoveWorktree: true}),
 		SessionFactory:  session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()}),

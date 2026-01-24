@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+
 	"github.com/zjrosen/perles/internal/orchestration/client"
 )
 
@@ -129,20 +130,6 @@ func (m *mockProcessResumer) ResumeProcess(processID string, proc client.Headles
 	return args.Error(0)
 }
 
-// workerRoleLookup returns a RoleLookup that always indicates the process is a worker.
-func workerRoleLookup() RoleLookup {
-	return func(processID string) (isCoordinator bool, found bool) {
-		return false, true // Always a worker, always found
-	}
-}
-
-// coordinatorRoleLookup returns a RoleLookup that identifies "coordinator" as coordinator.
-func coordinatorRoleLookup() RoleLookup {
-	return func(processID string) (isCoordinator bool, found bool) {
-		return processID == "coordinator", true
-	}
-}
-
 func TestProcessSessionDeliverer_Deliver_Success(t *testing.T) {
 	// Setup
 	sessionProvider := &mockSessionProvider{
@@ -176,7 +163,6 @@ func TestProcessSessionDeliverer_Deliver_Success(t *testing.T) {
 		mockResumer,
 		extensions, // coordinator extensions
 		extensions, // worker extensions
-		workerRoleLookup(),
 	)
 
 	// Execute
@@ -200,7 +186,6 @@ func TestProcessSessionDeliverer_Deliver_SessionNotFound(t *testing.T) {
 		mockClient, mockClient,
 		&mockProcessResumer{},
 		nil, nil,
-		workerRoleLookup(),
 	)
 
 	// Execute
@@ -223,7 +208,6 @@ func TestProcessSessionDeliverer_Deliver_EmptySessionID(t *testing.T) {
 		mockClient, mockClient,
 		&mockProcessResumer{},
 		nil, nil,
-		workerRoleLookup(),
 	)
 
 	// Execute
@@ -247,7 +231,6 @@ func TestProcessSessionDeliverer_Deliver_MCPConfigError(t *testing.T) {
 		mockClient, mockClient,
 		&mockProcessResumer{},
 		nil, nil,
-		workerRoleLookup(),
 	)
 
 	// Execute
@@ -274,7 +257,6 @@ func TestProcessSessionDeliverer_Deliver_SpawnError(t *testing.T) {
 		mockClient, mockClient,
 		&mockProcessResumer{},
 		nil, nil,
-		workerRoleLookup(),
 	)
 
 	// Execute
@@ -307,7 +289,6 @@ func TestProcessSessionDeliverer_Deliver_ResumeProcessError(t *testing.T) {
 		mockClient, mockClient,
 		mockResumer,
 		nil, nil,
-		workerRoleLookup(),
 	)
 
 	// Execute
@@ -338,7 +319,6 @@ func TestProcessSessionDeliverer_Deliver_ContextCancellation(t *testing.T) {
 		mockClient, mockClient,
 		&mockProcessResumer{},
 		nil, nil,
-		workerRoleLookup(),
 		WithDeliveryTimeout(100*time.Millisecond),
 	)
 
@@ -369,7 +349,6 @@ func TestProcessSessionDeliverer_Deliver_Timeout(t *testing.T) {
 		mockClient, mockClient,
 		&mockProcessResumer{},
 		nil, nil,
-		workerRoleLookup(),
 		WithDeliveryTimeout(10*time.Millisecond), // Very short timeout
 	)
 
@@ -391,7 +370,6 @@ func TestProcessSessionDeliverer_WithDeliveryTimeout(t *testing.T) {
 		mockClient, mockClient,
 		nil, // resumer not used in this test
 		nil, nil,
-		workerRoleLookup(),
 		WithDeliveryTimeout(5*time.Second),
 	)
 
@@ -452,7 +430,6 @@ func TestProcessSessionDeliverer_Deliver_PassesExtensions(t *testing.T) {
 		mockClient, mockClient,
 		mockResumer,
 		testExtensions, testExtensions,
-		workerRoleLookup(),
 	)
 
 	// Execute
@@ -489,7 +466,6 @@ func TestProcessSessionDeliverer_Deliver_ExtensionsDefensiveCopy(t *testing.T) {
 		mockClient, mockClient,
 		mockResumer,
 		originalExtensions, originalExtensions,
-		workerRoleLookup(),
 	)
 
 	// Mutate the original map AFTER creating deliverer

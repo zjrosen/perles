@@ -473,8 +473,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.orchestration = orchestration.New(orchestration.Config{
 			Services:             m.services,
 			WorkDir:              m.services.WorkDir,
-			CoordinatorProvider:  orchConfig.CoordinatorProvider(),
-			WorkerProvider:       orchConfig.WorkerProvider(),
+			AgentProviders:       orchConfig.AgentProviders(),
 			WorkflowRegistry:     m.workflowRegistry,
 			VimMode:              m.services.Config.UI.VimMode,
 			DebugMode:            m.debugMode,
@@ -1012,7 +1011,7 @@ func (m Model) handleToggleChatPanel() (tea.Model, tea.Cmd) {
 			m.services.Sounds.Play("greeting", "chat_welcome")
 
 			// Get AgentProvider from config (includes model settings from user config)
-			provider := m.services.Config.Orchestration.AgentProvider()
+			provider := m.services.Config.Orchestration.AgentProviders().Coordinator()
 
 			// Create v2 SimpleInfrastructure with AgentProvider
 			infra, err := v2.NewSimpleInfrastructure(v2.SimpleInfrastructureConfig{
@@ -1235,9 +1234,8 @@ func (m *Model) createControlPlane() controlplane.ControlPlane {
 	registry := controlplane.NewInMemoryRegistry()
 	eventBus := controlplane.NewCrossWorkflowEventBus()
 
-	// Get orchestration config for agent provider
+	// Get orchestration config for agent providers
 	orchConfig := m.services.Config.Orchestration
-	agentProvider := orchConfig.AgentProvider()
 
 	// Create session factory for workflow session tracking
 	sessionFactory := session.NewFactory(session.FactoryConfig{
@@ -1247,7 +1245,7 @@ func (m *Model) createControlPlane() controlplane.ControlPlane {
 
 	// Create supervisor with full configuration
 	supervisor, err := controlplane.NewSupervisor(controlplane.SupervisorConfig{
-		AgentProvider:      agentProvider,
+		AgentProviders:     orchConfig.AgentProviders(),
 		WorkflowRegistry:   m.workflowRegistry,
 		GitExecutorFactory: m.services.GitExecutorFactory,
 		Flags:              m.services.Flags,

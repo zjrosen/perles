@@ -1018,8 +1018,7 @@ func (m Model) handleStartCoordinator() (Model, tea.Cmd) {
 	initConfig := NewInitializerConfigFromModel(
 		m.workDir,
 		beadsDir,
-		m.coordinatorProvider,
-		m.workerProvider,
+		m.agentProviders,
 		m.worktreeBaseBranch,
 		m.worktreeCustomBranch,
 		m.tracingConfig,

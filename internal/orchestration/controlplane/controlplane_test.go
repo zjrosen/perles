@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/zjrosen/perles/internal/mocks"
+	"github.com/zjrosen/perles/internal/orchestration/client"
 	"github.com/zjrosen/perles/internal/orchestration/session"
 	v2 "github.com/zjrosen/perles/internal/orchestration/v2"
 	"github.com/zjrosen/perles/internal/orchestration/v2/adapter"
@@ -53,7 +54,9 @@ func newTestControlPlane(t *testing.T) (ControlPlane, *mockInfrastructureFactory
 	sessionFactory := session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()})
 
 	supervisor, err := NewSupervisor(SupervisorConfig{
-		AgentProvider:         mockProvider,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: mockProvider,
+		},
 		InfrastructureFactory: mockFactory,
 		ListenerFactory:       &testListenerFactory{},
 		SessionFactory:        sessionFactory,
@@ -155,7 +158,9 @@ func TestNewControlPlane_ValidConfig(t *testing.T) {
 	mockProvider := mocks.NewMockAgentProvider(t)
 	registry := NewInMemoryRegistry()
 	supervisor, err := NewSupervisor(SupervisorConfig{
-		AgentProvider:  mockProvider,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: mockProvider,
+		},
 		SessionFactory: session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()}),
 	})
 	require.NoError(t, err)
@@ -172,7 +177,9 @@ func TestNewControlPlane_ValidConfig(t *testing.T) {
 func TestNewControlPlane_MissingRegistry(t *testing.T) {
 	mockProvider := mocks.NewMockAgentProvider(t)
 	supervisor, err := NewSupervisor(SupervisorConfig{
-		AgentProvider:  mockProvider,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: mockProvider,
+		},
 		SessionFactory: session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()}),
 	})
 	require.NoError(t, err)
@@ -612,7 +619,9 @@ func newTestControlPlaneWithEventBus(t *testing.T) (ControlPlane, *CrossWorkflow
 	sessionFactory := session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()})
 
 	supervisor, err := NewSupervisor(SupervisorConfig{
-		AgentProvider:  mockProvider,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: mockProvider,
+		},
 		SessionFactory: sessionFactory,
 	})
 	require.NoError(t, err)
@@ -959,7 +968,9 @@ func TestControlPlane_NewControlPlaneCreatesDefaultEventBus(t *testing.T) {
 	mockProvider := mocks.NewMockAgentProvider(t)
 	registry := NewInMemoryRegistry()
 	supervisor, err := NewSupervisor(SupervisorConfig{
-		AgentProvider:  mockProvider,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: mockProvider,
+		},
 		SessionFactory: session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()}),
 	})
 	require.NoError(t, err)
@@ -1166,7 +1177,9 @@ func TestControlPlane_Shutdown_WithHealthMonitor(t *testing.T) {
 	sessionFactory := session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()})
 
 	supervisor, err := NewSupervisor(SupervisorConfig{
-		AgentProvider:         mockProvider,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: mockProvider,
+		},
 		InfrastructureFactory: mockFactory,
 		SessionFactory:        sessionFactory,
 	})

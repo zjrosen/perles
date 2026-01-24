@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/zjrosen/perles/internal/orchestration/client"
 )
 
 func TestValidateColumns_Empty(t *testing.T) {
@@ -444,6 +445,65 @@ func TestValidateOrchestration_ValidAmpModes(t *testing.T) {
 	}
 }
 
+func TestValidateOrchestration_ValidCoordinatorClient(t *testing.T) {
+	clients := []string{"claude", "amp", "codex", "gemini", "opencode"}
+	for _, c := range clients {
+		t.Run(c, func(t *testing.T) {
+			cfg := OrchestrationConfig{CoordinatorClient: c}
+			err := ValidateOrchestration(cfg)
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestValidateOrchestration_InvalidCoordinatorClient(t *testing.T) {
+	cfg := OrchestrationConfig{CoordinatorClient: "invalid"}
+	err := ValidateOrchestration(cfg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "orchestration.coordinator_client must be one of")
+	require.Contains(t, err.Error(), "invalid")
+}
+
+func TestValidateOrchestration_ValidWorkerClient(t *testing.T) {
+	clients := []string{"claude", "amp", "codex", "gemini", "opencode"}
+	for _, c := range clients {
+		t.Run(c, func(t *testing.T) {
+			cfg := OrchestrationConfig{WorkerClient: c}
+			err := ValidateOrchestration(cfg)
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestValidateOrchestration_InvalidWorkerClient(t *testing.T) {
+	cfg := OrchestrationConfig{WorkerClient: "invalid"}
+	err := ValidateOrchestration(cfg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "orchestration.worker_client must be one of")
+	require.Contains(t, err.Error(), "invalid")
+}
+
+func TestValidateOrchestration_MixedClientConfigs(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Client:            "claude",
+		CoordinatorClient: "amp",
+		WorkerClient:      "codex",
+	}
+	err := ValidateOrchestration(cfg)
+	require.NoError(t, err)
+}
+
+func TestValidateOrchestration_InvalidClientButValidCoordinatorWorker(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Client:            "invalid",
+		CoordinatorClient: "claude",
+		WorkerClient:      "amp",
+	}
+	err := ValidateOrchestration(cfg)
+	require.Error(t, err, "invalid Client should still fail validation")
+	require.Contains(t, err.Error(), "orchestration.client")
+}
+
 // Tests for GeminiClientConfig
 
 func TestGeminiClientConfig_ZeroValue(t *testing.T) {
@@ -508,7 +568,9 @@ func TestValidateOrchestration_ValidOpenCodeModels(t *testing.T) {
 func TestDefaults_Orchestration(t *testing.T) {
 	cfg := Defaults()
 
-	require.Equal(t, "claude", cfg.Orchestration.Client)
+	require.Empty(t, cfg.Orchestration.Client, "legacy Client field should be empty")
+	require.Equal(t, "claude", cfg.Orchestration.CoordinatorClient)
+	require.Equal(t, "claude", cfg.Orchestration.WorkerClient)
 	require.Equal(t, "claude-opus-4-5", cfg.Orchestration.Claude.Model)
 	require.Equal(t, "opus", cfg.Orchestration.Amp.Model)
 	require.Equal(t, "smart", cfg.Orchestration.Amp.Mode)
@@ -1556,4 +1618,384 @@ func TestTimeoutsConfig_CustomValuesPreserved(t *testing.T) {
 	require.Equal(t, 90*time.Second, cfg.CoordinatorStart)
 	require.Equal(t, 15*time.Second, cfg.WorkspaceSetup)
 	require.Equal(t, 180*time.Second, cfg.MaxTotal)
+}
+
+// ============================================================================
+// CoordinatorClientType Tests
+// ============================================================================
+
+func TestCoordinatorClientType_EmptyConfig(t *testing.T) {
+	cfg := OrchestrationConfig{}
+	require.Equal(t, client.ClientClaude, cfg.CoordinatorClientType(), "empty config should default to claude")
+}
+
+func TestCoordinatorClientType_OnlyClient(t *testing.T) {
+	cfg := OrchestrationConfig{Client: "amp"}
+	require.Equal(t, client.ClientType("amp"), cfg.CoordinatorClientType(), "should use Client when CoordinatorClient is empty")
+}
+
+func TestCoordinatorClientType_CoordinatorClientOverridesClient(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Client:            "amp",
+		CoordinatorClient: "codex",
+	}
+	require.Equal(t, client.ClientType("codex"), cfg.CoordinatorClientType(), "CoordinatorClient should override Client")
+}
+
+func TestCoordinatorClientType_AllClients(t *testing.T) {
+	clients := []string{"claude", "amp", "codex", "gemini", "opencode"}
+	for _, c := range clients {
+		t.Run(c, func(t *testing.T) {
+			cfg := OrchestrationConfig{CoordinatorClient: c}
+			require.Equal(t, client.ClientType(c), cfg.CoordinatorClientType())
+		})
+	}
+}
+
+// ============================================================================
+// WorkerClientType Tests
+// ============================================================================
+
+func TestWorkerClientType_EmptyConfig(t *testing.T) {
+	cfg := OrchestrationConfig{}
+	require.Equal(t, client.ClientClaude, cfg.WorkerClientType(), "empty config should default to claude")
+}
+
+func TestWorkerClientType_OnlyClient(t *testing.T) {
+	cfg := OrchestrationConfig{Client: "amp"}
+	require.Equal(t, client.ClientType("amp"), cfg.WorkerClientType(), "should use Client when WorkerClient is empty")
+}
+
+func TestWorkerClientType_WorkerClientOverridesClient(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Client:       "amp",
+		WorkerClient: "codex",
+	}
+	require.Equal(t, client.ClientType("codex"), cfg.WorkerClientType(), "WorkerClient should override Client")
+}
+
+func TestWorkerClientType_AllClients(t *testing.T) {
+	clients := []string{"claude", "amp", "codex", "gemini", "opencode"}
+	for _, c := range clients {
+		t.Run(c, func(t *testing.T) {
+			cfg := OrchestrationConfig{WorkerClient: c}
+			require.Equal(t, client.ClientType(c), cfg.WorkerClientType())
+		})
+	}
+}
+
+func TestClientType_CoordinatorAndWorkerIndependent(t *testing.T) {
+	cfg := OrchestrationConfig{
+		CoordinatorClient: "claude",
+		WorkerClient:      "amp",
+	}
+	require.Equal(t, client.ClientType("claude"), cfg.CoordinatorClientType())
+	require.Equal(t, client.ClientType("amp"), cfg.WorkerClientType())
+}
+
+func TestClientType_FallbackToClientForBoth(t *testing.T) {
+	cfg := OrchestrationConfig{Client: "codex"}
+	require.Equal(t, client.ClientType("codex"), cfg.CoordinatorClientType())
+	require.Equal(t, client.ClientType("codex"), cfg.WorkerClientType())
+}
+
+// ============================================================================
+// AgentProviders Tests
+// ============================================================================
+
+func TestAgentProviders_DefaultConfig(t *testing.T) {
+	cfg := OrchestrationConfig{}
+	providers := cfg.AgentProviders()
+
+	require.NotNil(t, providers[client.RoleCoordinator])
+	require.NotNil(t, providers[client.RoleWorker])
+	require.Equal(t, client.ClientClaude, providers[client.RoleCoordinator].Type())
+	require.Equal(t, client.ClientClaude, providers[client.RoleWorker].Type())
+}
+
+func TestAgentProviders_DifferentClients(t *testing.T) {
+	cfg := OrchestrationConfig{
+		CoordinatorClient: "claude",
+		WorkerClient:      "amp",
+		Claude:            ClaudeClientConfig{Model: "opus"},
+		Amp:               AmpClientConfig{Model: "sonnet", Mode: "smart"},
+	}
+	providers := cfg.AgentProviders()
+
+	require.Equal(t, client.ClientClaude, providers[client.RoleCoordinator].Type())
+	require.Equal(t, client.ClientType("amp"), providers[client.RoleWorker].Type())
+}
+
+func TestAgentProviders_IncludesExtensions(t *testing.T) {
+	cfg := OrchestrationConfig{
+		CoordinatorClient: "claude",
+		WorkerClient:      "claude",
+		Claude:            ClaudeClientConfig{Model: "opus"},
+	}
+	providers := cfg.AgentProviders()
+
+	coordExt := providers[client.RoleCoordinator].Extensions()
+	workerExt := providers[client.RoleWorker].Extensions()
+
+	require.Equal(t, "opus", coordExt["claude.model"])
+	require.Equal(t, "opus", workerExt["claude.model"])
+}
+
+func TestAgentProviders_WorkerUsesWorkerConfig(t *testing.T) {
+	cfg := OrchestrationConfig{
+		CoordinatorClient: "claude",
+		WorkerClient:      "claude",
+		Claude:            ClaudeClientConfig{Model: "opus"},
+		ClaudeWorker: ClaudeClientConfig{
+			Model: "sonnet",
+			Env:   map[string]string{"WORKER_KEY": "value"},
+		},
+	}
+	providers := cfg.AgentProviders()
+
+	coordExt := providers[client.RoleCoordinator].Extensions()
+	workerExt := providers[client.RoleWorker].Extensions()
+
+	require.Equal(t, "opus", coordExt["claude.model"])
+	require.NotContains(t, coordExt, "claude.env")
+
+	require.Equal(t, "sonnet", workerExt["claude.model"])
+	require.Equal(t, map[string]string{"WORKER_KEY": "value"}, workerExt["claude.env"])
+}
+
+func TestAgentProviders_FallbackToClient(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Client: "gemini",
+		Gemini: GeminiClientConfig{Model: "gemini-2.5-flash"},
+	}
+	providers := cfg.AgentProviders()
+
+	require.Equal(t, client.ClientType("gemini"), providers[client.RoleCoordinator].Type())
+	require.Equal(t, client.ClientType("gemini"), providers[client.RoleWorker].Type())
+	require.Equal(t, "gemini-2.5-flash", providers[client.RoleCoordinator].Extensions()["gemini.model"])
+	require.Equal(t, "gemini-2.5-flash", providers[client.RoleWorker].Extensions()["gemini.model"])
+}
+
+// ============================================================================
+// extensionsForClient Tests
+// ============================================================================
+
+func TestExtensionsForClient_Claude_EmptyConfig(t *testing.T) {
+	cfg := OrchestrationConfig{}
+	ext := cfg.extensionsForClient("claude", false)
+	require.Empty(t, ext, "empty Claude config should return empty extensions")
+}
+
+func TestExtensionsForClient_Claude_WithModel(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Claude: ClaudeClientConfig{Model: "sonnet"},
+	}
+	ext := cfg.extensionsForClient("claude", false)
+	require.Equal(t, "sonnet", ext["claude.model"])
+}
+
+func TestExtensionsForClient_Claude_WithEnv(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Claude: ClaudeClientConfig{
+			Model: "opus",
+			Env:   map[string]string{"API_KEY": "secret"},
+		},
+	}
+	ext := cfg.extensionsForClient("claude", false)
+	require.Equal(t, "opus", ext["claude.model"])
+	require.Equal(t, map[string]string{"API_KEY": "secret"}, ext["claude.env"])
+}
+
+func TestExtensionsForClient_Claude_WorkerUsesMainConfig(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Claude: ClaudeClientConfig{Model: "opus"},
+	}
+	ext := cfg.extensionsForClient("claude", true)
+	require.Equal(t, "opus", ext["claude.model"])
+}
+
+func TestExtensionsForClient_Claude_WorkerUsesWorkerConfig(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Claude: ClaudeClientConfig{Model: "opus"},
+		ClaudeWorker: ClaudeClientConfig{
+			Model: "sonnet",
+			Env:   map[string]string{"WORKER_KEY": "worker-secret"},
+		},
+	}
+	ext := cfg.extensionsForClient("claude", true)
+	require.Equal(t, "sonnet", ext["claude.model"])
+	require.Equal(t, map[string]string{"WORKER_KEY": "worker-secret"}, ext["claude.env"])
+}
+
+func TestExtensionsForClient_Claude_WorkerInheritsModelFromMain(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Claude: ClaudeClientConfig{Model: "opus"},
+		ClaudeWorker: ClaudeClientConfig{
+			Model: "", // Empty - should inherit from main
+			Env:   map[string]string{"WORKER_KEY": "value"},
+		},
+	}
+	ext := cfg.extensionsForClient("claude", true)
+	require.Equal(t, "opus", ext["claude.model"], "worker should inherit model from main claude config")
+	require.Equal(t, map[string]string{"WORKER_KEY": "value"}, ext["claude.env"])
+}
+
+func TestExtensionsForClient_Claude_WorkerWithoutEnvUsesMainConfig(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Claude: ClaudeClientConfig{
+			Model: "opus",
+			Env:   map[string]string{"MAIN_KEY": "main-value"},
+		},
+		ClaudeWorker: ClaudeClientConfig{
+			Model: "sonnet",
+			Env:   nil, // No env vars - should use main config
+		},
+	}
+	ext := cfg.extensionsForClient("claude", true)
+	require.Equal(t, "opus", ext["claude.model"], "should use main claude config when worker has no env")
+	require.Equal(t, map[string]string{"MAIN_KEY": "main-value"}, ext["claude.env"])
+}
+
+func TestExtensionsForClient_Claude_CoordinatorIgnoresWorkerConfig(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Claude: ClaudeClientConfig{Model: "opus"},
+		ClaudeWorker: ClaudeClientConfig{
+			Model: "sonnet",
+			Env:   map[string]string{"WORKER_KEY": "worker-secret"},
+		},
+	}
+	ext := cfg.extensionsForClient("claude", false)
+	require.Equal(t, "opus", ext["claude.model"], "coordinator should use main claude config")
+	require.NotContains(t, ext, "claude.env", "coordinator should not have worker env")
+}
+
+func TestExtensionsForClient_Codex_EmptyConfig(t *testing.T) {
+	cfg := OrchestrationConfig{}
+	ext := cfg.extensionsForClient("codex", false)
+	require.Empty(t, ext, "empty Codex config should return empty extensions")
+}
+
+func TestExtensionsForClient_Codex_WithModel(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Codex: CodexClientConfig{Model: "gpt-5.2-codex"},
+	}
+	ext := cfg.extensionsForClient("codex", false)
+	require.Equal(t, "gpt-5.2-codex", ext["codex.model"])
+}
+
+func TestExtensionsForClient_Codex_WorkerSameAsCoordinator(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Codex: CodexClientConfig{Model: "o4-mini"},
+	}
+	extCoord := cfg.extensionsForClient("codex", false)
+	extWorker := cfg.extensionsForClient("codex", true)
+	require.Equal(t, extCoord, extWorker, "Codex extensions should be same for coordinator and worker")
+}
+
+func TestExtensionsForClient_Amp_EmptyConfig(t *testing.T) {
+	cfg := OrchestrationConfig{}
+	ext := cfg.extensionsForClient("amp", false)
+	require.Empty(t, ext, "empty Amp config should return empty extensions")
+}
+
+func TestExtensionsForClient_Amp_WithModel(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Amp: AmpClientConfig{Model: "sonnet"},
+	}
+	ext := cfg.extensionsForClient("amp", false)
+	require.Equal(t, "sonnet", ext["amp.model"])
+}
+
+func TestExtensionsForClient_Amp_WithMode(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Amp: AmpClientConfig{Mode: "rush"},
+	}
+	ext := cfg.extensionsForClient("amp", false)
+	require.Equal(t, "rush", ext["amp.mode"])
+}
+
+func TestExtensionsForClient_Amp_WithModelAndMode(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Amp: AmpClientConfig{
+			Model: "opus",
+			Mode:  "smart",
+		},
+	}
+	ext := cfg.extensionsForClient("amp", false)
+	require.Equal(t, "opus", ext["amp.model"])
+	require.Equal(t, "smart", ext["amp.mode"])
+}
+
+func TestExtensionsForClient_Amp_WorkerSameAsCoordinator(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Amp: AmpClientConfig{Model: "opus", Mode: "smart"},
+	}
+	extCoord := cfg.extensionsForClient("amp", false)
+	extWorker := cfg.extensionsForClient("amp", true)
+	require.Equal(t, extCoord, extWorker, "Amp extensions should be same for coordinator and worker")
+}
+
+func TestExtensionsForClient_Gemini_EmptyConfig(t *testing.T) {
+	cfg := OrchestrationConfig{}
+	ext := cfg.extensionsForClient("gemini", false)
+	require.Empty(t, ext, "empty Gemini config should return empty extensions")
+}
+
+func TestExtensionsForClient_Gemini_WithModel(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Gemini: GeminiClientConfig{Model: "gemini-2.5-flash"},
+	}
+	ext := cfg.extensionsForClient("gemini", false)
+	require.Equal(t, "gemini-2.5-flash", ext["gemini.model"])
+}
+
+func TestExtensionsForClient_Gemini_WorkerSameAsCoordinator(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Gemini: GeminiClientConfig{Model: "gemini-3-pro-preview"},
+	}
+	extCoord := cfg.extensionsForClient("gemini", false)
+	extWorker := cfg.extensionsForClient("gemini", true)
+	require.Equal(t, extCoord, extWorker, "Gemini extensions should be same for coordinator and worker")
+}
+
+func TestExtensionsForClient_OpenCode_EmptyConfig(t *testing.T) {
+	cfg := OrchestrationConfig{}
+	ext := cfg.extensionsForClient("opencode", false)
+	require.Empty(t, ext, "empty OpenCode config should return empty extensions")
+}
+
+func TestExtensionsForClient_OpenCode_WithModel(t *testing.T) {
+	cfg := OrchestrationConfig{
+		OpenCode: OpenCodeClientConfig{Model: "opencode/glm-4.8"},
+	}
+	ext := cfg.extensionsForClient("opencode", false)
+	require.Equal(t, "opencode/glm-4.8", ext["opencode.model"])
+}
+
+func TestExtensionsForClient_OpenCode_WorkerSameAsCoordinator(t *testing.T) {
+	cfg := OrchestrationConfig{
+		OpenCode: OpenCodeClientConfig{Model: "anthropic/claude-opus-4-5"},
+	}
+	extCoord := cfg.extensionsForClient("opencode", false)
+	extWorker := cfg.extensionsForClient("opencode", true)
+	require.Equal(t, extCoord, extWorker, "OpenCode extensions should be same for coordinator and worker")
+}
+
+func TestExtensionsForClient_UnknownClient(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Claude: ClaudeClientConfig{Model: "opus"},
+		Codex:  CodexClientConfig{Model: "gpt-5.2-codex"},
+	}
+	ext := cfg.extensionsForClient("unknown-client", false)
+	require.Empty(t, ext, "unknown client should return empty extensions")
+}
+
+func TestExtensionsForClient_ReturnsNewMap(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Claude: ClaudeClientConfig{Model: "opus"},
+	}
+	ext1 := cfg.extensionsForClient("claude", false)
+	ext2 := cfg.extensionsForClient("claude", false)
+	ext1["new-key"] = "value"
+	require.NotContains(t, ext2, "new-key", "should return independent maps")
 }

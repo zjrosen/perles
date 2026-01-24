@@ -75,7 +75,9 @@ func initConfig() {
 	viper.SetDefault("theme.preset", defaults.Theme.Preset)
 
 	// Orchestration defaults
-	viper.SetDefault("orchestration.client", defaults.Orchestration.Client)
+	viper.SetDefault("orchestration.client", defaults.Orchestration.CoordinatorClient)
+	viper.SetDefault("orchestration.coordinator_client", defaults.Orchestration.CoordinatorClient)
+	viper.SetDefault("orchestration.worker_client", defaults.Orchestration.WorkerClient)
 	viper.SetDefault("orchestration.claude.model", defaults.Orchestration.Claude.Model)
 	viper.SetDefault("orchestration.amp.model", defaults.Orchestration.Amp.Model)
 	viper.SetDefault("orchestration.amp.mode", defaults.Orchestration.Amp.Mode)

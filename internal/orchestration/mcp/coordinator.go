@@ -10,7 +10,6 @@ import (
 	appbeads "github.com/zjrosen/perles/internal/beads/application"
 	beads "github.com/zjrosen/perles/internal/beads/domain"
 	"github.com/zjrosen/perles/internal/log"
-	"github.com/zjrosen/perles/internal/orchestration/client"
 	"github.com/zjrosen/perles/internal/orchestration/message"
 	"github.com/zjrosen/perles/internal/orchestration/v2/adapter"
 	"github.com/zjrosen/perles/internal/orchestration/v2/repository"
@@ -21,11 +20,9 @@ import (
 // It provides tools for spawning workers, managing tasks, and communicating via message issues.
 type CoordinatorServer struct {
 	*Server
-	client        client.HeadlessClient
 	msgRepo       repository.MessageRepository // Message repository for read/write operations
 	workDir       string
 	port          int                    // HTTP server port for MCP config generation
-	extensions    map[string]any         // Provider-specific extensions (model, mode, etc.)
 	beadsExecutor appbeads.IssueExecutor // BD command executor
 
 	// dedup tracks recent messages to prevent duplicate sends to workers
@@ -37,43 +34,34 @@ type CoordinatorServer struct {
 }
 
 // NewCoordinatorServer creates a new coordinator MCP server.
-// The client is used for spawning and resuming AI processes for workers.
 // The port is the HTTP server port used for MCP config generation.
-// The extensions map holds provider-specific configuration (model, mode, etc.)
-// that will be passed to workers when they are spawned.
 // The beadsExec parameter is required and must not be nil.
 // The msgRepo parameter accepts any implementation of repository.MessageRepository interface
 // (e.g., *repository.MemoryMessageRepository).
 func NewCoordinatorServer(
-	aiClient client.HeadlessClient,
 	msgRepo repository.MessageRepository,
 	workDir string,
 	port int,
-	extensions map[string]any,
 	beadsExec appbeads.IssueExecutor,
 ) *CoordinatorServer {
-	return NewCoordinatorServerWithV2Adapter(aiClient, msgRepo, workDir, port, extensions, beadsExec, nil)
+	return NewCoordinatorServerWithV2Adapter(msgRepo, workDir, port, beadsExec, nil)
 }
 
 // NewCoordinatorServerWithV2Adapter creates a new coordinator MCP server with a v2 adapter.
 // The v2 adapter handles command-based processing for all orchestration operations.
 // The msgRepo parameter accepts any implementation of repository.MessageRepository interface.
 func NewCoordinatorServerWithV2Adapter(
-	aiClient client.HeadlessClient,
 	msgRepo repository.MessageRepository,
 	workDir string,
 	port int,
-	extensions map[string]any,
 	beadsExec appbeads.IssueExecutor,
 	v2Adapter *adapter.V2Adapter,
 ) *CoordinatorServer {
 	cs := &CoordinatorServer{
 		Server:        NewServer("perles-orchestrator", "1.0.0", WithInstructions(coordinatorInstructions)),
-		client:        aiClient,
 		msgRepo:       msgRepo,
 		workDir:       workDir,
 		port:          port,
-		extensions:    extensions,
 		beadsExecutor: beadsExec,
 		dedup:         NewMessageDeduplicator(DefaultDeduplicationWindow),
 		v2Adapter:     v2Adapter,

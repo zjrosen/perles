@@ -102,15 +102,9 @@ const (
 
 // SupervisorConfig configures the Supervisor.
 type SupervisorConfig struct {
-	// AgentProvider creates AI clients for workflow processes.
-	// If CoordinatorProvider/WorkerProvider not set, this is used for both.
-	AgentProvider client.AgentProvider
-	// CoordinatorProvider creates AI clients for coordinator processes.
-	// Takes precedence over AgentProvider for coordinators.
-	CoordinatorProvider client.AgentProvider
-	// WorkerProvider creates AI clients for worker processes.
-	// Takes precedence over AgentProvider for workers.
-	WorkerProvider client.AgentProvider
+	// AgentProviders maps roles to their AI client providers.
+	// Must contain at least RoleCoordinator. RoleWorker falls back to coordinator if not set.
+	AgentProviders client.AgentProviders
 	// InfrastructureFactory creates v2 infrastructure instances.
 	// If nil, DefaultInfrastructureFactory is used.
 	InfrastructureFactory InfrastructureFactory
@@ -150,8 +144,7 @@ type SupervisorConfig struct {
 
 // defaultSupervisor is the default implementation of Supervisor.
 type defaultSupervisor struct {
-	coordinatorProvider   client.AgentProvider
-	workerProvider        client.AgentProvider
+	agentProviders        client.AgentProviders
 	infrastructureFactory InfrastructureFactory
 	listenerFactory       ListenerFactory
 	workflowRegistry      *workflow.Registry
@@ -165,20 +158,12 @@ type defaultSupervisor struct {
 
 // NewSupervisor creates a new Supervisor with the given configuration.
 func NewSupervisor(cfg SupervisorConfig) (Supervisor, error) {
-	// Resolve coordinator/worker providers with fallback to AgentProvider
-	coordinatorProvider := cfg.CoordinatorProvider
-	if coordinatorProvider == nil {
-		coordinatorProvider = cfg.AgentProvider
+	// Validate AgentProviders
+	if cfg.AgentProviders == nil {
+		return nil, fmt.Errorf("AgentProviders is required")
 	}
-	workerProvider := cfg.WorkerProvider
-	if workerProvider == nil {
-		workerProvider = cfg.AgentProvider
-	}
-	if coordinatorProvider == nil {
-		return nil, fmt.Errorf("AgentProvider or CoordinatorProvider is required")
-	}
-	if workerProvider == nil {
-		return nil, fmt.Errorf("AgentProvider or WorkerProvider is required")
+	if _, ok := cfg.AgentProviders[client.RoleCoordinator]; !ok {
+		return nil, fmt.Errorf("AgentProviders must contain RoleCoordinator")
 	}
 	if cfg.SessionFactory == nil {
 		return nil, fmt.Errorf("SessionFactory is required")
@@ -201,8 +186,7 @@ func NewSupervisor(cfg SupervisorConfig) (Supervisor, error) {
 	}
 
 	return &defaultSupervisor{
-		coordinatorProvider:   coordinatorProvider,
-		workerProvider:        workerProvider,
+		agentProviders:        cfg.AgentProviders,
 		infrastructureFactory: infraFactory,
 		listenerFactory:       listenerFactory,
 		workflowRegistry:      cfg.WorkflowRegistry,
@@ -359,8 +343,7 @@ func (s *defaultSupervisor) AllocateResources(ctx context.Context, inst *Workflo
 	// Step 4: Create InfrastructureConfig
 	infraCfg := v2.InfrastructureConfig{
 		Port:                    port,
-		CoordinatorProvider:     s.coordinatorProvider,
-		WorkerProvider:          s.workerProvider,
+		AgentProviders:          s.agentProviders,
 		WorkDir:                 workDir,
 		BeadsDir:                s.beadsDir,
 		MessageRepo:             messageRepo,
@@ -388,20 +371,15 @@ func (s *defaultSupervisor) AllocateResources(ctx context.Context, inst *Workflo
 		return fmt.Errorf("starting infrastructure: %w", err)
 	}
 
-	// Step 7: Create and start MCP HTTP server
-	// Get coordinator client and extensions from provider
-	aiClient, err := s.coordinatorProvider.Client()
-	if err != nil {
-		cleanup()
-		return fmt.Errorf("getting AI client: %w", err)
-	}
-	extensions := s.coordinatorProvider.Extensions()
-
 	// Create coordinator MCP server with the v2 adapter
 	// Note: BeadsDir is empty here; the v2 infrastructure config handles BEADS_DIR for spawned processes
 	mcpCoordServer := mcp.NewCoordinatorServerWithV2Adapter(
-		aiClient, messageRepo, workDir, port, extensions,
-		infrabeads.NewBDExecutor(workDir, ""), infra.Core.Adapter)
+		messageRepo,
+		workDir,
+		port,
+		infrabeads.NewBDExecutor(workDir, ""),
+		infra.Core.Adapter,
+	)
 
 	// Attach MCP broker to session for mcp_requests.jsonl logging
 	sess.AttachMCPBroker(workflowCtx, mcpCoordServer.Broker())
