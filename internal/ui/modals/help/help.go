@@ -517,6 +517,7 @@ func (m Model) renderDashboardContent() string {
 	navCol.WriteString(renderBinding(keys.Dashboard.Down))
 	navCol.WriteString(renderBinding(keys.Dashboard.GotoTop))
 	navCol.WriteString(renderBinding(keys.Dashboard.GotoBottom))
+	navCol.WriteString(renderKeyDesc("Tab", "cycle focus zone"))
 
 	// Workflow Actions column
 	var actionsCol strings.Builder
@@ -525,7 +526,6 @@ func (m Model) renderDashboardContent() string {
 	actionsCol.WriteString(renderBinding(keys.Dashboard.Start))
 	actionsCol.WriteString(renderBinding(keys.Dashboard.Stop))
 	actionsCol.WriteString(renderBinding(keys.Dashboard.New))
-	actionsCol.WriteString(renderBinding(keys.Dashboard.CoordinatorChat))
 	actionsCol.WriteString(renderBinding(keys.Dashboard.Help))
 	actionsCol.WriteString(renderBinding(keys.Dashboard.Quit))
 

@@ -701,3 +701,127 @@ func TestDashboard_View_Golden_WithCoordinatorPanelMessages(t *testing.T) {
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))
 }
+
+// === Golden tests for Epic Section (perles-boi8.4) ===
+
+func TestDashboard_View_Golden_WithEpicSectionNoEpic(t *testing.T) {
+	// Test dashboard with epic section visible but no epic associated with selected workflow
+	workflows := []*controlplane.WorkflowInstance{
+		createTestWorkflowWithEpicID(
+			"wf-001",
+			"Workflow without epic",
+			controlplane.WorkflowRunning,
+			2, 50000,
+			"", // No epic
+		),
+	}
+	m := createGoldenTestModel(t, workflows)
+	m.width = 120
+	m.height = 30
+
+	view := m.View()
+	teatest.RequireEqualOutput(t, []byte(view))
+}
+
+func TestDashboard_View_Golden_WithEpicSectionLoading(t *testing.T) {
+	// Test dashboard with epic section visible but tree not yet loaded.
+	// Loading states are hidden to prevent UI flash - shows "No tasks" instead.
+	workflows := []*controlplane.WorkflowInstance{
+		createTestWorkflowWithEpicID(
+			"wf-001",
+			"Workflow with epic",
+			controlplane.WorkflowRunning,
+			2, 50000,
+			"epic-123",
+		),
+	}
+	m := createGoldenTestModel(t, workflows)
+	m.width = 120
+	m.height = 30
+
+	view := m.View()
+	teatest.RequireEqualOutput(t, []byte(view))
+}
+
+func TestDashboard_View_Golden_WithEpicSectionNarrowWidth(t *testing.T) {
+	// Test dashboard with epic section visible but terminal too narrow
+	// Should show warning message about minimum width
+	workflows := []*controlplane.WorkflowInstance{
+		createTestWorkflowWithEpicID(
+			"wf-001",
+			"Workflow",
+			controlplane.WorkflowRunning,
+			1, 25000,
+			"epic-123",
+		),
+	}
+	m := createGoldenTestModel(t, workflows)
+	m.width = 45 // Less than minimum epic section width of 50
+	m.height = 30
+
+	view := m.View()
+	teatest.RequireEqualOutput(t, []byte(view))
+}
+
+// === Golden tests for Context-Aware Footer Hints (perles-boi8.9) ===
+
+func TestDashboard_View_Golden_FooterWithTableFocus(t *testing.T) {
+	// Test footer hints when workflow table is focused
+	workflows := []*controlplane.WorkflowInstance{
+		createTestWorkflowWithDetails(
+			"wf-001",
+			"Running workflow",
+			controlplane.WorkflowRunning,
+			2, 50000,
+		),
+	}
+	m := createGoldenTestModel(t, workflows)
+	m.width = 100
+	m.height = 20
+	m.focus = FocusTable // Table focus (default)
+
+	view := m.View()
+	teatest.RequireEqualOutput(t, []byte(view))
+}
+
+func TestDashboard_View_Golden_FooterWithEpicTreeFocus(t *testing.T) {
+	// Test footer hints when epic tree pane is focused
+	workflows := []*controlplane.WorkflowInstance{
+		createTestWorkflowWithEpicID(
+			"wf-001",
+			"Workflow with epic",
+			controlplane.WorkflowRunning,
+			2, 50000,
+			"epic-123",
+		),
+	}
+	m := createGoldenTestModel(t, workflows)
+	m.width = 100
+	m.height = 30
+	m.focus = FocusEpicView
+	m.epicViewFocus = EpicFocusTree
+
+	view := m.View()
+	teatest.RequireEqualOutput(t, []byte(view))
+}
+
+func TestDashboard_View_Golden_FooterWithEpicDetailsFocus(t *testing.T) {
+	// Test footer hints when epic details pane is focused
+	workflows := []*controlplane.WorkflowInstance{
+		createTestWorkflowWithEpicID(
+			"wf-001",
+			"Workflow with epic",
+			controlplane.WorkflowRunning,
+			2, 50000,
+			"epic-123",
+		),
+	}
+	m := createGoldenTestModel(t, workflows)
+	m.width = 100
+	m.height = 30
+	m.focus = FocusEpicView
+	m.epicViewFocus = EpicFocusDetails
+
+	view := m.View()
+	teatest.RequireEqualOutput(t, []byte(view))
+}

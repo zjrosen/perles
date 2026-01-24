@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/zjrosen/perles/internal/orchestration/controlplane"
 	"github.com/zjrosen/perles/internal/orchestration/events"
@@ -192,11 +193,14 @@ func (m Model) createWorkflowTableConfig() table.TableConfig {
 				},
 			},
 		},
-		ShowHeader:   true,
-		ShowBorder:   true,
-		EmptyMessage: m.getEmptyMessage(),
-		BorderColor:  styles.BorderDefaultColor,
-		Title:        m.getTableTitle(),
+		ShowHeader:         true,
+		ShowBorder:         true,
+		Scrollable:         true,
+		EmptyMessage:       m.getEmptyMessage(),
+		BorderColor:        styles.BorderDefaultColor,
+		Focused:            m.focus == FocusTable,
+		FocusedBorderColor: styles.BorderHighlightFocusColor,
+		Title:              m.getTableTitle(),
 		RowZoneID: func(index int, _ any) string {
 			return makeWorkflowZoneID(index)
 		},
@@ -220,7 +224,8 @@ func (m Model) getTableTitle() string {
 }
 
 // renderView renders the complete dashboard view.
-func (m *Model) renderView() string {
+// This is a pure render function - it does not mutate model state.
+func (m Model) renderView() string {
 	if m.width == 0 || m.height == 0 {
 		return ""
 	}
@@ -233,6 +238,28 @@ func (m *Model) renderView() string {
 	footerHeight := lipgloss.Height(footer)
 	contentHeight := max(m.height-headerHeight-footerHeight, 5)
 
+	// Calculate table/epic section heights
+	// Only show epic section if there are workflows
+	var tableHeight, epicSectionHeight int
+	if len(m.workflows) == 0 {
+		// No workflows - table takes full height (shows empty state)
+		tableHeight = contentHeight
+		epicSectionHeight = 0
+	} else {
+		// 45%/55% split (table/epic), but ensure minimum 6 rows for table
+		// Table needs: 6 data rows + 3 (header + borders) = 9 minimum
+		minTableHeight := minWorkflowTableRows + 3
+
+		// Calculate 45% for table, 55% for epic section
+		tableHeight = max(contentHeight*45/100, minTableHeight)
+		epicSectionHeight = contentHeight - tableHeight
+		if epicSectionHeight < 5 {
+			// Not enough room for epic section - don't show it
+			tableHeight = contentHeight
+			epicSectionHeight = 0
+		}
+	}
+
 	var mainContent string
 
 	// Check if coordinator panel is visible
@@ -242,17 +269,33 @@ func (m *Model) renderView() string {
 		tableWidth := m.width - panelWidth
 
 		// Render workflow table (narrower)
-		tableView := m.renderBorderedWorkflowTable(tableWidth, contentHeight)
+		tableView := m.renderBorderedWorkflowTable(tableWidth, tableHeight)
 
-		// Render coordinator panel
+		// Render coordinator panel - it spans the full content height
 		m.coordinatorPanel.SetSize(panelWidth, contentHeight)
 		panelView := m.coordinatorPanel.View()
 
+		// Build left column: table + epic section
+		var leftColumn string
+		if epicSectionHeight > 0 {
+			epicSection := m.renderEpicSection(tableWidth, epicSectionHeight)
+			leftColumn = lipgloss.JoinVertical(lipgloss.Left, tableView, epicSection)
+		} else {
+			leftColumn = tableView
+		}
+
 		// Join horizontally
-		mainContent = lipgloss.JoinHorizontal(lipgloss.Top, tableView, panelView)
+		mainContent = lipgloss.JoinHorizontal(lipgloss.Top, leftColumn, panelView)
 	} else {
 		// Full width workflow table
-		mainContent = m.renderBorderedWorkflowTable(m.width, contentHeight)
+		tableView := m.renderBorderedWorkflowTable(m.width, tableHeight)
+
+		if epicSectionHeight > 0 {
+			epicSection := m.renderEpicSection(m.width, epicSectionHeight)
+			mainContent = lipgloss.JoinVertical(lipgloss.Left, tableView, epicSection)
+		} else {
+			mainContent = tableView
+		}
 	}
 
 	// Compose the layout with JoinVertical
@@ -264,6 +307,8 @@ func (m *Model) renderView() string {
 }
 
 // renderBorderedWorkflowTable renders the workflow table inside a bordered pane.
+// This is a pure render function - it does not mutate model state.
+// All state updates (scroll offset, config caching) must happen in Update().
 func (m Model) renderBorderedWorkflowTable(width, height int) string {
 	filtered := m.getFilteredWorkflows()
 
@@ -282,26 +327,33 @@ func (m Model) renderBorderedWorkflowTable(width, height int) string {
 		}
 	}
 
-	// Create fresh table config to capture current model state in render closures
-	tbl := table.New(m.createWorkflowTableConfig()).
+	// Build table for rendering (no mutation - use cached config from Update)
+	// Note: EnsureVisible is called in Update when selection changes, not here
+	tbl := m.workflowTable.
+		SetConfig(m.tableConfigCache).
 		SetRows(rows).
-		SetSize(width, height)
+		SetSize(width, height).
+		SetYOffset(m.tableScrollOffset)
 
-	return tbl.ViewWithSelection(m.selectedIndex)
+	// Wrap in zone for mouse scroll detection
+	return zone.Mark(zoneWorkflowTable, tbl.ViewWithSelection(m.selectedIndex))
 }
 
 // renderActionHints renders the quick action hints bar in a bordered pane.
+// Shows a static set of hints that apply across all focus zones.
 func (m Model) renderActionHints() string {
 	hintStyle := lipgloss.NewStyle().Foreground(colorDimmed)
 	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(colorHeader)
 
+	// Static hints that are always relevant
 	hints := []string{
-		fmt.Sprintf("%s start", keyStyle.Render("[s]")),
-		fmt.Sprintf("%s stop", keyStyle.Render("[x]")),
-		fmt.Sprintf("%s new", keyStyle.Render("[n]")),
-		fmt.Sprintf("%s chat", keyStyle.Render("[ctrl+w]")),
-		fmt.Sprintf("%s help", keyStyle.Render("[?]")),
-		fmt.Sprintf("%s quit", keyStyle.Render("[q]")),
+		fmt.Sprintf("%s nav", keyStyle.Render("j/k")),
+		fmt.Sprintf("%s cycle", keyStyle.Render("tab")),
+		fmt.Sprintf("%s new", keyStyle.Render("n")),
+		fmt.Sprintf("%s start", keyStyle.Render("s")),
+		fmt.Sprintf("%s stop", keyStyle.Render("x")),
+		fmt.Sprintf("%s help", keyStyle.Render("?")),
+		fmt.Sprintf("%s quit", keyStyle.Render("q")),
 	}
 
 	content := hintStyle.Render(strings.Join(hints, "  "))
@@ -426,6 +478,185 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dm", int(d.Minutes()))
 	}
 	return fmt.Sprintf("%dh", int(d.Hours()))
+}
+
+// minEpicSectionWidth is the minimum width required to render the epic section.
+// Below this threshold, a warning message is shown instead of the tree/details panes.
+const minEpicSectionWidth = 50
+
+// minWorkflowTableRows is the minimum number of rows to show in the workflow table.
+// This ensures the table remains usable even when the epic section is visible.
+const minWorkflowTableRows = 6
+
+// renderEpicSection renders the epic tree+details section below the workflow table.
+// It handles empty states (no epic, empty tree, loading) and the 40%/60% horizontal split.
+func (m Model) renderEpicSection(width, height int) string {
+	// Check minimum width threshold
+	if width < minEpicSectionWidth {
+		emptyStyle := lipgloss.NewStyle().
+			Foreground(colorDimmed).
+			Italic(true).
+			PaddingLeft(1)
+		return emptyStyle.Render("Terminal too narrow for tree view (need 50+ chars)")
+	}
+
+	// Handle no epic associated with workflow
+	wf := m.SelectedWorkflow()
+	if wf == nil || wf.EpicID == "" {
+		emptyStyle := lipgloss.NewStyle().
+			Foreground(colorDimmed).
+			Italic(true).
+			PaddingLeft(1)
+		return emptyStyle.Render("No epic associated with this workflow")
+	}
+
+	// Handle no tree loaded yet (tree loads fast, so just show empty state briefly)
+	if m.epicTree == nil || m.epicTree.Root() == nil {
+		emptyStyle := lipgloss.NewStyle().
+			Foreground(colorDimmed).
+			Italic(true).
+			PaddingLeft(1)
+		return emptyStyle.Render("No tasks in epic")
+	}
+
+	// Check if tree has only root with no children
+	root := m.epicTree.Root()
+	if len(root.Children) == 0 {
+		emptyStyle := lipgloss.NewStyle().
+			Foreground(colorDimmed).
+			Italic(true).
+			PaddingLeft(1)
+		return emptyStyle.Render("Epic has no child tasks yet")
+	}
+
+	// Minimum width threshold to show details pane (tree + details needs at least 80 chars)
+	const minWidthForDetails = 80
+
+	// Determine if we should show details pane based on available width
+	showDetails := width >= minWidthForDetails
+
+	var treeWidth, detailsWidth int
+	if showDetails {
+		// Calculate widths: 40% tree, 60% details
+		treeWidth = width * 40 / 100
+		detailsWidth = width - treeWidth
+
+		// Ensure minimum widths
+		if treeWidth < 20 {
+			treeWidth = 20
+			detailsWidth = width - treeWidth
+		}
+		if detailsWidth < 20 {
+			detailsWidth = 20
+			treeWidth = width - detailsWidth
+		}
+	} else {
+		// Narrow width: only show tree pane
+		treeWidth = width
+		detailsWidth = 0
+	}
+
+	// Set sizes for tree
+	m.epicTree.SetSize(treeWidth-2, height-2) // -2 for borders
+
+	// Render tree pane with border
+	treeContent := m.epicTree.View()
+	treePaneStyle := m.getEpicPaneBorderConfig(EpicFocusTree, treeWidth, height, "Epic")
+
+	// Calculate progress bar for tree pane
+	var progressBar string
+	if m.epicTree.Root() != nil {
+		closed, total := m.epicTree.Root().CalculateProgress()
+		progressBar = renderCompactProgress(closed, total)
+	}
+
+	treePane := zone.Mark(zoneEpicTree, panes.BorderedPane(panes.BorderConfig{
+		Content:            treeContent,
+		Width:              treePaneStyle.width,
+		Height:             treePaneStyle.height,
+		TopLeft:            treePaneStyle.title,
+		TopRight:           progressBar,
+		Focused:            treePaneStyle.focused,
+		TitleColor:         styles.OverlayTitleColor,
+		FocusedBorderColor: styles.BorderHighlightFocusColor,
+	}))
+
+	// If not showing details, just return the tree pane
+	if !showDetails {
+		return treePane
+	}
+
+	// Set details size and render
+	if m.hasEpicDetail {
+		m.epicDetails = m.epicDetails.SetSize(detailsWidth-2, height-2)
+	}
+
+	// Render details pane with border
+	var detailsContent string
+	if m.hasEpicDetail {
+		detailsContent = m.epicDetails.View()
+	} else {
+		emptyStyle := lipgloss.NewStyle().
+			Foreground(colorDimmed).
+			Italic(true).
+			PaddingLeft(1)
+		detailsContent = emptyStyle.Render("Select an issue to view details")
+	}
+	detailsPaneStyle := m.getEpicPaneBorderConfig(EpicFocusDetails, detailsWidth, height, "Details")
+
+	detailsPane := zone.Mark(zoneEpicDetails, panes.BorderedPane(panes.BorderConfig{
+		Content:            detailsContent,
+		Width:              detailsPaneStyle.width,
+		Height:             detailsPaneStyle.height,
+		TopLeft:            detailsPaneStyle.title,
+		Focused:            detailsPaneStyle.focused,
+		TitleColor:         styles.OverlayTitleColor,
+		FocusedBorderColor: styles.BorderHighlightFocusColor,
+	}))
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, treePane, detailsPane)
+}
+
+// epicPaneBorderConfig holds the configuration for a bordered pane in the epic section.
+type epicPaneBorderConfig struct {
+	width   int
+	height  int
+	title   string
+	focused bool
+}
+
+// getEpicPaneBorderConfig returns the border configuration for an epic view pane.
+// The focused state is determined by comparing the pane's focus enum with the current epicViewFocus.
+func (m Model) getEpicPaneBorderConfig(pane EpicViewFocus, width, height int, title string) epicPaneBorderConfig {
+	// Pane is focused only when:
+	// 1. Dashboard focus is on the epic view
+	// 2. The specific pane within epic view matches
+	focused := m.focus == FocusEpicView && m.epicViewFocus == pane
+
+	return epicPaneBorderConfig{
+		width:   width,
+		height:  height,
+		title:   title,
+		focused: focused,
+	}
+}
+
+// renderCompactProgress renders a compact progress bar with percentage and counts.
+func renderCompactProgress(closed, total int) string {
+	if total == 0 {
+		return ""
+	}
+	percent := float64(closed) / float64(total) * 100
+	barWidth := 10
+	filledWidth := int(float64(barWidth) * float64(closed) / float64(total))
+
+	filledStyle := lipgloss.NewStyle().Foreground(styles.TextMutedColor)
+	emptyStyle := lipgloss.NewStyle().Foreground(styles.TextMutedColor)
+
+	filled := filledStyle.Render(strings.Repeat("█", filledWidth))
+	empty := emptyStyle.Render(strings.Repeat("░", barWidth-filledWidth))
+
+	return fmt.Sprintf("%s%s %.0f%% (%d/%d)", filled, empty, percent, closed, total)
 }
 
 // ResourceSummary holds aggregated resource statistics.

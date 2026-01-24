@@ -86,6 +86,12 @@ type Model struct {
 	commentLoader      appbeads.CommentReader
 	commentsLoaded     bool
 	commentsError      error
+	hideFooter         bool // When true, footer is not rendered (e.g., in dashboard mode)
+
+	// Cached renders to avoid recomputing on every scroll
+	cachedHeader   string
+	cachedMetadata string
+	cacheValid     bool
 }
 
 // New creates a new detail view.
@@ -112,6 +118,12 @@ func (m Model) SetMarkdownStyle(style string) Model {
 	return m
 }
 
+// SetHideFooter configures whether the footer is hidden (e.g., in dashboard mode).
+func (m Model) SetHideFooter(hide bool) Model {
+	m.hideFooter = hide
+	return m
+}
+
 // SetSize updates dimensions and initializes viewport.
 func (m Model) SetSize(width, height int) Model {
 	m.width = width
@@ -122,7 +134,10 @@ func (m Model) SetSize(width, height int) Model {
 
 	// Calculate actual header height based on title wrapping
 	headerHeight := m.calculateHeaderHeight(leftColWidth)
-	footerHeight := 1 // Footer is a single line
+	footerHeight := 0
+	if !m.hideFooter {
+		footerHeight = 1 // Footer is a single line
+	}
 	viewportHeight := max(height-headerHeight-footerHeight, 1)
 
 	// Initialize or update markdown renderer (uses left column width)
@@ -149,6 +164,13 @@ func (m Model) SetSize(width, height int) Model {
 		m.viewport.SetContent(m.renderLeftColumn())
 		// Scroll position preserved - GotoTop() removed to enable scroll restoration
 	}
+
+	// Pre-compute cached renders for scroll performance
+	m.cachedHeader = m.renderHeader()
+	if m.useTwoColumnLayout() {
+		m.cachedMetadata = m.renderMetadataColumn()
+	}
+	m.cacheValid = true
 
 	return m
 }
@@ -274,7 +296,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if msg.Button != tea.MouseButtonWheelUp && msg.Button != tea.MouseButtonWheelDown {
 			return m, nil
 		}
-		scrollLines := 1
+		scrollLines := 3 // Scroll 3 lines per wheel tick for smoother feel
 		if msg.Button == tea.MouseButtonWheelUp {
 			m.viewport.ScrollUp(scrollLines)
 		} else {
@@ -316,16 +338,25 @@ func (m Model) View() string {
 		return "Loading..."
 	}
 
-	// Build the modal
-	header := m.renderHeader()
-	footer := m.renderFooter()
+	// Use cached header/metadata if available (they don't change during scrolling)
+	header := m.cachedHeader
+	if !m.cacheValid || header == "" {
+		header = m.renderHeader()
+	}
+	footer := ""
+	if !m.hideFooter {
+		footer = m.renderFooter()
+	}
 
 	var body string
 	if m.useTwoColumnLayout() {
 		// Two-column layout: left (header + scrollable content) + right (static metadata)
 		// Include header in left column so both columns start at top
 		leftCol := header + m.viewport.View()
-		rightCol := m.renderMetadataColumn()
+		rightCol := m.cachedMetadata
+		if !m.cacheValid || rightCol == "" {
+			rightCol = m.renderMetadataColumn()
+		}
 
 		// Get calculated column widths (fixed or percentage-based)
 		leftWidth, rightWidth := m.calculateColumnWidths()
@@ -378,22 +409,30 @@ func (m Model) View() string {
 
 		contentStyle := lipgloss.NewStyle().PaddingLeft(leftPadding)
 
-		// Create footer row with divider extending down
-		footerLeftStyle := lipgloss.NewStyle().Width(leftWidth)
-		footerRightStyle := lipgloss.NewStyle().Width(rightWidth)
-		footerDivider := dividerStyle.Render(" │ ")
-		footerRow := lipgloss.JoinHorizontal(
-			lipgloss.Top,
-			footerLeftStyle.Render(footer),
-			footerDivider,
-			footerRightStyle.Render(""),
-		)
-
-		body = lipgloss.JoinVertical(lipgloss.Left, contentStyle.Render(content), contentStyle.Render(footerRow))
+		// Skip footer row entirely when hideFooter is set
+		if m.hideFooter {
+			body = contentStyle.Render(content)
+		} else {
+			// Create footer row with divider extending down
+			footerLeftStyle := lipgloss.NewStyle().Width(leftWidth)
+			footerRightStyle := lipgloss.NewStyle().Width(rightWidth)
+			footerDivider := dividerStyle.Render(" │ ")
+			footerRow := lipgloss.JoinHorizontal(
+				lipgloss.Top,
+				footerLeftStyle.Render(footer),
+				footerDivider,
+				footerRightStyle.Render(""),
+			)
+			body = lipgloss.JoinVertical(lipgloss.Left, contentStyle.Render(content), contentStyle.Render(footerRow))
+		}
 	} else {
 		// Single-column fallback (narrow terminals)
 		content := m.viewport.View()
-		body = lipgloss.JoinVertical(lipgloss.Left, header, content, footer)
+		if m.hideFooter {
+			body = lipgloss.JoinVertical(lipgloss.Left, header, content)
+		} else {
+			body = lipgloss.JoinVertical(lipgloss.Left, header, content, footer)
+		}
 	}
 
 	return body

@@ -6,20 +6,20 @@
 │                                                          ││                                                          │
 │                                                          ││User                                                      │
 │                                                          ││Start working on the authentication feature               │
-│                                                          ││                                                          │
-│                                                          ││Coordinator                                               │
-│                                                          ││I'll begin implementing the authentication feature.       │
-│                                                          ││First, let me analyze the codebase.                       │
-│                                                          ││                                                          │
-│                                                          ││Coordinator                                               │
-│                                                          ││╰╴ Looking at the middleware...                           │
-│                                                          │╰──────────────────────────────────────────────────────────╯
-│                                                          │╭──────────────────────────────────────────────────────────╮
-│                                                          ││ Message coordinator...                                   │
-│                                                          ││                                                          │
-│                                                          ││                                                          │
-│                                                          ││                                                          │
-╰──────────────────────────────────────────────────────────╯╰─ [INSERT] ───────────────────────────────────────────────╯
+╰──────────────────────────────────────────────────────────╯│                                                          │
+ No epic associated with this workflow                      │Coordinator                                               │
+                                                            │I'll begin implementing the authentication feature.       │
+                                                            │First, let me analyze the codebase.                       │
+                                                            │                                                          │
+                                                            │Coordinator                                               │
+                                                            │╰╴ Looking at the middleware...                           │
+                                                            ╰──────────────────────────────────────────────────────────╯
+                                                            ╭──────────────────────────────────────────────────────────╮
+                                                            │ Message coordinator...                                   │
+                                                            │                                                          │
+                                                            │                                                          │
+                                                            │                                                          │
+                                                            ╰─ [INSERT] ───────────────────────────────────────────────╯
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│[s] start  [x] stop  [n] new  [ctrl+w] chat  [?] help  [q] quit                                                       │
+│j/k nav  tab cycle  n new  s start  x stop  ? help  q quit                                                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

@@ -126,8 +126,8 @@ func (r *inMemoryRegistry) List(q ListQuery) []*WorkflowInstance {
 		}
 	}
 
-	// Sort by creation time (newest first)
-	sortByCreatedAtDesc(results)
+	// Sort by creation time (oldest first, so new workflows appear at bottom)
+	sortByCreatedAtAsc(results)
 
 	// Apply offset and limit
 	if q.Offset > 0 {
@@ -201,22 +201,22 @@ func containsState(states []WorkflowState, target WorkflowState) bool {
 	return slices.Contains(states, target)
 }
 
-// sortByCreatedAtDesc sorts workflows by CreatedAt in descending order (newest first).
+// sortByCreatedAtAsc sorts workflows by CreatedAt in ascending order (oldest first).
 // When CreatedAt times are equal, sorts by ID ascending for stable ordering.
-func sortByCreatedAtDesc(workflows []*WorkflowInstance) {
+func sortByCreatedAtAsc(workflows []*WorkflowInstance) {
 	// Simple insertion sort - adequate for expected list sizes
 	for i := 1; i < len(workflows); i++ {
-		for j := i; j > 0 && isNewerOrSameTimeWithSmallerID(workflows[j], workflows[j-1]); j-- {
+		for j := i; j > 0 && isOlderOrSameTimeWithSmallerID(workflows[j], workflows[j-1]); j-- {
 			workflows[j], workflows[j-1] = workflows[j-1], workflows[j]
 		}
 	}
 }
 
-// isNewerOrSameTimeWithSmallerID returns true if a should sort before b.
-// Primary sort: CreatedAt descending (newer first).
+// isOlderOrSameTimeWithSmallerID returns true if a should sort before b.
+// Primary sort: CreatedAt ascending (older first).
 // Secondary sort (tie-breaker): ID ascending for stable ordering.
-func isNewerOrSameTimeWithSmallerID(a, b *WorkflowInstance) bool {
-	if a.CreatedAt.After(b.CreatedAt) {
+func isOlderOrSameTimeWithSmallerID(a, b *WorkflowInstance) bool {
+	if a.CreatedAt.Before(b.CreatedAt) {
 		return true
 	}
 	if a.CreatedAt.Equal(b.CreatedAt) {

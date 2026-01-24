@@ -1,12 +1,14 @@
 package dashboard
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	beads "github.com/zjrosen/perles/internal/beads/domain"
 	"github.com/zjrosen/perles/internal/mode"
 	"github.com/zjrosen/perles/internal/orchestration/controlplane"
 	"github.com/zjrosen/perles/internal/orchestration/events"
@@ -14,6 +16,7 @@ import (
 	"github.com/zjrosen/perles/internal/orchestration/metrics"
 	"github.com/zjrosen/perles/internal/pubsub"
 	"github.com/zjrosen/perles/internal/ui/shared/chatrender"
+	"github.com/zjrosen/perles/internal/ui/tree"
 )
 
 func TestNewWorkflowUIState_CreatesEmptyState(t *testing.T) {
@@ -698,4 +701,198 @@ func TestModel_WorkflowSelectionChange_SameIndexNoOp(t *testing.T) {
 	// Select same index - should be no-op
 	m.handleWorkflowSelectionChange(0)
 	require.Equal(t, 0, m.selectedIndex)
+}
+
+// === Unit Tests: Tree State Caching ===
+
+func TestWorkflowUIState_TreeStateFields_DefaultsToZeroValues(t *testing.T) {
+	// Verify that new state has zero values for tree state fields
+	state := NewWorkflowUIState()
+
+	require.Equal(t, tree.Direction(""), state.TreeDirection, "TreeDirection should be zero value")
+	require.Equal(t, tree.TreeMode(""), state.TreeMode, "TreeMode should be zero value")
+	require.Equal(t, "", state.TreeSelectedID, "TreeSelectedID should be empty")
+}
+
+func TestModel_SaveEpicTreeState_SavesDirectionModeSelection(t *testing.T) {
+	// Verify that saveEpicTreeState saves direction, mode, and selection
+	mockCP := newMockControlPlane()
+	mockCP.On("List", mock.Anything, mock.Anything).Return([]*controlplane.WorkflowInstance{}, nil).Maybe()
+
+	globalEventCh := make(chan controlplane.ControlPlaneEvent)
+	close(globalEventCh)
+	mockCP.On("Subscribe", mock.Anything).Return((<-chan controlplane.ControlPlaneEvent)(globalEventCh), func() {}).Maybe()
+
+	cfg := Config{
+		ControlPlane: mockCP,
+		Services:     mode.Services{},
+	}
+
+	m := New(cfg)
+	m = m.SetSize(100, 40).(Model)
+
+	// Create a tree with specific state (DirectionDown shows children)
+	issueMap := map[string]*beads.Issue{
+		"issue-1": {ID: "issue-1", TitleText: "Root Issue", Children: []string{"issue-2"}},
+		"issue-2": {ID: "issue-2", TitleText: "Child Issue", ParentID: "issue-1"},
+	}
+	m.epicTree = tree.New("issue-1", issueMap, tree.DirectionDown, tree.ModeChildren, nil)
+
+	// Move cursor to second node (child)
+	m.epicTree.MoveCursor(1)
+
+	// Save state
+	m.saveEpicTreeState("wf-1")
+
+	// Verify state was saved
+	state := m.getOrCreateUIState("wf-1")
+	require.Equal(t, tree.DirectionDown, state.TreeDirection)
+	require.Equal(t, tree.ModeChildren, state.TreeMode)
+	require.Equal(t, "issue-2", state.TreeSelectedID)
+}
+
+func TestModel_TreeStateRestoredOnReturn(t *testing.T) {
+	// Verify that tree state is restored when returning to a workflow.
+	// This tests the round-trip: save state -> switch away -> switch back -> state restored.
+	mockCP := newMockControlPlane()
+	mockCP.On("List", mock.Anything, mock.Anything).Return([]*controlplane.WorkflowInstance{}, nil).Maybe()
+
+	globalEventCh := make(chan controlplane.ControlPlaneEvent)
+	close(globalEventCh)
+	mockCP.On("Subscribe", mock.Anything).Return((<-chan controlplane.ControlPlaneEvent)(globalEventCh), func() {}).Maybe()
+
+	cfg := Config{
+		ControlPlane: mockCP,
+		Services:     mode.Services{},
+	}
+
+	m := New(cfg)
+	m = m.SetSize(100, 40).(Model)
+
+	// Create two workflows
+	workflows := []*controlplane.WorkflowInstance{
+		createTestWorkflow("wf-1", "Workflow 1", controlplane.WorkflowRunning),
+		createTestWorkflow("wf-2", "Workflow 2", controlplane.WorkflowRunning),
+	}
+	workflows[0].EpicID = "epic-1"
+	workflows[1].EpicID = "epic-2"
+	m.workflows = workflows
+	m.selectedIndex = 0
+
+	// Create a tree with specific state for wf-1
+	issueMap := map[string]*beads.Issue{
+		"epic-1":  {ID: "epic-1", TitleText: "Epic 1", Children: []string{"issue-1"}},
+		"issue-1": {ID: "issue-1", TitleText: "Issue 1", ParentID: "epic-1"},
+	}
+	m.epicTree = tree.New("epic-1", issueMap, tree.DirectionDown, tree.ModeChildren, nil)
+
+	// Change direction to Up and select child
+	m.epicTree.SetDirection(tree.DirectionUp)
+	_ = m.epicTree.Rebuild()
+	m.epicTree.MoveCursor(1)
+
+	// Save state before switching
+	m.saveEpicTreeState("wf-1")
+
+	// Verify state was saved correctly
+	state1 := m.getOrCreateUIState("wf-1")
+	require.Equal(t, tree.DirectionUp, state1.TreeDirection)
+	require.Equal(t, tree.ModeChildren, state1.TreeMode)
+
+	// Switch to wf-2
+	m.handleWorkflowSelectionChange(1)
+
+	// Create different tree state for wf-2
+	issueMap2 := map[string]*beads.Issue{
+		"epic-2":  {ID: "epic-2", TitleText: "Epic 2", Children: []string{"issue-2"}},
+		"issue-2": {ID: "issue-2", TitleText: "Issue 2", ParentID: "epic-2"},
+	}
+	m.epicTree = tree.New("epic-2", issueMap2, tree.DirectionDown, tree.ModeDeps, nil)
+	m.saveEpicTreeState("wf-2")
+
+	// Switch back to wf-1
+	m.handleWorkflowSelectionChange(0)
+
+	// Verify wf-1's state is still preserved in cache
+	state1After := m.getOrCreateUIState("wf-1")
+	require.Equal(t, tree.DirectionUp, state1After.TreeDirection)
+	require.Equal(t, tree.ModeChildren, state1After.TreeMode)
+
+	// Verify wf-2's state is also preserved
+	state2 := m.getOrCreateUIState("wf-2")
+	require.Equal(t, tree.DirectionDown, state2.TreeDirection)
+	require.Equal(t, tree.ModeDeps, state2.TreeMode)
+}
+
+func TestModel_TreeDirectionPreserved(t *testing.T) {
+	// Verify direction enum is preserved exactly (up vs down)
+	state := NewWorkflowUIState()
+
+	// Test DirectionDown
+	state.TreeDirection = tree.DirectionDown
+	require.Equal(t, tree.DirectionDown, state.TreeDirection)
+
+	// Test DirectionUp
+	state.TreeDirection = tree.DirectionUp
+	require.Equal(t, tree.DirectionUp, state.TreeDirection)
+}
+
+func TestModel_TreeModePreserved(t *testing.T) {
+	// Verify mode enum is preserved exactly (deps vs children)
+	state := NewWorkflowUIState()
+
+	// Test ModeDeps
+	state.TreeMode = tree.ModeDeps
+	require.Equal(t, tree.ModeDeps, state.TreeMode)
+
+	// Test ModeChildren
+	state.TreeMode = tree.ModeChildren
+	require.Equal(t, tree.ModeChildren, state.TreeMode)
+}
+
+func TestModel_TreeStateEvicted_CleanedUpProperly(t *testing.T) {
+	// Verify that tree state is cleaned up when workflow state is evicted
+	mockCP := newMockControlPlane()
+	mockCP.On("List", mock.Anything, mock.Anything).Return([]*controlplane.WorkflowInstance{}, nil).Maybe()
+
+	globalEventCh := make(chan controlplane.ControlPlaneEvent)
+	close(globalEventCh)
+	mockCP.On("Subscribe", mock.Anything).Return((<-chan controlplane.ControlPlaneEvent)(globalEventCh), func() {}).Maybe()
+
+	cfg := Config{
+		ControlPlane: mockCP,
+		Services:     mode.Services{},
+	}
+
+	m := New(cfg)
+	m = m.SetSize(100, 40).(Model)
+
+	baseTime := time.Now()
+
+	// Create more than maxCachedWorkflows states with staggered timestamps
+	// to ensure deterministic eviction (oldest gets evicted first)
+	for i := 0; i < maxCachedWorkflows+2; i++ {
+		wfID := controlplane.WorkflowID(fmt.Sprintf("wf-%d", i))
+		state := m.getOrCreateUIState(wfID)
+		state.TreeDirection = tree.DirectionUp
+		state.TreeMode = tree.ModeChildren
+		state.TreeSelectedID = fmt.Sprintf("issue-%d", i)
+		// Set timestamps so earlier workflows are older
+		state.LastUpdated = baseTime.Add(time.Duration(i) * time.Second)
+	}
+
+	// Verify we don't exceed max cached workflows
+	require.LessOrEqual(t, len(m.workflowUIState), maxCachedWorkflows)
+
+	// Verify that evicted workflow states (including tree state) were removed
+	// At least some early workflows should have been evicted
+	evictedCount := 0
+	for i := 0; i < maxCachedWorkflows+2; i++ {
+		wfID := controlplane.WorkflowID(fmt.Sprintf("wf-%d", i))
+		if _, exists := m.workflowUIState[wfID]; !exists {
+			evictedCount++
+		}
+	}
+
+	require.GreaterOrEqual(t, evictedCount, 2, "At least 2 workflows should have been evicted")
 }

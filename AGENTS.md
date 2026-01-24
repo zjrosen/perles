@@ -637,10 +637,19 @@ orchestration:                       # AI orchestration settings
 ### Dashboard Mode (Multi-Workflow Management)
 
 - **Navigation:** `j/k` or `↓/↑` (move between workflows), `g` (first), `G` (last)
+- **Focus Cycling:** `Tab` or `Ctrl+n` (next zone), `Shift+Tab` or `Ctrl+p` (prev zone)
 - **Filter:** `/` (activate filter), `esc` (clear filter)
-- **Actions:** `s` (start), `p` (pause), `x` (stop), `enter` (detail view)
-- **Create:** `n` (new workflow), `N` (new workflow and start)
+- **Actions:** `s` (start), `x` (stop), `enter` (focus coordinator)
+- **Create:** `n` (new workflow)
+- **Coordinator:** `ctrl+w` (toggle panel), `[` / `]` (switch tabs)
 - **General:** `?` (help), `q` (quit)
+
+#### Epic Tree View (when visible)
+
+- **Toggle:** `t` (show/hide tree view)
+- **Navigation:** `j/k` or `↓/↑` (move in tree when tree focused)
+- **Pane switch:** `h/l` (tree ↔ details)
+- **Tree controls:** `d` (direction), `m` (mode), `r` (refresh)
 
 ## Important Gotchas
 

@@ -3,6 +3,8 @@ package table
 import (
 	"strings"
 
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	zone "github.com/lrstanley/bubblezone"
 
@@ -11,13 +13,16 @@ import (
 )
 
 // Model holds table rendering state.
-// The table is a pure render component with external state management.
+// The table supports optional scrolling via an internal viewport.
 // Use View() for rendering without selection, or ViewWithSelection() for highlighting.
+// When Scrollable is enabled in config, call Update() to handle scroll events.
 type Model struct {
-	config TableConfig
-	rows   []any
-	width  int
-	height int
+	config        TableConfig
+	rows          []any
+	width         int
+	height        int
+	viewport      viewport.Model // Internal viewport for scrollable tables
+	targetYOffset int            // Desired scroll offset (applied after SetContent)
 }
 
 // New creates a table with the given configuration.
@@ -32,10 +37,18 @@ func New(cfg TableConfig) Model {
 		cfg.EmptyMessage = "No data"
 	}
 
-	return Model{
+	m := Model{
 		config: cfg,
 		rows:   make([]any, 0),
 	}
+
+	// Initialize viewport for scrollable tables
+	if cfg.Scrollable {
+		m.viewport = viewport.New(0, 0)
+		m.viewport.MouseWheelEnabled = true
+	}
+
+	return m
 }
 
 // SetRows updates the row data and returns a new Model (immutable pattern).
@@ -44,16 +57,107 @@ func (m Model) SetRows(rows []any) Model {
 	return m
 }
 
+// SetConfig updates the table configuration without recreating the viewport.
+// Use this to update dynamic config values like Focused state.
+func (m Model) SetConfig(cfg TableConfig) Model {
+	m.config = cfg
+	return m
+}
+
 // SetSize sets the available dimensions and returns a new Model (immutable pattern).
 func (m Model) SetSize(width, height int) Model {
 	m.width = width
 	m.height = height
+
+	// Update viewport size if scrollable
+	if m.config.Scrollable {
+		// Calculate viewport dimensions (inside borders, minus header)
+		vpWidth := width
+		vpHeight := height
+		if m.config.ShowBorder {
+			vpWidth -= 2
+			vpHeight -= 2
+		}
+		if m.config.ShowHeader {
+			vpHeight--
+		}
+		m.viewport.Width = max(0, vpWidth)
+		m.viewport.Height = max(0, vpHeight)
+
+		// Clamp scroll offset to valid range
+		m.targetYOffset = m.clampYOffset(m.targetYOffset)
+	}
+
 	return m
+}
+
+// SetYOffset sets the vertical scroll offset for scrollable tables.
+// For non-scrollable tables, this is a no-op.
+// The offset is applied after SetContent during rendering.
+func (m Model) SetYOffset(offset int) Model {
+	if m.config.Scrollable {
+		m.targetYOffset = m.clampYOffset(offset)
+	}
+	return m
+}
+
+// YOffset returns the current vertical scroll offset.
+func (m Model) YOffset() int {
+	return m.targetYOffset
+}
+
+// clampYOffset ensures the offset is within valid bounds.
+func (m Model) clampYOffset(offset int) int {
+	if offset < 0 {
+		return 0
+	}
+	// Max offset is total rows minus viewport height
+	maxOffset := max(len(m.rows)-m.viewport.Height, 0)
+	if offset > maxOffset {
+		return maxOffset
+	}
+	return offset
 }
 
 // RowCount returns the number of rows in the table.
 func (m Model) RowCount() int {
 	return len(m.rows)
+}
+
+// Update handles messages for scrollable tables.
+// For non-scrollable tables, this is a no-op.
+func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
+	if !m.config.Scrollable {
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.viewport, cmd = m.viewport.Update(msg)
+	return m, cmd
+}
+
+// EnsureVisible scrolls to make the given row index visible.
+// For non-scrollable tables, this is a no-op.
+func (m Model) EnsureVisible(rowIndex int) Model {
+	if !m.config.Scrollable || rowIndex < 0 || rowIndex >= len(m.rows) {
+		return m
+	}
+
+	// Each row is 1 line high
+	rowOffset := rowIndex
+
+	// If row is above viewport, scroll up to it
+	if rowOffset < m.targetYOffset {
+		m.targetYOffset = m.clampYOffset(rowOffset)
+	}
+
+	// If row is below viewport, scroll down to show it at bottom
+	viewportHeight := m.viewport.Height
+	if rowOffset >= m.targetYOffset+viewportHeight {
+		m.targetYOffset = m.clampYOffset(rowOffset - viewportHeight + 1)
+	}
+
+	return m
 }
 
 // View renders the table without selection highlighting.
@@ -104,56 +208,119 @@ func (m Model) renderTable(selectedIndex int) string {
 	if len(m.rows) == 0 {
 		// Empty state
 		content = renderEmptyState(m.config.EmptyMessage, innerWidth, innerHeight)
+	} else if m.config.Scrollable {
+		// Scrollable table: header + viewport with all rows
+		content = m.renderScrollableContent(visibleColumns, widths, innerWidth, innerHeight, selectedIndex)
 	} else {
-		// Build table content
-		var lines []string
-
-		// Header row
-		if m.config.ShowHeader {
-			headerLine := renderHeader(visibleColumns, widths)
-			// Style header with muted color
-			headerStyle := lipgloss.NewStyle().Foreground(styles.TextMutedColor)
-			headerLine = headerStyle.Render(headerLine)
-			lines = append(lines, headerLine)
-		}
-
-		// Data rows
-		dataRowCount := min(len(m.rows), contentHeight)
-		for i := range dataRowCount {
-			selected := i == selectedIndex
-			rowLine := renderRow(m.rows[i], visibleColumns, widths, selected, innerWidth)
-
-			// Wrap row with zone mark if RowZoneID callback is set
-			if m.config.RowZoneID != nil {
-				zoneID := m.config.RowZoneID(i, m.rows[i])
-				if zoneID != "" {
-					rowLine = zone.Mark(zoneID, rowLine)
-				}
-			}
-
-			lines = append(lines, rowLine)
-		}
-
-		// Pad remaining height with empty lines
-		currentLines := len(lines)
-		for i := currentLines; i < innerHeight; i++ {
-			lines = append(lines, "")
-		}
-
-		content = strings.Join(lines, "\n")
+		// Non-scrollable table: header + limited rows + padding
+		content = m.renderStaticContent(visibleColumns, widths, innerWidth, innerHeight, contentHeight, selectedIndex)
 	}
 
 	// Wrap in border if configured
 	if m.config.ShowBorder {
 		return panes.BorderedPane(panes.BorderConfig{
-			Content:     content,
-			Width:       m.width,
-			Height:      m.height,
-			TopLeft:     m.config.Title,
-			BorderColor: m.config.BorderColor,
-			PreWrapped:  true, // Content already handles its own width/height
+			Content:            content,
+			Width:              m.width,
+			Height:             m.height,
+			TopLeft:            m.config.Title,
+			BorderColor:        m.config.BorderColor,
+			Focused:            m.config.Focused,
+			FocusedBorderColor: m.config.FocusedBorderColor,
+			PreWrapped:         true, // Content already handles its own width/height
 		})
 	}
 
 	return content
+}
+
+// renderStaticContent renders the table content for non-scrollable tables.
+func (m Model) renderStaticContent(visibleColumns []ColumnConfig, widths []int, innerWidth, innerHeight, contentHeight, selectedIndex int) string {
+	var lines []string
+
+	// Header row
+	if m.config.ShowHeader {
+		headerLine := renderHeader(visibleColumns, widths)
+		headerStyle := lipgloss.NewStyle().Foreground(styles.TextMutedColor)
+		headerLine = headerStyle.Render(headerLine)
+		lines = append(lines, headerLine)
+	}
+
+	// Data rows (limited to visible area)
+	dataRowCount := min(len(m.rows), contentHeight)
+	for i := range dataRowCount {
+		selected := i == selectedIndex
+		rowLine := renderRow(m.rows[i], visibleColumns, widths, selected, innerWidth)
+
+		if m.config.RowZoneID != nil {
+			zoneID := m.config.RowZoneID(i, m.rows[i])
+			if zoneID != "" {
+				rowLine = zone.Mark(zoneID, rowLine)
+			}
+		}
+
+		lines = append(lines, rowLine)
+	}
+
+	// Pad remaining height with empty lines
+	for i := len(lines); i < innerHeight; i++ {
+		lines = append(lines, "")
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// renderScrollableContent renders the table content for scrollable tables.
+// Header stays sticky, only visible rows are rendered (not all rows).
+func (m Model) renderScrollableContent(visibleColumns []ColumnConfig, widths []int, innerWidth, innerHeight, selectedIndex int) string {
+	var lines []string
+
+	// Sticky header row
+	if m.config.ShowHeader {
+		headerLine := renderHeader(visibleColumns, widths)
+		headerStyle := lipgloss.NewStyle().Foreground(styles.TextMutedColor)
+		headerLine = headerStyle.Render(headerLine)
+		lines = append(lines, headerLine)
+	}
+
+	// Calculate visible row range based on scroll offset and viewport height
+	viewportHeight := m.viewport.Height
+	if viewportHeight <= 0 {
+		viewportHeight = innerHeight
+		if m.config.ShowHeader {
+			viewportHeight--
+		}
+	}
+
+	startRow := m.targetYOffset
+	endRow := min(startRow+viewportHeight, len(m.rows))
+	if startRow < 0 {
+		startRow = 0
+	}
+
+	// Only render visible rows (not all rows)
+	var rowLines []string
+	for i := startRow; i < endRow; i++ {
+		selected := i == selectedIndex
+		rowLine := renderRow(m.rows[i], visibleColumns, widths, selected, innerWidth)
+
+		if m.config.RowZoneID != nil {
+			zoneID := m.config.RowZoneID(i, m.rows[i])
+			if zoneID != "" {
+				rowLine = zone.Mark(zoneID, rowLine)
+			}
+		}
+
+		rowLines = append(rowLines, rowLine)
+	}
+
+	// Join visible rows directly (no viewport needed since we're managing scroll ourselves)
+	lines = append(lines, strings.Join(rowLines, "\n"))
+
+	// Pad remaining height with empty lines
+	renderedRows := endRow - startRow
+	for i := renderedRows; i < viewportHeight; i++ {
+		lines = append(lines, "")
+	}
+
+	return strings.Join(lines, "\n")
 }

@@ -8,6 +8,12 @@ import (
 	"github.com/zjrosen/perles/internal/ui/styles"
 )
 
+// Cached styles to avoid repeated allocations during rendering.
+// These are initialized once and reused across all table renders.
+var (
+	selectionBgStyle = lipgloss.NewStyle().Background(styles.SelectionBackgroundColor)
+)
+
 // renderHeader renders the table header row.
 // Returns the header row string with column alignment applied.
 func renderHeader(cols []ColumnConfig, widths []int) string {
@@ -45,8 +51,8 @@ func renderRow(row any, cols []ColumnConfig, widths []int, selected bool, fullWi
 	// For selected rows, we need to apply background to each part individually.
 	// The key is that each styled segment must have BOTH foreground AND background
 	// applied in the same style - we can't wrap pre-styled content with a background.
+	// Use cached style to avoid repeated allocations.
 	bgColor := styles.SelectionBackgroundColor
-	spaceStyle := lipgloss.NewStyle().Background(bgColor)
 
 	var result strings.Builder
 	for i, col := range cols {
@@ -55,7 +61,7 @@ func renderRow(row any, cols []ColumnConfig, widths []int, selected bool, fullWi
 		// Add separator before each cell (except first)
 		if i > 0 {
 			if selected {
-				result.WriteString(spaceStyle.Render(" "))
+				result.WriteString(selectionBgStyle.Render(" "))
 			} else {
 				result.WriteString(" ")
 			}
@@ -72,7 +78,7 @@ func renderRow(row any, cols []ColumnConfig, widths []int, selected bool, fullWi
 	if selected {
 		contentWidth := lipgloss.Width(content)
 		if contentWidth < fullWidth {
-			content += spaceStyle.Render(strings.Repeat(" ", fullWidth-contentWidth))
+			content += selectionBgStyle.Render(strings.Repeat(" ", fullWidth-contentWidth))
 		}
 	}
 
@@ -97,7 +103,8 @@ func renderCellWithBackground(row any, col ColumnConfig, width int, selected boo
 	padding := width - contentWidth
 
 	if selected {
-		bgStyle := lipgloss.NewStyle().Background(bgColor)
+		// Use cached style to avoid allocations
+		bgStyle := selectionBgStyle
 
 		// Build the aligned content with background applied to each segment
 		var result strings.Builder
@@ -133,25 +140,30 @@ func renderCellWithBackground(row any, col ColumnConfig, width int, selected boo
 	return alignText(content, width, col.Align)
 }
 
+// Cached ANSI prefix for selection background (computed once).
+var selectionBgPrefix string
+
+func init() {
+	// Pre-compute the ANSI prefix for selection background
+	bgRendered := selectionBgStyle.Render(" ")
+	selectionBgPrefix = strings.TrimSuffix(bgRendered, " \x1b[0m")
+}
+
 // applyBackgroundToStyledContent applies a background color to content that may
 // already have foreground styling. It handles ANSI reset sequences by replacing
 // them with sequences that only reset foreground while preserving background.
-func applyBackgroundToStyledContent(content string, bgColor lipgloss.AdaptiveColor) string {
-	bgStyle := lipgloss.NewStyle().Background(bgColor)
-
+func applyBackgroundToStyledContent(content string, _ lipgloss.AdaptiveColor) string {
 	// If content has no ANSI codes, just apply background directly
 	if !strings.Contains(content, "\x1b[") {
-		return bgStyle.Render(content)
+		return selectionBgStyle.Render(content)
 	}
 
 	// Content has ANSI styling. The problem is that ANSI reset codes (\x1b[0m)
 	// inside the content will reset the background color we apply.
 	// Solution: Replace full resets with resets that restore the background.
 
-	// Get the ANSI sequence for just the background color
-	// We render a space with the background and extract the ANSI prefix
-	bgRendered := bgStyle.Render(" ")
-	bgPrefix := strings.TrimSuffix(bgRendered, " \x1b[0m")
+	// Use pre-computed ANSI prefix for selection background
+	bgPrefix := selectionBgPrefix
 
 	// Replace full resets with: reset + background restore
 	// \x1b[0m -> \x1b[0m + bgPrefix

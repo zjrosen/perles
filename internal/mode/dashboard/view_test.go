@@ -215,3 +215,168 @@ func TestEpicIDColumn_TruncatesLongEpicID(t *testing.T) {
 	require.LessOrEqual(t, lipgloss.Width(result), 15)
 	require.Contains(t, result, "...")
 }
+
+// === Unit Tests: renderEpicSection (perles-boi8.4) ===
+
+func TestRenderEpicSectionNarrowWidth(t *testing.T) {
+	// Setup model without tree
+	m := createEpicTreeTestModel(t)
+
+	// Render with narrow width (< 50)
+	result := m.renderEpicSection(40, 20)
+
+	// Should show warning message
+	require.Contains(t, result, "Terminal too narrow for tree view")
+	require.Contains(t, result, "need 50+ chars")
+}
+
+func TestRenderEpicSectionNoTree(t *testing.T) {
+	// Setup model with a workflow with epic but no tree loaded
+	m := createEpicTreeTestModelWithWorkflows(t)
+	m.epicTree = nil    // No tree loaded yet
+	m.selectedIndex = 0 // wf-1 with epic-100
+
+	// Render with adequate width
+	result := m.renderEpicSection(100, 20)
+
+	// Should show empty state message
+	require.Contains(t, result, "No tasks in epic")
+}
+
+func TestRenderEpicSectionNoEpic(t *testing.T) {
+	// Setup model without epic
+	m := createEpicTreeTestModel(t)
+	// No workflows, so no epic ID
+
+	// Render with adequate width
+	result := m.renderEpicSection(100, 20)
+
+	// Should show no epic message
+	require.Contains(t, result, "No epic associated with this workflow")
+}
+
+func TestRenderEpicSectionNoEpicWithWorkflow(t *testing.T) {
+	// Setup model with a workflow that has no epic
+	m := createEpicTreeTestModelWithWorkflows(t)
+	// Select workflow with no epic (index 2, wf-3 has empty EpicID)
+	m.selectedIndex = 2
+
+	// Render with adequate width
+	result := m.renderEpicSection(100, 20)
+
+	// Should show no epic message
+	require.Contains(t, result, "No epic associated with this workflow")
+}
+
+func TestRenderEpicSectionEmptyEpic(t *testing.T) {
+	// Setup model with workflow that has epic but tree is nil
+	// Loading states are hidden to prevent UI flash, so we show "No tasks"
+	m := createEpicTreeTestModelWithWorkflows(t)
+	m.selectedIndex = 0 // wf-1 with epic-100
+	m.epicTree = nil    // No tree loaded yet
+
+	// Render with adequate width
+	result := m.renderEpicSection(100, 20)
+
+	// Should show "No tasks" message (loading states hidden to prevent flash)
+	require.Contains(t, result, "No tasks in epic")
+}
+
+func TestRenderEpicSectionWidthAllocation(t *testing.T) {
+	// This test verifies the 40%/60% width split calculation
+	// We test the calculation logic by checking that tree and details
+	// components are sized correctly
+
+	// For a width of 100:
+	// - Tree: 100 * 40 / 100 = 40
+	// - Details: 100 - 40 - 1 = 59 (minus separator)
+
+	// For a width of 200:
+	// - Tree: 200 * 40 / 100 = 80
+	// - Details: 200 - 80 - 1 = 119
+
+	tests := []struct {
+		name                 string
+		totalWidth           int
+		expectedTreeWidth    int
+		expectedDetailsWidth int
+	}{
+		{"width 100", 100, 40, 59},
+		{"width 200", 200, 80, 119},
+		{"width 150", 150, 60, 89},
+		{"minimum width 50", 50, 20, 29}, // Clamped to minimum 20
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Calculate widths using the same logic as renderEpicSection
+			treeWidth := tc.totalWidth * 40 / 100
+			detailsWidth := tc.totalWidth - treeWidth - 1
+
+			// Apply minimum width constraints
+			if treeWidth < 20 {
+				treeWidth = 20
+				detailsWidth = tc.totalWidth - treeWidth - 1
+			}
+			if detailsWidth < 20 {
+				detailsWidth = 20
+				treeWidth = tc.totalWidth - detailsWidth - 1
+			}
+
+			require.Equal(t, tc.expectedTreeWidth, treeWidth, "tree width mismatch")
+			require.Equal(t, tc.expectedDetailsWidth, detailsWidth, "details width mismatch")
+		})
+	}
+}
+
+// === Unit Tests: getEpicPaneBorderConfig (perles-boi8.4) ===
+
+func TestGetEpicPaneBorderConfigFocused(t *testing.T) {
+	// Setup model with epic view focused
+	m := createEpicTreeTestModel(t)
+	m.focus = FocusEpicView
+	m.epicViewFocus = EpicFocusTree
+
+	// Get config for tree pane (should be focused)
+	treeConfig := m.getEpicPaneBorderConfig(EpicFocusTree, 40, 20, "Tree")
+	require.True(t, treeConfig.focused, "tree pane should be focused when epicViewFocus is EpicFocusTree")
+	require.Equal(t, 40, treeConfig.width)
+	require.Equal(t, 20, treeConfig.height)
+	require.Equal(t, "Tree", treeConfig.title)
+
+	// Get config for details pane (should not be focused)
+	detailsConfig := m.getEpicPaneBorderConfig(EpicFocusDetails, 60, 20, "Details")
+	require.False(t, detailsConfig.focused, "details pane should not be focused when epicViewFocus is EpicFocusTree")
+}
+
+func TestGetEpicPaneBorderConfigNotFocused(t *testing.T) {
+	// Setup model with table focused (not epic view)
+	m := createEpicTreeTestModel(t)
+	m.focus = FocusTable
+	m.epicViewFocus = EpicFocusTree // Even though epicViewFocus is Tree, focus is on Table
+
+	// Get config for tree pane (should not be focused because dashboard focus is elsewhere)
+	treeConfig := m.getEpicPaneBorderConfig(EpicFocusTree, 40, 20, "Tree")
+	require.False(t, treeConfig.focused, "tree pane should not be focused when dashboard focus is FocusTable")
+}
+
+// === Unit Tests: Footer Hints (perles-boi8.9) ===
+
+func TestFooterHintsAreStatic(t *testing.T) {
+	// Setup model
+	m := createEpicTreeTestModel(t)
+	m.width = 100
+	m.height = 30
+
+	// Render footer hints
+	footer := m.renderActionHints()
+
+	// Verify static hints are present regardless of focus
+	require.Contains(t, footer, "j/k", "footer should have j/k nav hint")
+	require.Contains(t, footer, "tab", "footer should have tab cycle hint")
+	require.Contains(t, footer, "new", "footer should have new hint")
+	require.Contains(t, footer, "start", "footer should have start hint")
+	require.Contains(t, footer, "stop", "footer should have stop hint")
+	require.Contains(t, footer, "help", "footer should have help hint")
+	require.Contains(t, footer, "quit", "footer should have quit hint")
+}

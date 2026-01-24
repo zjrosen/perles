@@ -622,6 +622,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.kanban, modeCmd = m.kanban.HandleDBChanged()
 			case mode.ModeSearch:
 				m.search, modeCmd = m.search.HandleDBChanged()
+			case mode.ModeDashboard:
+				m.dashboard, modeCmd = m.dashboard.HandleDBChanged()
 			}
 			return m, tea.Batch(modeCmd, m.watcherListener.Listen())
 

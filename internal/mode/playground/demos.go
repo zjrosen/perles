@@ -127,8 +127,8 @@ func GetComponentDemos() []ComponentDemo {
 		},
 		{
 			Name:        "table",
-			Description: "Config-driven table component",
-			Create:      createTableDemo,
+			Description: "Scrollable table with sticky header",
+			Create:      createScrollableTableDemo,
 		},
 		{
 			Name:        "Theme Tokens",
@@ -2059,19 +2059,8 @@ func (m *TabDemoModel) Reset() DemoModel {
 func (m *TabDemoModel) NeedsEscKey() bool { return false }
 
 // =============================================================================
-// Table Demo
+// Table Demo (Scrollable)
 // =============================================================================
-
-// TableDemoModel demonstrates the shared table component.
-type TableDemoModel struct {
-	table       table.Model
-	selectedIdx int
-	showBorder  bool
-	showHeader  bool
-	lastAction  string
-	width       int
-	height      int
-}
 
 // sampleUser represents a demo user for the table.
 type sampleUser struct {
@@ -2083,8 +2072,18 @@ type sampleUser struct {
 	Activity string
 }
 
-// sampleUsers provides demo data for the table.
-var sampleUsers = []sampleUser{
+// ScrollableTableDemoModel demonstrates the scrollable table component.
+type ScrollableTableDemoModel struct {
+	table       table.Model
+	selectedIdx int
+	scrollY     int
+	lastAction  string
+	width       int
+	height      int
+}
+
+// manyUsers provides more demo data for testing scrolling.
+var manyUsers = []sampleUser{
 	{ID: 1, Name: "Alice Johnson", Email: "alice@example.com", Role: "Admin", Status: "Active", Activity: "2 min ago"},
 	{ID: 2, Name: "Bob Smith", Email: "bob@example.com", Role: "Developer", Status: "Active", Activity: "5 min ago"},
 	{ID: 3, Name: "Carol Williams", Email: "carol@example.com", Role: "Designer", Status: "Away", Activity: "1 hour ago"},
@@ -2093,14 +2092,25 @@ var sampleUsers = []sampleUser{
 	{ID: 6, Name: "Frank Miller", Email: "frank@example.com", Role: "Developer", Status: "Offline", Activity: "3 days ago"},
 	{ID: 7, Name: "Grace Lee", Email: "grace@example.com", Role: "QA", Status: "Active", Activity: "15 min ago"},
 	{ID: 8, Name: "Henry Wilson", Email: "henry@example.com", Role: "DevOps", Status: "Active", Activity: "1 min ago"},
+	{ID: 9, Name: "Ivy Chen", Email: "ivy@example.com", Role: "Developer", Status: "Active", Activity: "10 min ago"},
+	{ID: 10, Name: "Jack Turner", Email: "jack@example.com", Role: "Designer", Status: "Away", Activity: "2 hours ago"},
+	{ID: 11, Name: "Kate Martin", Email: "kate@example.com", Role: "PM", Status: "Active", Activity: "5 min ago"},
+	{ID: 12, Name: "Leo Garcia", Email: "leo@example.com", Role: "Developer", Status: "Active", Activity: "Just now"},
+	{ID: 13, Name: "Maya Patel", Email: "maya@example.com", Role: "QA", Status: "Busy", Activity: "45 min ago"},
+	{ID: 14, Name: "Nick Brown", Email: "nick@example.com", Role: "DevOps", Status: "Active", Activity: "3 min ago"},
+	{ID: 15, Name: "Olivia White", Email: "olivia@example.com", Role: "Designer", Status: "Active", Activity: "20 min ago"},
+	{ID: 16, Name: "Paul Adams", Email: "paul@example.com", Role: "Developer", Status: "Offline", Activity: "1 day ago"},
+	{ID: 17, Name: "Quinn Taylor", Email: "quinn@example.com", Role: "Manager", Status: "Active", Activity: "8 min ago"},
+	{ID: 18, Name: "Rosa Lopez", Email: "rosa@example.com", Role: "Developer", Status: "Active", Activity: "12 min ago"},
+	{ID: 19, Name: "Sam Wilson", Email: "sam@example.com", Role: "QA", Status: "Away", Activity: "3 hours ago"},
+	{ID: 20, Name: "Tina Roberts", Email: "tina@example.com", Role: "PM", Status: "Active", Activity: "Just now"},
 }
 
-func createTableDemo(width, height int) DemoModel {
-	m := &TableDemoModel{
+func createScrollableTableDemo(width, height int) DemoModel {
+	m := &ScrollableTableDemoModel{
 		selectedIdx: 0,
-		showBorder:  true,
-		showHeader:  true,
-		lastAction:  "j/k: navigate, b: toggle border, h: toggle header",
+		scrollY:     0,
+		lastAction:  "j/k: navigate, scroll: mouse wheel",
 		width:       width,
 		height:      height,
 	}
@@ -2108,7 +2118,7 @@ func createTableDemo(width, height int) DemoModel {
 	return m
 }
 
-func (m *TableDemoModel) buildTable() table.Model {
+func (m *ScrollableTableDemoModel) buildTable() table.Model {
 	cfg := table.TableConfig{
 		Columns: []table.ColumnConfig{
 			{
@@ -2152,10 +2162,9 @@ func (m *TableDemoModel) buildTable() table.Model {
 				Key:    "status",
 				Header: "Status",
 				Width:  8,
-				Render: func(row any, _ string, w int, selected bool) string {
+				Render: func(row any, _ string, w int, _ bool) string {
 					u := row.(sampleUser)
 					status := u.Status
-					// Color-code status
 					var color lipgloss.TerminalColor
 					switch status {
 					case "Active":
@@ -2171,127 +2180,122 @@ func (m *TableDemoModel) buildTable() table.Model {
 					return styles.TruncateString(styled, w)
 				},
 			},
-			{
-				Key:      "activity",
-				Header:   "Activity",
-				MinWidth: 10,
-				Render: func(row any, _ string, w int, _ bool) string {
-					u := row.(sampleUser)
-					return styles.TruncateString(u.Activity, w)
-				},
-			},
 		},
-		ShowHeader:   m.showHeader,
-		ShowBorder:   m.showBorder,
-		Title:        "Users",
+		ShowHeader:   true,
+		ShowBorder:   true,
+		Scrollable:   true, // Enable scrolling
+		Title:        "Scrollable Users (20 rows)",
 		EmptyMessage: "No users found",
 		BorderColor:  styles.BorderDefaultColor,
+		Focused:      true,
 	}
 
 	// Convert to []any for table
-	rows := make([]any, len(sampleUsers))
-	for i, u := range sampleUsers {
+	rows := make([]any, len(manyUsers))
+	for i, u := range manyUsers {
 		rows[i] = u
 	}
 
-	return table.New(cfg).SetRows(rows).SetSize(m.width, m.height)
+	return table.New(cfg).SetRows(rows).SetSize(m.width, m.height-6)
 }
 
-func (m *TableDemoModel) Update(msg tea.Msg) (DemoModel, tea.Cmd, string) {
+func (m *ScrollableTableDemoModel) Update(msg tea.Msg) (DemoModel, tea.Cmd, string) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "j", "down":
-			if m.selectedIdx < len(sampleUsers)-1 {
+			if m.selectedIdx < len(manyUsers)-1 {
 				m.selectedIdx++
-				m.lastAction = fmt.Sprintf("Selected row %d: %s", m.selectedIdx+1, sampleUsers[m.selectedIdx].Name)
+				m.table = m.table.EnsureVisible(m.selectedIdx)
+				m.scrollY = m.table.YOffset()
+				m.lastAction = fmt.Sprintf("Selected row %d: %s (scroll: %d)", m.selectedIdx+1, manyUsers[m.selectedIdx].Name, m.scrollY)
 			}
 			return m, nil, m.lastAction
 		case "k", "up":
 			if m.selectedIdx > 0 {
 				m.selectedIdx--
-				m.lastAction = fmt.Sprintf("Selected row %d: %s", m.selectedIdx+1, sampleUsers[m.selectedIdx].Name)
-			}
-			return m, nil, m.lastAction
-		case "b":
-			m.showBorder = !m.showBorder
-			m.table = m.buildTable()
-			if m.showBorder {
-				m.lastAction = "Border: ON"
-			} else {
-				m.lastAction = "Border: OFF"
-			}
-			return m, nil, m.lastAction
-		case "H":
-			m.showHeader = !m.showHeader
-			m.table = m.buildTable()
-			if m.showHeader {
-				m.lastAction = "Header: ON"
-			} else {
-				m.lastAction = "Header: OFF"
+				m.table = m.table.EnsureVisible(m.selectedIdx)
+				m.scrollY = m.table.YOffset()
+				m.lastAction = fmt.Sprintf("Selected row %d: %s (scroll: %d)", m.selectedIdx+1, manyUsers[m.selectedIdx].Name, m.scrollY)
 			}
 			return m, nil, m.lastAction
 		case "g":
 			m.selectedIdx = 0
+			m.table = m.table.EnsureVisible(m.selectedIdx)
+			m.scrollY = m.table.YOffset()
 			m.lastAction = "Jumped to first row"
 			return m, nil, m.lastAction
 		case "G":
-			m.selectedIdx = len(sampleUsers) - 1
+			m.selectedIdx = len(manyUsers) - 1
+			m.table = m.table.EnsureVisible(m.selectedIdx)
+			m.scrollY = m.table.YOffset()
 			m.lastAction = "Jumped to last row"
 			return m, nil, m.lastAction
 		}
+	case tea.MouseMsg:
+		// Handle mouse wheel scrolling
+		if msg.Button == tea.MouseButtonWheelUp {
+			m.scrollY = max(0, m.scrollY-3)
+			m.table = m.table.SetYOffset(m.scrollY)
+			m.lastAction = fmt.Sprintf("Scrolled up to offset %d", m.scrollY)
+			return m, nil, m.lastAction
+		}
+		if msg.Button == tea.MouseButtonWheelDown {
+			m.scrollY += 3
+			m.table = m.table.SetYOffset(m.scrollY)
+			m.scrollY = m.table.YOffset() // Get clamped value
+			m.lastAction = fmt.Sprintf("Scrolled down to offset %d", m.scrollY)
+			return m, nil, m.lastAction
+		}
 	}
-	return m, nil, ""
+
+	// Forward other messages to table for built-in viewport handling
+	var cmd tea.Cmd
+	m.table, cmd = m.table.Update(msg)
+	return m, cmd, ""
 }
 
-func (m *TableDemoModel) View() string {
+func (m *ScrollableTableDemoModel) View() string {
 	var sb strings.Builder
 
 	// Instructions
 	instructionStyle := lipgloss.NewStyle().Foreground(styles.TextSecondaryColor)
-	sb.WriteString(instructionStyle.Render("Table Component Demo"))
+	sb.WriteString(instructionStyle.Render("Scrollable Table Demo (20 rows, limited viewport)"))
 	sb.WriteString("\n")
 
 	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.StatusInProgressColor)
 	descStyle := lipgloss.NewStyle().Foreground(styles.TextMutedColor)
 	sb.WriteString(keyStyle.Render("j/k") + descStyle.Render(": navigate  "))
 	sb.WriteString(keyStyle.Render("g/G") + descStyle.Render(": first/last  "))
-	sb.WriteString(keyStyle.Render("b") + descStyle.Render(": toggle border  "))
-	sb.WriteString(keyStyle.Render("H") + descStyle.Render(": toggle header"))
+	sb.WriteString(keyStyle.Render("scroll") + descStyle.Render(": mouse wheel"))
 	sb.WriteString("\n\n")
 
 	// Status indicators
 	statusStyle := lipgloss.NewStyle().Foreground(styles.TextMutedColor)
-	borderStatus := "ON"
-	if !m.showBorder {
-		borderStatus = "OFF"
-	}
-	headerStatus := "ON"
-	if !m.showHeader {
-		headerStatus = "OFF"
-	}
-	sb.WriteString(statusStyle.Render(fmt.Sprintf("Border: %s | Header: %s | Row %d/%d",
-		borderStatus, headerStatus, m.selectedIdx+1, len(sampleUsers))))
+	sb.WriteString(statusStyle.Render(fmt.Sprintf("Row %d/%d | Scroll offset: %d",
+		m.selectedIdx+1, len(manyUsers), m.scrollY)))
 	sb.WriteString("\n\n")
 
 	// Render the table with current settings
 	tableHeight := m.height - 6 // Account for instructions
 	tableWidth := min(m.width, 80)
-	tableModel := m.table.SetSize(tableWidth, tableHeight)
+
+	// Apply scroll offset before rendering
+	tableModel := m.table.SetSize(tableWidth, tableHeight).SetYOffset(m.scrollY)
 	sb.WriteString(tableModel.ViewWithSelection(m.selectedIdx))
 
 	return sb.String()
 }
 
-func (m *TableDemoModel) SetSize(width, height int) DemoModel {
+func (m *ScrollableTableDemoModel) SetSize(width, height int) DemoModel {
 	m.width = width
 	m.height = height
 	m.table = m.table.SetSize(width, height-6)
 	return m
 }
 
-func (m *TableDemoModel) Reset() DemoModel {
-	return createTableDemo(m.width, m.height)
+func (m *ScrollableTableDemoModel) Reset() DemoModel {
+	return createScrollableTableDemo(m.width, m.height)
 }
 
-func (m *TableDemoModel) NeedsEscKey() bool { return false }
+func (m *ScrollableTableDemoModel) NeedsEscKey() bool { return false }

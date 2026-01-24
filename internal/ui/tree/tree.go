@@ -28,8 +28,9 @@ type Model struct {
 	clock       shared.Clock            // Clock for formatting relative timestamps
 	width       int
 	height      int
-	scrollTop   int // First visible line index (for viewport scrolling)
-	columnIndex int // Column index for zone ID construction in tree columns (-1 = standalone)
+	scrollTop   int    // First visible line index (for viewport scrolling)
+	columnIndex int    // Column index for zone ID construction in tree columns (-1 = standalone)
+	zonePrefix  string // Custom zone prefix for issue zones (overrides columnIndex when set)
 }
 
 // New creates a new tree model with default mode (deps).
@@ -67,6 +68,13 @@ func (m *Model) SetSize(width, height int) {
 // A value of -1 (the default) disables zone marking for standalone tree usage.
 func (m *Model) SetColumnIndex(idx int) {
 	m.columnIndex = idx
+}
+
+// SetZonePrefix sets a custom zone prefix for issue zones.
+// When set, zone IDs use format "{prefix}{issueID}" instead of column-based format.
+// This is useful for embedding the tree in contexts like the dashboard epic view.
+func (m *Model) SetZonePrefix(prefix string) {
+	m.zonePrefix = prefix
 }
 
 // MoveCursor moves the cursor by delta, respecting bounds.
@@ -448,7 +456,12 @@ func (m *Model) renderNode(node *TreeNode, isLast bool, isSelected bool) string 
 
 	line := sb.String()
 
-	// Wrap with zone mark for mouse click detection when in column context
+	// Wrap with zone mark for mouse click detection
+	// Custom prefix takes priority over column index
+	if m.zonePrefix != "" {
+		zoneID := m.zonePrefix + node.Issue.ID
+		return zone.Mark(zoneID, line)
+	}
 	if m.columnIndex >= 0 {
 		zoneID := makeZoneID(m.columnIndex, node.Issue.ID)
 		return zone.Mark(zoneID, line)

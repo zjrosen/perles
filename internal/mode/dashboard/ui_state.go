@@ -7,6 +7,7 @@ import (
 	"github.com/zjrosen/perles/internal/orchestration/message"
 	"github.com/zjrosen/perles/internal/orchestration/metrics"
 	"github.com/zjrosen/perles/internal/ui/shared/chatrender"
+	"github.com/zjrosen/perles/internal/ui/tree"
 )
 
 // maxCachedWorkflows is the maximum number of workflow UI states to keep in cache.
@@ -43,6 +44,13 @@ type WorkflowUIState struct {
 	// This is used to highlight the workflow row in the dashboard to draw user attention.
 	// Cleared when the user selects the row and presses Enter.
 	HasNotification bool
+
+	// Epic tree state
+	// These fields store minimal tree navigation state (enums and ID string)
+	// to avoid memory pressure while still preserving user context.
+	TreeDirection  tree.Direction
+	TreeMode       tree.TreeMode
+	TreeSelectedID string
 
 	// Cache metadata
 	LastUpdated time.Time

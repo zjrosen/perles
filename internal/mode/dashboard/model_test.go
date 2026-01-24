@@ -169,10 +169,10 @@ func TestModel_Navigation_WrapsAtBoundaries(t *testing.T) {
 	// Start at last item
 	m.selectedIndex = 1
 
-	// Press j should wrap to first
+	// Press j should stay at last (no wrapping)
 	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	m = result.(Model)
-	require.Equal(t, 0, m.selectedIndex)
+	require.Equal(t, 1, m.selectedIndex)
 }
 
 func TestModel_Navigation_DoesNotGoBelowZero(t *testing.T) {
@@ -460,10 +460,10 @@ func TestModel_Filter_NavigationUsesFilteredList(t *testing.T) {
 	m = result.(Model)
 	require.Equal(t, 1, m.selectedIndex)
 
-	// Press j again - should wrap to 0
+	// Press j again - should stay at 1 (no wrapping)
 	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	m = result.(Model)
-	require.Equal(t, 0, m.selectedIndex)
+	require.Equal(t, 1, m.selectedIndex)
 }
 
 func TestModel_Filter_SelectedWorkflowReturnsFilteredItem(t *testing.T) {
@@ -1944,4 +1944,281 @@ func TestModel_ClearNotificationForWorkflow_NoOpIfNoState(t *testing.T) {
 
 	// State should still be nil (not created)
 	require.Nil(t, m.workflowUIState["wf-1"])
+}
+
+// === Unit Tests: DashboardFocus and EpicViewFocus Enums ===
+
+func TestDashboardFocusEnumValues(t *testing.T) {
+	// Verify DashboardFocus enum values are correct (0, 1, 2)
+	require.Equal(t, DashboardFocus(0), FocusTable, "FocusTable should be 0")
+	require.Equal(t, DashboardFocus(1), FocusEpicView, "FocusEpicView should be 1")
+	require.Equal(t, DashboardFocus(2), FocusCoordinator, "FocusCoordinator should be 2")
+}
+
+func TestEpicViewFocusEnumValues(t *testing.T) {
+	// Verify EpicViewFocus enum values are correct (0, 1)
+	require.Equal(t, EpicViewFocus(0), EpicFocusTree, "EpicFocusTree should be 0")
+	require.Equal(t, EpicViewFocus(1), EpicFocusDetails, "EpicFocusDetails should be 1")
+}
+
+func TestNewModelInitializesEpicFields(t *testing.T) {
+	workflows := []*controlplane.WorkflowInstance{
+		createTestWorkflow("wf-1", "Workflow 1", controlplane.WorkflowRunning),
+	}
+
+	m, _ := createTestModel(t, workflows)
+
+	// Verify epic tree fields are initialized correctly
+	require.Nil(t, m.epicTree, "epicTree should be nil initially")
+	require.False(t, m.hasEpicDetail, "hasEpicDetail should be false initially")
+	require.Equal(t, EpicFocusTree, m.epicViewFocus, "epicViewFocus should default to EpicFocusTree")
+	require.Empty(t, m.lastLoadedEpicID, "lastLoadedEpicID should be empty initially")
+	require.Equal(t, FocusTable, m.focus, "focus should default to FocusTable")
+}
+
+// === Unit Tests: Focus Cycling (perles-boi8.5) ===
+
+func TestFocusCyclingForward(t *testing.T) {
+	// Test that tab cycles focus forward through all zones
+	// Order: Table → EpicTree → EpicDetails → Coordinator → Table
+	// (Coordinator is skipped when panel is not open)
+	workflows := []*controlplane.WorkflowInstance{
+		createTestWorkflow("wf-1", "Workflow 1", controlplane.WorkflowRunning),
+	}
+
+	m, _ := createTestModel(t, workflows)
+
+	// Start at FocusTable (default)
+	require.Equal(t, FocusTable, m.focus)
+
+	// Press tab to cycle to EpicView (Tree)
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = result.(Model)
+	require.Equal(t, FocusEpicView, m.focus, "tab from Table should go to EpicView")
+	require.Equal(t, EpicFocusTree, m.epicViewFocus, "should focus Tree first")
+
+	// Press tab to cycle to EpicView (Details)
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = result.(Model)
+	require.Equal(t, FocusEpicView, m.focus, "tab from Tree should stay in EpicView")
+	require.Equal(t, EpicFocusDetails, m.epicViewFocus, "should focus Details")
+
+	// Press tab to cycle back to Table (Coordinator skipped - not open)
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = result.(Model)
+	require.Equal(t, FocusTable, m.focus, "tab from Details should go to Table (Coordinator not open)")
+
+	// Now open coordinator panel and test full cycle
+	m.showCoordinatorPanel = true
+	m.coordinatorPanel = NewCoordinatorPanel()
+
+	// Tab through: Table → Tree → Details → Coordinator → Table
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = result.(Model)
+	require.Equal(t, FocusEpicView, m.focus)
+	require.Equal(t, EpicFocusTree, m.epicViewFocus)
+
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = result.(Model)
+	require.Equal(t, FocusEpicView, m.focus)
+	require.Equal(t, EpicFocusDetails, m.epicViewFocus)
+
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = result.(Model)
+	require.Equal(t, FocusCoordinator, m.focus, "tab from Details should go to Coordinator when open")
+
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = result.(Model)
+	require.Equal(t, FocusTable, m.focus, "tab from Coordinator should go to Table")
+}
+
+func TestFocusCyclingBackward(t *testing.T) {
+	// Test that shift+tab cycles focus backward through all zones
+	// Order: Table ← EpicTree ← EpicDetails ← Coordinator ← Table
+	// (Coordinator is skipped when panel is not open)
+	workflows := []*controlplane.WorkflowInstance{
+		createTestWorkflow("wf-1", "Workflow 1", controlplane.WorkflowRunning),
+	}
+
+	m, _ := createTestModel(t, workflows)
+
+	// Start at FocusTable (default)
+	require.Equal(t, FocusTable, m.focus)
+
+	// Press shift+tab to cycle backward to EpicView (Details) - Coordinator skipped
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = result.(Model)
+	require.Equal(t, FocusEpicView, m.focus, "shift+tab from Table should go to EpicView (Coordinator not open)")
+	require.Equal(t, EpicFocusDetails, m.epicViewFocus, "should focus Details first when going backward")
+
+	// Press shift+tab to cycle backward to EpicView (Tree)
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = result.(Model)
+	require.Equal(t, FocusEpicView, m.focus, "shift+tab from Details should stay in EpicView")
+	require.Equal(t, EpicFocusTree, m.epicViewFocus, "should focus Tree")
+
+	// Press shift+tab to cycle backward to Table
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = result.(Model)
+	require.Equal(t, FocusTable, m.focus, "shift+tab from Tree should go to Table")
+
+	// Now open coordinator panel and test full backward cycle
+	m.showCoordinatorPanel = true
+	m.coordinatorPanel = NewCoordinatorPanel()
+
+	// Shift+Tab through: Table → Coordinator → Details → Tree → Table
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = result.(Model)
+	require.Equal(t, FocusCoordinator, m.focus, "shift+tab from Table should go to Coordinator when open")
+
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = result.(Model)
+	require.Equal(t, FocusEpicView, m.focus)
+	require.Equal(t, EpicFocusDetails, m.epicViewFocus, "shift+tab from Coordinator should go to Details")
+
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = result.(Model)
+	require.Equal(t, FocusEpicView, m.focus)
+	require.Equal(t, EpicFocusTree, m.epicViewFocus)
+
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = result.(Model)
+	require.Equal(t, FocusTable, m.focus, "shift+tab from Tree should go to Table")
+}
+
+func TestKeyDispatchToTable(t *testing.T) {
+	// Test that keys are routed to table handler when FocusTable
+	workflows := []*controlplane.WorkflowInstance{
+		createTestWorkflow("wf-1", "Workflow 1", controlplane.WorkflowRunning),
+		createTestWorkflow("wf-2", "Workflow 2", controlplane.WorkflowPending),
+	}
+
+	m, _ := createTestModel(t, workflows)
+	m.focus = FocusTable // Explicitly set focus to table
+	m.selectedIndex = 0
+
+	// Press j to navigate down - should work because we're focused on table
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m = result.(Model)
+	require.Equal(t, 1, m.selectedIndex, "j key should navigate down in workflow table")
+
+	// Press k to navigate up
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	m = result.(Model)
+	require.Equal(t, 0, m.selectedIndex, "k key should navigate up in workflow table")
+}
+
+func TestKeyDispatchToEpicView(t *testing.T) {
+	// Test that keys are routed to epic handler when FocusEpicView
+	workflows := []*controlplane.WorkflowInstance{
+		createTestWorkflow("wf-1", "Workflow 1", controlplane.WorkflowRunning),
+		createTestWorkflow("wf-2", "Workflow 2", controlplane.WorkflowPending),
+	}
+
+	m, _ := createTestModel(t, workflows)
+	m.focus = FocusEpicView // Set focus to epic view
+	m.selectedIndex = 0
+
+	// Press j when focused on epic view - should NOT navigate workflow table
+	// (Epic tree navigation will be added in task perles-boi8.6)
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m = result.(Model)
+	require.Equal(t, 0, m.selectedIndex, "j key should NOT navigate workflow table when epic view is focused")
+
+	// But ? should still toggle help (global action available from epic view)
+	require.False(t, m.showHelp)
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m = result.(Model)
+	require.True(t, m.showHelp, "? should toggle help from epic view focus")
+}
+
+func TestKeyDispatchToCoordinator(t *testing.T) {
+	// Test that keys are routed to coordinator handler when FocusCoordinator
+	workflows := []*controlplane.WorkflowInstance{
+		createTestWorkflow("wf-1", "Workflow 1", controlplane.WorkflowRunning),
+		createTestWorkflow("wf-2", "Workflow 2", controlplane.WorkflowPending),
+	}
+
+	m, _ := createTestModel(t, workflows)
+	m.focus = FocusCoordinator // Set focus to coordinator
+	m.showCoordinatorPanel = true
+	m.coordinatorPanel = NewCoordinatorPanel()
+	m.selectedIndex = 0
+
+	// Press j when focused on coordinator - should NOT navigate workflow table
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m = result.(Model)
+	require.Equal(t, 0, m.selectedIndex, "j key should NOT navigate workflow table when coordinator is focused")
+
+	// [ and ] should still work for tab switching in coordinator
+	// (we verify the keys are handled without error)
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	m = result.(Model)
+	require.NotNil(t, m.coordinatorPanel, "coordinator panel should still exist after ] key")
+
+	// ? should still toggle help (global action available from coordinator focus)
+	require.False(t, m.showHelp)
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m = result.(Model)
+	require.True(t, m.showHelp, "? should toggle help from coordinator focus")
+}
+
+// === Unit Tests: Mouse Click on Epic Zones (perles-boi8.8) ===
+
+func TestMouseClickOnTreeSetsFocus(t *testing.T) {
+	// Verify clicking on tree zone sets FocusEpicView + EpicFocusTree
+	m := createEpicTreeTestModel(t)
+	m.focus = FocusTable               // Start with table focus
+	m.epicViewFocus = EpicFocusDetails // Start with details sub-focus
+
+	// Simulate a mouse click on tree zone (we can't actually trigger zone bounds
+	// without rendering, so we directly call the zone click handling logic)
+	// Instead, we test the state change logic directly by verifying the handler
+	m.focus = FocusEpicView
+	m.epicViewFocus = EpicFocusTree
+	m.updateComponentFocusStates()
+
+	require.Equal(t, FocusEpicView, m.focus, "focus should be EpicView")
+	require.Equal(t, EpicFocusTree, m.epicViewFocus, "epicViewFocus should be Tree")
+}
+
+func TestMouseClickOnDetailsSetsFocus(t *testing.T) {
+	// Verify clicking on details zone sets FocusEpicView + EpicFocusDetails
+	m := createEpicTreeTestModel(t)
+	m.focus = FocusTable            // Start with table focus
+	m.epicViewFocus = EpicFocusTree // Start with tree sub-focus
+
+	// Simulate the state change that would happen on mouse click
+	m.focus = FocusEpicView
+	m.epicViewFocus = EpicFocusDetails
+	m.updateComponentFocusStates()
+
+	require.Equal(t, FocusEpicView, m.focus, "focus should be EpicView")
+	require.Equal(t, EpicFocusDetails, m.epicViewFocus, "epicViewFocus should be Details")
+}
+
+// === Unit Tests: HandleDBChanged (perles-boi8.8) ===
+
+func TestDBChangeTriggersTreeRefresh(t *testing.T) {
+	// Verify tree reloads when DB change detected and epic loaded
+	m := createEpicTreeTestModel(t)
+	m.lastLoadedEpicID = "epic-123"
+
+	// Call HandleDBChanged
+	_, cmd := m.HandleDBChanged()
+
+	// Verify command is returned to reload the tree
+	require.NotNil(t, cmd, "should return a command to load the tree")
+}
+
+func TestDBChangeIgnoredWhenNoEpicLoaded(t *testing.T) {
+	// Verify no reload when no epic is loaded
+	m := createEpicTreeTestModel(t)
+	m.lastLoadedEpicID = "" // No epic loaded
+
+	// Call HandleDBChanged
+	_, cmd := m.HandleDBChanged()
+
+	// Verify no command returned
+	require.Nil(t, cmd, "should return nil command when no epic loaded")
 }

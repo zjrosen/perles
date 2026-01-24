@@ -17,6 +17,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
 
+	beads "github.com/zjrosen/perles/internal/beads/domain"
 	appgit "github.com/zjrosen/perles/internal/git/application"
 	domaingit "github.com/zjrosen/perles/internal/git/domain"
 	"github.com/zjrosen/perles/internal/mode"
@@ -24,11 +25,13 @@ import (
 	"github.com/zjrosen/perles/internal/orchestration/events"
 	"github.com/zjrosen/perles/internal/orchestration/message"
 	appreg "github.com/zjrosen/perles/internal/registry/application"
+	"github.com/zjrosen/perles/internal/ui/details"
 	"github.com/zjrosen/perles/internal/ui/modals/help"
 	"github.com/zjrosen/perles/internal/ui/shared/chatrender"
 	"github.com/zjrosen/perles/internal/ui/shared/table"
 	"github.com/zjrosen/perles/internal/ui/shared/toaster"
 	"github.com/zjrosen/perles/internal/ui/shared/vimtextarea"
+	"github.com/zjrosen/perles/internal/ui/tree"
 )
 
 // heartbeatRefreshInterval is how often to refresh the view for heartbeat display updates.
@@ -36,6 +39,35 @@ const heartbeatRefreshInterval = 5 * time.Second
 
 // heartbeatTickMsg triggers a view refresh for heartbeat display.
 type heartbeatTickMsg struct{}
+
+// DashboardFocus represents which zone has focus in the dashboard.
+type DashboardFocus int
+
+const (
+	// FocusTable indicates the workflow table has focus.
+	FocusTable DashboardFocus = iota
+	// FocusEpicView indicates the epic tree/details section has focus.
+	FocusEpicView
+	// FocusCoordinator indicates the coordinator chat panel has focus.
+	FocusCoordinator
+)
+
+// EpicViewFocus represents which pane within the epic view has focus.
+type EpicViewFocus int
+
+const (
+	// EpicFocusTree indicates the tree pane has focus.
+	EpicFocusTree EpicViewFocus = iota
+	// EpicFocusDetails indicates the details pane has focus.
+	EpicFocusDetails
+)
+
+// epicTreeLoadedMsg is sent when the epic tree data has been loaded.
+type epicTreeLoadedMsg struct {
+	Issues []beads.Issue
+	RootID string
+	Err    error
+}
 
 // Model holds the dashboard mode state.
 type Model struct {
@@ -52,11 +84,14 @@ type Model struct {
 	workflowCreator *appreg.WorkflowCreator
 
 	// Workflow state
-	workflows       []*controlplane.WorkflowInstance
-	selectedIndex   int
-	workflowTable   table.Model     // Shared table component for workflow list
-	workflowList    WorkflowList    // Component for sorting/filtering state
-	resourceSummary ResourceSummary // Component for resource bar
+	workflows         []*controlplane.WorkflowInstance
+	selectedIndex     int
+	tableScrollOffset int               // Persisted scroll offset for workflow table
+	workflowTable     table.Model       // Shared table component for workflow list
+	tableConfigCache  table.TableConfig // Cached table config to avoid recreating closures
+	lastTableFocus    bool              // Track focus state to detect when config needs rebuild
+	workflowList      WorkflowList      // Component for sorting/filtering state
+	resourceSummary   ResourceSummary   // Component for resource bar
 
 	// New workflow modal state (nil when not showing modal)
 	newWorkflowModal *NewWorkflowModal
@@ -74,6 +109,14 @@ type Model struct {
 	// Coordinator chat panel (shown on right side when toggled)
 	coordinatorPanel     *CoordinatorPanel
 	showCoordinatorPanel bool
+
+	// Epic tree view state (always visible section below workflow table)
+	epicTree         *tree.Model    // Tree component for epic task hierarchy
+	epicDetails      details.Model  // Details component for selected issue
+	hasEpicDetail    bool           // Whether epicDetails has valid content
+	epicViewFocus    EpicViewFocus  // Which pane within epic view has focus
+	lastLoadedEpicID string         // ID of the last loaded epic (for stale response detection)
+	focus            DashboardFocus // Which zone has focus (table, epic, coordinator)
 
 	// Event subscription (global - all workflows)
 	eventCh     <-chan controlplane.ControlPlaneEvent
@@ -137,6 +180,7 @@ func New(cfg Config) Model {
 		helpModal:          help.NewDashboard(),
 		filter:             NewFilterState(),
 		workflowUIState:    make(map[controlplane.WorkflowID]*WorkflowUIState),
+		focus:              FocusTable,
 		ctx:                ctx,
 		cancel:             cancel,
 		gitExecutorFactory: cfg.GitExecutorFactory,
@@ -145,9 +189,9 @@ func New(cfg Config) Model {
 	}
 
 	// Initialize the workflow table with config
-	// Note: The table config is recreated on each render to capture current model state
-	// in render callback closures, but we initialize it here for the initial state.
-	m.workflowTable = table.New(m.createWorkflowTableConfig())
+	m.tableConfigCache = m.createWorkflowTableConfig()
+	m.lastTableFocus = m.focus == FocusTable
+	m.workflowTable = table.New(m.tableConfigCache)
 
 	return m
 }
@@ -219,39 +263,25 @@ func (m Model) Update(msg tea.Msg) (mode.Controller, tea.Cmd) {
 		return m.handleMouseMsg(mouseMsg)
 	}
 
-	// If coordinator panel is open and focused, delegate key events to it
-	if m.showCoordinatorPanel && m.coordinatorPanel != nil && m.coordinatorPanel.IsFocused() {
+	// If coordinator panel is open and in insert mode, forward key events to it
+	// This ensures typing in the chat input works correctly before focus cycling intercepts
+	if m.showCoordinatorPanel && m.coordinatorPanel != nil && m.coordinatorPanel.IsFocused() && !m.coordinatorPanel.IsInputInNormalMode() {
 		if keyMsg, ok := msg.(tea.KeyMsg); ok {
-			// Always allow ctrl+c to quit, even when panel is focused
+			// Ctrl+C shows quit modal (consistent with other modes)
 			if keyMsg.String() == "ctrl+c" {
-				return m, tea.Quit
+				return m, func() tea.Msg { return QuitMsg{} }
 			}
 
-			// Handle escape - blur panel to return focus to workflow table
-			// In insert mode, ESC switches to normal mode (handled by vimtextarea)
-			// In normal mode, ESC returns focus to workflow table (doesn't close panel)
-			if keyMsg.String() == "esc" && m.coordinatorPanel.IsInputInNormalMode() {
-				m.coordinatorPanel.Blur()
-				return m, nil
+			// Allow tab/shift+tab to pass through for focus cycling even in insert mode
+			if keyMsg.Type == tea.KeyTab || keyMsg.Type == tea.KeyShiftTab ||
+				keyMsg.String() == "ctrl+n" || keyMsg.String() == "ctrl+p" {
+				// Fall through to handleKeyMsg for focus cycling
+			} else {
+				// Forward all other key events to panel (ESC will switch to normal mode via vimtextarea)
+				var cmd tea.Cmd
+				m.coordinatorPanel, cmd = m.coordinatorPanel.Update(msg)
+				return m, cmd
 			}
-
-			// Tab switches focus back to workflows table
-			if keyMsg.String() == "tab" {
-				m.coordinatorPanel.Blur()
-				return m, nil
-			}
-
-			// ctrl+w toggles (closes) the panel
-			if keyMsg.String() == "ctrl+w" {
-				m.showCoordinatorPanel = false
-				m.coordinatorPanel = nil
-				return m, nil
-			}
-
-			// Forward all key events to panel (including ESC for vim mode switching)
-			var cmd tea.Cmd
-			m.coordinatorPanel, cmd = m.coordinatorPanel.Update(msg)
-			return m, cmd
 		}
 	}
 
@@ -303,7 +333,10 @@ func (m Model) Update(msg tea.Msg) (mode.Controller, tea.Cmd) {
 				m.coordinatorPanel.SetWorkflow(wf.ID, uiState)
 			}
 		}
-		return m, nil
+
+		// Trigger epic tree load for the selected workflow
+		cmd := m.triggerEpicTreeLoad()
+		return m, cmd
 
 	case eventSubscriptionReadyMsg:
 		m.eventCh = msg.eventCh
@@ -337,6 +370,9 @@ func (m Model) Update(msg tea.Msg) (mode.Controller, tea.Cmd) {
 			m.coordinatorPanel.SetSize(CoordinatorPanelWidth, m.height)
 		}
 		return m, nil
+
+	case epicTreeLoadedMsg:
+		return m.handleEpicTreeLoaded(msg)
 	}
 
 	return m, nil
@@ -369,6 +405,39 @@ func (m Model) SetSize(width, height int) mode.Controller {
 		m.newWorkflowModal = m.newWorkflowModal.SetSize(width, height)
 	}
 	m.helpModal = m.helpModal.SetSize(width, height)
+
+	// Recalculate tree and details dimensions
+	if m.epicTree != nil {
+		// Calculate available height for epic section (same logic as renderView)
+		footerHeight := 3 // Action hints pane
+		contentHeight := max(height-footerHeight, 5)
+
+		// 55%/45% split (table/epic)
+		minTableHeight := minWorkflowTableRows + 3 // header/borders
+		tableHeight := max(contentHeight*55/100, minTableHeight)
+		epicSectionHeight := contentHeight - tableHeight
+
+		if epicSectionHeight >= 5 {
+			// Calculate widths accounting for coordinator panel
+			epicWidth := width
+			if m.showCoordinatorPanel && m.coordinatorPanel != nil {
+				epicWidth = width - CoordinatorPanelWidth
+			}
+
+			// 40%/60% split for tree/details
+			treeWidth := epicWidth * 40 / 100
+			detailsWidth := epicWidth - treeWidth
+
+			// Set tree size
+			m.epicTree.SetSize(treeWidth-2, epicSectionHeight-2)
+
+			// Set details size if available
+			if m.hasEpicDetail {
+				m.epicDetails = m.epicDetails.SetSize(detailsWidth-2, epicSectionHeight-2)
+			}
+		}
+	}
+
 	return m
 }
 
@@ -478,6 +547,32 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (mode.Controller, tea.Cmd) {
 		return m, cmd
 	}
 
+	// Handle focus cycling keys (work regardless of current focus)
+	switch msg.String() {
+	case "tab", "ctrl+n": // Cycle focus forward
+		m.cycleFocusForward()
+		return m, nil
+
+	case "shift+tab", "ctrl+p": // Cycle focus backward
+		m.cycleFocusBackward()
+		return m, nil
+	}
+
+	// Dispatch based on current focus
+	switch m.focus {
+	case FocusTable:
+		return m.handleTableKeys(msg)
+	case FocusEpicView:
+		return m.handleEpicTreeKeys(msg)
+	case FocusCoordinator:
+		return m.handleCoordinatorKeys(msg)
+	}
+
+	return m, nil
+}
+
+// handleTableKeys handles key events when the workflow table is focused.
+func (m Model) handleTableKeys(msg tea.KeyMsg) (mode.Controller, tea.Cmd) {
 	// Get filtered workflows for navigation bounds
 	filteredWorkflows := m.getFilteredWorkflows()
 	workflowCount := len(filteredWorkflows)
@@ -485,29 +580,32 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (mode.Controller, tea.Cmd) {
 	// Navigation
 	switch msg.String() {
 	case "j", "down":
-		if workflowCount > 0 {
-			newIndex := (m.selectedIndex + 1) % workflowCount
-			m.handleWorkflowSelectionChange(newIndex)
+		if workflowCount > 0 && m.selectedIndex < workflowCount-1 {
+			cmd := m.handleWorkflowSelectionChange(m.selectedIndex + 1)
+			return m, cmd
 		}
 		return m, nil
 
 	case "k", "up":
 		if m.selectedIndex > 0 {
-			m.handleWorkflowSelectionChange(m.selectedIndex - 1)
+			cmd := m.handleWorkflowSelectionChange(m.selectedIndex - 1)
+			return m, cmd
 		}
 		return m, nil
 
 	case "g": // Go to first workflow
-		m.handleWorkflowSelectionChange(0)
-		return m, nil
+		cmd := m.handleWorkflowSelectionChange(0)
+		return m, cmd
 
 	case "G": // Go to last workflow
 		if workflowCount > 0 {
-			m.handleWorkflowSelectionChange(workflowCount - 1)
+			cmd := m.handleWorkflowSelectionChange(workflowCount - 1)
+			return m, cmd
 		}
 		return m, nil
 	}
 
+	// Global actions (available from table focus)
 	switch msg.String() {
 	// Filter
 	case "/": // Activate filter
@@ -562,19 +660,78 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (mode.Controller, tea.Cmd) {
 		}
 
 		if m.showCoordinatorPanel && m.coordinatorPanel != nil {
-			m.coordinatorPanel.Focus()
+			m.focus = FocusCoordinator
+			m.updateComponentFocusStates()
 			return m, nil
 		}
 		// If panel not open, open it and focus
 		m.openCoordinatorPanelForSelected()
 		if m.coordinatorPanel != nil {
-			m.coordinatorPanel.Focus()
+			m.focus = FocusCoordinator
+			m.updateComponentFocusStates()
 		}
 		return m, nil
 
-	case "tab": // Focus coordinator panel if open
-		if m.showCoordinatorPanel && m.coordinatorPanel != nil {
-			m.coordinatorPanel.Focus()
+	case "q", "ctrl+c":
+		return m, func() tea.Msg { return QuitMsg{} }
+	}
+
+	return m, nil
+}
+
+// handleEpicTreeKeys handles key events when the epic tree/details section is focused.
+// Dispatches to tree pane or details pane handler based on epicViewFocus.
+func (m Model) handleEpicTreeKeys(msg tea.KeyMsg) (mode.Controller, tea.Cmd) {
+	// Handle global keys that should work from epic view
+	switch msg.String() {
+	case "?": // Toggle help
+		m.showHelp = !m.showHelp
+		m.helpModal = m.helpModal.SetSize(m.width, m.height)
+		return m, nil
+
+	case "ctrl+w": // Toggle coordinator chat panel
+		return m.toggleCoordinatorPanel()
+
+	case "q", "ctrl+c":
+		return m, func() tea.Msg { return QuitMsg{} }
+	}
+
+	// Dispatch to pane-specific handler
+	switch m.epicViewFocus {
+	case EpicFocusTree:
+		return m.handleEpicTreeKeysFocusTree(msg)
+	case EpicFocusDetails:
+		return m.handleEpicTreeKeysFocusDetails(msg)
+	}
+
+	return m, nil
+}
+
+// handleCoordinatorKeys handles key events when the coordinator panel is focused.
+func (m Model) handleCoordinatorKeys(msg tea.KeyMsg) (mode.Controller, tea.Cmd) {
+	switch msg.String() {
+	case "?": // Toggle help
+		m.showHelp = !m.showHelp
+		m.helpModal = m.helpModal.SetSize(m.width, m.height)
+		return m, nil
+
+	case "ctrl+w": // Toggle coordinator chat panel (closes it)
+		m.showCoordinatorPanel = false
+		m.coordinatorPanel = nil
+		m.focus = FocusTable
+		m.updateComponentFocusStates()
+		return m, nil
+
+	case "[": // Previous tab in coordinator panel
+		if m.coordinatorPanel != nil {
+			m.coordinatorPanel.PrevTab()
+			return m, nil
+		}
+		return m, nil
+
+	case "]": // Next tab in coordinator panel
+		if m.coordinatorPanel != nil {
+			m.coordinatorPanel.NextTab()
 			return m, nil
 		}
 		return m, nil
@@ -595,11 +752,43 @@ func (m Model) handleMouseMsg(msg tea.MouseMsg) (mode.Controller, tea.Cmd) {
 		for i := range filtered {
 			zoneID := makeWorkflowZoneID(i)
 			if z := zone.Get(zoneID); z != nil && z.InBounds(msg) {
-				m.handleWorkflowSelectionChange(i)
+				cmd := m.handleWorkflowSelectionChange(i)
 				// Clear notification flag for the clicked workflow
 				m.clearNotificationForWorkflow(filtered[i].ID)
-				return m, nil
+				return m, cmd
 			}
+		}
+
+		// Check epic zone clicks
+		// Check epic tree issue clicks first (more specific than tree container)
+		if m.epicTree != nil {
+			for _, issueID := range m.epicTree.VisibleIssueIDs() {
+				zoneID := zoneEpicIssuePrefix + issueID
+				if z := zone.Get(zoneID); z != nil && z.InBounds(msg) {
+					m.epicTree.SelectByIssueID(issueID)
+					m.updateEpicDetail()
+					m.focus = FocusEpicView
+					m.epicViewFocus = EpicFocusTree
+					m.updateComponentFocusStates()
+					return m, nil
+				}
+			}
+		}
+
+		// Check epic tree zone (container click - focuses tree pane)
+		if z := zone.Get(zoneEpicTree); z != nil && z.InBounds(msg) {
+			m.focus = FocusEpicView
+			m.epicViewFocus = EpicFocusTree
+			m.updateComponentFocusStates()
+			return m, nil
+		}
+
+		// Check epic details zone
+		if z := zone.Get(zoneEpicDetails); z != nil && z.InBounds(msg) {
+			m.focus = FocusEpicView
+			m.epicViewFocus = EpicFocusDetails
+			m.updateComponentFocusStates()
+			return m, nil
 		}
 
 		// Check tab zones (only if coordinator panel is open)
@@ -621,11 +810,41 @@ func (m Model) handleMouseMsg(msg tea.MouseMsg) (mode.Controller, tea.Cmd) {
 		}
 	}
 
-	// Forward scroll events to coordinator panel if open (for viewport scrolling)
-	if m.showCoordinatorPanel && m.coordinatorPanel != nil {
-		var cmd tea.Cmd
-		m.coordinatorPanel, cmd = m.coordinatorPanel.Update(msg)
-		return m, cmd
+	// Handle scroll events - route to the appropriate zone based on mouse position
+	if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
+		// Check if scrolling in workflow table zone
+		if z := zone.Get(zoneWorkflowTable); z != nil && z.InBounds(msg) {
+			scrollAmount := 3 // Scroll 3 rows at a time
+			filteredCount := len(m.getFilteredWorkflows())
+			if msg.Button == tea.MouseButtonWheelUp {
+				m.tableScrollOffset = max(0, m.tableScrollOffset-scrollAmount)
+			} else {
+				m.tableScrollOffset += scrollAmount
+				// Clamp to prevent scrolling past the end
+				// Max offset is roughly rows - visible_rows, but we don't know visible_rows
+				// So clamp to rows-1 as a safe upper bound (will be further refined in render)
+				maxOffset := max(0, filteredCount-1)
+				m.tableScrollOffset = min(m.tableScrollOffset, maxOffset)
+			}
+			return m, nil
+		}
+
+		// Check if scrolling in epic details zone
+		if z := zone.Get(zoneEpicDetails); z != nil && z.InBounds(msg) {
+			if m.hasEpicDetail {
+				var cmd tea.Cmd
+				m.epicDetails, cmd = m.epicDetails.Update(msg)
+				return m, cmd
+			}
+			return m, nil
+		}
+
+		// Forward scroll events to coordinator panel if scrolling in that area
+		if m.showCoordinatorPanel && m.coordinatorPanel != nil {
+			var cmd tea.Cmd
+			m.coordinatorPanel, cmd = m.coordinatorPanel.Update(msg)
+			return m, cmd
+		}
 	}
 
 	return m, nil
@@ -1050,12 +1269,19 @@ func (m *Model) loadSelectedWorkflowState() {
 }
 
 // handleWorkflowSelectionChange handles workflow selection changes during navigation.
-// It updates the selected index and loads cached state for the new selection.
+// It updates the selected index, loads cached state for the new selection, and
+// triggers epic tree loading if conditions are met.
+// Returns a tea.Cmd for any async operations (e.g., debounced epic tree load).
 // All workflow events are received via the global subscription and cached automatically.
-func (m *Model) handleWorkflowSelectionChange(newIndex int) {
+func (m *Model) handleWorkflowSelectionChange(newIndex int) tea.Cmd {
 	// Don't do anything if selection isn't actually changing
 	if newIndex == m.selectedIndex {
-		return
+		return nil
+	}
+
+	// Save epic tree state for the current workflow before switching
+	if currentWf := m.SelectedWorkflow(); currentWf != nil {
+		m.saveEpicTreeState(string(currentWf.ID))
 	}
 
 	// Update selection
@@ -1073,6 +1299,9 @@ func (m *Model) handleWorkflowSelectionChange(newIndex int) {
 			m.coordinatorPanel.SetWorkflow(wf.ID, uiState)
 		}
 	}
+
+	// Trigger epic tree load if conditions are met (has epicID, different epic)
+	return m.triggerEpicTreeLoad()
 }
 
 // clearNotificationForWorkflow clears the notification flag for a workflow.
@@ -1133,4 +1362,92 @@ func (m *Model) isWorkflowRunning(id controlplane.WorkflowID) bool {
 		}
 	}
 	return false
+}
+
+// === DB Change Handling ===
+
+// HandleDBChanged processes database change notifications from the app.
+// This is called by app.go when the centralized watcher detects changes.
+// It triggers a tree refresh if an epic is loaded.
+func (m Model) HandleDBChanged() (Model, tea.Cmd) {
+	// Skip if no epic is loaded
+	if m.lastLoadedEpicID == "" {
+		return m, nil
+	}
+
+	// Trigger a tree refresh by loading the epic tree again
+	return m, loadEpicTree(m.lastLoadedEpicID, m.services.Executor)
+}
+
+// === Focus Management ===
+
+// cycleFocusForward cycles focus to the next zone and updates component focus states.
+// Order: Table → EpicTree → EpicDetails → Coordinator → Table
+func (m *Model) cycleFocusForward() {
+	switch m.focus {
+	case FocusTable:
+		m.focus = FocusEpicView
+		m.epicViewFocus = EpicFocusTree
+	case FocusEpicView:
+		if m.epicViewFocus == EpicFocusTree {
+			// Tree → Details
+			m.epicViewFocus = EpicFocusDetails
+		} else {
+			// Details → Coordinator (or Table if no coordinator)
+			if m.showCoordinatorPanel && m.coordinatorPanel != nil {
+				m.focus = FocusCoordinator
+			} else {
+				m.focus = FocusTable
+			}
+		}
+	case FocusCoordinator:
+		m.focus = FocusTable
+	}
+	m.updateComponentFocusStates()
+}
+
+// cycleFocusBackward cycles focus to the previous zone and updates component focus states.
+// Order: Table ← EpicTree ← EpicDetails ← Coordinator ← Table
+func (m *Model) cycleFocusBackward() {
+	switch m.focus {
+	case FocusTable:
+		// Table → Coordinator (or Details if no coordinator)
+		if m.showCoordinatorPanel && m.coordinatorPanel != nil {
+			m.focus = FocusCoordinator
+		} else {
+			m.focus = FocusEpicView
+			m.epicViewFocus = EpicFocusDetails
+		}
+	case FocusEpicView:
+		if m.epicViewFocus == EpicFocusDetails {
+			// Details → Tree
+			m.epicViewFocus = EpicFocusTree
+		} else {
+			// Tree → Table
+			m.focus = FocusTable
+		}
+	case FocusCoordinator:
+		m.focus = FocusEpicView
+		m.epicViewFocus = EpicFocusDetails
+	}
+	m.updateComponentFocusStates()
+}
+
+// updateComponentFocusStates updates the focus state of sub-components based on m.focus.
+// This ensures the coordinator panel and table config cache reflect the current focus correctly.
+func (m *Model) updateComponentFocusStates() {
+	if m.coordinatorPanel != nil {
+		if m.focus == FocusCoordinator {
+			m.coordinatorPanel.Focus()
+		} else {
+			m.coordinatorPanel.Blur()
+		}
+	}
+
+	// Update table config cache when focus changes (affects border styling)
+	currentFocus := m.focus == FocusTable
+	if m.lastTableFocus != currentFocus {
+		m.tableConfigCache = m.createWorkflowTableConfig()
+		m.lastTableFocus = currentFocus
+	}
 }

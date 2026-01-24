@@ -139,6 +139,9 @@ type TableConfig struct {
 	Title        string         // Optional title for bordered pane
 	EmptyMessage string         // Message when no rows (default: "No data")
 
+	// Scrolling configuration
+	Scrollable bool // Enable scrolling with sticky header (requires Update() calls)
+
 	// Selection configuration (for documentation - state is external)
 	Selectable bool
 
@@ -152,10 +155,12 @@ type TableConfig struct {
 	RowZoneID func(index int, row any) string
 
 	// Style overrides (optional - uses defaults from styles package)
-	HeaderStyle   lipgloss.Style         // Header row style
-	RowStyle      lipgloss.Style         // Normal row style
-	SelectedStyle lipgloss.Style         // Selected row background
-	BorderColor   lipgloss.TerminalColor // Border color override
+	HeaderStyle        lipgloss.Style         // Header row style
+	RowStyle           lipgloss.Style         // Normal row style
+	SelectedStyle      lipgloss.Style         // Selected row background
+	BorderColor        lipgloss.TerminalColor // Border color override
+	Focused            bool                   // Whether the table has focus (affects border color)
+	FocusedBorderColor lipgloss.TerminalColor // Border color when focused
 }
 
 // ValidateConfig validates the table configuration.
