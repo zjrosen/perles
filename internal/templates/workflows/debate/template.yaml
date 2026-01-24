@@ -1,0 +1,174 @@
+registry:
+  # Technical Debate Workflow - Structured multi-perspective debate
+  # 4 workers with moderator, affirmative, negative, and neutral analyst roles
+  - namespace: "workflow"
+    key: "debate"
+    version: "v1"
+    name: "Technical Debate"
+    description: "Structured multi-perspective debate with moderator, affirmative, negative, and neutral analyst roles. Produces balanced analysis with evidence-based reasoning."
+    epic_template: "v1-debate-epic.md"
+    system_prompt: "v1-epic-instructions.md"
+    path: "docs/debates"
+    labels:
+      - "category:analysis"
+      - "category:debate"
+    arguments:
+      - key: "proposition"
+        label: "Proposition"
+        description: "The proposition to debate (e.g., 'Microservices are superior to monolithic architecture for most applications')"
+        type: "textarea"
+        required: true
+    nodes:
+      # Phase 1: Moderator creates debate file with introduction
+      - key: "setup"
+        name: "Create Debate File"
+        assignee: "worker-1"
+        template: "v1-debate-setup.md"
+        outputs:
+          - key: "debate"
+            file: "{{.Date}}-{{.Slug}}-debate.md"
+
+      # Phase 2A: Affirmative opening argument
+      - key: "opening-affirmative"
+        name: "Opening Argument: Affirmative"
+        assignee: "worker-2"
+        template: "v1-debate-opening-affirmative.md"
+        inputs:
+          - key: "debate"
+            file: "{{.Date}}-{{.Slug}}-debate.md"
+        after:
+          - "setup"
+
+      # Phase 2B: Negative opening argument
+      - key: "opening-negative"
+        name: "Opening Argument: Negative"
+        assignee: "worker-3"
+        template: "v1-debate-opening-negative.md"
+        inputs:
+          - key: "debate"
+            file: "{{.Date}}-{{.Slug}}-debate.md"
+        after:
+          - "opening-affirmative"
+
+      # Phase 3A: Affirmative rebuttal
+      - key: "rebuttal-affirmative"
+        name: "Rebuttal: Affirmative"
+        assignee: "worker-2"
+        template: "v1-debate-rebuttal-affirmative.md"
+        inputs:
+          - key: "debate"
+            file: "{{.Date}}-{{.Slug}}-debate.md"
+        after:
+          - "opening-negative"
+
+      # Phase 3B: Negative counter-rebuttal
+      - key: "counter-rebuttal-negative"
+        name: "Counter-Rebuttal: Negative"
+        assignee: "worker-3"
+        template: "v1-debate-counter-rebuttal-negative.md"
+        inputs:
+          - key: "debate"
+            file: "{{.Date}}-{{.Slug}}-debate.md"
+        after:
+          - "rebuttal-affirmative"
+
+      # Phase 4A: Affirmative closing statement
+      - key: "closing-affirmative"
+        name: "Closing Statement: Affirmative"
+        assignee: "worker-2"
+        template: "v1-debate-closing-affirmative.md"
+        inputs:
+          - key: "debate"
+            file: "{{.Date}}-{{.Slug}}-debate.md"
+        after:
+          - "counter-rebuttal-negative"
+
+      # Phase 4B: Negative closing statement
+      - key: "closing-negative"
+        name: "Closing Statement: Negative"
+        assignee: "worker-3"
+        template: "v1-debate-closing-negative.md"
+        inputs:
+          - key: "debate"
+            file: "{{.Date}}-{{.Slug}}-debate.md"
+        after:
+          - "closing-affirmative"
+
+      # Phase 5: Neutral analysis
+      - key: "neutral-analysis"
+        name: "Neutral Analysis"
+        assignee: "worker-4"
+        template: "v1-debate-neutral-analysis.md"
+        inputs:
+          - key: "debate"
+            file: "{{.Date}}-{{.Slug}}-debate.md"
+        after:
+          - "closing-negative"
+
+      # Phase 6: Moderator summary
+      - key: "moderator-summary"
+        name: "Moderator Summary"
+        assignee: "worker-1"
+        template: "v1-debate-moderator-summary.md"
+        inputs:
+          - key: "debate"
+            file: "{{.Date}}-{{.Slug}}-debate.md"
+        after:
+          - "neutral-analysis"
+
+      # Phase 7A: First voter (fresh worker replaces affirmative)
+      - key: "vote-1"
+        name: "Vote 1"
+        assignee: "worker-5"
+        template: "v1-debate-vote.md"
+        inputs:
+          - key: "debate"
+            file: "{{.Date}}-{{.Slug}}-debate.md"
+        after:
+          - "moderator-summary"
+
+      # Phase 7B: Second voter (fresh worker replaces negative)
+      - key: "vote-2"
+        name: "Vote 2"
+        assignee: "worker-6"
+        template: "v1-debate-vote.md"
+        inputs:
+          - key: "debate"
+            file: "{{.Date}}-{{.Slug}}-debate.md"
+        after:
+          - "vote-1"
+
+      # Phase 7C: Third voter (fresh worker replaces neutral)
+      - key: "vote-3"
+        name: "Vote 3"
+        assignee: "worker-7"
+        template: "v1-debate-vote.md"
+        inputs:
+          - key: "debate"
+            file: "{{.Date}}-{{.Slug}}-debate.md"
+        after:
+          - "vote-2"
+
+      # Phase 7D: Moderator votes
+      - key: "vote-moderator"
+        name: "Vote 4 (Moderator)"
+        assignee: "worker-1"
+        template: "v1-debate-vote-moderator.md"
+        inputs:
+          - key: "debate"
+            file: "{{.Date}}-{{.Slug}}-debate.md"
+        after:
+          - "vote-3"
+
+      # Phase 7E: Voting summary
+      - key: "voting-summary"
+        name: "Voting Summary"
+        assignee: "worker-1"
+        template: "v1-debate-voting-summary.md"
+        inputs:
+          - key: "debate"
+            file: "{{.Date}}-{{.Slug}}-debate.md"
+        after:
+          - "vote-moderator"
+
+
