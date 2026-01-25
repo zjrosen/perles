@@ -343,11 +343,6 @@ func (m Model) Update(msg tea.Msg) (mode.Controller, tea.Cmd) {
 			}
 		}
 
-		// If no workflows, automatically open the new workflow modal
-		if len(m.workflows) == 0 && m.newWorkflowModal == nil {
-			return m.openNewWorkflowModal()
-		}
-
 		// Load cached state for initial selection if needed
 		if len(m.workflows) > 0 {
 			m.loadSelectedWorkflowState()
