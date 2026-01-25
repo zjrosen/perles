@@ -468,7 +468,7 @@ func (m Model) renderTreeContent() string {
 	generalCol.WriteString(sectionStyle.Render("General"))
 	generalCol.WriteString("\n")
 	generalCol.WriteString(renderKeyDesc("/", "switch to list mode"))
-	generalCol.WriteString(renderKeyDesc("Ctrl+Space", "switch mode"))
+	generalCol.WriteString(renderBinding(keys.Kanban.SwitchMode))
 	generalCol.WriteString(renderKeyDesc("Esc", "return to kanban"))
 	generalCol.WriteString(renderKeyDesc("?", "toggle this help"))
 

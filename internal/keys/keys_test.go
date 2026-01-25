@@ -171,3 +171,161 @@ func TestApp_ChatFocus_HelpDesc(t *testing.T) {
 	help := App.ChatFocus.Help()
 	require.Equal(t, "switch chat/board focus", help.Desc, "ChatFocus help desc should be 'switch chat/board focus'")
 }
+
+// ============================================================================
+// Translation Function Tests
+// ============================================================================
+
+func TestTranslateToTerminal_CtrlSpace(t *testing.T) {
+	result := translateToTerminal("ctrl+space")
+	require.Equal(t, "ctrl+@", result, "ctrl+space should translate to ctrl+@")
+}
+
+func TestTranslateToTerminal_CtrlSpaceVariant(t *testing.T) {
+	result := translateToTerminal("ctrl+ ")
+	require.Equal(t, "ctrl+@", result, "ctrl+ (space) should translate to ctrl+@")
+}
+
+func TestTranslateToTerminal_Passthrough(t *testing.T) {
+	result := translateToTerminal("ctrl+o")
+	require.Equal(t, "ctrl+o", result, "ctrl+o should pass through unchanged")
+}
+
+func TestTranslateToTerminal_CaseNormalization(t *testing.T) {
+	result := translateToTerminal("Ctrl+Space")
+	require.Equal(t, "ctrl+@", result, "Ctrl+Space should normalize to ctrl+@")
+}
+
+func TestTranslateToTerminal_WhitespaceTrim(t *testing.T) {
+	result := translateToTerminal(" ctrl+o ")
+	require.Equal(t, "ctrl+o", result, "leading/trailing whitespace should be trimmed")
+}
+
+func TestTranslateToDisplay_CtrlAt(t *testing.T) {
+	result := translateToDisplay("ctrl+@")
+	require.Equal(t, "ctrl+space", result, "ctrl+@ should display as ctrl+space")
+}
+
+func TestTranslateToDisplay_Passthrough(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"f1", "f1"},
+		{"alt+s", "alt+s"},
+		{"enter", "enter"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := translateToDisplay(tt.input)
+			require.Equal(t, tt.expected, result, "%s should pass through unchanged", tt.input)
+		})
+	}
+}
+
+// ============================================================================
+// ApplyConfig Tests
+// ============================================================================
+
+func TestApplyConfig_ModifiesSearchBindings(t *testing.T) {
+	// Reset state before test
+	ResetForTesting()
+	defer ResetForTesting()
+
+	// Apply config with custom search key
+	ApplyConfig("ctrl+s", "")
+
+	// Verify Kanban.SwitchMode updated
+	kanbanKeys := Kanban.SwitchMode.Keys()
+	require.Equal(t, []string{"ctrl+s"}, kanbanKeys, "Kanban.SwitchMode should be bound to ctrl+s")
+
+	// Verify Search.SwitchMode updated
+	searchKeys := Search.SwitchMode.Keys()
+	require.Equal(t, []string{"ctrl+s"}, searchKeys, "Search.SwitchMode should be bound to ctrl+s")
+}
+
+func TestApplyConfig_ModifiesDashboardBindings(t *testing.T) {
+	// Reset state before test
+	ResetForTesting()
+	defer ResetForTesting()
+
+	// Apply config with custom dashboard key
+	ApplyConfig("", "ctrl+d")
+
+	// Verify Kanban.Dashboard updated
+	dashboardKeys := Kanban.Dashboard.Keys()
+	require.Equal(t, []string{"ctrl+d"}, dashboardKeys, "Kanban.Dashboard should be bound to ctrl+d")
+}
+
+func TestApplyConfig_SetsHelpText(t *testing.T) {
+	// Reset state before test
+	ResetForTesting()
+	defer ResetForTesting()
+
+	// Apply config with ctrl+space (should translate display properly)
+	ApplyConfig("ctrl+space", "ctrl+o")
+
+	// Verify Kanban.SwitchMode help text
+	kanbanHelp := Kanban.SwitchMode.Help()
+	require.Equal(t, "ctrl+space", kanbanHelp.Key, "Kanban.SwitchMode help key should show ctrl+space")
+	require.Equal(t, "search mode", kanbanHelp.Desc, "Kanban.SwitchMode help desc should be 'search mode'")
+
+	// Verify Search.SwitchMode help text
+	searchHelp := Search.SwitchMode.Help()
+	require.Equal(t, "ctrl+space", searchHelp.Key, "Search.SwitchMode help key should show ctrl+space")
+	require.Equal(t, "switch mode", searchHelp.Desc, "Search.SwitchMode help desc should be 'switch mode'")
+
+	// Verify Dashboard help text uses ^O shorthand
+	dashboardHelp := Kanban.Dashboard.Help()
+	require.Equal(t, "ctrl+o", dashboardHelp.Key, "Kanban.Dashboard help key should show ctrl+o")
+	require.Equal(t, "dashboard", dashboardHelp.Desc, "Kanban.Dashboard help desc should be 'dashboard'")
+}
+
+func TestApplyConfig_EmptyString_NoChange(t *testing.T) {
+	// Reset state before test
+	ResetForTesting()
+	defer ResetForTesting()
+
+	// Capture defaults
+	originalKanbanSwitchKeys := Kanban.SwitchMode.Keys()
+	originalSearchSwitchKeys := Search.SwitchMode.Keys()
+	originalDashboardKeys := Kanban.Dashboard.Keys()
+
+	// Apply config with empty strings (should not modify)
+	ApplyConfig("", "")
+
+	// Verify bindings unchanged
+	require.Equal(t, originalKanbanSwitchKeys, Kanban.SwitchMode.Keys(), "Kanban.SwitchMode should be unchanged")
+	require.Equal(t, originalSearchSwitchKeys, Search.SwitchMode.Keys(), "Search.SwitchMode should be unchanged")
+	require.Equal(t, originalDashboardKeys, Kanban.Dashboard.Keys(), "Kanban.Dashboard should be unchanged")
+}
+
+func TestResetForTesting_RestoresDefaults(t *testing.T) {
+	// First modify state
+	ResetForTesting()
+	ApplyConfig("ctrl+x", "ctrl+y")
+
+	// Verify modified
+	require.Equal(t, []string{"ctrl+x"}, Kanban.SwitchMode.Keys())
+	require.Equal(t, []string{"ctrl+y"}, Kanban.Dashboard.Keys())
+
+	// Reset
+	ResetForTesting()
+
+	// Verify defaults restored
+	require.Equal(t, []string{"ctrl+@"}, Kanban.SwitchMode.Keys(), "Kanban.SwitchMode should be restored to ctrl+@")
+	require.Equal(t, []string{"ctrl+@"}, Search.SwitchMode.Keys(), "Search.SwitchMode should be restored to ctrl+@")
+	require.Equal(t, []string{"ctrl+o"}, Kanban.Dashboard.Keys(), "Kanban.Dashboard should be restored to ctrl+o")
+
+	// Verify help text restored
+	kanbanHelp := Kanban.SwitchMode.Help()
+	require.Equal(t, "^space", kanbanHelp.Key, "Kanban.SwitchMode help key should be restored to ^space")
+
+	searchHelp := Search.SwitchMode.Help()
+	require.Equal(t, "ctrl+space", searchHelp.Key, "Search.SwitchMode help key should be restored to ctrl+space")
+
+	dashboardHelp := Kanban.Dashboard.Help()
+	require.Equal(t, "ctrl+o", dashboardHelp.Key, "Kanban.Dashboard help key should be restored to ctrl+o")
+
+}

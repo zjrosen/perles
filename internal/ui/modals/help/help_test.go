@@ -334,3 +334,27 @@ func TestHelp_SearchView_Golden(t *testing.T) {
 
 	teatest.RequireEqualOutput(t, []byte(view))
 }
+
+// TestHelp_TreeView_Golden uses teatest golden file comparison for tree mode
+func TestHelp_TreeView_Golden(t *testing.T) {
+	m := New().SetMode(ModeSearchTree).SetSize(100, 40)
+	view := m.View()
+
+	teatest.RequireEqualOutput(t, []byte(view))
+}
+
+// TestHelpOverlay_ShowsCustomKeys verifies help displays configured key bindings, not hardcoded defaults
+func TestHelpOverlay_ShowsCustomKeys(t *testing.T) {
+	// Apply custom key binding
+	keys.ResetForTesting()
+	defer keys.ResetForTesting()
+	keys.ApplyConfig("ctrl+k", "")
+
+	// Tree mode should show the configured key, not hardcoded "Ctrl+Space"
+	m := New().SetMode(ModeSearchTree).SetSize(100, 40)
+	view := m.View()
+
+	// Should contain the configured key's display text from the binding
+	require.Contains(t, view, "ctrl+k")
+	require.NotContains(t, view, "Ctrl+Space", "expected tree mode help to NOT show hardcoded Ctrl+Space")
+}

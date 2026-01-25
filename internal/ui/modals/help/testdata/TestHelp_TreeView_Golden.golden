@@ -1,0 +1,40 @@
+                                                                                                                
+                                                                                                                
+                                                                                                                
+                                                                                                                
+                                                                                                                
+                                                                                                                
+                                                                                                                
+                                                                                                                
+                                                                                                                
+                                                                                                                
+                                                                                                                
+                                                                                                                
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│  Tree Mode Help                                                                                              │
+│──────────────────────────────────────────────────────────────────────────────────────────────────────────────│
+│                                                                                                              │
+│  Navigation                        Tree Actions                              General                         │
+│  j/↓        move cursor down       Enter      refocus on node                /          switch to list mode  │
+│  k/↑        move cursor up         u          go back (prev root)            ^space     search mode          │
+│  l/Tab      focus details panel    U          go to original root            Esc        return to kanban     │
+│  h          focus tree panel       d          toggle direction               ?          toggle this help     │
+│                                    m          toggle mode (deps/children)                                    │
+│                                    y          copy issue ID                                                  │
+│                                                                                                              │
+│                                                                                                              │
+│  Press ? or Esc to close                                                                                     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+                                                                                                                
+                                                                                                                
+                                                                                                                
+                                                                                                                
+                                                                                                                
+                                                                                                                
+                                                                                                                
+                                                                                                                
+                                                                                                                
+                                                                                                                
+                                                                                                                
+                                                                                                                
+                                                                                                                

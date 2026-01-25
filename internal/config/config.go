@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -48,10 +49,17 @@ type Config struct {
 
 // UIConfig holds user interface configuration options.
 type UIConfig struct {
-	ShowCounts    bool   `mapstructure:"show_counts"`
-	ShowStatusBar bool   `mapstructure:"show_status_bar"`
-	MarkdownStyle string `mapstructure:"markdown_style"` // "dark" (default) or "light"
-	VimMode       bool   `mapstructure:"vim_mode"`       // Enable vim keybindings in text input areas
+	ShowCounts    bool              `mapstructure:"show_counts"`
+	ShowStatusBar bool              `mapstructure:"show_status_bar"`
+	MarkdownStyle string            `mapstructure:"markdown_style"` // "dark" (default) or "light"
+	VimMode       bool              `mapstructure:"vim_mode"`       // Enable vim keybindings in text input areas
+	Keybindings   KeybindingsConfig `mapstructure:"keybindings"`
+}
+
+// KeybindingsConfig holds user-customizable keybinding overrides.
+type KeybindingsConfig struct {
+	Search    string `mapstructure:"search"`    // Default: "ctrl+space"
+	Dashboard string `mapstructure:"dashboard"` // Default: "ctrl+o"
 }
 
 // ThemeConfig holds all theme customization options.
@@ -614,6 +622,87 @@ func ValidateWorkflows(workflows []WorkflowConfig) error {
 	return nil
 }
 
+// normalizeKey normalizes a key string for comparison.
+// Lowercases, trims whitespace, and translates ctrl+space to ctrl+@.
+func normalizeKey(key string) string {
+	normalized := strings.ToLower(strings.TrimSpace(key))
+	if normalized == "ctrl+space" {
+		return "ctrl+@"
+	}
+	return normalized
+}
+
+// isValidKeyFormat checks if a key string is a valid terminal key format.
+func isValidKeyFormat(key string) bool {
+	// Valid patterns:
+	// - Single character: a-z, 0-9, /, [, ], \, ^, _, ?, @
+	// - ctrl+X: ctrl+a through ctrl+z, ctrl+@, ctrl+[
+	// - alt+X: alt+a through alt+z
+	// - Special keys: enter, esc, tab, space, backspace
+	// - Function keys: f1 through f12
+	// - Navigation: up, down, left, right, home, end, pgup, pgdown
+	// - Shift combos: shift+tab
+	// - Ctrl combos: ctrl+up, ctrl+down, etc.
+
+	validPatterns := []*regexp.Regexp{
+		regexp.MustCompile(`^[a-z0-9/\[\]\\^_?@]$`),                       // Single character
+		regexp.MustCompile(`^ctrl\+[a-z@\[\]\\^_]$`),                      // ctrl+X
+		regexp.MustCompile(`^alt\+[a-z]$`),                                // alt+X
+		regexp.MustCompile(`^(enter|esc|tab|space|backspace)$`),           // Special keys
+		regexp.MustCompile(`^f([1-9]|1[0-2])$`),                           // Function keys f1-f12
+		regexp.MustCompile(`^(up|down|left|right|home|end|pgup|pgdown)$`), // Navigation
+		regexp.MustCompile(`^shift\+tab$`),                                // Shift combos
+		regexp.MustCompile(`^ctrl\+(up|down|left|right|home|end)$`),       // Ctrl+nav combos
+	}
+
+	for _, pattern := range validPatterns {
+		if pattern.MatchString(key) {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidateKeybindings validates the keybinding configuration.
+// Returns an error if any keybinding is invalid.
+func ValidateKeybindings(kb KeybindingsConfig) error {
+	// Reserved keys that cannot be remapped
+	reserved := map[string]bool{
+		"q": true, "ctrl+c": true, "esc": true, "?": true, "enter": true,
+	}
+
+	// Validate search key if specified
+	if kb.Search != "" {
+		normalized := normalizeKey(kb.Search)
+		if !isValidKeyFormat(normalized) {
+			return fmt.Errorf("ui.keybindings.search: invalid key format %q", kb.Search)
+		}
+		if reserved[normalized] {
+			return fmt.Errorf("ui.keybindings.search: %q is a reserved key and cannot be remapped", kb.Search)
+		}
+	}
+
+	// Validate dashboard key if specified
+	if kb.Dashboard != "" {
+		normalized := normalizeKey(kb.Dashboard)
+		if !isValidKeyFormat(normalized) {
+			return fmt.Errorf("ui.keybindings.dashboard: invalid key format %q", kb.Dashboard)
+		}
+		if reserved[normalized] {
+			return fmt.Errorf("ui.keybindings.dashboard: %q is a reserved key and cannot be remapped", kb.Dashboard)
+		}
+	}
+
+	// Check for duplicate mappings
+	if kb.Search != "" && kb.Dashboard != "" {
+		if normalizeKey(kb.Search) == normalizeKey(kb.Dashboard) {
+			return fmt.Errorf("ui.keybindings: search and dashboard cannot use the same key %q", kb.Search)
+		}
+	}
+
+	return nil
+}
+
 // ValidateTracing checks tracing configuration for errors.
 // Returns nil if the configuration is valid (empty values use defaults).
 func ValidateTracing(tracing TracingConfig) error {
@@ -700,6 +789,10 @@ func Defaults() Config {
 			ShowStatusBar: true,
 			MarkdownStyle: "dark",
 			VimMode:       false, // Disabled by default for non-vim users
+			Keybindings: KeybindingsConfig{
+				Search:    "ctrl+space",
+				Dashboard: "ctrl+o",
+			},
 		},
 		Theme: ThemeConfig{
 			// Default theme uses the "default" preset
@@ -765,6 +858,11 @@ ui:
   show_status_bar: true   # Show status bar at bottom
   # markdown_style: dark  # Markdown rendering style: "dark" (default) or "light"
   vim_mode: false         # Enable vim keybindings in text input areas (orchestration mode)
+
+  # Keybinding overrides (optional)
+  # keybindings:
+  #   search: "ctrl+space"    # Default: ctrl+space
+  #   dashboard: "ctrl+o"     # Default: ctrl+o
 
 # Theme configuration
 # Use a preset theme or customize individual colors

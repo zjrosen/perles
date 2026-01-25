@@ -17,6 +17,7 @@ import (
 	"github.com/zjrosen/perles/internal/bql"
 	"github.com/zjrosen/perles/internal/cachemanager"
 	"github.com/zjrosen/perles/internal/config"
+	"github.com/zjrosen/perles/internal/keys"
 	"github.com/zjrosen/perles/internal/log"
 	"github.com/zjrosen/perles/internal/paths"
 	appreg "github.com/zjrosen/perles/internal/registry/application"
@@ -84,6 +85,10 @@ func initConfig() {
 
 	// Sound defaults
 	viper.SetDefault("sound.events", defaults.Sound.Events)
+
+	// Keybinding defaults
+	viper.SetDefault("ui.keybindings.search", "ctrl+space")
+	viper.SetDefault("ui.keybindings.dashboard", "ctrl+o")
 
 	if cfgFile != "" {
 		viper.SetConfigFile(cfgFile)
@@ -168,6 +173,14 @@ func runApp(cmd *cobra.Command, args []string) error {
 	if err := config.ValidateSound(cfg.Sound); err != nil {
 		return fmt.Errorf("invalid sound configuration: %w", err)
 	}
+
+	// Validate keybindings before applying
+	if err := config.ValidateKeybindings(cfg.UI.Keybindings); err != nil {
+		return fmt.Errorf("invalid keybindings configuration: %w", err)
+	}
+
+	// Apply keybinding overrides from config
+	keys.ApplyConfig(cfg.UI.Keybindings.Search, cfg.UI.Keybindings.Dashboard)
 
 	// Working directory is always the current directory (where perles was invoked)
 	workDir, err := os.Getwd()

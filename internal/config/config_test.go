@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
 	"github.com/zjrosen/perles/internal/orchestration/client"
 )
 
@@ -1975,4 +1977,374 @@ func TestExtensionsForClient_ReturnsNewMap(t *testing.T) {
 	ext2 := cfg.extensionsForClient("claude", false)
 	ext1["new-key"] = "value"
 	require.NotContains(t, ext2, "new-key", "should return independent maps")
+}
+
+// ============================================================================
+// KeybindingsConfig Tests
+// ============================================================================
+
+func TestKeybindingsConfig_ZeroValue(t *testing.T) {
+	// Test that zero value KeybindingsConfig has empty strings
+	cfg := KeybindingsConfig{}
+	require.Empty(t, cfg.Search, "Search zero value should be empty")
+	require.Empty(t, cfg.Dashboard, "Dashboard zero value should be empty")
+}
+
+func TestKeybindingsConfig_WithValues(t *testing.T) {
+	cfg := KeybindingsConfig{
+		Search:    "ctrl+k",
+		Dashboard: "ctrl+d",
+	}
+	require.Equal(t, "ctrl+k", cfg.Search)
+	require.Equal(t, "ctrl+d", cfg.Dashboard)
+}
+
+func TestUIConfig_KeybindingsField(t *testing.T) {
+	// Verify UIConfig includes Keybindings field
+	cfg := UIConfig{
+		ShowCounts:    true,
+		ShowStatusBar: true,
+		VimMode:       false,
+		Keybindings: KeybindingsConfig{
+			Search:    "ctrl+space",
+			Dashboard: "ctrl+o",
+		},
+	}
+	require.Equal(t, "ctrl+space", cfg.Keybindings.Search)
+	require.Equal(t, "ctrl+o", cfg.Keybindings.Dashboard)
+}
+
+func TestDefaults_KeybindingsEmpty(t *testing.T) {
+	cfg := Defaults()
+	require.Equal(t, cfg.UI.Keybindings.Search, "ctrl+space")
+	require.Equal(t, cfg.UI.Keybindings.Dashboard, "ctrl+o")
+}
+
+func TestConfigUnmarshal_Keybindings(t *testing.T) {
+	// Test that YAML with keybindings unmarshals correctly
+	// We'll use direct struct assignment to simulate what viper would produce
+	cfg := Config{
+		UI: UIConfig{
+			ShowCounts:    true,
+			ShowStatusBar: true,
+			Keybindings: KeybindingsConfig{
+				Search:    "ctrl+k",
+				Dashboard: "ctrl+d",
+			},
+		},
+	}
+
+	require.Equal(t, "ctrl+k", cfg.UI.Keybindings.Search)
+	require.Equal(t, "ctrl+d", cfg.UI.Keybindings.Dashboard)
+}
+
+func TestConfigUnmarshal_NoKeybindings(t *testing.T) {
+	// Test that YAML without keybindings section uses empty strings
+	cfg := Config{
+		UI: UIConfig{
+			ShowCounts:    true,
+			ShowStatusBar: true,
+			// Keybindings not specified - should be zero value
+		},
+	}
+
+	require.Empty(t, cfg.UI.Keybindings.Search, "Search should be empty when not specified")
+	require.Empty(t, cfg.UI.Keybindings.Dashboard, "Dashboard should be empty when not specified")
+}
+
+func TestConfigUnmarshal_PartialKeybindings(t *testing.T) {
+	// Test that partial keybindings work (only one specified)
+	cfg := Config{
+		UI: UIConfig{
+			ShowCounts:    true,
+			ShowStatusBar: true,
+			Keybindings: KeybindingsConfig{
+				Search: "ctrl+k",
+				// Dashboard not specified
+			},
+		},
+	}
+
+	require.Equal(t, "ctrl+k", cfg.UI.Keybindings.Search)
+	require.Empty(t, cfg.UI.Keybindings.Dashboard, "Dashboard should be empty when not specified")
+}
+
+func TestKeybindingsConfig_NestedInConfig(t *testing.T) {
+	// Test that keybindings are properly nested in the full config hierarchy
+	cfg := Config{
+		AutoRefresh: true,
+		UI: UIConfig{
+			ShowCounts:    true,
+			ShowStatusBar: true,
+			MarkdownStyle: "dark",
+			VimMode:       false,
+			Keybindings: KeybindingsConfig{
+				Search:    "alt+s",
+				Dashboard: "f5",
+			},
+		},
+	}
+
+	require.True(t, cfg.AutoRefresh)
+	require.True(t, cfg.UI.ShowCounts)
+	require.Equal(t, "alt+s", cfg.UI.Keybindings.Search)
+	require.Equal(t, "f5", cfg.UI.Keybindings.Dashboard)
+}
+
+func TestKeybindingsConfig_EmptyValuesNoPanic(t *testing.T) {
+	// Verify nested struct with empty values doesn't cause nil pointer issues
+	cfg := Config{}
+	// Accessing nested keybindings should not panic
+	require.NotPanics(t, func() {
+		_ = cfg.UI.Keybindings.Search
+		_ = cfg.UI.Keybindings.Dashboard
+	})
+}
+
+// ============================================================================
+// ValidateKeybindings Tests
+// ============================================================================
+
+func TestValidateKeybindings_ValidKeys(t *testing.T) {
+	// Valid formats like ctrl+k, alt+s, f5 should be accepted
+	testCases := []KeybindingsConfig{
+		{Search: "ctrl+k", Dashboard: "ctrl+d"},
+		{Search: "alt+s", Dashboard: "alt+d"},
+		{Search: "f5", Dashboard: "f12"},
+		{Search: "ctrl+space", Dashboard: "ctrl+o"},
+		{Search: "tab", Dashboard: "space"},
+		{Search: "up", Dashboard: "down"},
+		{Search: "ctrl+up", Dashboard: "ctrl+down"},
+		{Search: "shift+tab", Dashboard: "backspace"},
+		{Search: "a", Dashboard: "b"},
+		{Search: "/", Dashboard: "["},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.Search+"+"+tc.Dashboard, func(t *testing.T) {
+			err := ValidateKeybindings(tc)
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestValidateKeybindings_InvalidFormat(t *testing.T) {
+	// Typos like crtl+o, ctrl space should be rejected with clear error
+	testCases := []struct {
+		name     string
+		kb       KeybindingsConfig
+		contains string
+	}{
+		{
+			name:     "typo crtl",
+			kb:       KeybindingsConfig{Search: "crtl+o"},
+			contains: "invalid key format",
+		},
+		{
+			name:     "missing plus",
+			kb:       KeybindingsConfig{Search: "ctrl space"},
+			contains: "invalid key format",
+		},
+		{
+			name:     "cmd not supported",
+			kb:       KeybindingsConfig{Search: "cmd+o"},
+			contains: "invalid key format",
+		},
+		{
+			name:     "invalid special key",
+			kb:       KeybindingsConfig{Dashboard: "return"},
+			contains: "invalid key format",
+		},
+		{
+			name:     "invalid combo",
+			kb:       KeybindingsConfig{Search: "ctrl+shift+a"},
+			contains: "invalid key format",
+		},
+		{
+			name:     "number with ctrl not valid",
+			kb:       KeybindingsConfig{Search: "ctrl+9"},
+			contains: "invalid key format",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateKeybindings(tc.kb)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.contains)
+		})
+	}
+}
+
+func TestValidateKeybindings_ReservedKeys(t *testing.T) {
+	// Reserved keys: q, ctrl+c, esc, ?, enter should be rejected
+	reservedKeys := []string{"q", "ctrl+c", "esc", "?", "enter"}
+
+	for _, key := range reservedKeys {
+		t.Run("search_"+key, func(t *testing.T) {
+			err := ValidateKeybindings(KeybindingsConfig{Search: key})
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "reserved key")
+		})
+
+		t.Run("dashboard_"+key, func(t *testing.T) {
+			err := ValidateKeybindings(KeybindingsConfig{Dashboard: key})
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "reserved key")
+		})
+	}
+}
+
+func TestValidateKeybindings_DuplicateKeys(t *testing.T) {
+	// Same key for both search and dashboard should be rejected
+	testCases := []KeybindingsConfig{
+		{Search: "ctrl+k", Dashboard: "ctrl+k"},
+		{Search: "f5", Dashboard: "f5"},
+		{Search: "Ctrl+K", Dashboard: "ctrl+k"},   // Case insensitive
+		{Search: " ctrl+k ", Dashboard: "ctrl+k"}, // Whitespace normalized
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.Search+"="+tc.Dashboard, func(t *testing.T) {
+			err := ValidateKeybindings(tc)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "cannot use the same key")
+		})
+	}
+}
+
+func TestValidateKeybindings_SwappedDefaults(t *testing.T) {
+	// Swapping defaults should be allowed: search: "ctrl+o", dashboard: "ctrl+space"
+	err := ValidateKeybindings(KeybindingsConfig{
+		Search:    "ctrl+o",
+		Dashboard: "ctrl+space",
+	})
+	require.NoError(t, err)
+}
+
+func TestValidateKeybindings_EmptyValues(t *testing.T) {
+	// Empty strings should pass validation (use defaults)
+	testCases := []KeybindingsConfig{
+		{Search: "", Dashboard: ""},
+		{Search: "ctrl+k", Dashboard: ""},
+		{Search: "", Dashboard: "ctrl+d"},
+	}
+
+	for i, tc := range testCases {
+		t.Run(fmt.Sprintf("case_%d", i), func(t *testing.T) {
+			err := ValidateKeybindings(tc)
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestNormalizeKey_CtrlSpace(t *testing.T) {
+	// ctrl+space should normalize to ctrl+@
+	testCases := []struct {
+		input    string
+		expected string
+	}{
+		{"ctrl+space", "ctrl+@"},
+		{"Ctrl+Space", "ctrl+@"},
+		{"CTRL+SPACE", "ctrl+@"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.input, func(t *testing.T) {
+			result := normalizeKey(tc.input)
+			require.Equal(t, tc.expected, result)
+		})
+	}
+}
+
+func TestNormalizeKey_CaseInsensitive(t *testing.T) {
+	// Keys should be lowercased
+	testCases := []struct {
+		input    string
+		expected string
+	}{
+		{"Ctrl+O", "ctrl+o"},
+		{"CTRL+K", "ctrl+k"},
+		{"Alt+S", "alt+s"},
+		{"F5", "f5"},
+		{"Tab", "tab"},
+		{"ENTER", "enter"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.input, func(t *testing.T) {
+			result := normalizeKey(tc.input)
+			require.Equal(t, tc.expected, result)
+		})
+	}
+}
+
+func TestNormalizeKey_TrimWhitespace(t *testing.T) {
+	// Whitespace should be trimmed
+	testCases := []struct {
+		input    string
+		expected string
+	}{
+		{" ctrl+o ", "ctrl+o"},
+		{"  f5  ", "f5"},
+		{"\tctrl+k\t", "ctrl+k"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.input, func(t *testing.T) {
+			result := normalizeKey(tc.input)
+			require.Equal(t, tc.expected, result)
+		})
+	}
+}
+
+func TestIsValidKeyFormat_AllPatterns(t *testing.T) {
+	// Comprehensive pattern coverage
+	validKeys := []string{
+		// Single characters
+		"a", "z", "0", "9", "/", "[", "]", "^", "_", "?", "@",
+		// ctrl+X
+		"ctrl+a", "ctrl+z", "ctrl+@", "ctrl+[",
+		// alt+X
+		"alt+a", "alt+z",
+		// Special keys
+		"enter", "esc", "tab", "space", "backspace",
+		// Function keys
+		"f1", "f5", "f10", "f12",
+		// Navigation
+		"up", "down", "left", "right", "home", "end", "pgup", "pgdown",
+		// Shift combos
+		"shift+tab",
+		// Ctrl+nav combos
+		"ctrl+up", "ctrl+down", "ctrl+left", "ctrl+right", "ctrl+home", "ctrl+end",
+	}
+
+	for _, key := range validKeys {
+		t.Run(key, func(t *testing.T) {
+			require.True(t, isValidKeyFormat(key), "key %q should be valid", key)
+		})
+	}
+
+	invalidKeys := []string{
+		// Invalid patterns
+		"crtl+o",       // typo
+		"ctrl space",   // missing plus
+		"cmd+o",        // unsupported modifier
+		"ctrl+shift+a", // double modifier
+		"ctrl+9",       // number with ctrl
+		"alt+1",        // number with alt
+		"f0",           // invalid function key
+		"f13",          // invalid function key
+		"return",       // not a valid special key
+		"delete",       // not a valid special key (use backspace)
+		"ctrl+",        // incomplete
+		"+a",           // incomplete
+		"",             // empty
+	}
+
+	for _, key := range invalidKeys {
+		t.Run(key, func(t *testing.T) {
+			require.False(t, isValidKeyFormat(key), "key %q should be invalid", key)
+		})
+	}
 }

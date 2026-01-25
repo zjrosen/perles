@@ -1,7 +1,34 @@
 // Package keys contains keybinding definitions.
 package keys
 
-import "github.com/charmbracelet/bubbles/key"
+import (
+	"strings"
+
+	"github.com/charmbracelet/bubbles/key"
+)
+
+// translateToTerminal converts user-friendly key names to terminal codes.
+// Example: "ctrl+space" -> "ctrl+@" (terminal sends ctrl+@ for ctrl+space)
+func translateToTerminal(key string) string {
+	normalized := strings.ToLower(key)
+	// Check for ctrl+space variants before trimming (space might be significant)
+	if normalized == "ctrl+space" || normalized == "ctrl+ " {
+		return "ctrl+@"
+	}
+	// For other keys, trim and normalize
+	return strings.ToLower(strings.TrimSpace(key))
+}
+
+// translateToDisplay converts terminal codes to user-friendly display text.
+// Example: "ctrl+@" -> "ctrl+space"
+func translateToDisplay(key string) string {
+	normalized := strings.ToLower(strings.TrimSpace(key))
+	if normalized == "ctrl+@" {
+		return "ctrl+space"
+	}
+
+	return normalized
+}
 
 // Common contains keybindings shared across all modes.
 var Common = struct {
@@ -608,4 +635,34 @@ func DashboardFullHelp() [][]key.Binding {
 		{Dashboard.New, Dashboard.Filter, Dashboard.ClearFilter},
 		{Dashboard.Help, Dashboard.Quit},
 	}
+}
+
+// ApplyConfig applies user-configured keybindings to the package-level bindings.
+func ApplyConfig(searchKey, dashboardKey string) {
+	if searchKey != "" {
+		terminalKey := translateToTerminal(searchKey)
+		displayKey := translateToDisplay(searchKey)
+		Kanban.SwitchMode.SetKeys(terminalKey)
+		Kanban.SwitchMode.SetHelp(displayKey, "search mode")
+		Search.SwitchMode.SetKeys(terminalKey)
+		Search.SwitchMode.SetHelp(displayKey, "switch mode")
+	}
+
+	if dashboardKey != "" {
+		terminalKey := translateToTerminal(dashboardKey)
+		displayKey := translateToDisplay(dashboardKey)
+		Kanban.Dashboard.SetKeys(terminalKey)
+		Kanban.Dashboard.SetHelp(displayKey, "dashboard")
+	}
+}
+
+// ResetForTesting resets keybindings to defaults for testing.
+// Only call from test files.
+func ResetForTesting() {
+	Kanban.SwitchMode.SetKeys("ctrl+@")
+	Kanban.SwitchMode.SetHelp("^space", "search mode")
+	Search.SwitchMode.SetKeys("ctrl+@")
+	Search.SwitchMode.SetHelp("ctrl+space", "switch mode")
+	Kanban.Dashboard.SetKeys("ctrl+o")
+	Kanban.Dashboard.SetHelp("ctrl+o", "dashboard")
 }
