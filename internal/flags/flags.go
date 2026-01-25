@@ -15,6 +15,10 @@ const (
 
 	// FlagRemoveWorktree controls if existing orchestration mode removes the worktree.
 	FlagRemoveWorktree = "remove-worktree"
+
+	// FlagSessionPersistence controls whether workflow sessions are persisted to SQLite.
+	// When disabled, falls back to in-memory registry (no persistence across restarts).
+	FlagSessionPersistence = "session-persistence"
 )
 
 // Registry holds feature flag state loaded from configuration.

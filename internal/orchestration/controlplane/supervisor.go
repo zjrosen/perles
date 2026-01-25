@@ -24,6 +24,8 @@ import (
 	"github.com/zjrosen/perles/internal/orchestration/v2/adapter"
 	"github.com/zjrosen/perles/internal/orchestration/v2/command"
 	"github.com/zjrosen/perles/internal/orchestration/v2/handler"
+	"github.com/zjrosen/perles/internal/orchestration/v2/process"
+	"github.com/zjrosen/perles/internal/orchestration/v2/processor"
 	"github.com/zjrosen/perles/internal/orchestration/v2/prompt/roles"
 	"github.com/zjrosen/perles/internal/orchestration/v2/repository"
 	"github.com/zjrosen/perles/internal/orchestration/workflow"
@@ -212,12 +214,19 @@ func NewSupervisor(cfg SupervisorConfig) (Supervisor, error) {
 // AllocateResources prepares a workflow for execution.
 // Creates infrastructure, MCP server, session, and stores resources on the instance.
 // After this call succeeds, inst.Infrastructure is set and event buses can be attached.
+//
+// This method accepts workflows in Pending state (new workflows) or Paused state (cold resume).
+// For cold resume (Paused state with SessionDir set), it reopens the existing session directory
+// instead of creating a new one, preserving message history and coordinator session refs.
 func (s *defaultSupervisor) AllocateResources(ctx context.Context, inst *WorkflowInstance) error {
-	// Validate state is Pending
-	if inst.State != WorkflowPending {
-		return fmt.Errorf("%w: cannot allocate resources for workflow in state %s, expected %s",
-			ErrInvalidState, inst.State, WorkflowPending)
+	// Validate state is Pending (new workflow) or Paused (cold resume from SQLite)
+	if inst.State != WorkflowPending && inst.State != WorkflowPaused {
+		return fmt.Errorf("%w: cannot allocate resources for workflow in state %s, expected %s or %s",
+			ErrInvalidState, inst.State, WorkflowPending, WorkflowPaused)
 	}
+
+	// Detect cold resume: Paused state with existing SessionDir
+	coldResume := inst.State == WorkflowPaused && inst.SessionDir != ""
 
 	// Create a cancellable context for this workflow's lifecycle.
 	// IMPORTANT: Use context.Background() instead of ctx to ensure the workflow
@@ -259,67 +268,80 @@ func (s *defaultSupervisor) AllocateResources(ctx context.Context, inst *Workflo
 	}
 
 	// Step 0: Create worktree if enabled (fail fast - before any other resources)
+	// For cold resume, skip worktree creation if WorktreePath is already set and exists.
 	if inst.WorktreeEnabled && s.gitExecutorFactory != nil {
-		// Determine the work directory to use for git operations
-		workDir := inst.WorkDir
-		if workDir == "" {
-			if wd, err := os.Getwd(); err == nil {
-				workDir = wd
+		// Check if worktree already exists (cold resume case)
+		worktreeExists := false
+		if inst.WorktreePath != "" {
+			if info, err := os.Stat(inst.WorktreePath); err == nil && info.IsDir() {
+				worktreeExists = true
+				log.Debug(log.CatOrch, "Using existing worktree for cold resume", "subsystem", "supervisor",
+					"workflowID", inst.ID, "path", inst.WorktreePath, "branch", inst.WorktreeBranch)
 			}
 		}
 
-		// Create GitExecutor for the work directory
-		gitExec = s.gitExecutorFactory(workDir)
+		if !worktreeExists {
+			// Determine the work directory to use for git operations
+			workDir := inst.WorkDir
+			if workDir == "" {
+				if wd, err := os.Getwd(); err == nil {
+					workDir = wd
+				}
+			}
 
-		// Prune stale worktree references
-		_ = gitExec.PruneWorktrees() // Best-effort, don't fail on prune errors
+			// Create GitExecutor for the work directory
+			gitExec = s.gitExecutorFactory(workDir)
 
-		// Determine worktree path
-		path, err := gitExec.DetermineWorktreePath(inst.ID.String())
-		if err != nil {
-			cancel()
-			return fmt.Errorf("determining worktree path: %w", err)
+			// Prune stale worktree references
+			_ = gitExec.PruneWorktrees() // Best-effort, don't fail on prune errors
+
+			// Determine worktree path
+			path, err := gitExec.DetermineWorktreePath(inst.ID.String())
+			if err != nil {
+				cancel()
+				return fmt.Errorf("determining worktree path: %w", err)
+			}
+
+			// Generate branch name: use custom if provided, otherwise auto-generate
+			branchName := inst.WorktreeBranchName
+			if branchName == "" {
+				// Auto-generate branch name using first 8 chars of workflow ID
+				shortID := inst.ID.String()
+				if len(shortID) > 8 {
+					shortID = shortID[:8]
+				}
+				branchName = fmt.Sprintf("perles-workflow-%s", shortID)
+			}
+
+			// Create worktree with timeout context
+			worktreeCtx, worktreeCancel := context.WithTimeout(ctx, s.worktreeTimeout)
+			err = gitExec.CreateWorktreeWithContext(worktreeCtx, path, branchName, inst.WorktreeBaseBranch)
+			worktreeCancel()
+
+			if err != nil {
+				cancel()
+				// Wrap known error types for user-friendly messages
+				if errors.Is(err, domaingit.ErrBranchAlreadyCheckedOut) {
+					return fmt.Errorf("creating worktree: branch '%s' is already checked out in another worktree: %w", branchName, err)
+				}
+				if errors.Is(err, domaingit.ErrPathAlreadyExists) {
+					return fmt.Errorf("creating worktree: path '%s' already exists: %w", path, err)
+				}
+				if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, domaingit.ErrWorktreeTimeout) {
+					return fmt.Errorf("creating worktree: operation timed out after %v: %w", s.worktreeTimeout, err)
+				}
+				return fmt.Errorf("creating worktree: %w", err)
+			}
+
+			// Update instance fields with worktree information
+			worktreePath = path // Track for cleanup on subsequent failure
+			inst.WorktreePath = path
+			inst.WorktreeBranch = branchName
+			inst.WorkDir = path // Override WorkDir to use the worktree path
+
+			log.Debug(log.CatOrch, "Worktree created", "subsystem", "supervisor",
+				"workflowID", inst.ID, "path", path, "branch", branchName)
 		}
-
-		// Generate branch name: use custom if provided, otherwise auto-generate
-		branchName := inst.WorktreeBranchName
-		if branchName == "" {
-			// Auto-generate branch name using first 8 chars of workflow ID
-			shortID := inst.ID.String()
-			if len(shortID) > 8 {
-				shortID = shortID[:8]
-			}
-			branchName = fmt.Sprintf("perles-workflow-%s", shortID)
-		}
-
-		// Create worktree with timeout context
-		worktreeCtx, worktreeCancel := context.WithTimeout(ctx, s.worktreeTimeout)
-		err = gitExec.CreateWorktreeWithContext(worktreeCtx, path, branchName, inst.WorktreeBaseBranch)
-		worktreeCancel()
-
-		if err != nil {
-			cancel()
-			// Wrap known error types for user-friendly messages
-			if errors.Is(err, domaingit.ErrBranchAlreadyCheckedOut) {
-				return fmt.Errorf("creating worktree: branch '%s' is already checked out in another worktree: %w", branchName, err)
-			}
-			if errors.Is(err, domaingit.ErrPathAlreadyExists) {
-				return fmt.Errorf("creating worktree: path '%s' already exists: %w", path, err)
-			}
-			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, domaingit.ErrWorktreeTimeout) {
-				return fmt.Errorf("creating worktree: operation timed out after %v: %w", s.worktreeTimeout, err)
-			}
-			return fmt.Errorf("creating worktree: %w", err)
-		}
-
-		// Update instance fields with worktree information
-		worktreePath = path // Track for cleanup on subsequent failure
-		inst.WorktreePath = path
-		inst.WorktreeBranch = branchName
-		inst.WorkDir = path // Override WorkDir to use the worktree path
-
-		log.Debug(log.CatOrch, "Worktree created", "subsystem", "supervisor",
-			"workflowID", inst.ID, "path", path, "branch", branchName)
 	}
 
 	// Step 1: Create TCP listener for MCP HTTP server (OS assigns available port)
@@ -337,18 +359,32 @@ func (s *defaultSupervisor) AllocateResources(ctx context.Context, inst *Workflo
 	// Step 3: Create message repository for this workflow
 	messageRepo := repository.NewMemoryMessageRepository()
 
-	// Step 3.5: Create session for this workflow
+	// Step 3.5: Create or reopen session for this workflow
 	workDir := getWorkDir(inst)
-	sess, err = s.sessionFactory.Create(session.CreateOptions{
-		SessionID: inst.ID.String(),
-		WorkDir:   workDir,
-	})
-	if err != nil {
-		cleanup()
-		return fmt.Errorf("creating session: %w", err)
+	if coldResume && inst.SessionDir != "" {
+		// Cold resume: reopen existing session directory to preserve message history
+		sess, err = session.Reopen(inst.ID.String(), inst.SessionDir)
+		if err != nil {
+			cleanup()
+			return fmt.Errorf("reopening session for cold resume: %w", err)
+		}
+		log.Debug(log.CatOrch, "Session reopened for cold resume", "subsystem", "supervisor",
+			"workflowID", inst.ID, "sessionDir", sess.Dir)
+	} else {
+		// New workflow: create fresh session
+		sess, err = s.sessionFactory.Create(session.CreateOptions{
+			SessionID: inst.ID.String(),
+			WorkDir:   workDir,
+		})
+		if err != nil {
+			cleanup()
+			return fmt.Errorf("creating session: %w", err)
+		}
+		// Store session directory for persistence
+		inst.SessionDir = sess.Dir
+		log.Debug(log.CatOrch, "Session created for workflow", "subsystem", "supervisor",
+			"workflowID", inst.ID, "sessionDir", sess.Dir)
 	}
-	log.Debug(log.CatOrch, "Session created for workflow", "subsystem", "supervisor",
-		"workflowID", inst.ID, "sessionDir", sess.Dir)
 
 	// Step 4: Create InfrastructureConfig
 	infraCfg := v2.InfrastructureConfig{
@@ -425,6 +461,16 @@ func (s *defaultSupervisor) AllocateResources(ctx context.Context, inst *Workflo
 	inst.MCPCoordServer = mcpCoordServer
 	inst.MessageRepo = messageRepo
 	inst.Session = sess // May be nil if session factory not configured
+
+	// For cold resume: restore ProcessRepository and ProcessRegistry from session data.
+	// This populates the coordinator and worker processes so Resume() can find them.
+	if coldResume && inst.SessionDir != "" {
+		if err := s.restoreProcessStateFromSession(inst, workflowCtx); err != nil {
+			// Log but don't fail - we can still try to resume even if restore fails
+			log.Debug(log.CatOrch, "Failed to restore process state from session (will spawn fresh)",
+				"subsystem", "supervisor", "workflowID", inst.ID, "error", err)
+		}
+	}
 
 	return nil
 }
@@ -581,6 +627,85 @@ func (s *defaultSupervisor) Resume(ctx context.Context, inst *WorkflowInstance) 
 		}
 		_ = inst.TransitionTo(WorkflowPaused)
 		return fmt.Errorf("sending resume message: %w", err)
+	}
+
+	return nil
+}
+
+// restoreProcessStateFromSession loads session metadata and restores ProcessRepository
+// and ProcessRegistry from the persisted session data. This enables cold resume by
+// populating the coordinator and worker processes so Resume() can find them.
+func (s *defaultSupervisor) restoreProcessStateFromSession(inst *WorkflowInstance, _ context.Context) error {
+	// Load metadata directly (without resumable validation)
+	metadata, err := session.Load(inst.SessionDir)
+	if err != nil {
+		return fmt.Errorf("loading session metadata: %w", err)
+	}
+
+	// Build a minimal ResumableSession for the restore functions
+	// We only need metadata for process restoration, not messages
+	resumableSession := &session.ResumableSession{
+		Metadata:       metadata,
+		ActiveWorkers:  []session.WorkerMetadata{},
+		RetiredWorkers: []session.WorkerMetadata{},
+	}
+
+	// Partition workers into active and retired
+	for _, worker := range metadata.Workers {
+		if worker.RetiredAt.IsZero() {
+			resumableSession.ActiveWorkers = append(resumableSession.ActiveWorkers, worker)
+		} else {
+			resumableSession.RetiredWorkers = append(resumableSession.RetiredWorkers, worker)
+		}
+	}
+
+	// Restore ProcessRepository (used by command handlers)
+	if inst.Infrastructure.Repositories.ProcessRepo != nil {
+		if err := session.RestoreProcessRepository(inst.Infrastructure.Repositories.ProcessRepo, resumableSession); err != nil {
+			return fmt.Errorf("restoring process repository: %w", err)
+		}
+		log.Debug(log.CatOrch, "Restored ProcessRepository from session",
+			"subsystem", "supervisor", "workflowID", inst.ID,
+			"coordinatorSessionRef", metadata.CoordinatorSessionRef,
+			"activeWorkers", len(resumableSession.ActiveWorkers),
+			"retiredWorkers", len(resumableSession.RetiredWorkers))
+	}
+
+	// Restore ProcessRegistry (used by delivery handler to find live processes)
+	if inst.Infrastructure.Internal.ProcessRegistry != nil {
+		// Create a submitter adapter that wraps the processor
+		var submitter process.CommandSubmitter
+		if inst.Infrastructure.Core.Processor != nil {
+			submitter = &processorSubmitterAdapter{processor: inst.Infrastructure.Core.Processor}
+		}
+		if err := session.RestoreProcessRegistry(
+			inst.Infrastructure.Internal.ProcessRegistry,
+			resumableSession,
+			submitter,
+			inst.Infrastructure.Core.EventBus,
+		); err != nil {
+			return fmt.Errorf("restoring process registry: %w", err)
+		}
+		log.Debug(log.CatOrch, "Restored ProcessRegistry from session",
+			"subsystem", "supervisor", "workflowID", inst.ID)
+	}
+
+	// Restore MessageRepository (inter-agent messages)
+	if inst.MessageRepo != nil {
+		interAgentMsgs, err := session.LoadInterAgentMessages(inst.SessionDir)
+		if err != nil {
+			// Log but don't fail - messages are nice-to-have for resume
+			log.Debug(log.CatOrch, "Failed to load inter-agent messages",
+				"subsystem", "supervisor", "workflowID", inst.ID, "error", err)
+		} else if len(interAgentMsgs) > 0 {
+			if err := session.RestoreMessageRepository(inst.MessageRepo, interAgentMsgs); err != nil {
+				log.Debug(log.CatOrch, "Failed to restore message repository",
+					"subsystem", "supervisor", "workflowID", inst.ID, "error", err)
+			} else {
+				log.Debug(log.CatOrch, "Restored MessageRepository from session",
+					"subsystem", "supervisor", "workflowID", inst.ID, "messageCount", len(interAgentMsgs))
+			}
+		}
 	}
 
 	return nil
@@ -744,6 +869,17 @@ func getWorkDir(inst *WorkflowInstance) string {
 		return wd
 	}
 	return ""
+}
+
+// processorSubmitterAdapter adapts CommandProcessor to process.CommandSubmitter interface.
+// The processor.Submit returns error but process.CommandSubmitter.Submit doesn't.
+type processorSubmitterAdapter struct {
+	processor *processor.CommandProcessor
+}
+
+// Submit implements process.CommandSubmitter.
+func (a *processorSubmitterAdapter) Submit(cmd command.Command) {
+	_ = a.processor.Submit(cmd) // Ignore error - fire-and-forget for turn completion
 }
 
 // workerServerCache manages worker MCP servers that share the same message store.

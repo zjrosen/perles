@@ -46,7 +46,7 @@ func createStressTestModel(t *testing.T, numWorkflows int) Model {
 		)
 	}
 
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	mockCP.On("List", mock.Anything, mock.Anything).Return(workflows, nil).Maybe()
 
 	eventCh := make(chan controlplane.ControlPlaneEvent)

@@ -53,24 +53,48 @@ func (s SessionState) IsValid() bool {
 // All fields are unexported to enforce encapsulation; use the constructor
 // and getter methods to access data.
 type Session struct {
-	id              int64
-	guid            string
-	project         string
-	name            string
-	state           SessionState
-	templateID      string
-	epicID          string
-	workDir         string
-	worktreePath    string
-	worktreeBranch  string
+	id         int64
+	guid       string
+	project    string
+	name       string
+	state      SessionState
+	templateID string
+	epicID     string
+	workDir    string
+	labels     map[string]string
+
+	// Worktree configuration (requested settings)
+	worktreeEnabled    bool
+	worktreeBaseBranch string
+	worktreeBranchName string
+
+	// Worktree state (actual created worktree)
+	worktreePath   string
+	worktreeBranch string
+
+	// Session storage path (for file-based session logs in ~/.perles/sessions/)
+	sessionDir string
+
+	// Ownership for crash recovery
 	ownerCreatedPID *int
 	ownerCurrentPID *int
-	createdAt       time.Time
-	startedAt       *time.Time
-	pausedAt        *time.Time
-	updatedAt       time.Time
-	archivedAt      *time.Time
-	deletedAt       *time.Time
+
+	// Metrics
+	tokensUsed    int64
+	activeWorkers int
+
+	// Health tracking
+	lastHeartbeatAt *time.Time
+	lastProgressAt  *time.Time
+
+	// Timestamps
+	createdAt   time.Time
+	startedAt   *time.Time
+	pausedAt    *time.Time
+	completedAt *time.Time
+	updatedAt   time.Time
+	archivedAt  *time.Time
+	deletedAt   *time.Time
 }
 
 // NewSession creates a new Session with the given GUID, project, and state.
@@ -79,24 +103,34 @@ type Session struct {
 func NewSession(guid, project string, state SessionState) *Session {
 	now := time.Now()
 	return &Session{
-		id:              0,
-		guid:            guid,
-		project:         project,
-		name:            "",
-		state:           state,
-		templateID:      "",
-		epicID:          "",
-		workDir:         "",
-		worktreePath:    "",
-		worktreeBranch:  "",
-		ownerCreatedPID: nil,
-		ownerCurrentPID: nil,
-		createdAt:       now,
-		startedAt:       nil,
-		pausedAt:        nil,
-		updatedAt:       now,
-		archivedAt:      nil,
-		deletedAt:       nil,
+		id:                 0,
+		guid:               guid,
+		project:            project,
+		name:               "",
+		state:              state,
+		templateID:         "",
+		epicID:             "",
+		workDir:            "",
+		labels:             nil,
+		worktreeEnabled:    false,
+		worktreeBaseBranch: "",
+		worktreeBranchName: "",
+		worktreePath:       "",
+		worktreeBranch:     "",
+		sessionDir:         "",
+		ownerCreatedPID:    nil,
+		ownerCurrentPID:    nil,
+		tokensUsed:         0,
+		activeWorkers:      0,
+		lastHeartbeatAt:    nil,
+		lastProgressAt:     nil,
+		createdAt:          now,
+		startedAt:          nil,
+		pausedAt:           nil,
+		completedAt:        nil,
+		updatedAt:          now,
+		archivedAt:         nil,
+		deletedAt:          nil,
 	}
 }
 
@@ -107,32 +141,49 @@ func ReconstituteSession(
 	guid, project, name string,
 	state SessionState,
 	templateID, epicID, workDir string,
+	labels map[string]string,
+	worktreeEnabled bool,
+	worktreeBaseBranch, worktreeBranchName string,
 	worktreePath, worktreeBranch string,
+	sessionDir string,
 	ownerCreatedPID, ownerCurrentPID *int,
+	tokensUsed int64,
+	activeWorkers int,
+	lastHeartbeatAt, lastProgressAt *time.Time,
 	createdAt time.Time,
-	startedAt, pausedAt *time.Time,
+	startedAt, pausedAt, completedAt *time.Time,
 	updatedAt time.Time,
 	archivedAt, deletedAt *time.Time,
 ) *Session {
 	return &Session{
-		id:              id,
-		guid:            guid,
-		project:         project,
-		name:            name,
-		state:           state,
-		templateID:      templateID,
-		epicID:          epicID,
-		workDir:         workDir,
-		worktreePath:    worktreePath,
-		worktreeBranch:  worktreeBranch,
-		ownerCreatedPID: ownerCreatedPID,
-		ownerCurrentPID: ownerCurrentPID,
-		createdAt:       createdAt,
-		startedAt:       startedAt,
-		pausedAt:        pausedAt,
-		updatedAt:       updatedAt,
-		archivedAt:      archivedAt,
-		deletedAt:       deletedAt,
+		id:                 id,
+		guid:               guid,
+		project:            project,
+		name:               name,
+		state:              state,
+		templateID:         templateID,
+		epicID:             epicID,
+		workDir:            workDir,
+		labels:             labels,
+		worktreeEnabled:    worktreeEnabled,
+		worktreeBaseBranch: worktreeBaseBranch,
+		worktreeBranchName: worktreeBranchName,
+		worktreePath:       worktreePath,
+		worktreeBranch:     worktreeBranch,
+		sessionDir:         sessionDir,
+		ownerCreatedPID:    ownerCreatedPID,
+		ownerCurrentPID:    ownerCurrentPID,
+		tokensUsed:         tokensUsed,
+		activeWorkers:      activeWorkers,
+		lastHeartbeatAt:    lastHeartbeatAt,
+		lastProgressAt:     lastProgressAt,
+		createdAt:          createdAt,
+		startedAt:          startedAt,
+		pausedAt:           pausedAt,
+		completedAt:        completedAt,
+		updatedAt:          updatedAt,
+		archivedAt:         archivedAt,
+		deletedAt:          deletedAt,
 	}
 }
 
@@ -172,6 +223,26 @@ func (s *Session) EpicID() string {
 	return s.epicID
 }
 
+// Labels returns the labels associated with this session.
+func (s *Session) Labels() map[string]string {
+	return s.labels
+}
+
+// WorktreeEnabled returns whether a git worktree was requested for this session.
+func (s *Session) WorktreeEnabled() bool {
+	return s.worktreeEnabled
+}
+
+// WorktreeBaseBranch returns the branch the worktree was based on.
+func (s *Session) WorktreeBaseBranch() string {
+	return s.worktreeBaseBranch
+}
+
+// WorktreeBranchName returns the requested branch name for the worktree.
+func (s *Session) WorktreeBranchName() string {
+	return s.worktreeBranchName
+}
+
 // WorkDir returns the working directory for this session.
 func (s *Session) WorkDir() string {
 	return s.workDir
@@ -187,6 +258,12 @@ func (s *Session) WorktreeBranch() string {
 	return s.worktreeBranch
 }
 
+// SessionDir returns the path to the file-based session logs directory.
+// This is where coordinator/worker logs, messages.jsonl, and metadata.json are stored.
+func (s *Session) SessionDir() string {
+	return s.sessionDir
+}
+
 // OwnerCreatedPID returns the PID of the process that created this session, if set.
 func (s *Session) OwnerCreatedPID() *int {
 	return s.ownerCreatedPID
@@ -195,6 +272,26 @@ func (s *Session) OwnerCreatedPID() *int {
 // OwnerCurrentPID returns the PID of the process currently owning this session, if set.
 func (s *Session) OwnerCurrentPID() *int {
 	return s.ownerCurrentPID
+}
+
+// TokensUsed returns the total tokens used by this session.
+func (s *Session) TokensUsed() int64 {
+	return s.tokensUsed
+}
+
+// ActiveWorkers returns the number of active workers in this session.
+func (s *Session) ActiveWorkers() int {
+	return s.activeWorkers
+}
+
+// LastHeartbeatAt returns when the last heartbeat was received, or nil if never.
+func (s *Session) LastHeartbeatAt() *time.Time {
+	return s.lastHeartbeatAt
+}
+
+// LastProgressAt returns when the last progress was made, or nil if never.
+func (s *Session) LastProgressAt() *time.Time {
+	return s.lastProgressAt
 }
 
 // CreatedAt returns when this session was created.
@@ -210,6 +307,11 @@ func (s *Session) StartedAt() *time.Time {
 // PausedAt returns when this session was paused, or nil if never paused.
 func (s *Session) PausedAt() *time.Time {
 	return s.pausedAt
+}
+
+// CompletedAt returns when this session was completed, or nil if not completed.
+func (s *Session) CompletedAt() *time.Time {
+	return s.completedAt
 }
 
 // UpdatedAt returns when this session was last updated.
@@ -273,6 +375,12 @@ func (s *Session) SetWorktreeBranch(branch string) {
 	s.updatedAt = time.Now()
 }
 
+// SetSessionDir sets the path to the file-based session logs directory.
+func (s *Session) SetSessionDir(dir string) {
+	s.sessionDir = dir
+	s.updatedAt = time.Now()
+}
+
 // SetOwnerCreatedPID sets the PID of the process that created this session.
 func (s *Session) SetOwnerCreatedPID(pid *int) {
 	s.ownerCreatedPID = pid
@@ -283,6 +391,64 @@ func (s *Session) SetOwnerCreatedPID(pid *int) {
 func (s *Session) SetOwnerCurrentPID(pid *int) {
 	s.ownerCurrentPID = pid
 	s.updatedAt = time.Now()
+}
+
+// SetLabels sets the labels associated with this session.
+func (s *Session) SetLabels(labels map[string]string) {
+	s.labels = labels
+	s.updatedAt = time.Now()
+}
+
+// SetWorktreeEnabled sets whether a git worktree was requested for this session.
+func (s *Session) SetWorktreeEnabled(enabled bool) {
+	s.worktreeEnabled = enabled
+	s.updatedAt = time.Now()
+}
+
+// SetWorktreeBaseBranch sets the branch the worktree was based on.
+func (s *Session) SetWorktreeBaseBranch(branch string) {
+	s.worktreeBaseBranch = branch
+	s.updatedAt = time.Now()
+}
+
+// SetWorktreeBranchName sets the requested branch name for the worktree.
+func (s *Session) SetWorktreeBranchName(name string) {
+	s.worktreeBranchName = name
+	s.updatedAt = time.Now()
+}
+
+// SetTokensUsed sets the total tokens used by this session.
+func (s *Session) SetTokensUsed(tokens int64) {
+	s.tokensUsed = tokens
+	s.updatedAt = time.Now()
+}
+
+// AddTokens adds tokens to the usage counter.
+func (s *Session) AddTokens(tokens int64) {
+	s.tokensUsed += tokens
+	s.updatedAt = time.Now()
+}
+
+// SetActiveWorkers sets the number of active workers in this session.
+func (s *Session) SetActiveWorkers(count int) {
+	s.activeWorkers = count
+	s.updatedAt = time.Now()
+}
+
+// RecordHeartbeat updates the last heartbeat timestamp.
+func (s *Session) RecordHeartbeat() {
+	now := time.Now()
+	s.lastHeartbeatAt = &now
+	s.updatedAt = now
+}
+
+// RecordProgress updates the last progress timestamp.
+// This also updates the heartbeat timestamp.
+func (s *Session) RecordProgress() {
+	now := time.Now()
+	s.lastProgressAt = &now
+	s.lastHeartbeatAt = &now
+	s.updatedAt = now
 }
 
 // Start transitions the session to the running state and sets startedAt.
@@ -311,10 +477,12 @@ func (s *Session) Resume() {
 }
 
 // MarkCompleted transitions the session to the completed state.
-// The updatedAt timestamp is set to the current time.
+// Both completedAt and updatedAt timestamps are set to the current time.
 func (s *Session) MarkCompleted() {
+	now := time.Now()
 	s.state = SessionStateCompleted
-	s.updatedAt = time.Now()
+	s.completedAt = &now
+	s.updatedAt = now
 }
 
 // MarkFailed transitions the session to the failed state.

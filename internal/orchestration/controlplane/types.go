@@ -203,15 +203,21 @@ type WorkflowInstance struct {
 	WorktreePath   string // Path to created worktree (empty if not using worktree)
 	WorktreeBranch string // Actual branch name (auto-generated or custom)
 
+	// Session storage path (for file-based session logs in ~/.perles/sessions/)
+	// Set by Supervisor.AllocateResources() when the session is created.
+	// Used for cold resume to reopen the existing session directory.
+	SessionDir string
+
 	// State
 	State  WorkflowState
 	Labels map[string]string
 
 	// Timestamps
-	CreatedAt time.Time
-	StartedAt *time.Time
-	PausedAt  time.Time // When workflow was paused (zero if never paused)
-	UpdatedAt time.Time
+	CreatedAt   time.Time
+	StartedAt   *time.Time
+	PausedAt    time.Time  // When workflow was paused (zero if never paused)
+	CompletedAt *time.Time // When workflow was completed (nil if not completed)
+	UpdatedAt   time.Time
 
 	// Runtime (owned by this instance, set when workflow is started)
 	Infrastructure *v2.Infrastructure
@@ -228,6 +234,11 @@ type WorkflowInstance struct {
 	// Health tracking
 	LastHeartbeatAt time.Time
 	LastProgressAt  time.Time
+
+	// Ownership tracking
+	// IsLocked is true when this workflow is owned by another running Perles process.
+	// Locked workflows cannot be started, stopped, or resumed by this process.
+	IsLocked bool
 
 	// Lifecycle context (for cancellation)
 	Ctx    context.Context

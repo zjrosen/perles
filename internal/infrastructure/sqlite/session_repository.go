@@ -2,11 +2,18 @@ package sqlite
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/zjrosen/perles/internal/sessions/domain"
 )
+
+// sessionColumns is the list of columns to select for session queries.
+const sessionColumns = `id, guid, project, name, state, template_id, epic_id, work_dir, labels, 
+	worktree_enabled, worktree_base_branch, worktree_branch_name, worktree_path, worktree_branch, session_dir,
+	owner_created_pid, owner_current_pid, tokens_used, active_workers, last_heartbeat_at, last_progress_at,
+	created_at, started_at, paused_at, completed_at, updated_at, archived_at, deleted_at`
 
 // sessionRepository implements domain.SessionRepository using SQLite.
 type sessionRepository struct {
@@ -21,6 +28,23 @@ func newSessionRepository(db *sql.DB) *sessionRepository {
 // Ensure sessionRepository implements domain.SessionRepository.
 var _ domain.SessionRepository = (*sessionRepository)(nil)
 
+// scanSession scans a row into a SessionModel.
+func scanSession(scanner interface{ Scan(...any) error }) (*SessionModel, error) {
+	var model SessionModel
+	err := scanner.Scan(
+		&model.ID, &model.GUID, &model.Project, &model.Name, &model.State,
+		&model.TemplateID, &model.EpicID, &model.WorkDir, &model.Labels,
+		&model.WorktreeEnabled, &model.WorktreeBaseBranch, &model.WorktreeBranchName,
+		&model.WorktreePath, &model.WorktreeBranch, &model.SessionDir,
+		&model.OwnerCreatedPID, &model.OwnerCurrentPID,
+		&model.TokensUsed, &model.ActiveWorkers,
+		&model.LastHeartbeatAt, &model.LastProgressAt,
+		&model.CreatedAt, &model.StartedAt, &model.PausedAt, &model.CompletedAt, &model.UpdatedAt,
+		&model.ArchivedAt, &model.DeletedAt,
+	)
+	return &model, err
+}
+
 // Save persists a session to the database.
 // For new sessions (ID == 0), inserts a new row and sets the session ID.
 // For existing sessions (ID > 0), updates the existing row.
@@ -30,11 +54,19 @@ func (r *sessionRepository) Save(session *domain.Session) error {
 	if session.ID() == 0 {
 		// Insert new session
 		result, err := r.db.Exec(
-			`INSERT INTO sessions (guid, project, name, state, template_id, epic_id, work_dir, worktree_path, worktree_branch, owner_created_pid, owner_current_pid, created_at, started_at, paused_at, updated_at, archived_at, deleted_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			model.GUID, model.Project, model.Name, model.State, model.TemplateID, model.EpicID, model.WorkDir,
-			model.WorktreePath, model.WorktreeBranch, model.OwnerCreatedPID, model.OwnerCurrentPID,
-			model.CreatedAt, model.StartedAt, model.PausedAt, model.UpdatedAt, model.ArchivedAt, model.DeletedAt,
+			`INSERT INTO sessions (
+				guid, project, name, state, template_id, epic_id, work_dir, labels,
+				worktree_enabled, worktree_base_branch, worktree_branch_name, worktree_path, worktree_branch, session_dir,
+				owner_created_pid, owner_current_pid, tokens_used, active_workers, last_heartbeat_at, last_progress_at,
+				created_at, started_at, paused_at, completed_at, updated_at, archived_at, deleted_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			model.GUID, model.Project, model.Name, model.State, model.TemplateID, model.EpicID,
+			model.WorkDir, model.Labels,
+			model.WorktreeEnabled, model.WorktreeBaseBranch, model.WorktreeBranchName,
+			model.WorktreePath, model.WorktreeBranch, model.SessionDir,
+			model.OwnerCreatedPID, model.OwnerCurrentPID,
+			model.TokensUsed, model.ActiveWorkers, model.LastHeartbeatAt, model.LastProgressAt,
+			model.CreatedAt, model.StartedAt, model.PausedAt, model.CompletedAt, model.UpdatedAt, model.ArchivedAt, model.DeletedAt,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to insert session: %w", err)
@@ -49,8 +81,19 @@ func (r *sessionRepository) Save(session *domain.Session) error {
 
 	// Update existing session
 	_, err := r.db.Exec(
-		`UPDATE sessions SET name = ?, state = ?, template_id = ?, epic_id = ?, work_dir = ?, worktree_path = ?, worktree_branch = ?, owner_created_pid = ?, owner_current_pid = ?, started_at = ?, paused_at = ?, updated_at = ?, archived_at = ?, deleted_at = ? WHERE id = ?`,
-		model.Name, model.State, model.TemplateID, model.EpicID, model.WorkDir, model.WorktreePath, model.WorktreeBranch, model.OwnerCreatedPID, model.OwnerCurrentPID, model.StartedAt, model.PausedAt, model.UpdatedAt, model.ArchivedAt, model.DeletedAt, model.ID,
+		`UPDATE sessions SET 
+			name = ?, state = ?, template_id = ?, epic_id = ?, work_dir = ?, labels = ?,
+			worktree_enabled = ?, worktree_base_branch = ?, worktree_branch_name = ?, worktree_path = ?, worktree_branch = ?, session_dir = ?,
+			owner_created_pid = ?, owner_current_pid = ?, tokens_used = ?, active_workers = ?, 
+			last_heartbeat_at = ?, last_progress_at = ?,
+			started_at = ?, paused_at = ?, completed_at = ?, updated_at = ?, archived_at = ?, deleted_at = ?
+		WHERE id = ?`,
+		model.Name, model.State, model.TemplateID, model.EpicID, model.WorkDir, model.Labels,
+		model.WorktreeEnabled, model.WorktreeBaseBranch, model.WorktreeBranchName, model.WorktreePath, model.WorktreeBranch, model.SessionDir,
+		model.OwnerCreatedPID, model.OwnerCurrentPID, model.TokensUsed, model.ActiveWorkers,
+		model.LastHeartbeatAt, model.LastProgressAt,
+		model.StartedAt, model.PausedAt, model.CompletedAt, model.UpdatedAt, model.ArchivedAt, model.DeletedAt,
+		model.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update session: %w", err)
@@ -62,16 +105,12 @@ func (r *sessionRepository) Save(session *domain.Session) error {
 // Returns SessionNotFoundError if no matching session exists.
 // Soft-deleted sessions are not returned.
 func (r *sessionRepository) FindByGUID(project, guid string) (*domain.Session, error) {
-	var model SessionModel
-	err := r.db.QueryRow(
-		`SELECT id, guid, project, name, state, template_id, epic_id, work_dir, worktree_path, worktree_branch, owner_created_pid, owner_current_pid, created_at, started_at, paused_at, updated_at, archived_at, deleted_at
-		 FROM sessions
-		 WHERE project = ? AND guid = ? AND deleted_at IS NULL`,
+	row := r.db.QueryRow(
+		`SELECT `+sessionColumns+` FROM sessions WHERE project = ? AND guid = ? AND deleted_at IS NULL`,
 		project, guid,
-	).Scan(&model.ID, &model.GUID, &model.Project, &model.Name, &model.State, &model.TemplateID, &model.EpicID, &model.WorkDir,
-		&model.WorktreePath, &model.WorktreeBranch, &model.OwnerCreatedPID, &model.OwnerCurrentPID, &model.CreatedAt, &model.StartedAt, &model.PausedAt, &model.UpdatedAt, &model.ArchivedAt, &model.DeletedAt)
-
-	if err == sql.ErrNoRows {
+	)
+	model, err := scanSession(row)
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, &domain.SessionNotFoundError{GUID: guid, Project: project}
 	}
 	if err != nil {
@@ -85,16 +124,12 @@ func (r *sessionRepository) FindByGUID(project, guid string) (*domain.Session, e
 // Soft-deleted sessions are not returned.
 // Note: This method does not filter by project as it's used for internal lookups.
 func (r *sessionRepository) FindByID(id int64) (*domain.Session, error) {
-	var model SessionModel
-	err := r.db.QueryRow(
-		`SELECT id, guid, project, name, state, template_id, epic_id, work_dir, worktree_path, worktree_branch, owner_created_pid, owner_current_pid, created_at, started_at, paused_at, updated_at, archived_at, deleted_at
-		 FROM sessions
-		 WHERE id = ? AND deleted_at IS NULL`,
+	row := r.db.QueryRow(
+		`SELECT `+sessionColumns+` FROM sessions WHERE id = ? AND deleted_at IS NULL`,
 		id,
-	).Scan(&model.ID, &model.GUID, &model.Project, &model.Name, &model.State, &model.TemplateID, &model.EpicID, &model.WorkDir,
-		&model.WorktreePath, &model.WorktreeBranch, &model.OwnerCreatedPID, &model.OwnerCurrentPID, &model.CreatedAt, &model.StartedAt, &model.PausedAt, &model.UpdatedAt, &model.ArchivedAt, &model.DeletedAt)
-
-	if err == sql.ErrNoRows {
+	)
+	model, err := scanSession(row)
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, &domain.SessionNotFoundError{GUID: "", Project: ""}
 	}
 	if err != nil {
@@ -106,16 +141,12 @@ func (r *sessionRepository) FindByID(id int64) (*domain.Session, error) {
 // GetActiveSession retrieves the currently running session for a project.
 // Returns NoActiveSessionError if no session is in the running state.
 func (r *sessionRepository) GetActiveSession(project string) (*domain.Session, error) {
-	var model SessionModel
-	err := r.db.QueryRow(
-		`SELECT id, guid, project, name, state, template_id, epic_id, work_dir, worktree_path, worktree_branch, owner_created_pid, owner_current_pid, created_at, started_at, paused_at, updated_at, archived_at, deleted_at
-		 FROM sessions
-		 WHERE project = ? AND state = 'running' AND deleted_at IS NULL`,
+	row := r.db.QueryRow(
+		`SELECT `+sessionColumns+` FROM sessions WHERE project = ? AND state = 'running' AND deleted_at IS NULL`,
 		project,
-	).Scan(&model.ID, &model.GUID, &model.Project, &model.Name, &model.State, &model.TemplateID, &model.EpicID, &model.WorkDir,
-		&model.WorktreePath, &model.WorktreeBranch, &model.OwnerCreatedPID, &model.OwnerCurrentPID, &model.CreatedAt, &model.StartedAt, &model.PausedAt, &model.UpdatedAt, &model.ArchivedAt, &model.DeletedAt)
-
-	if err == sql.ErrNoRows {
+	)
+	model, err := scanSession(row)
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, &domain.NoActiveSessionError{Project: project}
 	}
 	if err != nil {
@@ -163,9 +194,7 @@ func (r *sessionRepository) DeleteAllForProject(project string) error {
 // ListWithFilter retrieves sessions for a project matching the given filter criteria.
 // Results are ordered by created_at descending (newest first).
 func (r *sessionRepository) ListWithFilter(project string, filter domain.ListFilter) ([]*domain.Session, error) {
-	query := `SELECT id, guid, project, name, state, template_id, epic_id, work_dir, worktree_path, worktree_branch, owner_created_pid, owner_current_pid, created_at, started_at, paused_at, updated_at, archived_at, deleted_at
-			  FROM sessions
-			  WHERE project = ?`
+	query := `SELECT ` + sessionColumns + ` FROM sessions WHERE project = ?`
 	args := []any{project}
 
 	// Add state filter if specified
@@ -174,9 +203,20 @@ func (r *sessionRepository) ListWithFilter(project string, filter domain.ListFil
 		args = append(args, string(filter.State))
 	}
 
+	// Add owner PID filter if specified
+	if filter.OwnerPID != nil {
+		query += ` AND owner_current_pid = ?`
+		args = append(args, *filter.OwnerPID)
+	}
+
 	// Filter out deleted unless IncludeDeleted is true
 	if !filter.IncludeDeleted {
 		query += ` AND deleted_at IS NULL`
+	}
+
+	// Filter out archived unless IncludeArchived is true
+	if !filter.IncludeArchived {
+		query += ` AND archived_at IS NULL`
 	}
 
 	// Order by created_at descending (newest first)
@@ -196,9 +236,7 @@ func (r *sessionRepository) ListWithFilter(project string, filter domain.ListFil
 
 	var sessions []*domain.Session
 	for rows.Next() {
-		var model SessionModel
-		err := rows.Scan(&model.ID, &model.GUID, &model.Project, &model.Name, &model.State, &model.TemplateID, &model.EpicID, &model.WorkDir,
-			&model.WorktreePath, &model.WorktreeBranch, &model.OwnerCreatedPID, &model.OwnerCurrentPID, &model.CreatedAt, &model.StartedAt, &model.PausedAt, &model.UpdatedAt, &model.ArchivedAt, &model.DeletedAt)
+		model, err := scanSession(rows)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan session row: %w", err)
 		}

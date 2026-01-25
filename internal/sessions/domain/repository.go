@@ -6,6 +6,10 @@ type ListFilter struct {
 	// If empty, all states are included.
 	State SessionState
 
+	// OwnerPID filters to sessions owned by a specific process ID.
+	// If nil, no PID filtering is applied.
+	OwnerPID *int
+
 	// Limit restricts the number of sessions returned.
 	// If 0, no limit is applied.
 	Limit int
@@ -13,6 +17,10 @@ type ListFilter struct {
 	// IncludeDeleted includes soft-deleted sessions in results.
 	// By default, deleted sessions are excluded.
 	IncludeDeleted bool
+
+	// IncludeArchived includes archived sessions in results.
+	// By default, archived sessions are excluded.
+	IncludeArchived bool
 }
 
 // SessionRepository defines the persistence interface for Session entities.

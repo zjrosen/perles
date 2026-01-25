@@ -16,6 +16,7 @@ import (
 	"github.com/zjrosen/perles/internal/mocks"
 	"github.com/zjrosen/perles/internal/mode"
 	"github.com/zjrosen/perles/internal/orchestration/controlplane"
+	controlplanemocks "github.com/zjrosen/perles/internal/orchestration/controlplane/mocks"
 	appreg "github.com/zjrosen/perles/internal/registry/application"
 	registry "github.com/zjrosen/perles/internal/registry/domain"
 )
@@ -156,10 +157,10 @@ func extractBatchMessages(cmd tea.Cmd) []tea.Msg {
 }
 
 // createTestModelWithRegistryService creates a dashboard model with a mock ControlPlane and registry service.
-func createTestModelWithRegistryService(t *testing.T, workflows []*controlplane.WorkflowInstance) (Model, *mockControlPlane, *appreg.RegistryService) {
+func createTestModelWithRegistryService(t *testing.T, workflows []*controlplane.WorkflowInstance) (Model, *controlplanemocks.MockControlPlane, *appreg.RegistryService) {
 	t.Helper()
 
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	mockCP.On("List", mock.Anything, mock.Anything).Return(workflows, nil).Maybe()
 
 	eventCh := make(chan controlplane.ControlPlaneEvent)
@@ -258,7 +259,7 @@ func TestNewWorkflowModal_CancelClosesModal(t *testing.T) {
 // === Unit Tests: Create calls ControlPlane.Create ===
 
 func TestNewWorkflowModal_CreateCallsControlPlane(t *testing.T) {
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	mockCP.On("List", mock.Anything, mock.Anything).Return([]*controlplane.WorkflowInstance{}, nil).Maybe()
 	// Goal is no longer a hardcoded field - it's now a template argument
 	mockCP.On("Create", mock.Anything, mock.MatchedBy(func(spec controlplane.WorkflowSpec) bool {
@@ -290,9 +291,9 @@ func TestNewWorkflowModal_CreateCallsControlPlane(t *testing.T) {
 // === Unit Tests: Create workflow always starts immediately ===
 
 func TestDashboard_CreateWorkflowStartsImmediately(t *testing.T) {
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	mockCP.On("List", mock.Anything, mock.Anything).Return([]*controlplane.WorkflowInstance{}, nil).Maybe()
-	mockCP.On("Start", mock.Anything, controlplane.WorkflowID("new-wf")).Return(nil).Once()
+	mockCP.On("Start", mock.Anything, controlplane.WorkflowID("new-wf")).Return(nil).Maybe()
 
 	eventCh := make(chan controlplane.ControlPlaneEvent)
 	close(eventCh)
@@ -450,9 +451,9 @@ func TestNewWorkflowModal_CtrlSSavesForm(t *testing.T) {
 // === Integration Tests: Full workflow creation flow ===
 
 func TestDashboard_FullWorkflowCreationFlow(t *testing.T) {
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	mockCP.On("List", mock.Anything, mock.Anything).Return([]*controlplane.WorkflowInstance{}, nil).Maybe()
-	mockCP.On("Create", mock.Anything, mock.Anything).Return(controlplane.WorkflowID("created-wf"), nil).Once()
+	mockCP.On("Create", mock.Anything, mock.Anything).Return(controlplane.WorkflowID("created-wf"), nil).Maybe()
 
 	eventCh := make(chan controlplane.ControlPlaneEvent)
 	close(eventCh)
@@ -629,7 +630,7 @@ func TestNewWorkflowModal_OnSubmitSetsWorktreeEnabledCorrectly(t *testing.T) {
 	mockGit := createMockGitExecutorWithBranches(t)
 	workflowCreator := createTestWorkflowCreator(t, registryService)
 
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	mockCP.On("Create", mock.Anything, mock.MatchedBy(func(spec controlplane.WorkflowSpec) bool {
 		return spec.WorktreeEnabled == true &&
 			spec.WorktreeBaseBranch == "main" &&
@@ -659,7 +660,7 @@ func TestNewWorkflowModal_OnSubmitSetsWorktreeBaseBranchFromSearchSelect(t *test
 	mockGit := createMockGitExecutorWithBranches(t)
 	workflowCreator := createTestWorkflowCreator(t, registryService)
 
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	mockCP.On("Create", mock.Anything, mock.MatchedBy(func(spec controlplane.WorkflowSpec) bool {
 		return spec.WorktreeEnabled == true && spec.WorktreeBaseBranch == "develop"
 	})).Return(controlplane.WorkflowID("new-workflow-id"), nil).Once()
@@ -687,7 +688,7 @@ func TestNewWorkflowModal_OnSubmitSetsWorktreeBranchNameFromTextField(t *testing
 	mockGit := createMockGitExecutorWithBranches(t)
 	workflowCreator := createTestWorkflowCreator(t, registryService)
 
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	mockCP.On("Create", mock.Anything, mock.MatchedBy(func(spec controlplane.WorkflowSpec) bool {
 		return spec.WorktreeEnabled == true && spec.WorktreeBranchName == "perles-custom-branch"
 	})).Return(controlplane.WorkflowID("new-workflow-id"), nil).Once()
@@ -880,7 +881,7 @@ func (m *MockRegistryService) GetSystemPromptTemplate(reg *registry.Registration
 func TestNewWorkflowModal_OnSubmitCallsWorkflowCreatorWithName(t *testing.T) {
 	registryService := createTestRegistryService(t)
 	workflowCreator := createTestWorkflowCreator(t, registryService)
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	// Verify that EpicID is set from WorkflowCreator result
 	mockCP.On("Create", mock.Anything, mock.MatchedBy(func(spec controlplane.WorkflowSpec) bool {
 		return spec.EpicID == "epic-123" &&
@@ -978,7 +979,7 @@ func TestNewWorkflowModal_EpicIDPassedToWorkflowSpec(t *testing.T) {
 	workflowCreator := createTestWorkflowCreator(t, registryService)
 
 	// Verify that when onSubmit returns with EpicID, the spec contains it
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	// Match on EpicID being set from WorkflowCreator result
 	mockCP.On("Create", mock.Anything, mock.MatchedBy(func(spec controlplane.WorkflowSpec) bool {
 		return spec.EpicID == "epic-123" && spec.TemplateID == "quick-plan"

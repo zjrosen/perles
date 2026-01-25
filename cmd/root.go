@@ -277,7 +277,7 @@ func runApp(cmd *cobra.Command, args []string) error {
 		tea.WithMouseCellMotion(),
 	)
 
-	_, err = p.Run()
+	finalModel, err := p.Run()
 
 	// Log shutdown (only in debug mode - log is initialized)
 	if debug {
@@ -288,8 +288,9 @@ func runApp(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Clean up watcher resources
-	if closeErr := model.Close(); closeErr != nil && err == nil {
+	// Clean up watcher resources using the final model state (which has controlPlane if dashboard was used)
+	appModel := finalModel.(app.Model)
+	if closeErr := appModel.Close(); closeErr != nil && err == nil {
 		if debug {
 			log.Error(log.CatConfig, "Error during cleanup", "error", closeErr)
 		}

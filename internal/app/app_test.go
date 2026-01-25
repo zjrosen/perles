@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/zjrosen/perles/internal/config"
+	"github.com/zjrosen/perles/internal/flags"
 	"github.com/zjrosen/perles/internal/mocks"
 	"github.com/zjrosen/perles/internal/mode"
 	"github.com/zjrosen/perles/internal/mode/dashboard"
@@ -2122,6 +2123,7 @@ func TestApp_InitializesDatabase(t *testing.T) {
 	// Database uses ~/.perles/perles-test.db when running under `go test`
 	// (automatically detected via testing.Testing())
 	cfg := config.Defaults()
+	cfg.Flags = map[string]bool{flags.FlagSessionPersistence: true}
 
 	model, err := NewWithConfig(
 		nil, // client - not needed for database tests
@@ -2151,6 +2153,7 @@ func TestApp_InitializesDatabase(t *testing.T) {
 
 func TestApp_Shutdown_ClosesDatabase(t *testing.T) {
 	cfg := config.Defaults()
+	cfg.Flags = map[string]bool{flags.FlagSessionPersistence: true}
 
 	model, err := NewWithConfig(
 		nil, // client

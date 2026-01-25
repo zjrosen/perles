@@ -326,18 +326,27 @@ func TestSessionRepository_ListWithFilter_OrderByCreatedAtDesc(t *testing.T) {
 
 	// Create sessions with explicitly different timestamps (Unix seconds)
 	baseTime := time.Now()
-	s1 := domain.ReconstituteSession(0, "guid-1", "project-a", "", domain.SessionStateCompleted, "", "", "", "", "",
-		nil, nil, baseTime.Add(-3*time.Second), nil, nil, baseTime.Add(-3*time.Second), nil, nil)
+	s1 := domain.ReconstituteSession(0, "guid-1", "project-a", "", domain.SessionStateCompleted, "", "", "",
+		nil, false, "", "", "", "",
+		"", // sessionDir
+		nil, nil, 0, 0, nil, nil,
+		baseTime.Add(-3*time.Second), nil, nil, nil, baseTime.Add(-3*time.Second), nil, nil)
 	err := repo.Save(s1)
 	require.NoError(t, err)
 
-	s2 := domain.ReconstituteSession(0, "guid-2", "project-a", "", domain.SessionStateCompleted, "", "", "", "", "",
-		nil, nil, baseTime.Add(-2*time.Second), nil, nil, baseTime.Add(-2*time.Second), nil, nil)
+	s2 := domain.ReconstituteSession(0, "guid-2", "project-a", "", domain.SessionStateCompleted, "", "", "",
+		nil, false, "", "", "", "",
+		"", // sessionDir
+		nil, nil, 0, 0, nil, nil,
+		baseTime.Add(-2*time.Second), nil, nil, nil, baseTime.Add(-2*time.Second), nil, nil)
 	err = repo.Save(s2)
 	require.NoError(t, err)
 
-	s3 := domain.ReconstituteSession(0, "guid-3", "project-a", "", domain.SessionStateCompleted, "", "", "", "", "",
-		nil, nil, baseTime.Add(-1*time.Second), nil, nil, baseTime.Add(-1*time.Second), nil, nil)
+	s3 := domain.ReconstituteSession(0, "guid-3", "project-a", "", domain.SessionStateCompleted, "", "", "",
+		nil, false, "", "", "", "",
+		"", // sessionDir
+		nil, nil, 0, 0, nil, nil,
+		baseTime.Add(-1*time.Second), nil, nil, nil, baseTime.Add(-1*time.Second), nil, nil)
 	err = repo.Save(s3)
 	require.NoError(t, err)
 
@@ -514,13 +523,21 @@ func TestSessionModel_RoundTrip(t *testing.T) {
 		"template-abc",
 		"epic-123",
 		"/work/dir",
+		nil,
+		false,
+		"", "",
 		"/worktree/path",
 		"feature/branch",
+		"", // sessionDir
 		&ownerCreatedPID,
 		&ownerCurrentPID,
+		0,
+		0,
+		nil, nil,
 		now,
 		&startedAt,
 		&pausedAt,
+		nil, // completedAt
 		now,
 		&archivedAt,
 		&deletedAt,
@@ -594,10 +611,19 @@ func TestSessionModel_RoundTrip_NilDeletedAt(t *testing.T) {
 		"test-project",
 		"",
 		domain.SessionStateRunning,
-		"", "", "", "", "",
+		"", "", "",
+		nil,
+		false,
+		"", "",
+		"", "",
+		"", // sessionDir
+		nil, nil,
+		0,
+		0,
 		nil, nil,
 		now,
 		nil, nil,
+		nil, // completedAt
 		now,
 		nil,
 		nil,

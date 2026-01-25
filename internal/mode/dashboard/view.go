@@ -116,6 +116,10 @@ func (m Model) createWorkflowTableConfig() table.TableConfig {
 				Render: func(row any, _ string, w int, _ bool) string {
 					r := row.(WorkflowTableRow)
 					name := r.Workflow.Name
+					// Prefix with lock emoji if workflow is owned by another process
+					if r.Workflow.IsLocked {
+						name = "🔒 " + name
+					}
 					if lipgloss.Width(name) > w {
 						name = styles.TruncateString(name, w)
 					}

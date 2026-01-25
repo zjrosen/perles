@@ -40,7 +40,7 @@ func filterMockCalls(calls []*mock.Call, methodName string) []*mock.Call {
 // createGoldenTestModel creates a Model with mocked dependencies for reproducible golden tests.
 func createGoldenTestModel(t *testing.T, workflows []*controlplane.WorkflowInstance) Model {
 	t.Helper()
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	mockCP.On("List", mock.Anything, mock.Anything).Return(workflows, nil).Maybe()
 	mockCP.On("Subscribe", mock.Anything).Return((<-chan controlplane.ControlPlaneEvent)(nil), func() {}).Maybe()
 	// Override default GetHealthStatus to use testNow for consistent golden output
@@ -274,7 +274,7 @@ registry:
 // createGoldenTestModelWithRegistry creates a Model with mocked dependencies and a domain registry.
 func createGoldenTestModelWithRegistry(t *testing.T, workflows []*controlplane.WorkflowInstance) Model {
 	t.Helper()
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	mockCP.On("List", mock.Anything, mock.Anything).Return(workflows, nil).Maybe()
 	mockCP.On("Subscribe", mock.Anything).Return((<-chan controlplane.ControlPlaneEvent)(nil), func() {}).Maybe()
 	// Override default GetHealthStatus to use testNow for consistent golden output

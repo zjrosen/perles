@@ -126,14 +126,16 @@ func NewWithConfig(
 	debugMode bool,
 	registryService *appreg.RegistryService,
 ) (Model, error) {
-	// Initialize SQLite database for session persistence
+	// Initialize SQLite database for session persistence (only if feature flag enabled)
 	// Path is ~/.perles/perles.db (or perles-test.db when running tests)
 	var db *sqlite.DB
-	if sqliteDBPath := config.DefaultDatabasePath(); sqliteDBPath != "" {
-		var err error
-		db, err = sqlite.NewDB(sqliteDBPath)
-		if err != nil {
-			return Model{}, fmt.Errorf("database initialization failed: %w", err)
+	if cfg.Flags[flags.FlagSessionPersistence] {
+		if sqliteDBPath := config.DefaultDatabasePath(); sqliteDBPath != "" {
+			var err error
+			db, err = sqlite.NewDB(sqliteDBPath)
+			if err != nil {
+				return Model{}, fmt.Errorf("database initialization failed: %w", err)
+			}
 		}
 	}
 
@@ -1144,6 +1146,16 @@ func (m *Model) Close() error {
 	// Clean up chat panel infrastructure
 	m.chatPanel.Cleanup()
 
+	// Shutdown ControlPlane (stops all workflows, releases resources)
+	// Must happen before closing DB since it may persist final state
+	if m.controlPlane != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := m.controlPlane.Shutdown(ctx); err != nil {
+			log.Error(log.CatOrch, "Error shutting down control plane", "error", err)
+		}
+	}
+
 	// Close mode controllers
 	if err := m.kanban.Close(); err != nil {
 		return err
@@ -1181,10 +1193,28 @@ func (m *Model) Close() error {
 	return nil
 }
 
-// createControlPlane creates a minimal in-memory ControlPlane for the dashboard.
+// createControlPlane creates a ControlPlane for the dashboard.
+// Uses DurableRegistry for SQLite-backed persistence when database is available,
+// falling back to in-memory registry when not.
 func (m *Model) createControlPlane() controlplane.ControlPlane {
-	registry := controlplane.NewInMemoryRegistry()
 	eventBus := controlplane.NewCrossWorkflowEventBus()
+
+	// Derive project name for registry (matches session factory pattern)
+	project := session.DeriveApplicationName(
+		m.services.WorkDir,
+		m.services.GitExecutorFactory(m.services.WorkDir),
+	)
+
+	// Use DurableRegistry when SQLite is available, else fall back to in-memory
+	var registry controlplane.Registry
+	if m.db != nil {
+		registry = controlplane.NewDurableRegistry(project, m.db.SessionRepository())
+		log.Debug(log.CatOrch, "Using DurableRegistry for workflow persistence",
+			"project", project)
+	} else {
+		registry = controlplane.NewInMemoryRegistry()
+		log.Debug(log.CatOrch, "Using in-memory registry (no SQLite database)")
+	}
 
 	// Get orchestration config for agent providers
 	orchConfig := m.services.Config.Orchestration

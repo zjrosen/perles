@@ -11,11 +11,13 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/zjrosen/perles/internal/flags"
 	appgit "github.com/zjrosen/perles/internal/git/application"
 	domaingit "github.com/zjrosen/perles/internal/git/domain"
 	"github.com/zjrosen/perles/internal/mocks"
 	"github.com/zjrosen/perles/internal/mode"
 	"github.com/zjrosen/perles/internal/orchestration/controlplane"
+	controlplanemocks "github.com/zjrosen/perles/internal/orchestration/controlplane/mocks"
 	"github.com/zjrosen/perles/internal/orchestration/events"
 	"github.com/zjrosen/perles/internal/orchestration/message"
 )
@@ -37,10 +39,10 @@ func createTestWorkflow(id controlplane.WorkflowID, name string, state controlpl
 }
 
 // createTestModel creates a dashboard model with a mock ControlPlane.
-func createTestModel(t *testing.T, workflows []*controlplane.WorkflowInstance) (Model, *mockControlPlane) {
+func createTestModel(t *testing.T, workflows []*controlplane.WorkflowInstance) (Model, *controlplanemocks.MockControlPlane) {
 	t.Helper()
 
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	mockCP.On("List", mock.Anything, mock.Anything).Return(workflows, nil).Maybe()
 
 	// Setup event channel for global subscription
@@ -83,7 +85,7 @@ func TestModel_Init_ReturnsCommands(t *testing.T) {
 		createTestWorkflow("wf-2", "Workflow 2", controlplane.WorkflowPending),
 	}
 
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	// Setup expectations for when commands are executed
 	mockCP.On("List", mock.Anything, mock.Anything).Return(workflows, nil).Maybe()
 	mockCP.On("Subscribe", mock.Anything).Return((<-chan controlplane.ControlPlaneEvent)(nil), func() {}).Maybe()
@@ -204,7 +206,7 @@ func TestModel_PauseAction_CallsControlPlanePause(t *testing.T) {
 		createTestWorkflow("wf-running", "Running Workflow", controlplane.WorkflowRunning),
 	}
 
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	mockCP.On("List", mock.Anything, mock.Anything).Return(workflows, nil).Maybe()
 	mockCP.On("Pause", mock.Anything, controlplane.WorkflowID("wf-running")).Return(nil).Once()
 
@@ -255,7 +257,7 @@ func TestModel_ResumeAction_CallsControlPlaneResume(t *testing.T) {
 		createTestWorkflow("wf-paused", "Paused Workflow", controlplane.WorkflowPaused),
 	}
 
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	mockCP.On("List", mock.Anything, mock.Anything).Return(workflows, nil).Maybe()
 	mockCP.On("Resume", mock.Anything, controlplane.WorkflowID("wf-paused")).Return(nil).Once()
 
@@ -1105,7 +1107,7 @@ func TestModel_EventUpdatesLastUpdatedTimestamp(t *testing.T) {
 	expectedTime := time.Date(2026, 1, 18, 12, 0, 0, 0, time.UTC)
 	mockClock.On("Now").Return(expectedTime)
 
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	mockCP.On("List", mock.Anything, mock.Anything).Return(workflows, nil).Maybe()
 
 	eventCh := make(chan controlplane.ControlPlaneEvent)
@@ -1501,7 +1503,7 @@ func TestModel_EventWorkflowFailed_EmptyWorkflowID_NoEffect(t *testing.T) {
 // === Phase 7: Wiring and Integration Tests ===
 
 func TestModel_Config_AcceptsGitExecutorFactory(t *testing.T) {
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	mockCP.On("List", mock.Anything, mock.Anything).Return([]*controlplane.WorkflowInstance{}, nil).Maybe()
 
 	eventCh := make(chan controlplane.ControlPlaneEvent)
@@ -1528,7 +1530,7 @@ func TestModel_Config_AcceptsGitExecutorFactory(t *testing.T) {
 }
 
 func TestModel_PassesGitExecutorToNewWorkflowModal(t *testing.T) {
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	mockCP.On("List", mock.Anything, mock.Anything).Return([]*controlplane.WorkflowInstance{}, nil).Maybe()
 
 	eventCh := make(chan controlplane.ControlPlaneEvent)
@@ -1575,7 +1577,7 @@ func TestModel_PassesGitExecutorToNewWorkflowModal(t *testing.T) {
 }
 
 func TestModel_WorksNormallyWithNilGitExecutorFactory(t *testing.T) {
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	mockCP.On("List", mock.Anything, mock.Anything).Return([]*controlplane.WorkflowInstance{}, nil).Maybe()
 
 	eventCh := make(chan controlplane.ControlPlaneEvent)
@@ -1689,7 +1691,7 @@ func TestModel_StartWorkflow_ReturnsErrorMessage(t *testing.T) {
 	}
 
 	startErr := errors.New("failed to start workflow")
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	mockCP.On("List", mock.Anything, mock.Anything).Return(workflows, nil).Maybe()
 	mockCP.On("Start", mock.Anything, controlplane.WorkflowID("wf-pending")).Return(startErr).Once()
 
@@ -2337,4 +2339,271 @@ func TestDBChangeIgnoredWhenNoEpicLoaded(t *testing.T) {
 
 	// Verify no command returned
 	require.Nil(t, cmd, "should return nil command when no epic loaded")
+}
+
+// === Unit Tests: Workflow Lock Checks ===
+
+func TestStartSelectedWorkflow_LockedWorkflow_ReturnsToast(t *testing.T) {
+	// Create a locked workflow
+	wf := createTestWorkflow("wf-locked", "Locked Workflow", controlplane.WorkflowPending)
+	wf.IsLocked = true
+
+	m, _ := createTestModel(t, []*controlplane.WorkflowInstance{wf})
+	m.selectedIndex = 0
+
+	// Attempt to start the locked workflow
+	_, cmd := m.startSelectedWorkflow()
+
+	// Should return a toast command
+	require.NotNil(t, cmd, "should return a command for locked workflow")
+
+	// Execute the command to get the message
+	msg := cmd()
+	toastMsg, ok := msg.(mode.ShowToastMsg)
+	require.True(t, ok, "should return ShowToastMsg")
+	require.Contains(t, toastMsg.Message, "🔒")
+	require.Contains(t, toastMsg.Message, "owned by another Perles process")
+}
+
+func TestResumeSelectedWorkflow_LockedWorkflow_ReturnsToast(t *testing.T) {
+	// Create a locked paused workflow
+	wf := createTestWorkflow("wf-locked", "Locked Workflow", controlplane.WorkflowPaused)
+	wf.IsLocked = true
+
+	m, _ := createTestModel(t, []*controlplane.WorkflowInstance{wf})
+	m.selectedIndex = 0
+
+	// Attempt to resume the locked workflow
+	_, cmd := m.resumeSelectedWorkflow()
+
+	// Should return a toast command
+	require.NotNil(t, cmd, "should return a command for locked workflow")
+
+	// Execute the command to get the message
+	msg := cmd()
+	toastMsg, ok := msg.(mode.ShowToastMsg)
+	require.True(t, ok, "should return ShowToastMsg")
+	require.Contains(t, toastMsg.Message, "🔒")
+	require.Contains(t, toastMsg.Message, "owned by another Perles process")
+}
+
+func TestPauseSelectedWorkflow_LockedWorkflow_ReturnsToast(t *testing.T) {
+	// Create a locked running workflow
+	wf := createTestWorkflow("wf-locked", "Locked Workflow", controlplane.WorkflowRunning)
+	wf.IsLocked = true
+
+	m, _ := createTestModel(t, []*controlplane.WorkflowInstance{wf})
+	m.selectedIndex = 0
+
+	// Attempt to pause the locked workflow
+	_, cmd := m.pauseSelectedWorkflow()
+
+	// Should return a toast command
+	require.NotNil(t, cmd, "should return a command for locked workflow")
+
+	// Execute the command to get the message
+	msg := cmd()
+	toastMsg, ok := msg.(mode.ShowToastMsg)
+	require.True(t, ok, "should return ShowToastMsg")
+	require.Contains(t, toastMsg.Message, "🔒")
+	require.Contains(t, toastMsg.Message, "owned by another Perles process")
+}
+
+func TestStartSelectedWorkflow_UnlockedWorkflow_Proceeds(t *testing.T) {
+	// Create an unlocked pending workflow
+	wf := createTestWorkflow("wf-unlocked", "Unlocked Workflow", controlplane.WorkflowPending)
+	wf.IsLocked = false
+
+	m, mockCP := createTestModel(t, []*controlplane.WorkflowInstance{wf})
+	m.selectedIndex = 0
+
+	// Setup expectation for StartWorkflow call
+	mockCP.On("StartWorkflow", mock.Anything, wf.ID, mock.Anything).Return(nil).Maybe()
+
+	// Attempt to start the unlocked workflow
+	_, cmd := m.startSelectedWorkflow()
+
+	// Should return a command (but not a toast about being locked)
+	require.NotNil(t, cmd, "should return a command for start workflow")
+}
+
+func TestWorkflowTableRow_LockedWorkflow_ShowsLockPrefix(t *testing.T) {
+	// Create a locked workflow
+	wf := createTestWorkflow("wf-locked", "Test Workflow", controlplane.WorkflowRunning)
+	wf.IsLocked = true
+
+	// Create a WorkflowTableRow
+	row := WorkflowTableRow{
+		Index:    1,
+		Workflow: wf,
+	}
+
+	// Simulate what the view render does
+	name := row.Workflow.Name
+	if row.Workflow.IsLocked {
+		name = "🔒 " + name
+	}
+
+	require.Equal(t, "🔒 Test Workflow", name, "locked workflow should have 🔒 prefix")
+}
+
+func TestWorkflowTableRow_UnlockedWorkflow_NoLockPrefix(t *testing.T) {
+	// Create an unlocked workflow
+	wf := createTestWorkflow("wf-unlocked", "Test Workflow", controlplane.WorkflowRunning)
+	wf.IsLocked = false
+
+	// Create a WorkflowTableRow
+	row := WorkflowTableRow{
+		Index:    1,
+		Workflow: wf,
+	}
+
+	// Simulate what the view render does
+	name := row.Workflow.Name
+	if row.Workflow.IsLocked {
+		name = "🔒 " + name
+	}
+
+	require.Equal(t, "Test Workflow", name, "unlocked workflow should not have 🔒 prefix")
+}
+
+// === Unit Tests: Archive Workflow ===
+
+func TestArchiveSelectedWorkflow_NoFlagEnabled_ReturnsToast(t *testing.T) {
+	// Create a workflow with flags disabled (nil Flags)
+	wf := createTestWorkflow("wf-1", "Test Workflow", controlplane.WorkflowPending)
+
+	m, _ := createTestModel(t, []*controlplane.WorkflowInstance{wf})
+	m.selectedIndex = 0
+	// services.Flags is nil by default in createTestModel
+
+	// Attempt to archive
+	_, cmd := m.archiveSelectedWorkflow()
+
+	// Should return a toast about feature flag
+	require.NotNil(t, cmd, "should return a command")
+	msg := cmd()
+	toastMsg, ok := msg.(mode.ShowToastMsg)
+	require.True(t, ok, "should return ShowToastMsg")
+	require.Contains(t, toastMsg.Message, "session persistence feature flag")
+}
+
+func TestArchiveSelectedWorkflow_LockedWorkflow_ReturnsToast(t *testing.T) {
+	// Create a locked workflow
+	wf := createTestWorkflow("wf-locked", "Locked Workflow", controlplane.WorkflowPending)
+	wf.IsLocked = true
+
+	m, _ := createTestModelWithFlags(t, []*controlplane.WorkflowInstance{wf})
+	m.selectedIndex = 0
+
+	// Attempt to archive
+	_, cmd := m.archiveSelectedWorkflow()
+
+	// Should return a toast about being locked
+	require.NotNil(t, cmd, "should return a command")
+	msg := cmd()
+	toastMsg, ok := msg.(mode.ShowToastMsg)
+	require.True(t, ok, "should return ShowToastMsg")
+	require.Contains(t, toastMsg.Message, "🔒")
+	require.Contains(t, toastMsg.Message, "owned by another Perles process")
+}
+
+func TestArchiveSelectedWorkflow_RunningWorkflow_ReturnsToast(t *testing.T) {
+	// Create a running workflow
+	wf := createTestWorkflow("wf-running", "Running Workflow", controlplane.WorkflowRunning)
+
+	m, _ := createTestModelWithFlags(t, []*controlplane.WorkflowInstance{wf})
+	m.selectedIndex = 0
+
+	// Attempt to archive
+	_, cmd := m.archiveSelectedWorkflow()
+
+	// Should return a toast about running workflow
+	require.NotNil(t, cmd, "should return a command")
+	msg := cmd()
+	toastMsg, ok := msg.(mode.ShowToastMsg)
+	require.True(t, ok, "should return ShowToastMsg")
+	require.Contains(t, toastMsg.Message, "Cannot archive running workflow")
+}
+
+func TestArchiveSelectedWorkflow_PausedWorkflow_ShowsModal(t *testing.T) {
+	// Create a paused workflow (can be archived)
+	wf := createTestWorkflow("wf-paused", "Paused Workflow", controlplane.WorkflowPaused)
+
+	m, _ := createTestModelWithFlags(t, []*controlplane.WorkflowInstance{wf})
+	m.selectedIndex = 0
+
+	// Attempt to archive - should show confirmation modal
+	result, cmd := m.archiveSelectedWorkflow()
+
+	// Should return nil command (modal is shown, waiting for user input)
+	require.Nil(t, cmd, "should not return a command yet")
+
+	// Modal should be shown with workflow info
+	resultModel := result.(Model)
+	require.NotNil(t, resultModel.archiveModal, "archive modal should be shown")
+	require.Equal(t, wf.ID, resultModel.archiveModalWfID, "modal should store workflow ID")
+	require.Equal(t, wf.Name, resultModel.archiveModalWfName, "modal should store workflow name")
+}
+
+func TestWorkflowsLoaded_EmptyList_ClosesCoordinatorPanel(t *testing.T) {
+	// Start with one workflow and coordinator panel open
+	wf := createTestWorkflow("wf-1", "Test Workflow", controlplane.WorkflowPaused)
+	m, _ := createTestModelWithFlags(t, []*controlplane.WorkflowInstance{wf})
+
+	// Simulate coordinator panel being open
+	m.showCoordinatorPanel = true
+	m.coordinatorPanel = NewCoordinatorPanel(false, false)
+
+	// Simulate receiving empty workflow list (after archiving the last one)
+	result, _ := m.Update(workflowsLoadedMsg{workflows: []*controlplane.WorkflowInstance{}})
+
+	resultModel := result.(Model)
+	require.False(t, resultModel.showCoordinatorPanel, "coordinator panel should be closed")
+	require.Nil(t, resultModel.coordinatorPanel, "coordinator panel should be nil")
+}
+
+// createTestModelWithFlags creates a dashboard model with flags enabled.
+func createTestModelWithFlags(t *testing.T, workflows []*controlplane.WorkflowInstance) (Model, *controlplanemocks.MockControlPlane) {
+	t.Helper()
+
+	mockCP := newMockControlPlane(t)
+	mockCP.On("List", mock.Anything, mock.Anything).Return(workflows, nil).Maybe()
+
+	// Setup event channel for global subscription
+	eventCh := make(chan controlplane.ControlPlaneEvent)
+	close(eventCh)
+	mockCP.On("Subscribe", mock.Anything).Return((<-chan controlplane.ControlPlaneEvent)(eventCh), func() {}).Maybe()
+
+	// Setup event channel for workflow-specific subscriptions
+	wfEventCh := make(chan controlplane.ControlPlaneEvent)
+	close(wfEventCh)
+	mockCP.On("SubscribeWorkflow", mock.Anything, mock.Anything).Return(
+		(<-chan controlplane.ControlPlaneEvent)(wfEventCh),
+		func() {},
+	).Maybe()
+
+	// Setup mock sound service
+	mockSounds := mocks.NewMockSoundService(t)
+	mockSounds.EXPECT().Play(mock.Anything, mock.Anything).Maybe()
+
+	// Create flags with session persistence enabled
+	flagsMap := map[string]bool{
+		"session-persistence": true,
+	}
+	flagsRegistry := flags.New(flagsMap)
+
+	cfg := Config{
+		ControlPlane: mockCP,
+		Services:     mode.Services{Sounds: mockSounds, Flags: flagsRegistry},
+	}
+
+	m := New(cfg)
+	// Simulate workflow load
+	m.workflows = workflows
+	m.workflowList = m.workflowList.SetWorkflows(workflows)
+	m.resourceSummary = m.resourceSummary.Update(workflows)
+	m = m.SetSize(100, 40).(Model)
+
+	return m, mockCP
 }

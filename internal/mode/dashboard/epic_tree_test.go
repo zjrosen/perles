@@ -35,7 +35,7 @@ func createTestIssue(id, title string, parentID string) beads.Issue {
 func createEpicTreeTestModel(t *testing.T) Model {
 	t.Helper()
 
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	mockCP.On("List", mock.Anything, mock.Anything).Return([]*controlplane.WorkflowInstance{}, nil).Maybe()
 
 	eventCh := make(chan controlplane.ControlPlaneEvent)
@@ -351,7 +351,7 @@ func TestUpdateEpicDetailHandlesNilNode(t *testing.T) {
 func createEpicTreeTestModelWithWorkflows(t *testing.T) Model {
 	t.Helper()
 
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 
 	// Create workflows with and without EpicIDs
 	workflows := []*controlplane.WorkflowInstance{

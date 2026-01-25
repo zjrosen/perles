@@ -22,6 +22,100 @@ func (_m *MockControlPlane) EXPECT() *MockControlPlane_Expecter {
 	return &MockControlPlane_Expecter{mock: &_m.Mock}
 }
 
+// Archive provides a mock function with given fields: ctx, id
+func (_m *MockControlPlane) Archive(ctx context.Context, id controlplane.WorkflowID) error {
+	ret := _m.Called(ctx, id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Archive")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, controlplane.WorkflowID) error); ok {
+		r0 = rf(ctx, id)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockControlPlane_Archive_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Archive'
+type MockControlPlane_Archive_Call struct {
+	*mock.Call
+}
+
+// Archive is a helper method to define mock.On call
+//   - ctx context.Context
+//   - id controlplane.WorkflowID
+func (_e *MockControlPlane_Expecter) Archive(ctx interface{}, id interface{}) *MockControlPlane_Archive_Call {
+	return &MockControlPlane_Archive_Call{Call: _e.mock.On("Archive", ctx, id)}
+}
+
+func (_c *MockControlPlane_Archive_Call) Run(run func(ctx context.Context, id controlplane.WorkflowID)) *MockControlPlane_Archive_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(controlplane.WorkflowID))
+	})
+	return _c
+}
+
+func (_c *MockControlPlane_Archive_Call) Return(_a0 error) *MockControlPlane_Archive_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockControlPlane_Archive_Call) RunAndReturn(run func(context.Context, controlplane.WorkflowID) error) *MockControlPlane_Archive_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Complete provides a mock function with given fields: ctx, id
+func (_m *MockControlPlane) Complete(ctx context.Context, id controlplane.WorkflowID) error {
+	ret := _m.Called(ctx, id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Complete")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, controlplane.WorkflowID) error); ok {
+		r0 = rf(ctx, id)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockControlPlane_Complete_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Complete'
+type MockControlPlane_Complete_Call struct {
+	*mock.Call
+}
+
+// Complete is a helper method to define mock.On call
+//   - ctx context.Context
+//   - id controlplane.WorkflowID
+func (_e *MockControlPlane_Expecter) Complete(ctx interface{}, id interface{}) *MockControlPlane_Complete_Call {
+	return &MockControlPlane_Complete_Call{Call: _e.mock.On("Complete", ctx, id)}
+}
+
+func (_c *MockControlPlane_Complete_Call) Run(run func(ctx context.Context, id controlplane.WorkflowID)) *MockControlPlane_Complete_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(controlplane.WorkflowID))
+	})
+	return _c
+}
+
+func (_c *MockControlPlane_Complete_Call) Return(_a0 error) *MockControlPlane_Complete_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockControlPlane_Complete_Call) RunAndReturn(run func(context.Context, controlplane.WorkflowID) error) *MockControlPlane_Complete_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Create provides a mock function with given fields: ctx, spec
 func (_m *MockControlPlane) Create(ctx context.Context, spec controlplane.WorkflowSpec) (controlplane.WorkflowID, error) {
 	ret := _m.Called(ctx, spec)
@@ -75,6 +169,53 @@ func (_c *MockControlPlane_Create_Call) Return(_a0 controlplane.WorkflowID, _a1 
 }
 
 func (_c *MockControlPlane_Create_Call) RunAndReturn(run func(context.Context, controlplane.WorkflowSpec) (controlplane.WorkflowID, error)) *MockControlPlane_Create_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Fail provides a mock function with given fields: ctx, id
+func (_m *MockControlPlane) Fail(ctx context.Context, id controlplane.WorkflowID) error {
+	ret := _m.Called(ctx, id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Fail")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, controlplane.WorkflowID) error); ok {
+		r0 = rf(ctx, id)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockControlPlane_Fail_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Fail'
+type MockControlPlane_Fail_Call struct {
+	*mock.Call
+}
+
+// Fail is a helper method to define mock.On call
+//   - ctx context.Context
+//   - id controlplane.WorkflowID
+func (_e *MockControlPlane_Expecter) Fail(ctx interface{}, id interface{}) *MockControlPlane_Fail_Call {
+	return &MockControlPlane_Fail_Call{Call: _e.mock.On("Fail", ctx, id)}
+}
+
+func (_c *MockControlPlane_Fail_Call) Run(run func(ctx context.Context, id controlplane.WorkflowID)) *MockControlPlane_Fail_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(controlplane.WorkflowID))
+	})
+	return _c
+}
+
+func (_c *MockControlPlane_Fail_Call) Return(_a0 error) *MockControlPlane_Fail_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockControlPlane_Fail_Call) RunAndReturn(run func(context.Context, controlplane.WorkflowID) error) *MockControlPlane_Fail_Call {
 	_c.Call.Return(run)
 	return _c
 }

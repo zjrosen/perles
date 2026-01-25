@@ -486,7 +486,7 @@ func TestModel_GlobalEvent_CachesForAllWorkflows(t *testing.T) {
 		createTestWorkflow("wf-2", "Workflow 2", controlplane.WorkflowRunning),
 	}
 
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	mockCP.On("List", mock.Anything, mock.Anything).Return(workflows, nil).Maybe()
 
 	globalEventCh := make(chan controlplane.ControlPlaneEvent)
@@ -542,7 +542,7 @@ func TestModel_WorkflowSelectionChange_ShowsCachedState(t *testing.T) {
 		createTestWorkflow("wf-2", "Workflow 2", controlplane.WorkflowRunning),
 	}
 
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	mockCP.On("List", mock.Anything, mock.Anything).Return(workflows, nil).Maybe()
 
 	globalEventCh := make(chan controlplane.ControlPlaneEvent)
@@ -587,7 +587,7 @@ func TestModel_Cleanup_UnsubscribesFromGlobal(t *testing.T) {
 
 	globalUnsubscribeCalled := false
 
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	mockCP.On("List", mock.Anything, mock.Anything).Return(workflows, nil).Maybe()
 
 	globalEventCh := make(chan controlplane.ControlPlaneEvent)
@@ -619,7 +619,7 @@ func TestModel_GlobalEvent_CoordinatorStatusFromProcessReadyWorking(t *testing.T
 		createTestWorkflow("wf-1", "Workflow 1", controlplane.WorkflowRunning),
 	}
 
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	mockCP.On("List", mock.Anything, mock.Anything).Return(workflows, nil).Maybe()
 
 	globalEventCh := make(chan controlplane.ControlPlaneEvent)
@@ -681,7 +681,7 @@ func TestModel_WorkflowSelectionChange_SameIndexNoOp(t *testing.T) {
 		createTestWorkflow("wf-2", "Workflow 2", controlplane.WorkflowRunning),
 	}
 
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	mockCP.On("List", mock.Anything, mock.Anything).Return(workflows, nil).Maybe()
 
 	globalEventCh := make(chan controlplane.ControlPlaneEvent)
@@ -716,7 +716,7 @@ func TestWorkflowUIState_TreeStateFields_DefaultsToZeroValues(t *testing.T) {
 
 func TestModel_SaveEpicTreeState_SavesDirectionModeSelection(t *testing.T) {
 	// Verify that saveEpicTreeState saves direction, mode, and selection
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	mockCP.On("List", mock.Anything, mock.Anything).Return([]*controlplane.WorkflowInstance{}, nil).Maybe()
 
 	globalEventCh := make(chan controlplane.ControlPlaneEvent)
@@ -754,7 +754,7 @@ func TestModel_SaveEpicTreeState_SavesDirectionModeSelection(t *testing.T) {
 func TestModel_TreeStateRestoredOnReturn(t *testing.T) {
 	// Verify that tree state is restored when returning to a workflow.
 	// This tests the round-trip: save state -> switch away -> switch back -> state restored.
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	mockCP.On("List", mock.Anything, mock.Anything).Return([]*controlplane.WorkflowInstance{}, nil).Maybe()
 
 	globalEventCh := make(chan controlplane.ControlPlaneEvent)
@@ -852,7 +852,7 @@ func TestModel_TreeModePreserved(t *testing.T) {
 
 func TestModel_TreeStateEvicted_CleanedUpProperly(t *testing.T) {
 	// Verify that tree state is cleaned up when workflow state is evicted
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	mockCP.On("List", mock.Anything, mock.Anything).Return([]*controlplane.WorkflowInstance{}, nil).Maybe()
 
 	globalEventCh := make(chan controlplane.ControlPlaneEvent)
@@ -905,7 +905,7 @@ func TestUpdateCachedUIState_ProcessTokenUsage_Coordinator(t *testing.T) {
 		createTestWorkflow("wf-1", "Workflow 1", controlplane.WorkflowRunning),
 	}
 
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	mockCP.On("List", mock.Anything, mock.Anything).Return(workflows, nil).Maybe()
 
 	globalEventCh := make(chan controlplane.ControlPlaneEvent)
@@ -952,7 +952,7 @@ func TestUpdateCachedUIState_ProcessTokenUsage_Worker(t *testing.T) {
 		createTestWorkflow("wf-1", "Workflow 1", controlplane.WorkflowRunning),
 	}
 
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	mockCP.On("List", mock.Anything, mock.Anything).Return(workflows, nil).Maybe()
 
 	globalEventCh := make(chan controlplane.ControlPlaneEvent)
@@ -1001,7 +1001,7 @@ func TestUpdateCachedUIState_ProcessTokenUsage_NilMetrics(t *testing.T) {
 		createTestWorkflow("wf-1", "Workflow 1", controlplane.WorkflowRunning),
 	}
 
-	mockCP := newMockControlPlane()
+	mockCP := newMockControlPlane(t)
 	mockCP.On("List", mock.Anything, mock.Anything).Return(workflows, nil).Maybe()
 
 	globalEventCh := make(chan controlplane.ControlPlaneEvent)

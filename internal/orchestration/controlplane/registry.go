@@ -18,6 +18,11 @@ type ListQuery struct {
 	// TemplateID filters by template. If empty, all templates are included.
 	TemplateID string
 
+	// OwnerPID filters to workflows owned by a specific process ID.
+	// If nil, no PID filtering is applied.
+	// Use this to find workflows owned by the current process.
+	OwnerPID *int
+
 	// Limit is the maximum number of results to return. 0 means no limit.
 	Limit int
 
@@ -51,6 +56,11 @@ type Registry interface {
 
 	// Count returns the number of workflows in each state.
 	Count() map[WorkflowState]int
+
+	// Archive marks a workflow as archived. Archived workflows are excluded
+	// from List queries by default. Returns an error if the workflow is not found.
+	// Note: This is only supported by DurableRegistry. In-memory registry returns nil.
+	Archive(id WorkflowID) error
 }
 
 // inMemoryRegistry is a thread-safe in-memory implementation of Registry.
@@ -166,6 +176,12 @@ func (r *inMemoryRegistry) Count() map[WorkflowState]int {
 		counts[inst.State]++
 	}
 	return counts
+}
+
+// Archive is a no-op for in-memory registry since it doesn't support persistence.
+// Archived workflows would be lost on restart anyway.
+func (r *inMemoryRegistry) Archive(_ WorkflowID) error {
+	return nil
 }
 
 // matchesQuery checks if a workflow matches the given query filters.

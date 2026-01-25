@@ -18,6 +18,7 @@ import (
 	zone "github.com/lrstanley/bubblezone"
 
 	beads "github.com/zjrosen/perles/internal/beads/domain"
+	"github.com/zjrosen/perles/internal/flags"
 	appgit "github.com/zjrosen/perles/internal/git/application"
 	domaingit "github.com/zjrosen/perles/internal/git/domain"
 	"github.com/zjrosen/perles/internal/mode"
@@ -30,6 +31,7 @@ import (
 	"github.com/zjrosen/perles/internal/ui/details"
 	"github.com/zjrosen/perles/internal/ui/modals/help"
 	"github.com/zjrosen/perles/internal/ui/shared/chatrender"
+	"github.com/zjrosen/perles/internal/ui/shared/modal"
 	"github.com/zjrosen/perles/internal/ui/shared/table"
 	"github.com/zjrosen/perles/internal/ui/shared/toaster"
 	"github.com/zjrosen/perles/internal/ui/shared/vimtextarea"
@@ -101,6 +103,11 @@ type Model struct {
 	// Help modal state
 	showHelp  bool
 	helpModal help.Model
+
+	// Archive confirmation modal state
+	archiveModal       *modal.Model            // nil when not showing
+	archiveModalWfID   controlplane.WorkflowID // Workflow ID to archive on confirm
+	archiveModalWfName string                  // Workflow name for display/toast
 
 	// Filter state
 	filter FilterState
@@ -284,6 +291,29 @@ func (m Model) Update(msg tea.Msg) (mode.Controller, tea.Cmd) {
 		}
 	}
 
+	// Handle archive confirmation modal when visible
+	if m.archiveModal != nil {
+		switch msg := msg.(type) {
+		case modal.SubmitMsg:
+			m.archiveModal = nil
+			return m.doArchiveWorkflow()
+		case modal.CancelMsg:
+			m.archiveModal = nil
+			m.archiveModalWfID = ""
+			m.archiveModalWfName = ""
+			return m, nil
+		case tea.WindowSizeMsg:
+			m.width = msg.Width
+			m.height = msg.Height
+			m.archiveModal.SetSize(msg.Width, msg.Height)
+			return m, nil
+		default:
+			var cmd tea.Cmd
+			*m.archiveModal, cmd = m.archiveModal.Update(msg)
+			return m, cmd
+		}
+	}
+
 	// Handle mouse events for zone clicks and scrolling
 	if mouseMsg, ok := msg.(tea.MouseMsg); ok {
 		return m.handleMouseMsg(mouseMsg)
@@ -351,12 +381,18 @@ func (m Model) Update(msg tea.Msg) (mode.Controller, tea.Cmd) {
 		if !m.showCoordinatorPanel && len(m.workflows) > 0 {
 			m.openCoordinatorPanelForSelected()
 		} else if m.showCoordinatorPanel && m.coordinatorPanel != nil {
-			// Panel is already open - sync it with current selection
-			// (workflow list may have been reordered after new workflow created)
-			wf := m.SelectedWorkflow()
-			if wf != nil {
-				uiState := m.getOrCreateUIState(wf.ID)
-				m.coordinatorPanel.SetWorkflow(wf.ID, uiState)
+			if len(m.workflows) == 0 {
+				// No workflows left - close the coordinator panel
+				m.showCoordinatorPanel = false
+				m.coordinatorPanel = nil
+			} else {
+				// Panel is already open - sync it with current selection
+				// (workflow list may have been reordered after new workflow created)
+				wf := m.SelectedWorkflow()
+				if wf != nil {
+					uiState := m.getOrCreateUIState(wf.ID)
+					m.coordinatorPanel.SetWorkflow(wf.ID, uiState)
+				}
 			}
 		}
 
@@ -374,6 +410,18 @@ func (m Model) Update(msg tea.Msg) (mode.Controller, tea.Cmd) {
 
 	case StartWorkflowFailedMsg:
 		return m.handleStartWorkflowFailed(msg)
+
+	case workflowArchivedMsg:
+		// Reload workflows after archiving and show toast
+		return m, tea.Batch(
+			m.loadWorkflows(),
+			func() tea.Msg {
+				return mode.ShowToastMsg{
+					Message: "📦 Archived: " + msg.name,
+					Style:   toaster.StyleSuccess,
+				}
+			},
+		)
 
 	case CoordinatorPanelSubmitMsg:
 		// Check for slash commands first
@@ -416,6 +464,11 @@ func (m Model) View() string {
 	// If help modal is showing, render it as an overlay
 	if m.showHelp {
 		return zone.Scan(m.helpModal.Overlay(dashboardView))
+	}
+
+	// If archive confirmation modal is showing, render it as an overlay
+	if m.archiveModal != nil {
+		return zone.Scan(m.archiveModal.Overlay(dashboardView))
 	}
 
 	// If new workflow modal is open, render it as an overlay
@@ -668,6 +721,9 @@ func (m Model) handleTableKeys(msg tea.KeyMsg) (mode.Controller, tea.Cmd) {
 
 	case "x": // Pause workflow
 		return m.pauseSelectedWorkflow()
+
+	case "a": // Archive workflow (only when session persistence is enabled)
+		return m.archiveSelectedWorkflow()
 
 	case "n", "N": // New workflow (always starts immediately)
 		return m.openNewWorkflowModal()
@@ -1245,6 +1301,15 @@ func (m Model) startSelectedWorkflow() (mode.Controller, tea.Cmd) {
 	if wf == nil {
 		return m, nil
 	}
+	// Check if workflow is locked by another process
+	if wf.IsLocked {
+		return m, func() tea.Msg {
+			return mode.ShowToastMsg{
+				Message: "🔒 Workflow is owned by another Perles process",
+				Style:   toaster.StyleWarn,
+			}
+		}
+	}
 	if wf.State != controlplane.WorkflowPending {
 		// Show warning toast for already running/paused workflows
 		var msg string
@@ -1270,6 +1335,15 @@ func (m Model) resumeSelectedWorkflow() (mode.Controller, tea.Cmd) {
 	if workflow == nil {
 		return m, nil
 	}
+	// Check if workflow is locked by another process
+	if workflow.IsLocked {
+		return m, func() tea.Msg {
+			return mode.ShowToastMsg{
+				Message: "🔒 Workflow is owned by another Perles process",
+				Style:   toaster.StyleWarn,
+			}
+		}
+	}
 	if workflow.State != controlplane.WorkflowPaused {
 		return m, nil // Can only resume paused workflows
 	}
@@ -1289,6 +1363,15 @@ func (m Model) pauseSelectedWorkflow() (mode.Controller, tea.Cmd) {
 	workflow := m.SelectedWorkflow()
 	if workflow == nil {
 		return m, nil
+	}
+	// Check if workflow is locked by another process
+	if workflow.IsLocked {
+		return m, func() tea.Msg {
+			return mode.ShowToastMsg{
+				Message: "🔒 Workflow is owned by another Perles process",
+				Style:   toaster.StyleWarn,
+			}
+		}
 	}
 	if !workflow.IsRunning() {
 		// Show warning toast for already paused/pending workflows
@@ -1314,6 +1397,87 @@ func (m Model) pauseSelectedWorkflow() (mode.Controller, tea.Cmd) {
 		// Workflow state change will be received via event subscription
 		return nil
 	}
+}
+
+// archiveSelectedWorkflow shows the archive confirmation modal after validating the workflow.
+// This is only available when session persistence is enabled.
+func (m Model) archiveSelectedWorkflow() (mode.Controller, tea.Cmd) {
+	// Check if session persistence is enabled
+	if m.services.Flags == nil || !m.services.Flags.Enabled(flags.FlagSessionPersistence) {
+		return m, func() tea.Msg {
+			return mode.ShowToastMsg{
+				Message: "Archive requires session persistence feature flag",
+				Style:   toaster.StyleWarn,
+			}
+		}
+	}
+
+	workflow := m.SelectedWorkflow()
+	if workflow == nil {
+		return m, nil
+	}
+
+	// Check if workflow is locked by another process
+	if workflow.IsLocked {
+		return m, func() tea.Msg {
+			return mode.ShowToastMsg{
+				Message: "🔒 Workflow is owned by another Perles process",
+				Style:   toaster.StyleWarn,
+			}
+		}
+	}
+
+	// Cannot archive running workflows
+	if workflow.IsRunning() {
+		return m, func() tea.Msg {
+			return mode.ShowToastMsg{
+				Message: "Cannot archive running workflow. Pause or stop it first.",
+				Style:   toaster.StyleWarn,
+			}
+		}
+	}
+
+	// Show confirmation modal
+	m.archiveModalWfID = workflow.ID
+	m.archiveModalWfName = workflow.Name
+	archiveModal := modal.New(modal.Config{
+		Title:          "Archive Workflow",
+		Message:        "Archive this workflow?\n\n\"" + workflow.Name + "\"",
+		ConfirmVariant: modal.ButtonDanger,
+		ConfirmText:    "Archive",
+	})
+	archiveModal.SetSize(m.width, m.height)
+	m.archiveModal = &archiveModal
+	return m, nil
+}
+
+// doArchiveWorkflow performs the actual archive operation after user confirms.
+func (m Model) doArchiveWorkflow() (mode.Controller, tea.Cmd) {
+	workflowID := m.archiveModalWfID
+	workflowName := m.archiveModalWfName
+
+	// Clear modal state
+	m.archiveModalWfID = ""
+	m.archiveModalWfName = ""
+
+	return m, func() tea.Msg {
+		if m.controlPlane == nil {
+			return nil
+		}
+		if err := m.controlPlane.Archive(context.Background(), workflowID); err != nil {
+			return mode.ShowToastMsg{
+				Message: "Failed to archive workflow: " + err.Error(),
+				Style:   toaster.StyleError,
+			}
+		}
+		// Reload workflows to reflect the change
+		return workflowArchivedMsg{name: workflowName}
+	}
+}
+
+// workflowArchivedMsg is sent when a workflow has been successfully archived.
+type workflowArchivedMsg struct {
+	name string
 }
 
 // SelectedWorkflow returns the currently selected workflow, or nil if none.

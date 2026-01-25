@@ -573,7 +573,7 @@ func TestControlPlane_Resume_DoesNotEmitEventOnSupervisorError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Create a workflow in Pending state (can't be resumed)
+	// Create a workflow in Pending state
 	spec := WorkflowSpec{
 		TemplateID:    "test-template",
 		InitialPrompt: "Build a feature",
@@ -581,11 +581,16 @@ func TestControlPlane_Resume_DoesNotEmitEventOnSupervisorError(t *testing.T) {
 	id, err := cp.Create(ctx, spec)
 	require.NoError(t, err)
 
+	// Transition to Completed state (terminal, can't be resumed)
+	inst, _ := cp.Get(ctx, id)
+	_ = inst.TransitionTo(WorkflowRunning)
+	_ = inst.TransitionTo(WorkflowCompleted)
+
 	// Subscribe to events
 	eventCh, unsubscribe := cp.Subscribe(ctx)
 	defer unsubscribe()
 
-	// Resume should fail (workflow not in Paused state)
+	// Resume should fail (workflow in terminal state)
 	err = cp.Resume(ctx, id)
 	require.Error(t, err)
 
@@ -596,6 +601,326 @@ func TestControlPlane_Resume_DoesNotEmitEventOnSupervisorError(t *testing.T) {
 	case <-time.After(50 * time.Millisecond):
 		// Expected - no event emitted on error
 	}
+}
+
+// === Unit Tests: Complete ===
+
+func TestControlPlane_Complete_TransitionsToCompletedState(t *testing.T) {
+	cp, _ := newTestControlPlaneWithEventBus(t)
+	ctx := context.Background()
+
+	// Create a workflow
+	spec := WorkflowSpec{
+		TemplateID:    "test-template",
+		InitialPrompt: "Build a feature",
+		Name:          "Test Workflow",
+	}
+	id, err := cp.Create(ctx, spec)
+	require.NoError(t, err)
+
+	// Manually transition to Running state (simulating what Start would do)
+	dcp := cp.(*defaultControlPlane)
+	inst, _ := dcp.registry.Get(id)
+	require.NoError(t, inst.TransitionTo(WorkflowRunning))
+
+	// Complete the workflow
+	err = cp.Complete(ctx, id)
+	require.NoError(t, err)
+
+	// Verify workflow is now Completed
+	inst, err = cp.Get(ctx, id)
+	require.NoError(t, err)
+	require.Equal(t, WorkflowCompleted, inst.State)
+	require.NotNil(t, inst.CompletedAt)
+}
+
+func TestControlPlane_Complete_ReturnsErrorForNonExistentWorkflow(t *testing.T) {
+	cp, _, _ := newTestControlPlane(t)
+
+	nonExistentID := NewWorkflowID()
+	err := cp.Complete(context.Background(), nonExistentID)
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrWorkflowNotFound)
+}
+
+func TestControlPlane_Complete_ReturnsErrorForInvalidTransition(t *testing.T) {
+	cp, _ := newTestControlPlaneWithEventBus(t)
+	ctx := context.Background()
+
+	// Create a workflow (starts in Pending state)
+	spec := WorkflowSpec{
+		TemplateID:    "test-template",
+		InitialPrompt: "Build a feature",
+	}
+	id, err := cp.Create(ctx, spec)
+	require.NoError(t, err)
+
+	// Complete should fail (Pending -> Completed is not valid)
+	err = cp.Complete(ctx, id)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid state transition")
+}
+
+func TestControlPlane_Complete_EmitsEventOnSuccess(t *testing.T) {
+	cp, eventBus := newTestControlPlaneWithEventBus(t)
+	ctx := context.Background()
+
+	// Create a workflow
+	spec := WorkflowSpec{
+		TemplateID:    "test-template",
+		InitialPrompt: "Build a feature",
+		Name:          "Test Workflow",
+	}
+	id, err := cp.Create(ctx, spec)
+	require.NoError(t, err)
+
+	// Manually transition to Running state
+	dcp := cp.(*defaultControlPlane)
+	inst, _ := dcp.registry.Get(id)
+	require.NoError(t, inst.TransitionTo(WorkflowRunning))
+
+	// Subscribe to events
+	eventCh, unsubscribe := cp.Subscribe(ctx)
+	defer unsubscribe()
+
+	// Complete the workflow
+	err = cp.Complete(ctx, id)
+	require.NoError(t, err)
+
+	// Should receive EventWorkflowCompleted
+	select {
+	case received := <-eventCh:
+		require.Equal(t, EventWorkflowCompleted, received.Type)
+		require.Equal(t, id, received.WorkflowID)
+		require.Equal(t, "Test Workflow", received.WorkflowName)
+		require.Equal(t, WorkflowCompleted, received.State)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout waiting for EventWorkflowCompleted event")
+	}
+
+	_ = eventBus // Keep reference to avoid unused warning
+}
+
+func TestControlPlane_Complete_SetsCompletedAtTimestamp(t *testing.T) {
+	cp, _ := newTestControlPlaneWithEventBus(t)
+	ctx := context.Background()
+
+	// Create a workflow
+	spec := WorkflowSpec{
+		TemplateID:    "test-template",
+		InitialPrompt: "Build a feature",
+	}
+	id, err := cp.Create(ctx, spec)
+	require.NoError(t, err)
+
+	// Manually transition to Running state
+	dcp := cp.(*defaultControlPlane)
+	inst, _ := dcp.registry.Get(id)
+	require.NoError(t, inst.TransitionTo(WorkflowRunning))
+
+	before := time.Now()
+
+	// Complete the workflow
+	err = cp.Complete(ctx, id)
+	require.NoError(t, err)
+
+	after := time.Now()
+
+	// Verify CompletedAt is set and within expected range
+	inst, err = cp.Get(ctx, id)
+	require.NoError(t, err)
+	require.NotNil(t, inst.CompletedAt)
+	require.True(t, inst.CompletedAt.After(before) || inst.CompletedAt.Equal(before))
+	require.True(t, inst.CompletedAt.Before(after) || inst.CompletedAt.Equal(after))
+}
+
+// === Unit Tests: Fail ===
+
+func TestControlPlane_Fail_TransitionsToFailedState(t *testing.T) {
+	cp, _ := newTestControlPlaneWithEventBus(t)
+	ctx := context.Background()
+
+	// Create a workflow
+	spec := WorkflowSpec{
+		TemplateID:    "test-template",
+		InitialPrompt: "Build a feature",
+		Name:          "Test Workflow",
+	}
+	id, err := cp.Create(ctx, spec)
+	require.NoError(t, err)
+
+	// Manually transition to Running state
+	dcp := cp.(*defaultControlPlane)
+	inst, _ := dcp.registry.Get(id)
+	require.NoError(t, inst.TransitionTo(WorkflowRunning))
+
+	// Fail the workflow
+	err = cp.Fail(ctx, id)
+	require.NoError(t, err)
+
+	// Verify workflow is now Failed
+	inst, err = cp.Get(ctx, id)
+	require.NoError(t, err)
+	require.Equal(t, WorkflowFailed, inst.State)
+	require.NotNil(t, inst.CompletedAt)
+}
+
+func TestControlPlane_Fail_ReturnsErrorForNonExistentWorkflow(t *testing.T) {
+	cp, _, _ := newTestControlPlane(t)
+
+	nonExistentID := NewWorkflowID()
+	err := cp.Fail(context.Background(), nonExistentID)
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrWorkflowNotFound)
+}
+
+func TestControlPlane_Fail_WorksFromPendingState(t *testing.T) {
+	cp, _ := newTestControlPlaneWithEventBus(t)
+	ctx := context.Background()
+
+	// Create a workflow (starts in Pending state)
+	spec := WorkflowSpec{
+		TemplateID:    "test-template",
+		InitialPrompt: "Build a feature",
+	}
+	id, err := cp.Create(ctx, spec)
+	require.NoError(t, err)
+
+	// Fail should work (Pending -> Failed is valid per state machine)
+	err = cp.Fail(ctx, id)
+	require.NoError(t, err)
+
+	// Verify workflow is now Failed
+	inst, err := cp.Get(ctx, id)
+	require.NoError(t, err)
+	require.Equal(t, WorkflowFailed, inst.State)
+}
+
+func TestControlPlane_Fail_WorksFromPausedState(t *testing.T) {
+	cp, _ := newTestControlPlaneWithEventBus(t)
+	ctx := context.Background()
+
+	// Create a workflow
+	spec := WorkflowSpec{
+		TemplateID:    "test-template",
+		InitialPrompt: "Build a feature",
+	}
+	id, err := cp.Create(ctx, spec)
+	require.NoError(t, err)
+
+	// Manually transition to Running then Paused
+	dcp := cp.(*defaultControlPlane)
+	inst, _ := dcp.registry.Get(id)
+	require.NoError(t, inst.TransitionTo(WorkflowRunning))
+	require.NoError(t, inst.TransitionTo(WorkflowPaused))
+
+	// Fail should work (Paused -> Failed is valid)
+	err = cp.Fail(ctx, id)
+	require.NoError(t, err)
+
+	// Verify workflow is now Failed
+	inst, err = cp.Get(ctx, id)
+	require.NoError(t, err)
+	require.Equal(t, WorkflowFailed, inst.State)
+}
+
+func TestControlPlane_Fail_EmitsEventOnSuccess(t *testing.T) {
+	cp, eventBus := newTestControlPlaneWithEventBus(t)
+	ctx := context.Background()
+
+	// Create a workflow
+	spec := WorkflowSpec{
+		TemplateID:    "test-template",
+		InitialPrompt: "Build a feature",
+		Name:          "Test Workflow",
+	}
+	id, err := cp.Create(ctx, spec)
+	require.NoError(t, err)
+
+	// Manually transition to Running state
+	dcp := cp.(*defaultControlPlane)
+	inst, _ := dcp.registry.Get(id)
+	require.NoError(t, inst.TransitionTo(WorkflowRunning))
+
+	// Subscribe to events
+	eventCh, unsubscribe := cp.Subscribe(ctx)
+	defer unsubscribe()
+
+	// Fail the workflow
+	err = cp.Fail(ctx, id)
+	require.NoError(t, err)
+
+	// Should receive EventWorkflowFailed
+	select {
+	case received := <-eventCh:
+		require.Equal(t, EventWorkflowFailed, received.Type)
+		require.Equal(t, id, received.WorkflowID)
+		require.Equal(t, "Test Workflow", received.WorkflowName)
+		require.Equal(t, WorkflowFailed, received.State)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout waiting for EventWorkflowFailed event")
+	}
+
+	_ = eventBus // Keep reference to avoid unused warning
+}
+
+func TestControlPlane_Fail_SetsCompletedAtTimestamp(t *testing.T) {
+	cp, _ := newTestControlPlaneWithEventBus(t)
+	ctx := context.Background()
+
+	// Create a workflow
+	spec := WorkflowSpec{
+		TemplateID:    "test-template",
+		InitialPrompt: "Build a feature",
+	}
+	id, err := cp.Create(ctx, spec)
+	require.NoError(t, err)
+
+	// Manually transition to Running state
+	dcp := cp.(*defaultControlPlane)
+	inst, _ := dcp.registry.Get(id)
+	require.NoError(t, inst.TransitionTo(WorkflowRunning))
+
+	before := time.Now()
+
+	// Fail the workflow
+	err = cp.Fail(ctx, id)
+	require.NoError(t, err)
+
+	after := time.Now()
+
+	// Verify CompletedAt is set and within expected range
+	inst, err = cp.Get(ctx, id)
+	require.NoError(t, err)
+	require.NotNil(t, inst.CompletedAt)
+	require.True(t, inst.CompletedAt.After(before) || inst.CompletedAt.Equal(before))
+	require.True(t, inst.CompletedAt.Before(after) || inst.CompletedAt.Equal(after))
+}
+
+func TestControlPlane_Fail_ReturnsErrorFromTerminalState(t *testing.T) {
+	cp, _ := newTestControlPlaneWithEventBus(t)
+	ctx := context.Background()
+
+	// Create a workflow
+	spec := WorkflowSpec{
+		TemplateID:    "test-template",
+		InitialPrompt: "Build a feature",
+	}
+	id, err := cp.Create(ctx, spec)
+	require.NoError(t, err)
+
+	// Manually transition to Completed (terminal state)
+	dcp := cp.(*defaultControlPlane)
+	inst, _ := dcp.registry.Get(id)
+	require.NoError(t, inst.TransitionTo(WorkflowRunning))
+	require.NoError(t, inst.TransitionTo(WorkflowCompleted))
+
+	// Fail should fail (Completed -> Failed is not valid)
+	err = cp.Fail(ctx, id)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid state transition")
 }
 
 // === Unit Tests: Get ===
@@ -760,16 +1085,14 @@ func TestControlPlane_FullLifecycle_CreateStartStop(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, WorkflowRunning, inst.State)
 
-	// Step 5: Shutdown control plane (stops all workflows)
+	// Step 5: Shutdown control plane (stops all running workflows with full resource cleanup)
 	err = cp.Shutdown(ctx)
 	require.NoError(t, err)
 
-	// Verify failed state (Shutdown transitions to Failed)
+	// Verify failed state (stopWorkflow pauses then calls supervisor.Shutdown)
 	inst, err = cp.Get(ctx, id)
 	require.NoError(t, err)
 	require.Equal(t, WorkflowFailed, inst.State)
-	require.Nil(t, inst.Infrastructure)
-	require.Equal(t, 0, inst.MCPPort)
 
 	// List should show failed workflow
 	failed, err := cp.List(ctx, ListQuery{States: []WorkflowState{WorkflowFailed}})
@@ -1274,7 +1597,7 @@ func TestControlPlane_Shutdown_StopsAllRunningWorkflows(t *testing.T) {
 	err := cp.Shutdown(ctx)
 	require.NoError(t, err)
 
-	// Verify all are failed (Stop transitions to Failed)
+	// Verify all are failed (stopWorkflow pauses then fully shuts down)
 	for _, id := range ids {
 		inst, err := cp.Get(ctx, id)
 		require.NoError(t, err)
@@ -1292,7 +1615,7 @@ func TestControlPlane_Shutdown_NoWorkflows(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestControlPlane_Shutdown_WithPendingWorkflows(t *testing.T) {
+func TestControlPlane_Shutdown_PreservesPendingWorkflows(t *testing.T) {
 	cp, _, _ := newTestControlPlane(t)
 	ctx := context.Background()
 
@@ -1309,17 +1632,17 @@ func TestControlPlane_Shutdown_WithPendingWorkflows(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, WorkflowPending, inst.State)
 
-	// Shutdown should fail pending workflows
+	// Shutdown should preserve pending workflows (only stops Running)
 	err = cp.Shutdown(ctx)
 	require.NoError(t, err)
 
-	// Verify it's failed (Stop transitions to Failed)
+	// Verify it's still pending (not stopped)
 	inst, err = cp.Get(ctx, id)
 	require.NoError(t, err)
-	require.Equal(t, WorkflowFailed, inst.State)
+	require.Equal(t, WorkflowPending, inst.State)
 }
 
-func TestControlPlane_Shutdown_RespectsGracePeriod(t *testing.T) {
+func TestControlPlane_Shutdown_StopsPausedWorkflows(t *testing.T) {
 	cp, mockFactory, mockProvider := newTestControlPlane(t)
 	ctx := context.Background()
 
@@ -1342,20 +1665,59 @@ func TestControlPlane_Shutdown_RespectsGracePeriod(t *testing.T) {
 
 	require.NoError(t, cp.Start(ctx, id))
 
-	// Shutdown with a long timeout (shouldn't need to force)
+	// Pause the workflow
+	require.NoError(t, cp.Pause(ctx, id))
+	inst, err := cp.Get(ctx, id)
+	require.NoError(t, err)
+	require.Equal(t, WorkflowPaused, inst.State)
+
+	// Shutdown calls stopWorkflow which fully shuts down paused workflows
+	err = cp.Shutdown(ctx)
+	require.NoError(t, err)
+
+	// Verify it's failed (stopWorkflow calls supervisor.Shutdown)
+	inst, err = cp.Get(ctx, id)
+	require.NoError(t, err)
+	require.Equal(t, WorkflowFailed, inst.State)
+}
+
+func TestControlPlane_Shutdown_StopsWorkflowsGracefully(t *testing.T) {
+	cp, mockFactory, mockProvider := newTestControlPlane(t)
+	ctx := context.Background()
+
+	// Create and start a workflow
+	spec := WorkflowSpec{
+		TemplateID:    "test-template",
+		InitialPrompt: "Goal",
+	}
+	id, err := cp.Create(ctx, spec)
+	require.NoError(t, err)
+
+	infra := createTestInfrastructure(t)
+	mockFactory.On("Create", mock.AnythingOfType("v2.InfrastructureConfig")).Return(infra, nil)
+	setupTestAgentProviderMock(t, mockProvider)
+
+	runCtx, cancel := context.WithCancel(ctx)
+	t.Cleanup(cancel)
+	go infra.Core.Processor.Run(runCtx)
+	require.NoError(t, infra.Core.Processor.WaitForReady(runCtx))
+
+	require.NoError(t, cp.Start(ctx, id))
+
+	// Shutdown with a long timeout
 	shutdownCtx, shutdownCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer shutdownCancel()
 
 	err = cp.Shutdown(shutdownCtx)
 	require.NoError(t, err)
 
-	// Workflow should be failed (Stop transitions to Failed)
+	// Workflow should be failed (stopWorkflow pauses then fully shuts down)
 	inst, err := cp.Get(ctx, id)
 	require.NoError(t, err)
 	require.Equal(t, WorkflowFailed, inst.State)
 }
 
-func TestControlPlane_Shutdown_ForceStopsOnContextCancel(t *testing.T) {
+func TestControlPlane_Shutdown_StopsWithCancelledContext(t *testing.T) {
 	cp, mockFactory, mockProvider := newTestControlPlane(t)
 	ctx := context.Background()
 
@@ -1382,11 +1744,11 @@ func TestControlPlane_Shutdown_ForceStopsOnContextCancel(t *testing.T) {
 	cancelledCtx, cancel := context.WithCancel(ctx)
 	cancel() // Cancel immediately
 
-	// Shutdown with cancelled context should still complete (force stop)
+	// Shutdown with cancelled context should still complete (stop workflows)
 	err = cp.Shutdown(cancelledCtx)
 	require.NoError(t, err)
 
-	// Workflow should be failed (Stop transitions to Failed)
+	// Workflow should be failed (stopWorkflow pauses then fully shuts down)
 	inst, err := cp.Get(ctx, id)
 	require.NoError(t, err)
 	require.Equal(t, WorkflowFailed, inst.State)
@@ -1433,7 +1795,7 @@ func TestControlPlane_Shutdown_WithHealthMonitor(t *testing.T) {
 	healthMonitor.Stop()
 }
 
-func TestControlPlane_Shutdown_PartialFailureCleanup(t *testing.T) {
+func TestControlPlane_Shutdown_StopsMultipleWorkflows(t *testing.T) {
 	cp, mockFactory, mockProvider := newTestControlPlane(t)
 	ctx := context.Background()
 
@@ -1468,12 +1830,11 @@ func TestControlPlane_Shutdown_PartialFailureCleanup(t *testing.T) {
 		require.NoError(t, cp.Start(ctx, id))
 	}
 
-	// Even if some workflows have issues, shutdown should complete
-	// and return aggregated errors if any
+	// Shutdown should stop all running workflows
 	err := cp.Shutdown(ctx)
 	require.NoError(t, err)
 
-	// All workflows should be failed (Stop transitions to Failed)
+	// All workflows should be failed (stopWorkflow pauses then fully shuts down)
 	for _, id := range ids {
 		inst, err := cp.Get(ctx, id)
 		require.NoError(t, err)

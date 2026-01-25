@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"time"
 
 	"github.com/zjrosen/perles/internal/log"
 )
@@ -35,12 +37,29 @@ type ControlPlane interface {
 	// Returns ErrWorkflowNotFound if the workflow does not exist.
 	Resume(ctx context.Context, id WorkflowID) error
 
+	// Complete marks a workflow as completed and persists the final state.
+	// This should be called when the coordinator signals completion.
+	// Returns ErrWorkflowNotFound if the workflow does not exist.
+	Complete(ctx context.Context, id WorkflowID) error
+
+	// Fail marks a workflow as failed and persists the final state.
+	// This should be called when a workflow encounters an unrecoverable error.
+	// Returns ErrWorkflowNotFound if the workflow does not exist.
+	Fail(ctx context.Context, id WorkflowID) error
+
 	// Get retrieves a workflow by ID.
 	// Returns ErrWorkflowNotFound if the workflow does not exist.
 	Get(ctx context.Context, id WorkflowID) (*WorkflowInstance, error)
 
 	// List returns workflows matching the query.
 	List(ctx context.Context, q ListQuery) ([]*WorkflowInstance, error)
+
+	// Archive marks a workflow as archived. Archived workflows are excluded
+	// from List queries by default. This is only supported when session
+	// persistence is enabled (DurableRegistry). Returns nil when using
+	// in-memory registry.
+	// Returns ErrWorkflowNotFound if the workflow does not exist.
+	Archive(ctx context.Context, id WorkflowID) error
 
 	// === Event Subscription ===
 
@@ -190,6 +209,25 @@ func (cp *defaultControlPlane) Start(ctx context.Context, id WorkflowID) error {
 		return fmt.Errorf("spawning coordinator: %w", err)
 	}
 
+	// Persist the running state and resource allocations to registry (for SQLite-backed registries).
+	// AllocateResources modifies: WorkDir, WorktreePath, WorktreeBranch, SessionDir, MCPPort.
+	// SpawnCoordinator modifies: State, StartedAt, ActiveWorkers.
+	//nolint:staticcheck // SA9003: Intentionally ignoring error - in-memory state is authoritative
+	if err := cp.registry.Update(id, func(w *WorkflowInstance) {
+		// State transitions
+		w.State = inst.State
+		w.StartedAt = inst.StartedAt
+		// Resource allocations from AllocateResources
+		w.WorkDir = inst.WorkDir
+		w.WorktreePath = inst.WorktreePath
+		w.WorktreeBranch = inst.WorktreeBranch
+		w.SessionDir = inst.SessionDir
+		w.MCPPort = inst.MCPPort
+		w.ActiveWorkers = inst.ActiveWorkers
+	}); err != nil {
+		// Log but don't fail - the in-memory state is already updated
+	}
+
 	return nil
 }
 
@@ -207,6 +245,22 @@ func (cp *defaultControlPlane) Pause(ctx context.Context, id WorkflowID) error {
 		return err
 	}
 
+	// Persist the paused state and runtime metrics to registry (for SQLite-backed registries).
+	// This captures the current state for cold resume after app restart.
+	//nolint:staticcheck // SA9003: Intentionally ignoring error - in-memory state is authoritative
+	if err := cp.registry.Update(id, func(w *WorkflowInstance) {
+		w.State = inst.State
+		w.PausedAt = inst.PausedAt
+		w.TokensUsed = inst.TokensUsed
+		w.ActiveWorkers = inst.ActiveWorkers
+		w.LastHeartbeatAt = inst.LastHeartbeatAt
+		w.LastProgressAt = inst.LastProgressAt
+	}); err != nil {
+		// Log but don't fail - the in-memory state is already updated
+		// This handles the case where registry.Get returned a reconstituted session
+		// that isn't in the runtime map
+	}
+
 	// Emit workflow paused event
 	cp.eventBus.Publish(ControlPlaneEvent{
 		Type:         EventWorkflowPaused,
@@ -222,6 +276,9 @@ func (cp *defaultControlPlane) Pause(ctx context.Context, id WorkflowID) error {
 
 // Resume restarts a paused workflow by respawning the coordinator.
 // Sends a system message to the coordinator with pause context.
+//
+// For "cold resume" (workflow loaded from SQLite without runtime infrastructure),
+// this method first allocates resources before resuming the coordinator.
 func (cp *defaultControlPlane) Resume(ctx context.Context, id WorkflowID) error {
 	// Get workflow from registry
 	inst, ok := cp.registry.Get(id)
@@ -229,9 +286,41 @@ func (cp *defaultControlPlane) Resume(ctx context.Context, id WorkflowID) error 
 		return ErrWorkflowNotFound
 	}
 
-	// Delegate to supervisor
+	// Cold resume detection: workflow is Paused but has no Infrastructure
+	// This happens when a paused workflow is loaded from SQLite after app restart.
+	if inst.Infrastructure == nil {
+		log.Debug(log.CatOrch, "Cold resume detected - allocating resources", "workflowID", id)
+
+		// Allocate resources (creates infrastructure, MCP server, reopens session)
+		// AllocateResources accepts Paused state for cold resume scenarios.
+		if err := cp.supervisor.AllocateResources(ctx, inst); err != nil {
+			return fmt.Errorf("allocating resources for cold resume: %w", err)
+		}
+
+		// Attach workflow's event bus to the cross-workflow event bus
+		cp.eventBus.AttachWorkflow(inst)
+
+		// Attach runtime to DurableRegistry if applicable
+		if dr, ok := cp.registry.(*DurableRegistry); ok {
+			if err := dr.AttachRuntime(inst); err != nil {
+				// Log warning but continue - workflow may already be attached
+				log.Debug(log.CatOrch, "Failed to attach runtime to registry",
+					"workflowID", id, "error", err)
+			}
+		}
+	}
+
+	// Delegate to supervisor (handles warm and cold resume identically from here)
 	if err := cp.supervisor.Resume(ctx, inst); err != nil {
 		return err
+	}
+
+	// Persist the resumed state to registry (for SQLite-backed registries)
+	//nolint:staticcheck // SA9003: Intentionally ignoring error - in-memory state is authoritative
+	if err := cp.registry.Update(id, func(w *WorkflowInstance) {
+		w.State = inst.State
+	}); err != nil {
+		// Log but don't fail - the in-memory state is already updated
 	}
 
 	// Emit workflow resumed event
@@ -247,8 +336,88 @@ func (cp *defaultControlPlane) Resume(ctx context.Context, id WorkflowID) error 
 	return nil
 }
 
+// Complete marks a workflow as completed and persists the final state.
+func (cp *defaultControlPlane) Complete(ctx context.Context, id WorkflowID) error {
+	// Get workflow from registry
+	inst, ok := cp.registry.Get(id)
+	if !ok {
+		return ErrWorkflowNotFound
+	}
+
+	// Transition to completed state
+	now := time.Now()
+	if err := inst.TransitionTo(WorkflowCompleted); err != nil {
+		return fmt.Errorf("transitioning to completed: %w", err)
+	}
+	inst.CompletedAt = &now
+
+	// Persist the completed state to registry (for SQLite-backed registries)
+	//nolint:staticcheck // SA9003: Intentionally ignoring error - in-memory state is authoritative
+	if err := cp.registry.Update(id, func(w *WorkflowInstance) {
+		w.State = inst.State
+		w.CompletedAt = inst.CompletedAt
+		w.TokensUsed = inst.TokensUsed
+		w.ActiveWorkers = inst.ActiveWorkers
+	}); err != nil {
+		// Log but don't fail - the in-memory state is already updated
+	}
+
+	// Emit workflow completed event
+	cp.eventBus.Publish(ControlPlaneEvent{
+		Type:         EventWorkflowCompleted,
+		WorkflowID:   inst.ID,
+		WorkflowName: inst.Name,
+		TemplateID:   inst.TemplateID,
+		State:        inst.State,
+		Timestamp:    now,
+	})
+
+	return nil
+}
+
+// Fail marks a workflow as failed and persists the final state.
+func (cp *defaultControlPlane) Fail(ctx context.Context, id WorkflowID) error {
+	// Get workflow from registry
+	inst, ok := cp.registry.Get(id)
+	if !ok {
+		return ErrWorkflowNotFound
+	}
+
+	// Transition to failed state
+	now := time.Now()
+	if err := inst.TransitionTo(WorkflowFailed); err != nil {
+		return fmt.Errorf("transitioning to failed: %w", err)
+	}
+	inst.CompletedAt = &now
+
+	// Persist the failed state to registry (for SQLite-backed registries)
+	//nolint:staticcheck // SA9003: Intentionally ignoring error - in-memory state is authoritative
+	if err := cp.registry.Update(id, func(w *WorkflowInstance) {
+		w.State = inst.State
+		w.CompletedAt = inst.CompletedAt
+		w.TokensUsed = inst.TokensUsed
+		w.ActiveWorkers = inst.ActiveWorkers
+	}); err != nil {
+		// Log but don't fail - the in-memory state is already updated
+	}
+
+	// Emit workflow failed event
+	cp.eventBus.Publish(ControlPlaneEvent{
+		Type:         EventWorkflowFailed,
+		WorkflowID:   inst.ID,
+		WorkflowName: inst.Name,
+		TemplateID:   inst.TemplateID,
+		State:        inst.State,
+		Timestamp:    now,
+	})
+
+	return nil
+}
+
 // stopWorkflow terminates a workflow and releases all resources.
-// This is an internal method used by Shutdown.
+// This transitions the workflow to Failed state, which is a terminal state.
+// For running workflows, it first pauses them to persist state for cold resume,
+// then proceeds with full shutdown.
 func (cp *defaultControlPlane) stopWorkflow(ctx context.Context, id WorkflowID, opts StopOptions) error {
 	// Get workflow from registry
 	inst, ok := cp.registry.Get(id)
@@ -256,11 +425,21 @@ func (cp *defaultControlPlane) stopWorkflow(ctx context.Context, id WorkflowID, 
 		return ErrWorkflowNotFound
 	}
 
+	// For running workflows, pause first to persist state for potential cold resume
+	// This updates the registry with runtime metrics and paused state
+	if inst.State == WorkflowRunning {
+		if pauseErr := cp.Pause(ctx, id); pauseErr != nil {
+			// Log but continue with shutdown - we still want to release resources
+			log.Debug(log.CatOrch, "Failed to pause workflow before shutdown",
+				"workflowID", id, "error", pauseErr)
+		}
+	}
+
 	// Detach from cross-workflow event bus before stopping
 	// This stops forwarding events from the workflow's infrastructure
 	cp.eventBus.DetachWorkflow(id)
 
-	// Delegate to supervisor
+	// Delegate to supervisor for full resource cleanup (transitions state to Failed)
 	if err := cp.supervisor.Shutdown(ctx, inst, opts); err != nil {
 		return fmt.Errorf("stopping workflow: %w", err)
 	}
@@ -273,10 +452,10 @@ func (cp *defaultControlPlane) stopWorkflow(ctx context.Context, id WorkflowID, 
 func (cp *defaultControlPlane) handleLifecycleEvent(inst *WorkflowInstance, event ControlPlaneEvent) {
 	switch event.Type {
 	case EventWorkflowCompleted:
-		// Transition workflow to Completed state
+		// Complete the workflow via the standard Complete() method
 		if inst.State.CanTransitionTo(WorkflowCompleted) {
-			if err := inst.TransitionTo(WorkflowCompleted); err != nil {
-				log.Error(log.CatOrch, "Failed to transition workflow to Completed",
+			if err := cp.Complete(context.Background(), inst.ID); err != nil {
+				log.Error(log.CatOrch, "Failed to complete workflow",
 					"workflowID", inst.ID, "error", err)
 			} else {
 				log.Debug(log.CatOrch, "Workflow completed via signal_workflow_complete",
@@ -285,11 +464,14 @@ func (cp *defaultControlPlane) handleLifecycleEvent(inst *WorkflowInstance, even
 		}
 
 	case EventWorkflowFailed:
-		// Transition workflow to Failed state
+		// Fail the workflow via the standard Fail() method
 		if inst.State.CanTransitionTo(WorkflowFailed) {
-			if err := inst.TransitionTo(WorkflowFailed); err != nil {
-				log.Error(log.CatOrch, "Failed to transition workflow to Failed",
+			if err := cp.Fail(context.Background(), inst.ID); err != nil {
+				log.Error(log.CatOrch, "Failed to fail workflow",
 					"workflowID", inst.ID, "error", err)
+			} else {
+				log.Debug(log.CatOrch, "Workflow failed via lifecycle event",
+					"workflowID", inst.ID, "name", inst.Name)
 			}
 		}
 	}
@@ -307,6 +489,11 @@ func (cp *defaultControlPlane) Get(ctx context.Context, id WorkflowID) (*Workflo
 // List returns workflows matching the query.
 func (cp *defaultControlPlane) List(ctx context.Context, q ListQuery) ([]*WorkflowInstance, error) {
 	return cp.registry.List(q), nil
+}
+
+// Archive marks a workflow as archived.
+func (cp *defaultControlPlane) Archive(ctx context.Context, id WorkflowID) error {
+	return cp.registry.Archive(id)
 }
 
 // Subscribe returns a channel of all control plane events.
@@ -412,11 +599,11 @@ func (cp *defaultControlPlane) GetHealthStatus(id WorkflowID) (HealthStatus, boo
 // Shutdown gracefully stops all running workflows and releases all resources.
 // The shutdown sequence is:
 // 1. Stop the HealthMonitor (if configured)
-// 2. Stop all running/paused workflows (with grace period from context)
+// 2. Stop all active workflows via stopWorkflow (handles pause + resource cleanup)
 // 3. Close the CrossWorkflowEventBus
 // 4. Release all scheduler resources (if configured)
 //
-// If the context is cancelled or times out during graceful shutdown,
+// If the context is canceled or times out during graceful shutdown,
 // remaining workflows are force-stopped.
 func (cp *defaultControlPlane) Shutdown(ctx context.Context) error {
 	var errs []error
@@ -426,20 +613,21 @@ func (cp *defaultControlPlane) Shutdown(ctx context.Context) error {
 		cp.healthMonitor.Stop()
 	}
 
-	// Step 2: Stop all running/paused workflows
-	// Query for all non-terminal workflows
+	// Step 2: Stop all active workflows owned by this process
+	// - Running and Paused states need proper resource cleanup via supervisor.Shutdown
+	// - Pending workflows have no resources allocated, skip them
+	// - stopWorkflow handles pausing running workflows before full shutdown
+	// - Only workflows owned by current PID (filtered at DB level)
+	// - Archived workflows are excluded by default
+	currentPID := os.Getpid()
 	activeWorkflows := cp.registry.List(ListQuery{
-		States: []WorkflowState{WorkflowRunning, WorkflowPaused, WorkflowPending},
+		States:   []WorkflowState{WorkflowRunning, WorkflowPaused},
+		OwnerPID: &currentPID,
 	})
 
 	for _, inst := range activeWorkflows {
-		// Always force stop during shutdown - we're terminating everything anyway.
-		// This avoids waiting for graceful process draining which can be slow.
-		stopErr := cp.stopWorkflow(ctx, inst.ID, StopOptions{
-			Reason: "ControlPlane shutdown",
-			Force:  true,
-		})
-		if stopErr != nil {
+		// stopWorkflow handles: pause (for running) -> detach event bus -> supervisor.Shutdown
+		if stopErr := cp.stopWorkflow(ctx, inst.ID, StopOptions{}); stopErr != nil {
 			errs = append(errs, fmt.Errorf("workflow %s: %w", inst.ID, stopErr))
 		}
 	}
@@ -448,9 +636,6 @@ func (cp *defaultControlPlane) Shutdown(ctx context.Context) error {
 	if cp.eventBus != nil {
 		cp.eventBus.Close()
 	}
-
-	// Note: Individual workflow resources are released in stopWorkflow() via Supervisor.Shutdown().
-	// Scheduler doesn't have a global Close() method - no cleanup needed here.
 
 	// Return aggregated errors if any
 	if len(errs) > 0 {

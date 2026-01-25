@@ -9,13 +9,37 @@ CREATE TABLE sessions (
     template_id TEXT,
     epic_id TEXT,
     work_dir TEXT,
+    labels TEXT,  -- JSON encoded map[string]string
+
+    -- Worktree configuration (requested settings)
+    worktree_enabled INTEGER NOT NULL DEFAULT 0,
+    worktree_base_branch TEXT,
+    worktree_branch_name TEXT,
+
+    -- Worktree state (actual created worktree)
     worktree_path TEXT,
     worktree_branch TEXT,
+
+    -- Session storage path (for file-based session logs in ~/.perles/sessions/)
+    session_dir TEXT,
+
+    -- Ownership for crash recovery
     owner_created_pid INTEGER,
     owner_current_pid INTEGER,
+
+    -- Metrics
+    tokens_used INTEGER NOT NULL DEFAULT 0,
+    active_workers INTEGER NOT NULL DEFAULT 0,
+
+    -- Health tracking
+    last_heartbeat_at INTEGER,
+    last_progress_at INTEGER,
+
+    -- Timestamps
     created_at INTEGER NOT NULL,
     started_at INTEGER,
     paused_at INTEGER,
+    completed_at INTEGER,
     updated_at INTEGER NOT NULL,
     archived_at INTEGER,
     deleted_at INTEGER

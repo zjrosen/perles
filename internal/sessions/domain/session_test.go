@@ -108,13 +108,21 @@ func TestReconstituteSession(t *testing.T) {
 		"template-abc",
 		"epic-123",
 		"/path/to/workdir",
+		nil,
+		false,
+		"", "",
 		"/path/to/worktree",
 		"feature/branch",
+		"", // sessionDir
 		&ownerCreatedPID,
 		&ownerCurrentPID,
+		0,
+		0,
+		nil, nil,
 		createdAt,
 		&startedAt,
 		&pausedAt,
+		nil, // completedAt
 		updatedAt,
 		&archivedAt,
 		&deletedAt,
@@ -159,10 +167,19 @@ func TestReconstituteSession_NilDeletedAt(t *testing.T) {
 		"active-project",
 		"",
 		SessionStateRunning,
-		"", "", "", "", "",
+		"", "", "",
+		nil,
+		false,
+		"", "",
+		"", "",
+		"", // sessionDir
+		nil, nil,
+		0,
+		0,
 		nil, nil,
 		createdAt,
 		nil, nil,
+		nil, // completedAt
 		updatedAt,
 		nil,
 		nil,
@@ -260,8 +277,11 @@ func TestSession_IsDeleted(t *testing.T) {
 	t.Run("deleted when deletedAt is set", func(t *testing.T) {
 		deletedAt := time.Now()
 		session := ReconstituteSession(
-			1, "guid", "project", "", SessionStateCompleted, "", "", "", "", "",
-			nil, nil, time.Now(), nil, nil, time.Now(), nil, &deletedAt,
+			1, "guid", "project", "", SessionStateCompleted, "", "", "",
+			nil, false, "", "", "", "",
+			"", // sessionDir
+			nil, nil, 0, 0, nil, nil,
+			time.Now(), nil, nil, nil, time.Now(), nil, &deletedAt,
 		)
 		require.True(t, session.IsDeleted())
 	})
@@ -292,11 +312,19 @@ func TestSession_Getters(t *testing.T) {
 		"template-xyz",
 		"epic-456",
 		"/work/dir",
+		nil,
+		false,
+		"", "",
 		"/worktree/path",
 		"main",
+		"", // sessionDir
+		nil, nil,
+		0,
+		0,
 		nil, nil,
 		createdAt,
 		nil, nil,
+		nil, // completedAt
 		updatedAt,
 		nil,
 		nil,
