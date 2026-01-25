@@ -47,7 +47,7 @@ orchestration:
 
 ---
 
-Any workflow supports doing work inside a git worktrees. When using a worktree you can specify a different base branch to create the worktree from along with an optional branch name. If you are just doing research or converting a research proposal into an epic and tasks you likely do not have to use a worktree since you are not changing any code. 
+Any workflow supports doing work inside a git worktree. When using a worktree you can specify a different base branch to create the worktree from along with an optional branch name. If you are just doing research or converting a research proposal into an epic and tasks you likely do not have to use a worktree since you are not changing any code. 
 Worktree's are primarily meant for when you are running multiple "Cook" workflows on different epics in parallel.
  
 <p align="center">
@@ -62,9 +62,8 @@ Worktree's are primarily meant for when you are running multiple "Cook" workflow
 
 Every workflow launched shows as a new workflow in the table which shows the status, epic id, working directory and last heartbeat status.
 
-A workflow can be paused by pressing "x" which will stop all the running processes for the selected workflow and can be resumed with "s".
-
-New workflows can be started by pressing "n" when the workflows table is in focus.
+A workflow can be paused by pressing "x" which will stop all the running processes for the selected workflow and can be resumed with "s". 
+New workflows are started by pressing "n" when the workflows table is in focus.
 
 ### Coordinator Pane
 
@@ -165,19 +164,19 @@ And individual task markdown files that are referenced in the yaml file.
 
 **Registration Fields (Top-Level)**
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `namespace` | string | Yes | Always `"workflow"` for workflow templates |
-| `key` | string | Yes | Unique identifier for the workflow (e.g., `"joke-contest"`) |
-| `version` | string | Yes | Version identifier (e.g., `"v1"`) |
-| `name` | string | Yes | Human-readable name shown in the workflow picker |
-| `description` | string | Yes | Description of what the workflow does |
-| `epic_template` | string | Yes | Filename of the markdown template for the epic content |
-| `system_prompt` | string | Yes | Filename of the system prompt for the coordinator (typically `"v1-epic-instructions.md"`) |
-| `path` | string | No | Path prefix for artifact inputs/outputs (default: `".spec"`) |
-| `labels` | list | No | Tags for filtering (e.g., `["category:meta", "lang:go"]`) |
-| `arguments` | list | No | User-configurable parameters (see Arguments table) |
-| `nodes` | list | No | DAG of workflow tasks (see Nodes table) |
+| Field | Type | Required | Description                                                                                                                                                        |
+|-------|------|----------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `namespace` | string | Yes      | Always `"workflow"` for workflow templates                                                                                                                         |
+| `key` | string | Yes      | Unique identifier for the workflow (e.g., `"joke-contest"`)                                                                                                        |
+| `version` | string | Yes      | Version identifier (e.g., `"v1"`)                                                                                                                                  |
+| `name` | string | Yes      | Human-readable name shown in the workflow picker                                                                                                                   |
+| `description` | string | Yes      | Description of what the workflow does                                                                                                                              |
+| `epic_template` | string | Yes      | Filename of the markdown template for the epic content                                                                                                             |
+| `system_prompt` | string | No       | Leave this empty most of the time to use the default and use the epic_template for instructions unless you want to override the system prompt for the coordinator. |
+| `path` | string | No       | Path prefix for artifact inputs/outputs (example: `".spec"`)                                                                                                       |
+| `labels` | list | No       | Tags for filtering (e.g., `["category:meta", "lang:go"]`)                                                                                                          |
+| `arguments` | list | No       | User-configurable parameters (see Arguments table)                                                                                                                 |
+| `nodes` | list | No       | DAG of workflow tasks (see Nodes table)                                                                                                                            |
 
 **Argument Fields**
 
@@ -219,7 +218,8 @@ registry:
     name: "Joke Contest"
     description: "Test workflow where two workers write jokes in parallel, then a third worker judges and picks a winner"
     epic_template: "v1-joke-contest-epic.md"
-    system_prompt: "v1-epic-instructions.md"
+    # Optional system prompt override most of the time you should leave this empty or omitted
+    system_prompt: "v1-system-prompt.md"
     # Optional prefix path to the inputs / outputs
     path: ""
     labels:
@@ -255,7 +255,7 @@ registry:
         assignee: "worker-2"
         # No after - runs in parallel with joke-1
 
-      # Phase 2: Judge picks winner
+      # Phase 2: Human review gate
       - key: "review"
         name: "Human Review"
         template: "v1-human-review.md"
@@ -264,7 +264,7 @@ registry:
           - "joke-1"
           - "joke-2"
 
-      # Phase 2: Judge picks winner
+      # Phase 3: Judge picks winner
       - key: "judge"
         name: "Judge - Pick Winner"
         template: "v1-joke-contest-judge.md"

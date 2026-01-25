@@ -306,6 +306,33 @@ func TestRegistry_List_PaginationWithLimitOffset(t *testing.T) {
 	require.Len(t, results, 10)
 }
 
+func TestRegistry_List_SortsNewestFirst(t *testing.T) {
+	registry := NewInMemoryRegistry()
+
+	// Create workflows with explicit CreatedAt times
+	now := time.Now()
+	oldest := newTestInstance(t, "oldest")
+	oldest.CreatedAt = now.Add(-2 * time.Hour)
+
+	middle := newTestInstance(t, "middle")
+	middle.CreatedAt = now.Add(-1 * time.Hour)
+
+	newest := newTestInstance(t, "newest")
+	newest.CreatedAt = now
+
+	// Add in random order
+	require.NoError(t, registry.Put(middle))
+	require.NoError(t, registry.Put(oldest))
+	require.NoError(t, registry.Put(newest))
+
+	// List should return newest first
+	results := registry.List(ListQuery{})
+	require.Len(t, results, 3)
+	require.Equal(t, "newest", results[0].Name, "newest workflow should be first")
+	require.Equal(t, "middle", results[1].Name, "middle workflow should be second")
+	require.Equal(t, "oldest", results[2].Name, "oldest workflow should be last")
+}
+
 func TestRegistry_List_CombinedFilters(t *testing.T) {
 	registry := NewInMemoryRegistry()
 

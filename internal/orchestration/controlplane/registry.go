@@ -126,8 +126,8 @@ func (r *inMemoryRegistry) List(q ListQuery) []*WorkflowInstance {
 		}
 	}
 
-	// Sort by creation time (oldest first, so new workflows appear at bottom)
-	sortByCreatedAtAsc(results)
+	// Sort by creation time (newest first, so new workflows appear at top)
+	sortByCreatedAtDesc(results)
 
 	// Apply offset and limit
 	if q.Offset > 0 {
@@ -201,26 +201,26 @@ func containsState(states []WorkflowState, target WorkflowState) bool {
 	return slices.Contains(states, target)
 }
 
-// sortByCreatedAtAsc sorts workflows by CreatedAt in ascending order (oldest first).
-// When CreatedAt times are equal, sorts by ID ascending for stable ordering.
-func sortByCreatedAtAsc(workflows []*WorkflowInstance) {
+// sortByCreatedAtDesc sorts workflows by CreatedAt in descending order (newest first).
+// When CreatedAt times are equal, sorts by ID descending for stable ordering.
+func sortByCreatedAtDesc(workflows []*WorkflowInstance) {
 	// Simple insertion sort - adequate for expected list sizes
 	for i := 1; i < len(workflows); i++ {
-		for j := i; j > 0 && isOlderOrSameTimeWithSmallerID(workflows[j], workflows[j-1]); j-- {
+		for j := i; j > 0 && isNewerOrSameTimeWithLargerID(workflows[j], workflows[j-1]); j-- {
 			workflows[j], workflows[j-1] = workflows[j-1], workflows[j]
 		}
 	}
 }
 
-// isOlderOrSameTimeWithSmallerID returns true if a should sort before b.
-// Primary sort: CreatedAt ascending (older first).
-// Secondary sort (tie-breaker): ID ascending for stable ordering.
-func isOlderOrSameTimeWithSmallerID(a, b *WorkflowInstance) bool {
-	if a.CreatedAt.Before(b.CreatedAt) {
+// isNewerOrSameTimeWithLargerID returns true if a should sort before b.
+// Primary sort: CreatedAt descending (newer first).
+// Secondary sort (tie-breaker): ID descending for stable ordering.
+func isNewerOrSameTimeWithLargerID(a, b *WorkflowInstance) bool {
+	if a.CreatedAt.After(b.CreatedAt) {
 		return true
 	}
 	if a.CreatedAt.Equal(b.CreatedAt) {
-		return string(a.ID) < string(b.ID)
+		return string(a.ID) > string(b.ID)
 	}
 	return false
 }
