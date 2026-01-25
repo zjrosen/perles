@@ -1,14 +1,19 @@
 package dashboard
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/zjrosen/perles/internal/mode"
 	"github.com/zjrosen/perles/internal/orchestration/controlplane"
 	"github.com/zjrosen/perles/internal/orchestration/events"
 	"github.com/zjrosen/perles/internal/orchestration/metrics"
+	"github.com/zjrosen/perles/internal/orchestration/v2/command"
+	"github.com/zjrosen/perles/internal/orchestration/v2/repository"
 	"github.com/zjrosen/perles/internal/ui/shared/chatrender"
+	"github.com/zjrosen/perles/internal/ui/shared/toaster"
 )
 
 func TestNewCoordinatorPanel(t *testing.T) {
@@ -610,4 +615,359 @@ func visualWidth(s string) int {
 		width++
 	}
 	return width
+}
+
+// ============================================================================
+// Slash Command Tests
+// ============================================================================
+
+func TestHandleSlashCommand_Stop_Valid(t *testing.T) {
+	m := Model{}
+	workflowID := controlplane.WorkflowID("wf-123")
+
+	newM, cmd := m.handleSlashCommand(workflowID, "/stop worker-1")
+
+	require.NotNil(t, newM)
+	require.NotNil(t, cmd)
+}
+
+func TestHandleSlashCommand_Stop_WithForce(t *testing.T) {
+	m := Model{}
+	workflowID := controlplane.WorkflowID("wf-123")
+
+	newM, cmd := m.handleSlashCommand(workflowID, "/stop coordinator --force")
+
+	require.NotNil(t, newM)
+	require.NotNil(t, cmd)
+}
+
+func TestHandleSlashCommand_Stop_MissingProcessID(t *testing.T) {
+	m := Model{}
+	workflowID := controlplane.WorkflowID("wf-123")
+
+	newM, cmd := m.handleSlashCommand(workflowID, "/stop")
+
+	require.NotNil(t, newM)
+	require.NotNil(t, cmd)
+	// Should return a warning toast
+	msg := cmd()
+	toastMsg, ok := msg.(mode.ShowToastMsg)
+	require.True(t, ok, "expected ShowToastMsg, got %T", msg)
+	require.Contains(t, toastMsg.Message, "Usage:")
+}
+
+func TestHandleSlashCommand_Spawn(t *testing.T) {
+	m := Model{}
+	workflowID := controlplane.WorkflowID("wf-123")
+
+	newM, cmd := m.handleSlashCommand(workflowID, "/spawn")
+
+	require.NotNil(t, newM)
+	require.NotNil(t, cmd)
+}
+
+func TestHandleSlashCommand_Retire_Valid(t *testing.T) {
+	m := Model{}
+	workflowID := controlplane.WorkflowID("wf-123")
+
+	newM, cmd := m.handleSlashCommand(workflowID, "/retire worker-1")
+
+	require.NotNil(t, newM)
+	require.NotNil(t, cmd)
+}
+
+func TestHandleSlashCommand_Retire_WithReason(t *testing.T) {
+	m := Model{}
+	workflowID := controlplane.WorkflowID("wf-123")
+
+	newM, cmd := m.handleSlashCommand(workflowID, "/retire worker-1 task completed")
+
+	require.NotNil(t, newM)
+	require.NotNil(t, cmd)
+}
+
+func TestHandleSlashCommand_Retire_MissingWorkerID(t *testing.T) {
+	m := Model{}
+	workflowID := controlplane.WorkflowID("wf-123")
+
+	newM, cmd := m.handleSlashCommand(workflowID, "/retire")
+
+	require.NotNil(t, newM)
+	require.NotNil(t, cmd)
+	// Should return a warning toast
+	msg := cmd()
+	toastMsg, ok := msg.(mode.ShowToastMsg)
+	require.True(t, ok, "expected ShowToastMsg, got %T", msg)
+	require.Contains(t, toastMsg.Message, "Usage:")
+}
+
+func TestHandleSlashCommand_Retire_CannotRetireCoordinator(t *testing.T) {
+	m := Model{}
+	workflowID := controlplane.WorkflowID("wf-123")
+
+	newM, cmd := m.handleSlashCommand(workflowID, "/retire coordinator")
+
+	require.NotNil(t, newM)
+	require.NotNil(t, cmd)
+	// Should return a warning toast about not retiring coordinator
+	msg := cmd()
+	toastMsg, ok := msg.(mode.ShowToastMsg)
+	require.True(t, ok, "expected ShowToastMsg, got %T", msg)
+	require.Contains(t, toastMsg.Message, "Cannot retire coordinator")
+}
+
+func TestHandleSlashCommand_Replace_Valid(t *testing.T) {
+	m := Model{}
+	workflowID := controlplane.WorkflowID("wf-123")
+
+	newM, cmd := m.handleSlashCommand(workflowID, "/replace worker-1")
+
+	require.NotNil(t, newM)
+	require.NotNil(t, cmd)
+}
+
+func TestHandleSlashCommand_Replace_Coordinator(t *testing.T) {
+	m := Model{}
+	workflowID := controlplane.WorkflowID("wf-123")
+
+	// Unlike /retire, /replace coordinator IS allowed
+	newM, cmd := m.handleSlashCommand(workflowID, "/replace coordinator")
+
+	require.NotNil(t, newM)
+	require.NotNil(t, cmd)
+}
+
+func TestHandleSlashCommand_Replace_WithReason(t *testing.T) {
+	m := Model{}
+	workflowID := controlplane.WorkflowID("wf-123")
+
+	newM, cmd := m.handleSlashCommand(workflowID, "/replace worker-1 needs fresh context")
+
+	require.NotNil(t, newM)
+	require.NotNil(t, cmd)
+}
+
+func TestHandleSlashCommand_Replace_MissingProcessID(t *testing.T) {
+	m := Model{}
+	workflowID := controlplane.WorkflowID("wf-123")
+
+	newM, cmd := m.handleSlashCommand(workflowID, "/replace")
+
+	require.NotNil(t, newM)
+	require.NotNil(t, cmd)
+	// Should return a warning toast
+	msg := cmd()
+	toastMsg, ok := msg.(mode.ShowToastMsg)
+	require.True(t, ok, "expected ShowToastMsg, got %T", msg)
+	require.Contains(t, toastMsg.Message, "Usage:")
+}
+
+func TestHandleSlashCommand_UnknownCommand_PassedToCoordinator(t *testing.T) {
+	m := Model{}
+	workflowID := controlplane.WorkflowID("wf-123")
+
+	// Unknown slash commands should be passed through to coordinator
+	newM, cmd := m.handleSlashCommand(workflowID, "/unknown command")
+
+	require.NotNil(t, newM)
+	// Should return sendToCoordinator command (not a toast)
+	require.NotNil(t, cmd)
+}
+
+func TestHandleSlashCommand_EmptyContent(t *testing.T) {
+	m := Model{}
+	workflowID := controlplane.WorkflowID("wf-123")
+
+	newM, cmd := m.handleSlashCommand(workflowID, "")
+
+	require.NotNil(t, newM)
+	require.Nil(t, cmd)
+}
+
+func TestShowWarning_ReturnsToastMsg(t *testing.T) {
+	cmd := showWarning("test warning message")
+
+	require.NotNil(t, cmd)
+	msg := cmd()
+	toastMsg, ok := msg.(mode.ShowToastMsg)
+	require.True(t, ok, "expected ShowToastMsg, got %T", msg)
+	require.Equal(t, "test warning message", toastMsg.Message)
+	require.Equal(t, toaster.StyleWarn, toastMsg.Style)
+}
+
+// ============================================================================
+// Slash Command - Command Content Verification Tests
+// ============================================================================
+
+// captureSubmitter is a test helper that captures commands submitted to it.
+type captureSubmitter struct {
+	commands []command.Command
+}
+
+func (c *captureSubmitter) Submit(cmd command.Command) {
+	c.commands = append(c.commands, cmd)
+}
+
+func TestStopCommand_CreatesCorrectCommand(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		wantProcessID string
+		wantForce     bool
+	}{
+		{
+			name:          "stop worker",
+			input:         "/stop worker-1",
+			wantProcessID: "worker-1",
+			wantForce:     false,
+		},
+		{
+			name:          "stop coordinator",
+			input:         "/stop coordinator",
+			wantProcessID: "coordinator",
+			wantForce:     false,
+		},
+		{
+			name:          "stop with force",
+			input:         "/stop worker-1 --force",
+			wantProcessID: "worker-1",
+			wantForce:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			capture := &captureSubmitter{}
+			parts := strings.Fields(tt.input)
+
+			processID := parts[1]
+			force := len(parts) > 2 && parts[2] == "--force"
+
+			cmd := command.NewStopProcessCommand(command.SourceUser, processID, force, "user_requested")
+			capture.Submit(cmd)
+
+			require.Len(t, capture.commands, 1)
+			stopCmd, ok := capture.commands[0].(*command.StopProcessCommand)
+			require.True(t, ok)
+			require.Equal(t, tt.wantProcessID, stopCmd.ProcessID)
+			require.Equal(t, tt.wantForce, stopCmd.Force)
+			require.Equal(t, "user_requested", stopCmd.Reason)
+			require.Equal(t, command.SourceUser, stopCmd.Source())
+		})
+	}
+}
+
+func TestSpawnCommand_CreatesCorrectCommand(t *testing.T) {
+	capture := &captureSubmitter{}
+
+	cmd := command.NewSpawnProcessCommand(command.SourceUser, repository.RoleWorker)
+	capture.Submit(cmd)
+
+	require.Len(t, capture.commands, 1)
+	spawnCmd, ok := capture.commands[0].(*command.SpawnProcessCommand)
+	require.True(t, ok)
+	require.Equal(t, repository.RoleWorker, spawnCmd.Role)
+	require.Equal(t, command.SourceUser, spawnCmd.Source())
+}
+
+func TestRetireCommand_CreatesCorrectCommand(t *testing.T) {
+	tests := []struct {
+		name         string
+		input        string
+		wantWorkerID string
+		wantReason   string
+	}{
+		{
+			name:         "retire with default reason",
+			input:        "/retire worker-1",
+			wantWorkerID: "worker-1",
+			wantReason:   "user_requested",
+		},
+		{
+			name:         "retire with custom reason",
+			input:        "/retire worker-2 task completed",
+			wantWorkerID: "worker-2",
+			wantReason:   "task completed",
+		},
+		{
+			name:         "retire with multi-word reason",
+			input:        "/retire worker-3 finished all assigned tasks",
+			wantWorkerID: "worker-3",
+			wantReason:   "finished all assigned tasks",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			capture := &captureSubmitter{}
+			parts := strings.Fields(tt.input)
+
+			workerID := parts[1]
+			reason := "user_requested"
+			if len(parts) > 2 {
+				reason = strings.Join(parts[2:], " ")
+			}
+
+			cmd := command.NewRetireProcessCommand(command.SourceUser, workerID, reason)
+			capture.Submit(cmd)
+
+			require.Len(t, capture.commands, 1)
+			retireCmd, ok := capture.commands[0].(*command.RetireProcessCommand)
+			require.True(t, ok)
+			require.Equal(t, tt.wantWorkerID, retireCmd.ProcessID)
+			require.Equal(t, tt.wantReason, retireCmd.Reason)
+			require.Equal(t, command.SourceUser, retireCmd.Source())
+		})
+	}
+}
+
+func TestReplaceCommand_CreatesCorrectCommand(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		wantProcessID string
+		wantReason    string
+	}{
+		{
+			name:          "replace worker",
+			input:         "/replace worker-1",
+			wantProcessID: "worker-1",
+			wantReason:    "user_requested",
+		},
+		{
+			name:          "replace coordinator",
+			input:         "/replace coordinator",
+			wantProcessID: "coordinator",
+			wantReason:    "user_requested",
+		},
+		{
+			name:          "replace with reason",
+			input:         "/replace worker-1 needs fresh context",
+			wantProcessID: "worker-1",
+			wantReason:    "needs fresh context",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			capture := &captureSubmitter{}
+			parts := strings.Fields(tt.input)
+
+			processID := parts[1]
+			reason := "user_requested"
+			if len(parts) > 2 {
+				reason = strings.Join(parts[2:], " ")
+			}
+
+			cmd := command.NewReplaceProcessCommand(command.SourceUser, processID, reason)
+			capture.Submit(cmd)
+
+			require.Len(t, capture.commands, 1)
+			replaceCmd, ok := capture.commands[0].(*command.ReplaceProcessCommand)
+			require.True(t, ok)
+			require.Equal(t, tt.wantProcessID, replaceCmd.ProcessID)
+			require.Equal(t, tt.wantReason, replaceCmd.Reason)
+			require.Equal(t, command.SourceUser, replaceCmd.Source())
+		})
+	}
 }

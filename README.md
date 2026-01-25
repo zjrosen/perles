@@ -2,8 +2,11 @@
 
 Perles is a terminal UI for [beads](https://github.com/steveyegge/beads) issue tracking, powered by a custom **BQL (Beads Query Language)**. Search with boolean logic, filter by dates, traverse dependency trees, and build custom kanban views without leaving your terminal. Each kanban swimlane column is defined by a BQL query, so you can slice your issues however you want.
 
-Perles has its own [Orchestration Mode](ORCHESTRATION.md) that spawns a headless coordinator agent that can manage and recycle multiple headless worker agents for you with built-in multi-agent workflows or user defined workflows.
+Perles has its own [Orchestration Control Plane](ORCHESTRATION.md) that spawns a headless coordinator agent that can manage and recycle multiple headless worker agents for you with built-in multi-agent workflows or user defined workflows that can run in parallel.
 
+<p align="center">
+  <img src="./assets/control-plane.png" width="1440" alt="search">
+</p>
 <p align="center">
   <img src="./assets/search.png" width="1440" alt="search">
 </p>
@@ -18,9 +21,6 @@ Perles has its own [Orchestration Mode](ORCHESTRATION.md) that spawns a headless
 </p>
 <p align="center">
   <img src="./assets/delete-issue.png" width="1440" alt="board">
-</p>
-<p align="center">
-  <img src="./assets/orchestration-workflow-loaded.png" width="1440" alt="search">
 </p>
 
 ## Requirements
@@ -447,18 +447,19 @@ Perles looks for configuration in these locations (in order):
 
 ### Configuration Options
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `beads_dir` | string | `""` | Path to beads database directory (default: current directory) |
-| `auto_refresh` | bool | `true` | Auto-refresh when database changes |
-| `ui.show_counts` | bool | `true` | Show issue counts in column headers |
-| `ui.show_status_bar` | bool | `true` | Show status bar at bottom |
-| `theme.preset` | string | `""` | Theme preset name (see Theming section) |
-| `theme.colors.*` | hex | varies | Individual color token overrides |
-| `orchestration.client` | string | `"claude"` | AI client: claude, amp, or codex |
-| `orchestration.disable_worktrees` | bool | `false` | Disable git worktree isolation |
-| `orchestration.session_storage.base_dir` | string | `~/.perles/sessions` | Root directory for session storage |
-| `orchestration.session_storage.application_name` | string | auto | Override application name (default: derived from git remote) |
+| Option                                           | Type | Default              | Description                                                   |
+|--------------------------------------------------|------|----------------------|---------------------------------------------------------------|
+| `beads_dir`                                      | string | `""`                 | Path to beads database directory (default: current directory) |
+| `auto_refresh`                                   | bool | `true`               | Auto-refresh when database changes                            |
+| `ui.show_counts`                                 | bool | `true`               | Show issue counts in column headers                           |
+| `ui.show_status_bar`                             | bool | `true`               | Show status bar at bottom                                     |
+| `ui.vim_mode`                                    | bool | `false`              | Vim support for all textarea inputs |
+| `theme.preset`                                   | string | `""`                 | Theme preset name (see Theming section)                       |
+| `theme.colors.*`                                 | hex | varies               | Individual color token overrides                              |
+| `orchestration.coordinator_client`               | string | `"claude"`           | AI client: claude, amp, codex or opencode                     |
+| `orchestration.worker_client`                    | string | `"claude"`           | AI client: claude, amp, codex or opencode                     |
+| `orchestration.session_storage.base_dir`         | string | `~/.perles/sessions` | Root directory for session storage                            |
+| `orchestration.session_storage.application_name` | string | auto                 | Override application name (default: derived from git remote)  |
 
 ### Example Configuration
 
@@ -473,6 +474,7 @@ auto_refresh: true
 ui:
   show_counts: true
   show_status_bar: true
+  vim_mode: false
 
 # Theme (use a preset or customize colors)
 theme:
@@ -526,8 +528,8 @@ views:
 
 # AI Orchestration settings
 orchestration:
-  client: claude                       # claude (default), amp, or codex
-  disable_worktrees: false             # Disable git worktree isolation
+  coordinator_client: claude           # claude (default), amp, codex or opencode
+  worker_client: claude                # claude (default), amp, or codex or opencode
   session_storage:
     base_dir: ~/.perles/sessions       # Default session storage location
     # application_name: my-project     # Optional: override auto-derived name

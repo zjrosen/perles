@@ -38,7 +38,7 @@ const (
 )
 
 // CoordinatorPanelWidth is the fixed width for the coordinator chat panel.
-const CoordinatorPanelWidth = 70
+const CoordinatorPanelWidth = 65
 
 // createWorkflowTableConfig creates the table configuration for the workflow list.
 // The render callbacks close over the model to access controlPlane and services.Clock.
@@ -210,7 +210,7 @@ func (m Model) getEmptyMessage() string {
 	if m.filter.HasFilter() {
 		return "No workflows match the filter. Press Esc to clear."
 	}
-	return "No workflows yet. Press 'n' to create one, or use the API."
+	return "No workflows yet. Press 'n' to create one."
 }
 
 // getTableTitle returns the title for the workflow table including API port.
@@ -228,12 +228,16 @@ func (m Model) renderView() string {
 		return ""
 	}
 
-	// Footer section (action hints)
-	footer := m.renderActionHints()
+	// Footer section (action hints) - only show when there are workflows
+	var footer string
+	var footerHeight int
+	if len(m.workflows) > 0 {
+		footer = m.renderActionHints()
+		footerHeight = lipgloss.Height(footer)
+	}
 
 	// Calculate heights
 	headerHeight := 0
-	footerHeight := lipgloss.Height(footer)
 	contentHeight := max(m.height-headerHeight-footerHeight, 5)
 
 	// Calculate table/epic section heights
@@ -297,7 +301,12 @@ func (m Model) renderView() string {
 	}
 
 	// Compose the layout with JoinVertical
-	view := lipgloss.JoinVertical(lipgloss.Left, mainContent, footer)
+	var view string
+	if footer != "" {
+		view = lipgloss.JoinVertical(lipgloss.Left, mainContent, footer)
+	} else {
+		view = mainContent
+	}
 
 	// Use Place to position content in a fixed-size container
 	// This ensures the layout fills the entire terminal with footer at bottom

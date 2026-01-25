@@ -12,8 +12,8 @@ import (
 	"github.com/zjrosen/perles/internal/config"
 	"github.com/zjrosen/perles/internal/mocks"
 	"github.com/zjrosen/perles/internal/mode"
+	"github.com/zjrosen/perles/internal/mode/dashboard"
 	"github.com/zjrosen/perles/internal/mode/kanban"
-	"github.com/zjrosen/perles/internal/mode/orchestration"
 	"github.com/zjrosen/perles/internal/mode/search"
 	"github.com/zjrosen/perles/internal/orchestration/client"
 	v2 "github.com/zjrosen/perles/internal/orchestration/v2"
@@ -937,7 +937,7 @@ func TestApp_View_WithPanelVisible_InSearch(t *testing.T) {
 	require.NotEmpty(t, view, "view should render with panel visible in search mode")
 }
 
-func TestApp_View_PanelHiddenInOrchestration(t *testing.T) {
+func TestApp_View_PanelHiddenInDashboard(t *testing.T) {
 	m := createTestModel(t)
 
 	// Set terminal size
@@ -948,15 +948,15 @@ func TestApp_View_PanelHiddenInOrchestration(t *testing.T) {
 	m.chatPanel = m.chatPanel.Toggle()
 	require.True(t, m.chatPanel.Visible(), "panel should be visible after toggle")
 
-	// Switch to orchestration mode
-	m.currentMode = mode.ModeOrchestration
+	// Switch to dashboard mode
+	m.currentMode = mode.ModeDashboard
 
-	// View should NOT include chat panel (excluded in orchestration mode)
+	// View should NOT include chat panel (excluded in dashboard mode)
 	// even though chatPanel.Visible() is true
 	view := m.View()
-	require.NotEmpty(t, view, "view should render in orchestration mode")
+	require.NotEmpty(t, view, "view should render in dashboard mode")
 
-	// The orchestration view should be full width (not composed with chat panel)
+	// The dashboard view should be full width (not composed with chat panel)
 	// We verify this by checking that the panel's View() isn't being called
 	// through the layout composition logic
 }
@@ -1070,7 +1070,7 @@ func TestApp_ChatPanel_ToggleFromSearch(t *testing.T) {
 	require.False(t, m.chatPanelFocused, "panel should be unfocused after second Ctrl+W")
 }
 
-func TestApp_ChatPanel_ToggleInOrchestration_NoEffect(t *testing.T) {
+func TestApp_ChatPanel_ToggleInDashboard_NoEffect(t *testing.T) {
 	m := createTestModel(t)
 
 	// Pre-set infrastructure to avoid client creation during toggle
@@ -1089,28 +1089,28 @@ func TestApp_ChatPanel_ToggleInOrchestration_NoEffect(t *testing.T) {
 	m = newModel.(Model)
 	require.True(t, m.chatPanel.Visible(), "panel should be visible in kanban mode")
 
-	// Now close panel before switching to orchestration
+	// Now close panel before switching to dashboard
 	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlW})
 	m = newModel.(Model)
 	require.False(t, m.chatPanel.Visible(), "panel should be hidden")
 
-	// Switch to orchestration mode (setting directly to avoid initializing full orchestration)
-	m.currentMode = mode.ModeOrchestration
+	// Switch to dashboard mode (setting directly to avoid initializing full dashboard)
+	m.currentMode = mode.ModeDashboard
 
-	// Verify the handleToggleChatPanel would return early for orchestration mode
-	// We can't easily send Ctrl+W without initializing orchestration, but we can verify
+	// Verify the handleToggleChatPanel would return early for dashboard mode
+	// We can't easily send Ctrl+W without initializing dashboard, but we can verify
 	// the condition check works by testing the View excludes the panel
 	m.chatPanel = m.chatPanel.Toggle() // Force visible
 	require.True(t, m.chatPanel.Visible(), "panel.Visible() should be true")
 
-	// But View should NOT show panel in orchestration mode (even if visible flag is true)
-	// This is verified by the View implementation check: m.currentMode != mode.ModeOrchestration
+	// But View should NOT show panel in dashboard mode (even if visible flag is true)
+	// This is verified by the View implementation check: m.currentMode != mode.ModeDashboard
 	view := m.View()
 	require.NotEmpty(t, view, "view should render")
 
-	// The key point: panel is excluded from orchestration mode by both:
-	// 1. View(): checks m.currentMode != mode.ModeOrchestration
-	// 2. Update(): checks m.currentMode != mode.ModeOrchestration before handling Ctrl+W
+	// The key point: panel is excluded from dashboard mode by both:
+	// 1. View(): checks m.currentMode != mode.ModeDashboard
+	// 2. Update(): checks m.currentMode != mode.ModeDashboard before handling Ctrl+W
 }
 
 func TestApp_ChatPanel_FocusRouting(t *testing.T) {
@@ -1247,98 +1247,27 @@ func TestApp_ChatPanel_MinWidthJustBelow(t *testing.T) {
 }
 
 // ============================================================================
-// Orchestration Mode Transition Tests
+// Dashboard Mode Transition Tests
 // ============================================================================
 
-func TestApp_ChatPanel_ClosesOnOrchestrationEntry(t *testing.T) {
-	m := createTestModel(t)
-
-	// Pre-set infrastructure to avoid client creation during toggle
-	infra := newTestChatInfrastructure(t)
-	err := infra.Start()
-	require.NoError(t, err)
-	m.chatInfra = infra
-	m.chatPanel = m.chatPanel.SetInfrastructure(infra)
-
-	// Set terminal size
-	newModel, _ := m.Update(tea.WindowSizeMsg{Width: 150, Height: 40})
-	m = newModel.(Model)
-
-	// Open chat panel
-	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlW})
-	m = newModel.(Model)
-	require.True(t, m.chatPanel.Visible(), "panel should be visible before orchestration entry")
-	require.True(t, m.chatPanelFocused, "panel should be focused before orchestration entry")
-
-	// Enter orchestration mode via SwitchToOrchestrationMsg
-	newModel, _ = m.Update(kanban.SwitchToOrchestrationMsg{})
-	m = newModel.(Model)
-
-	// Verify mode switched
-	require.Equal(t, mode.ModeOrchestration, m.currentMode, "should be in orchestration mode")
-
-	// Verify panel is now hidden and unfocused
-	require.False(t, m.chatPanel.Visible(), "panel should be hidden after orchestration entry")
-	require.False(t, m.chatPanelFocused, "panel should be unfocused after orchestration entry")
-}
-
-func TestApp_ChatPanel_ClosesOnOrchestrationEntry_AlreadyClosed(t *testing.T) {
+func TestApp_ChatPanel_HiddenInDashboardMode(t *testing.T) {
 	m := createTestModel(t)
 
 	// Set terminal size
 	newModel, _ := m.Update(tea.WindowSizeMsg{Width: 150, Height: 40})
 	m = newModel.(Model)
 
-	// Panel starts hidden
-	require.False(t, m.chatPanel.Visible(), "panel should start hidden")
-	require.False(t, m.chatPanelFocused, "panel should start unfocused")
+	// Toggle panel visible
+	m.chatPanel = m.chatPanel.Toggle()
+	require.True(t, m.chatPanel.Visible(), "panel should be visible after toggle")
 
-	// Enter orchestration mode via SwitchToOrchestrationMsg
-	newModel, _ = m.Update(kanban.SwitchToOrchestrationMsg{})
-	m = newModel.(Model)
+	// Switch to dashboard mode (setting directly to avoid initializing full dashboard)
+	m.currentMode = mode.ModeDashboard
 
-	// Verify mode switched
-	require.Equal(t, mode.ModeOrchestration, m.currentMode, "should be in orchestration mode")
-
-	// Panel should still be hidden (no-op for already closed panel)
-	require.False(t, m.chatPanel.Visible(), "panel should remain hidden")
-	require.False(t, m.chatPanelFocused, "panel should remain unfocused")
-}
-
-func TestApp_ChatPanel_CleanupCalledOnOrchestration_WithInfrastructure(t *testing.T) {
-	m := createTestModel(t)
-
-	// Set terminal size
-	newModel, _ := m.Update(tea.WindowSizeMsg{Width: 150, Height: 40})
-	m = newModel.(Model)
-
-	// Create and set infrastructure on the chat panel
-	infra := newTestChatInfrastructure(t)
-	err := infra.Start()
-	require.NoError(t, err)
-
-	// Set infrastructure on chat panel
-	m.chatPanel = m.chatPanel.SetInfrastructure(infra)
-
-	// Verify infrastructure is set
-	require.True(t, m.chatPanel.HasInfrastructure(), "infrastructure should be set")
-
-	// Open chat panel
-	m.chatPanel = m.chatPanel.Toggle().Focus()
-	m.chatPanelFocused = true
-	require.True(t, m.chatPanel.Visible(), "panel should be visible")
-
-	// Enter orchestration mode via SwitchToOrchestrationMsg
-	// This should call Cleanup() which calls infra.Shutdown()
-	newModel, _ = m.Update(kanban.SwitchToOrchestrationMsg{})
-	m = newModel.(Model)
-
-	// Verify mode switched
-	require.Equal(t, mode.ModeOrchestration, m.currentMode, "should be in orchestration mode")
-
-	// Verify panel is hidden
-	require.False(t, m.chatPanel.Visible(), "panel should be hidden after orchestration entry")
-	require.False(t, m.chatPanelFocused, "panel should be unfocused")
+	// View should NOT include chat panel (excluded in dashboard mode)
+	// even though chatPanel.Visible() is true
+	view := m.View()
+	require.NotEmpty(t, view, "view should render in dashboard mode")
 
 	// The infrastructure's context should be cancelled (verified via Shutdown being called)
 	// We can't easily verify internal state, but we can verify no panic occurred
@@ -2139,41 +2068,14 @@ func TestApp_ModeSwitch_RapidToggleSequence_MaintainsCorrectWidth(t *testing.T) 
 // TestApp_OrchestrationQuit_SetsSizeCorrectly verifies that the orchestration.QuitMsg
 // handler correctly calculates width based on chatpanel visibility and calls SetSize
 // on kanban mode BEFORE RefreshFromConfig(). This ensures kanban mode has correct
-// dimensions before layout recalculation when exiting orchestration mode.
+// dimensions before layout recalculation when exiting dashboard mode.
 //
-// Note: The chatpanel is always hidden when entering orchestration mode (closed on entry),
+// Note: The chatpanel is always hidden when entering dashboard mode (closed on entry),
 // so the panel should always be hidden when exiting. This test provides defensive coverage
 // for the edge case where the panel is somehow visible.
-func TestApp_OrchestrationQuit_SetsSizeCorrectly(t *testing.T) {
+func TestApp_DashboardQuit_SetsSizeCorrectly(t *testing.T) {
 	terminalWidth := 150
 	terminalHeight := 40
-
-	t.Run("Panel hidden (normal case) - kanban gets full width", func(t *testing.T) {
-		m := createTestModel(t)
-
-		// Set terminal size
-		newModel, _ := m.Update(tea.WindowSizeMsg{Width: terminalWidth, Height: terminalHeight})
-		m = newModel.(Model)
-
-		// Enter orchestration mode via SwitchToOrchestrationMsg
-		// This automatically closes the chatpanel
-		newModel, _ = m.Update(kanban.SwitchToOrchestrationMsg{})
-		m = newModel.(Model)
-		require.Equal(t, mode.ModeOrchestration, m.currentMode, "should be in orchestration mode")
-		require.False(t, m.chatPanel.Visible(), "panel should be hidden after orchestration entry")
-
-		// Exit orchestration via QuitMsg
-		newModel, _ = m.Update(orchestration.QuitMsg{})
-		m = newModel.(Model)
-
-		// Verify mode switched back to kanban
-		require.Equal(t, mode.ModeKanban, m.currentMode, "should be back in kanban mode")
-		require.False(t, m.chatPanel.Visible(), "panel should remain hidden")
-
-		// Verify View renders correctly (SetSize was called with full width)
-		view := m.View()
-		require.NotEmpty(t, view, "kanban view should render without panic")
-	})
 
 	t.Run("Panel visible (edge case) - kanban gets reduced width", func(t *testing.T) {
 		m := createTestModel(t)
@@ -2189,17 +2091,17 @@ func TestApp_OrchestrationQuit_SetsSizeCorrectly(t *testing.T) {
 		newModel, _ := m.Update(tea.WindowSizeMsg{Width: terminalWidth, Height: terminalHeight})
 		m = newModel.(Model)
 
-		// Set orchestration mode directly (simulating being in orchestration)
-		m.currentMode = mode.ModeOrchestration
+		// Set dashboard mode directly (simulating being in dashboard)
+		m.currentMode = mode.ModeDashboard
 
 		// Manually set chatpanel visible to test the defensive edge case
-		// (This shouldn't happen in normal operation since panel is closed on orchestration entry,
+		// (This shouldn't happen in normal operation since panel is closed on dashboard entry,
 		// but the SetSize call provides defensive protection)
 		m.chatPanel = m.chatPanel.Toggle()
 		require.True(t, m.chatPanel.Visible(), "panel should be visible for edge case test")
 
-		// Exit orchestration via QuitMsg
-		newModel, _ = m.Update(orchestration.QuitMsg{})
+		// Exit dashboard via QuitMsg
+		newModel, _ = m.Update(dashboard.QuitMsg{})
 		m = newModel.(Model)
 
 		// Verify mode switched back to kanban
@@ -2210,62 +2112,4 @@ func TestApp_OrchestrationQuit_SetsSizeCorrectly(t *testing.T) {
 		view := m.View()
 		require.NotEmpty(t, view, "kanban view should render without panic")
 	})
-}
-
-// ============================================================================
-// Session Resumption Tests (perles-mewu.4)
-// ============================================================================
-
-func TestSwitchToOrchestration_NewSession(t *testing.T) {
-	m := createTestModel(t)
-
-	// Set terminal size
-	newModel, _ := m.Update(tea.WindowSizeMsg{Width: 150, Height: 40})
-	m = newModel.(Model)
-
-	// Verify initial state is kanban mode
-	require.Equal(t, mode.ModeKanban, m.currentMode, "should start in kanban mode")
-
-	// Send SwitchToOrchestrationMsg with empty ResumeSessionDir (new session)
-	newModel, cmd := m.Update(kanban.SwitchToOrchestrationMsg{})
-	m = newModel.(Model)
-
-	// Verify mode switched to orchestration
-	require.Equal(t, mode.ModeOrchestration, m.currentMode, "should be in orchestration mode")
-
-	// Verify orchestration model was created with empty ResumeSessionDir
-	// The Init() command should return StartCoordinatorMsg (not ResumeSessionMsg)
-	require.NotNil(t, cmd, "Init command should be returned")
-	msg := cmd()
-	_, isStartMsg := msg.(orchestration.StartCoordinatorMsg)
-	require.True(t, isStartMsg, "expected StartCoordinatorMsg for new session, got %T", msg)
-}
-
-func TestSwitchToOrchestration_WithResume(t *testing.T) {
-	m := createTestModel(t)
-
-	// Set terminal size
-	newModel, _ := m.Update(tea.WindowSizeMsg{Width: 150, Height: 40})
-	m = newModel.(Model)
-
-	// Verify initial state is kanban mode
-	require.Equal(t, mode.ModeKanban, m.currentMode, "should start in kanban mode")
-
-	// Send SwitchToOrchestrationMsg with populated ResumeSessionDir
-	sessionDir := "/path/to/session/2026-01-12/abc123"
-	newModel, cmd := m.Update(kanban.SwitchToOrchestrationMsg{
-		ResumeSessionDir: sessionDir,
-	})
-	m = newModel.(Model)
-
-	// Verify mode switched to orchestration
-	require.Equal(t, mode.ModeOrchestration, m.currentMode, "should be in orchestration mode")
-
-	// Verify orchestration model was created with ResumeSessionDir
-	// The Init() command should return ResumeSessionMsg (not StartCoordinatorMsg)
-	require.NotNil(t, cmd, "Init command should be returned")
-	msg := cmd()
-	resumeMsg, isResumeMsg := msg.(orchestration.ResumeSessionMsg)
-	require.True(t, isResumeMsg, "expected ResumeSessionMsg for resume session, got %T", msg)
-	require.Equal(t, sessionDir, resumeMsg.SessionDir, "ResumeSessionDir should match")
 }

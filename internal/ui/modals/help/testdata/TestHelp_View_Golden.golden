@@ -14,7 +14,7 @@
 │  ctrl+h     move column left                                 ctrl+k     prev chat tab                                            │
 │  ctrl+l     move column right                                ctrl+n     next chat session                                        │
 │  ctrl+e     edit issue                                       ctrl+p     prev chat session                                        │
-│  ctrl+d     delete issue                                     ctrl+o     orchestration mode                                       │
+│  ctrl+d     delete issue                                     ctrl+o     dashboard                                                │
 │                                                                                                                                  │
 │                                                                                                                                  │
 │  Press ? or Esc to close                                                                                                         │

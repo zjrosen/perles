@@ -157,7 +157,6 @@ type OrchestrationConfig struct {
 	Client            string               `mapstructure:"client"`             // "claude" (default), "amp", "codex", or "gemini" - backward compat
 	CoordinatorClient string               `mapstructure:"coordinator_client"` // Client for coordinator (overrides Client)
 	WorkerClient      string               `mapstructure:"worker_client"`      // Client for workers (overrides Client)
-	DisableWorktrees  bool                 `mapstructure:"disable_worktrees"`  // Skip worktree prompt (default: false)
 	APIPort           int                  `mapstructure:"api_port"`           // HTTP API port (0 = auto-assign, default: 0)
 	Claude            ClaudeClientConfig   `mapstructure:"claude"`
 	ClaudeWorker      ClaudeClientConfig   `mapstructure:"claude_worker"` // Worker-specific Claude config (uses claude config if empty)
@@ -844,9 +843,6 @@ orchestration:
 
   # AI client provider for the workers: "claude" (default), "amp", "codex", "opencode", or "opencode"
   worker_client: claude
-
-  # Skip worktree prompt and always run in current directory (default: false)
-  # disable_worktrees: true
 
   # Claude-specific settings (only used when client: claude)
   claude:

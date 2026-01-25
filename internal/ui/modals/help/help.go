@@ -223,10 +223,7 @@ func (m Model) renderKanbanContent() string {
 	navCol.WriteString(renderBinding(keys.App.ChatPrevTab))
 	navCol.WriteString(renderBinding(keys.App.ChatNextSession))
 	navCol.WriteString(renderBinding(keys.App.ChatPrevSession))
-	navCol.WriteString(renderBinding(keys.Kanban.Orchestrate))
-	if m.flags.Enabled(flags.FlagSessionResume) {
-		navCol.WriteString(renderBinding(keys.Kanban.OrchestrateResume))
-	}
+	navCol.WriteString(renderBinding(keys.Kanban.Dashboard))
 
 	// Actions column
 	var actionsCol strings.Builder

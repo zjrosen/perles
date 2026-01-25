@@ -56,9 +56,13 @@ func createTestModel(t *testing.T, workflows []*controlplane.WorkflowInstance) (
 		func() {},
 	).Maybe()
 
+	// Setup mock sound service
+	mockSounds := mocks.NewMockSoundService(t)
+	mockSounds.EXPECT().Play(mock.Anything, mock.Anything).Maybe()
+
 	cfg := Config{
 		ControlPlane: mockCP,
-		Services:     mode.Services{},
+		Services:     mode.Services{Sounds: mockSounds},
 	}
 
 	m := New(cfg)
@@ -84,9 +88,13 @@ func TestModel_Init_ReturnsCommands(t *testing.T) {
 	mockCP.On("List", mock.Anything, mock.Anything).Return(workflows, nil).Maybe()
 	mockCP.On("Subscribe", mock.Anything).Return((<-chan controlplane.ControlPlaneEvent)(nil), func() {}).Maybe()
 
+	// Setup mock sound service
+	mockSounds := mocks.NewMockSoundService(t)
+	mockSounds.EXPECT().Play("orchestration_welcome", "orchestration_welcome").Once()
+
 	cfg := Config{
 		ControlPlane: mockCP,
-		Services:     mode.Services{},
+		Services:     mode.Services{Sounds: mockSounds},
 	}
 
 	m := New(cfg)

@@ -13,14 +13,17 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	zone "github.com/lrstanley/bubblezone"
 
+	"github.com/zjrosen/perles/internal/mode"
 	"github.com/zjrosen/perles/internal/orchestration/controlplane"
 	"github.com/zjrosen/perles/internal/orchestration/events"
 	"github.com/zjrosen/perles/internal/orchestration/message"
 	"github.com/zjrosen/perles/internal/orchestration/metrics"
 	"github.com/zjrosen/perles/internal/orchestration/v2/command"
+	"github.com/zjrosen/perles/internal/orchestration/v2/process"
 	"github.com/zjrosen/perles/internal/orchestration/v2/repository"
 	"github.com/zjrosen/perles/internal/ui/shared/chatrender"
 	"github.com/zjrosen/perles/internal/ui/shared/panes"
+	"github.com/zjrosen/perles/internal/ui/shared/toaster"
 	"github.com/zjrosen/perles/internal/ui/shared/vimtextarea"
 	"github.com/zjrosen/perles/internal/ui/styles"
 )
@@ -944,6 +947,125 @@ func (m Model) sendToCoordinator(workflowID controlplane.WorkflowID, content str
 		cmd := command.NewSendToProcessCommand(command.SourceUser, repository.CoordinatorID, content)
 		cmdSubmitter.Submit(cmd)
 
+		return nil
+	}
+}
+
+// handleSlashCommand routes slash commands to their respective handlers.
+// Returns (model, cmd) - unknown commands fall through to normal message routing.
+func (m Model) handleSlashCommand(workflowID controlplane.WorkflowID, content string) (Model, tea.Cmd) {
+	parts := strings.Fields(content)
+	if len(parts) == 0 {
+		return m, nil
+	}
+
+	slashCmd := parts[0]
+	switch slashCmd {
+	case "/stop":
+		return m.handleStopCommand(workflowID, parts)
+	case "/spawn":
+		return m.handleSpawnCommand(workflowID)
+	case "/retire":
+		return m.handleRetireCommand(workflowID, parts)
+	case "/replace":
+		return m.handleReplaceCommand(workflowID, parts)
+	default:
+		// Unknown slash commands are sent to coordinator as-is
+		return m, m.sendToCoordinator(workflowID, content)
+	}
+}
+
+// handleStopCommand handles the /stop <process-id> [--force] command.
+func (m Model) handleStopCommand(workflowID controlplane.WorkflowID, parts []string) (Model, tea.Cmd) {
+	if len(parts) < 2 {
+		return m, showWarning("Usage: /stop <process-id> [--force]")
+	}
+
+	processID := parts[1]
+	force := len(parts) > 2 && parts[2] == "--force"
+
+	return m, m.submitCommand(workflowID, func(submitter process.CommandSubmitter) {
+		cmd := command.NewStopProcessCommand(command.SourceUser, processID, force, "user_requested")
+		submitter.Submit(cmd)
+	})
+}
+
+// handleSpawnCommand handles the /spawn command to spawn a new worker.
+func (m Model) handleSpawnCommand(workflowID controlplane.WorkflowID) (Model, tea.Cmd) {
+	return m, m.submitCommand(workflowID, func(submitter process.CommandSubmitter) {
+		cmd := command.NewSpawnProcessCommand(command.SourceUser, repository.RoleWorker)
+		submitter.Submit(cmd)
+	})
+}
+
+// handleRetireCommand handles the /retire <worker-id> [reason] command.
+func (m Model) handleRetireCommand(workflowID controlplane.WorkflowID, parts []string) (Model, tea.Cmd) {
+	if len(parts) < 2 {
+		return m, showWarning("Usage: /retire <worker-id> [reason]")
+	}
+
+	workerID := parts[1]
+
+	// Block retiring the coordinator
+	if workerID == repository.CoordinatorID {
+		return m, showWarning("Cannot retire coordinator. Use /replace coordinator instead.")
+	}
+
+	reason := "user_requested"
+	if len(parts) > 2 {
+		reason = strings.Join(parts[2:], " ")
+	}
+
+	return m, m.submitCommand(workflowID, func(submitter process.CommandSubmitter) {
+		cmd := command.NewRetireProcessCommand(command.SourceUser, workerID, reason)
+		submitter.Submit(cmd)
+	})
+}
+
+// handleReplaceCommand handles the /replace <process-id> [reason] command.
+func (m Model) handleReplaceCommand(workflowID controlplane.WorkflowID, parts []string) (Model, tea.Cmd) {
+	if len(parts) < 2 {
+		return m, showWarning("Usage: /replace <process-id> [reason]")
+	}
+
+	processID := parts[1]
+
+	reason := "user_requested"
+	if len(parts) > 2 {
+		reason = strings.Join(parts[2:], " ")
+	}
+
+	return m, m.submitCommand(workflowID, func(submitter process.CommandSubmitter) {
+		cmd := command.NewReplaceProcessCommand(command.SourceUser, processID, reason)
+		submitter.Submit(cmd)
+	})
+}
+
+// showWarning returns a command that shows a warning toast.
+func showWarning(msg string) tea.Cmd {
+	return func() tea.Msg {
+		return mode.ShowToastMsg{Message: msg, Style: toaster.StyleWarn}
+	}
+}
+
+// submitCommand submits a command to the specified workflow's command submitter.
+func (m Model) submitCommand(workflowID controlplane.WorkflowID, fn func(process.CommandSubmitter)) tea.Cmd {
+	return func() tea.Msg {
+		if m.controlPlane == nil {
+			return nil
+		}
+
+		wf, err := m.controlPlane.Get(context.Background(), workflowID)
+		if err != nil || wf == nil || wf.Infrastructure == nil {
+			return nil
+		}
+
+		cmdSubmitter := wf.Infrastructure.Core.CmdSubmitter
+		if cmdSubmitter == nil {
+			return nil
+		}
+
+		fn(cmdSubmitter)
 		return nil
 	}
 }

@@ -61,7 +61,6 @@ test-update:
 		./internal/ui/tree/... \
 		./internal/mode/dashboard/... \
 		./internal/mode/search/... \
-		./internal/mode/orchestration/... \
 		./internal/mode/playground/... \
 		-update
 

@@ -20,7 +20,6 @@ type AppMode int
 const (
 	ModeKanban AppMode = iota
 	ModeSearch
-	ModeOrchestration
 	ModeDashboard
 )
 

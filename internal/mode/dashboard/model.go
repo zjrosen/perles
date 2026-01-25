@@ -215,6 +215,9 @@ func New(cfg Config) Model {
 // Init returns initial commands for the mode.
 // It subscribes to ControlPlane events and loads the initial workflow list.
 func (m Model) Init() tea.Cmd {
+	// Play welcome sound when entering orchestration dashboard
+	m.services.Sounds.Play("orchestration_welcome", "orchestration_welcome")
+
 	return tea.Batch(
 		m.subscribeToEvents(),
 		m.loadWorkflows(),
@@ -266,6 +269,13 @@ func (m Model) Update(msg tea.Msg) (mode.Controller, tea.Cmd) {
 			// This is critical: the listenForEvents() goroutine must be restarted after each event,
 			// otherwise we stop receiving events entirely.
 			return m.handleControlPlaneEvent(msg)
+
+		case eventSubscriptionReadyMsg:
+			// Handle event subscription setup even when modal is open.
+			// The subscription is initiated by Init() and may complete after the modal opens.
+			m.eventCh = msg.eventCh
+			m.unsubscribe = msg.unsubscribe
+			return m, m.listenForEvents()
 
 		default:
 			var cmd tea.Cmd
@@ -371,6 +381,10 @@ func (m Model) Update(msg tea.Msg) (mode.Controller, tea.Cmd) {
 		return m.handleStartWorkflowFailed(msg)
 
 	case CoordinatorPanelSubmitMsg:
+		// Check for slash commands first
+		if strings.HasPrefix(msg.Content, "/") {
+			return m.handleSlashCommand(msg.WorkflowID, msg.Content)
+		}
 		// Send message to coordinator
 		return m, m.sendToCoordinator(msg.WorkflowID, msg.Content)
 

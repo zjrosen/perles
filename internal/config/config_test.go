@@ -762,29 +762,6 @@ func TestThemeConfig_FlattenedColors_MapAnyAny(t *testing.T) {
 	require.Equal(t, "#FF0000", result["text.primary"])
 }
 
-// Tests for DisableWorktrees config field
-
-func TestOrchestrationConfig_DisableWorktrees_Default(t *testing.T) {
-	// Verify Defaults() returns false for DisableWorktrees (Go's zero value)
-	cfg := Defaults()
-	require.False(t, cfg.Orchestration.DisableWorktrees, "DisableWorktrees should be false by default")
-}
-
-func TestOrchestrationConfig_DisableWorktrees_Explicit(t *testing.T) {
-	// Verify explicit true value is preserved when set
-	cfg := OrchestrationConfig{
-		Client:           "claude",
-		DisableWorktrees: true,
-	}
-	require.True(t, cfg.DisableWorktrees, "DisableWorktrees should preserve explicit true value")
-}
-
-func TestOrchestrationConfig_DisableWorktrees_ZeroValue(t *testing.T) {
-	// Test that zero value OrchestrationConfig has DisableWorktrees as false
-	cfg := OrchestrationConfig{}
-	require.False(t, cfg.DisableWorktrees, "DisableWorktrees zero value should be false")
-}
-
 // Tests for TracingConfig
 
 func TestTracingConfig_Defaults(t *testing.T) {

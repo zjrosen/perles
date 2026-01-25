@@ -24,7 +24,6 @@ import (
 	"github.com/zjrosen/perles/internal/mode"
 	"github.com/zjrosen/perles/internal/mode/dashboard"
 	"github.com/zjrosen/perles/internal/mode/kanban"
-	"github.com/zjrosen/perles/internal/mode/orchestration"
 	"github.com/zjrosen/perles/internal/mode/search"
 	"github.com/zjrosen/perles/internal/mode/shared"
 	"github.com/zjrosen/perles/internal/orchestration/controlplane"
@@ -49,11 +48,10 @@ import (
 // Model is the root application state.
 type Model struct {
 	// Mode management
-	currentMode   mode.AppMode
-	kanban        kanban.Model
-	search        search.Model
-	orchestration orchestration.Model
-	dashboard     dashboard.Model
+	currentMode mode.AppMode
+	kanban      kanban.Model
+	search      search.Model
+	dashboard   dashboard.Model
 
 	// ControlPlane for multi-workflow management (lazy initialized on dashboard entry)
 	controlPlane controlplane.ControlPlane
@@ -285,13 +283,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Calculate main content width (reduced when chat panel is visible)
 		mainWidth := msg.Width
-		if m.chatPanel.Visible() && m.currentMode != mode.ModeOrchestration {
+		if m.chatPanel.Visible() && m.currentMode != mode.ModeDashboard {
 			mainWidth = msg.Width - m.chatPanelWidth()
 		}
 
 		m.kanban = m.kanban.SetSize(mainWidth, msg.Height)
 		m.search = m.search.SetSize(mainWidth, msg.Height)
-		m.orchestration = m.orchestration.SetSize(msg.Width, msg.Height)
 		m.dashboard = m.dashboard.SetSize(msg.Width, msg.Height).(dashboard.Model)
 		m.toaster = m.toaster.SetSize(msg.Width, msg.Height)
 		m.logOverlay.SetSize(msg.Width, msg.Height)
@@ -366,14 +363,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
-		// Handle Ctrl+W to toggle chat panel (not in orchestration or dashboard mode)
+		// Handle Ctrl+W to toggle chat panel (not in dashboard mode)
 		// Dashboard mode has its own coordinator panel toggle
-		if key.Matches(msg, keys.App.ToggleChatPanel) && m.currentMode != mode.ModeOrchestration && m.currentMode != mode.ModeDashboard {
+		if key.Matches(msg, keys.App.ToggleChatPanel) && m.currentMode != mode.ModeDashboard {
 			return m.handleToggleChatPanel()
 		}
 
 		// Tab toggles focus between main view and chat panel when panel is visible
-		if msg.Type == tea.KeyTab && m.chatPanel.Visible() && m.currentMode != mode.ModeOrchestration {
+		if msg.Type == tea.KeyTab && m.chatPanel.Visible() && m.currentMode != mode.ModeDashboard {
 			if m.chatPanelFocused {
 				m.chatPanel = m.chatPanel.Blur()
 				m.chatPanelFocused = false
@@ -387,7 +384,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Chat panel focus routing - when focused, panel takes precedence for key events
-		if m.chatPanelFocused && m.chatPanel.Visible() && m.currentMode != mode.ModeOrchestration {
+		if m.chatPanelFocused && m.chatPanel.Visible() && m.currentMode != mode.ModeDashboard {
 			var cmd tea.Cmd
 			m.chatPanel, cmd = m.chatPanel.Update(msg)
 			return m, cmd
@@ -436,78 +433,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.kanban = m.kanban.SetSize(mainWidth, m.height)
 
 		// Rebuild kanban from config to reflect any column changes made in search mode
-		var cmd tea.Cmd
-		m.kanban, cmd = m.kanban.RefreshFromConfig()
-		return m, cmd
-
-	case kanban.SwitchToOrchestrationMsg:
-		// Log mode switch with resume status
-		isResume := msg.ResumeSessionDir != ""
-		if isResume {
-			log.Info(log.CatMode, "Switching mode", "from", "kanban", "to", "orchestration", "resume", true, "sessionDir", msg.ResumeSessionDir)
-		} else {
-			log.Info(log.CatMode, "Switching mode", "from", "kanban", "to", "orchestration", "resume", false)
-		}
-
-		// Close chat panel if open to prevent "two AIs" confusion
-		// Must call Cleanup() before entering orchestration to stop the AI process
-		// and prevent goroutine leaks (context cancelled, processor drained)
-		if m.chatPanel.Visible() {
-			m.chatPanel.Cleanup()
-			m.chatPanel = m.chatPanel.Toggle().Blur() // Set hidden and unfocused
-			m.chatPanelFocused = false
-			log.Info(log.CatMode, "Chat panel closed on orchestration entry")
-		}
-
-		m.currentMode = mode.ModeOrchestration
-
-		// Play welcome sound for orchestration mode (mirrors chat_welcome pattern)
-		if m.services.Sounds != nil {
-			m.services.Sounds.Play("greeting", "orchestration_welcome")
-		}
-
-		// Get orchestration config from services.Config
-		orchConfig := m.services.Config.Orchestration
-
-		// Use shared workflow registry (created at app startup)
-		m.orchestration = orchestration.New(orchestration.Config{
-			Services:             m.services,
-			WorkDir:              m.services.WorkDir,
-			AgentProviders:       orchConfig.AgentProviders(),
-			WorkflowRegistry:     m.workflowRegistry,
-			VimMode:              m.services.Config.UI.VimMode,
-			DebugMode:            m.debugMode,
-			DisableWorktrees:     orchConfig.DisableWorktrees,
-			TracingConfig:        orchConfig.Tracing,
-			SessionStorageConfig: orchConfig.SessionStorage,
-			ResumeSessionDir:     msg.ResumeSessionDir,
-		}).SetSize(m.width, m.height)
-		return m, m.orchestration.Init()
-
-	case orchestration.QuitMsg:
-		// Switch back to kanban mode from orchestration
-		log.Info(log.CatMode, "Switching mode", "from", "orchestration", "to", "kanban")
-
-		// Clean up all orchestration resources (processes, MCP server, subscriptions)
-		m.orchestration.Cleanup()
-
-		// Log exit message if present (worktree cleanup info)
-		if exitMsg := m.orchestration.ExitMessage(); exitMsg != "" {
-			log.Info(log.CatMode, "Orchestration exit", "message", exitMsg)
-		}
-
-		m.currentMode = mode.ModeKanban
-
-		// Calculate main content width based on chatpanel state and set size
-		// BEFORE RefreshFromConfig() so kanban has correct dimensions before layout recalculation
-		// Note: Panel is always hidden after orchestration (closed on entry), but this is defensive
-		mainWidth := m.width
-		if m.chatPanel.Visible() {
-			mainWidth = m.width - m.chatPanelWidth()
-		}
-		m.kanban = m.kanban.SetSize(mainWidth, m.height)
-
-		// Refresh kanban to show any changes made during orchestration
 		var cmd tea.Cmd
 		m.kanban, cmd = m.kanban.RefreshFromConfig()
 		return m, cmd
@@ -640,18 +565,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Forward vimtextarea.SubmitMsg to chatPanel for processing
 	// This is emitted when user presses Enter in the chat input
 	case vimtextarea.SubmitMsg:
-		if m.chatPanelFocused && m.chatPanel.Visible() && m.currentMode != mode.ModeOrchestration {
+		if m.chatPanelFocused && m.chatPanel.Visible() && m.currentMode != mode.ModeDashboard {
 			var cmd tea.Cmd
 			m.chatPanel, cmd = m.chatPanel.Update(msg)
 			return m, cmd
 		}
-		// Fall through to mode handler (orchestration mode handles its own SubmitMsg)
+		// Fall through to mode handler (dashboard mode handles its own SubmitMsg)
 
 	// Forward chat panel pubsub events (from SimpleChatInfrastructure)
 	// Always forward to chat panel to keep listener active (even when hidden).
 	// This prevents the listener chain from breaking when the panel is toggled off.
 	case pubsub.Event[any]:
-		if m.chatPanel.HasInfrastructure() && m.currentMode != mode.ModeOrchestration {
+		if m.chatPanel.HasInfrastructure() && m.currentMode != mode.ModeDashboard {
 			var cmd tea.Cmd
 			m.chatPanel, cmd = m.chatPanel.Update(msg)
 			// Don't return - let mode also process if needed (though modes won't
@@ -664,7 +589,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Forward spinner tick to chat panel for loading animation
 	case chatpanel.SpinnerTickMsg:
-		if m.chatPanel.Visible() && m.currentMode != mode.ModeOrchestration {
+		if m.chatPanel.Visible() && m.currentMode != mode.ModeDashboard {
 			var cmd tea.Cmd
 			m.chatPanel, cmd = m.chatPanel.Update(msg)
 			return m, cmd
@@ -795,12 +720,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case mode.ModeSearch:
 		var cmd tea.Cmd
 		m.search, cmd = m.search.Update(msg)
-
-		return m, cmd
-
-	case mode.ModeOrchestration:
-		var cmd tea.Cmd
-		m.orchestration, cmd = m.orchestration.Update(msg)
 
 		return m, cmd
 
@@ -1144,17 +1063,13 @@ func (m Model) handleNewSessionRequest() (tea.Model, tea.Cmd) {
 
 // View implements tea.Model.
 func (m Model) View() string {
-	// Determine if chat panel should be shown (excluded from orchestration and dashboard modes)
-	showChatPanel := m.chatPanel.Visible() &&
-		m.currentMode != mode.ModeOrchestration &&
-		m.currentMode != mode.ModeDashboard
+	// Determine if chat panel should be shown (excluded from dashboard mode which has its own coordinator panel)
+	showChatPanel := m.chatPanel.Visible() && m.currentMode != mode.ModeDashboard
 
 	var view string
 	switch m.currentMode {
 	case mode.ModeSearch:
 		view = m.search.View()
-	case mode.ModeOrchestration:
-		view = m.orchestration.View()
 	case mode.ModeDashboard:
 		view = m.dashboard.View()
 	default:
@@ -1194,12 +1109,6 @@ func (m Model) View() string {
 // Close releases resources held by the application.
 func (m *Model) Close() error {
 	m.logOverlay.StopListening()
-
-	// Clean up orchestration mode resources if active
-	// Cleanup is handled via CmdRetireProcess in model.cleanup()
-	if m.currentMode == mode.ModeOrchestration {
-		m.orchestration.CancelSubscriptions()
-	}
 
 	// Clean up chat panel infrastructure
 	m.chatPanel.Cleanup()

@@ -45,7 +45,6 @@ make test-update    # Update golden test files for teatest snapshots
 
 # Update specific golden tests
 go test -update ./internal/mode/search/...
-go test -update ./internal/mode/orchestration/...
 go test -update ./internal/ui/board/...
 go test -update ./internal/ui/shared/vimtextarea/...
 
@@ -283,7 +282,6 @@ make test-update
 
 # Update specific package
 go test -update ./internal/mode/search/...
-go test -update ./internal/mode/orchestration/...
 ```
 
 ## Architecture Patterns
@@ -595,7 +593,6 @@ views:                               # Board views
 
 orchestration:                       # AI orchestration settings
   client: "claude"                   # claude, amp, codex, gemini, or opencode
-  disable_worktrees: false           # Disable git worktree isolation
   session_storage:                   # Centralized session storage
     base_dir: ~/.perles/sessions     # Default storage location
     application_name: ""             # Override: defaults to git repo name
@@ -615,7 +612,7 @@ orchestration:                       # AI orchestration settings
 - **Column management:** `a` (add), `e` (edit), `Ctrl+h/l` (move)
 - **View management:** `Ctrl+n/p` (switch), `Ctrl+v` (menu)
 - **Actions:** `Enter` (open), `s` (status), `p` (priority), `y` (copy ID)
-- **Mode switch:** `Ctrl+Space` (search), `/` (search column), `Ctrl+O` (orchestration), `Ctrl+T` (dashboard)
+- **Mode switch:** `Ctrl+Space` (search), `/` (search column), `Ctrl+O` (dashboard)
 - **General:** `?` (help), `q` (quit), `r` (refresh)
 
 ### Search Mode (Supports regular search and tree sub-mode)
@@ -687,7 +684,6 @@ orchestration:                       # AI orchestration settings
 
 - Orchestration mode can create/delete git worktrees
 - Prompts if worktree has uncommitted changes before exit
-- Use `disable_worktrees: true` to disable worktree isolation
 
 ## CI/CD
 
