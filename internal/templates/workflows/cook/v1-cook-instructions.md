@@ -17,6 +17,7 @@ This workflow coordinates multiple AI workers to complete all tasks from a **sin
 7. **Close epic when done** - Mark the epic as closed after all tasks complete
 8. **Structured tools for state changes** - Use MCP tools (`assign_task`, `assign_task_review`, etc.) for workflow state transitions
 9. **Query before assign** - Always check worker state before making assignments to prevent duplicates
+10. **When stuck** - Use the `notifiy_user` tool to alert the user you need help.
 
 ## Workflow Pattern
 
@@ -28,7 +29,7 @@ This workflow coordinates multiple AI workers to complete all tasks from a **sin
    bd ready --json
    ```
 
-2. **Present execution plan**: Show user the task sequence and get approval
+2. **Present execution plan**: Show user the task sequence and then start working immediately you do not need approval.
 
 ### Phase 2: Task Execution Loop
 
@@ -665,19 +666,20 @@ Coordinator: signal_workflow_complete(
 
 #### Supplementary Communication
 
-| Tool | Parameters | Purpose |
-|------|------------|---------|
+| Tool | Parameters | Purpose                                                           |
+|------|------------|-------------------------------------------------------------------|
 | `send_to_worker` | `worker_id`, `message` | Send clarifications or additional context (NOT for state changes) |
+| `notify_user`                    | none | Send a notification to the user when they are needed |
 
 ### Worker MCP Tools
 
-| Tool | Parameters | Purpose |
-|------|------------|---------|
+| Tool                             | Parameters | Purpose |
+|----------------------------------|------------|---------|
 | `report_implementation_complete` | `summary` | Signal implementation done, transition to `AwaitingReview` |
-| `report_review_verdict` | `verdict` (APPROVED/DENIED), `comments` | Report review result, transition to `Idle` |
-| `signal_ready` | none | Signal ready for task assignment (on startup) |
-| `post_message` | `to`, `content` | Send message to coordinator or workers |
-| `check_messages` | none | Check for new messages |
+| `report_review_verdict`          | `verdict` (APPROVED/DENIED), `comments` | Report review result, transition to `Idle` |
+| `signal_ready`                   | none | Signal ready for task assignment (on startup) |
+| `post_message`                   | `to`, `content` | Send message to coordinator or workers |
+| `check_messages`                 | none | Check for new messages |
 
 ### BD Commands
 
