@@ -1739,7 +1739,7 @@ func TestModel_CoordinatorPanel_TwoWorkflowsEventRouting(t *testing.T) {
 
 	// Open coordinator panel for wf-1
 	m.showCoordinatorPanel = true
-	m.coordinatorPanel = NewCoordinatorPanel(false, false)
+	m.coordinatorPanel = NewCoordinatorPanel(false, false, nil)
 	uiState := m.getOrCreateUIState("wf-1")
 	m.coordinatorPanel.SetWorkflow("wf-1", uiState)
 
@@ -1835,7 +1835,7 @@ func TestModel_CoordinatorPanel_PanelStaysOnWorkflowAfterReload(t *testing.T) {
 
 	// Open coordinator panel for wf-1 and receive some messages
 	m.showCoordinatorPanel = true
-	m.coordinatorPanel = NewCoordinatorPanel(false, false)
+	m.coordinatorPanel = NewCoordinatorPanel(false, false, nil)
 	uiState := m.getOrCreateUIState("wf-1")
 	m.coordinatorPanel.SetWorkflow("wf-1", uiState)
 
@@ -2077,7 +2077,7 @@ func TestFocusCyclingForward(t *testing.T) {
 
 	// Now open coordinator panel and test full cycle
 	m.showCoordinatorPanel = true
-	m.coordinatorPanel = NewCoordinatorPanel(false, false)
+	m.coordinatorPanel = NewCoordinatorPanel(false, false, nil)
 
 	// Tab through: Table → Tree → Details → Coordinator → Table
 	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
@@ -2131,7 +2131,7 @@ func TestFocusCyclingBackward(t *testing.T) {
 
 	// Now open coordinator panel and test full backward cycle
 	m.showCoordinatorPanel = true
-	m.coordinatorPanel = NewCoordinatorPanel(false, false)
+	m.coordinatorPanel = NewCoordinatorPanel(false, false, nil)
 
 	// Shift+Tab through: Table → Coordinator → Details → Tree → Table
 	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
@@ -2209,7 +2209,7 @@ func TestKeyDispatchToCoordinator(t *testing.T) {
 	m, _ := createTestModel(t, workflows)
 	m.focus = FocusCoordinator // Set focus to coordinator
 	m.showCoordinatorPanel = true
-	m.coordinatorPanel = NewCoordinatorPanel(false, false)
+	m.coordinatorPanel = NewCoordinatorPanel(false, false, nil)
 	m.selectedIndex = 0
 
 	// Press j when focused on coordinator - should NOT navigate workflow table
@@ -2553,7 +2553,7 @@ func TestWorkflowsLoaded_EmptyList_ClosesCoordinatorPanel(t *testing.T) {
 
 	// Simulate coordinator panel being open
 	m.showCoordinatorPanel = true
-	m.coordinatorPanel = NewCoordinatorPanel(false, false)
+	m.coordinatorPanel = NewCoordinatorPanel(false, false, nil)
 
 	// Simulate receiving empty workflow list (after archiving the last one)
 	result, _ := m.Update(workflowsLoadedMsg{workflows: []*controlplane.WorkflowInstance{}})
@@ -2561,6 +2561,105 @@ func TestWorkflowsLoaded_EmptyList_ClosesCoordinatorPanel(t *testing.T) {
 	resultModel := result.(Model)
 	require.False(t, resultModel.showCoordinatorPanel, "coordinator panel should be closed")
 	require.Nil(t, resultModel.coordinatorPanel, "coordinator panel should be nil")
+}
+
+// === Tests: Clipboard Wiring ===
+
+func TestModel_OpenCoordinatorPanel_WiresClipboard(t *testing.T) {
+	// When openCoordinatorPanelForSelected() is called, it should wire the clipboard
+	// from Services to the CoordinatorPanel.
+
+	mockClipboard := mocks.NewMockClipboard(t)
+
+	wf := createTestWorkflow("wf-1", "Test Workflow", controlplane.WorkflowRunning)
+
+	mockCP := newMockControlPlane(t)
+	mockCP.On("List", mock.Anything, mock.Anything).Return([]*controlplane.WorkflowInstance{wf}, nil).Maybe()
+
+	// Setup event channels
+	eventCh := make(chan controlplane.ControlPlaneEvent)
+	close(eventCh)
+	mockCP.On("Subscribe", mock.Anything).Return((<-chan controlplane.ControlPlaneEvent)(eventCh), func() {}).Maybe()
+
+	wfEventCh := make(chan controlplane.ControlPlaneEvent)
+	close(wfEventCh)
+	mockCP.On("SubscribeWorkflow", mock.Anything, mock.Anything).Return(
+		(<-chan controlplane.ControlPlaneEvent)(wfEventCh),
+		func() {},
+	).Maybe()
+
+	// Setup mock sound service
+	mockSounds := mocks.NewMockSoundService(t)
+	mockSounds.EXPECT().Play(mock.Anything, mock.Anything).Maybe()
+
+	cfg := Config{
+		ControlPlane: mockCP,
+		Services: mode.Services{
+			Sounds:    mockSounds,
+			Clipboard: mockClipboard,
+		},
+	}
+
+	m := New(cfg)
+	m.workflows = []*controlplane.WorkflowInstance{wf}
+	m.workflowList = m.workflowList.SetWorkflows(m.workflows)
+	m = m.SetSize(100, 40).(Model)
+	m.selectedIndex = 0
+
+	// Call openCoordinatorPanelForSelected (this should wire the clipboard)
+	m.openCoordinatorPanelForSelected()
+
+	// Verify the panel was created and clipboard was wired
+	require.NotNil(t, m.coordinatorPanel, "coordinator panel should be created")
+	require.True(t, m.showCoordinatorPanel, "show flag should be set")
+	require.Same(t, mockClipboard, m.coordinatorPanel.clipboard,
+		"clipboard should be wired from Services to CoordinatorPanel")
+}
+
+func TestModel_OpenCoordinatorPanel_ClipboardNotNilWhenServicesProvides(t *testing.T) {
+	// When Services.Clipboard is provided, the CoordinatorPanel's clipboard should not be nil.
+
+	mockClipboard := mocks.NewMockClipboard(t)
+
+	wf := createTestWorkflow("wf-1", "Test Workflow", controlplane.WorkflowRunning)
+
+	mockCP := newMockControlPlane(t)
+	mockCP.On("List", mock.Anything, mock.Anything).Return([]*controlplane.WorkflowInstance{wf}, nil).Maybe()
+
+	eventCh := make(chan controlplane.ControlPlaneEvent)
+	close(eventCh)
+	mockCP.On("Subscribe", mock.Anything).Return((<-chan controlplane.ControlPlaneEvent)(eventCh), func() {}).Maybe()
+
+	wfEventCh := make(chan controlplane.ControlPlaneEvent)
+	close(wfEventCh)
+	mockCP.On("SubscribeWorkflow", mock.Anything, mock.Anything).Return(
+		(<-chan controlplane.ControlPlaneEvent)(wfEventCh),
+		func() {},
+	).Maybe()
+
+	mockSounds := mocks.NewMockSoundService(t)
+	mockSounds.EXPECT().Play(mock.Anything, mock.Anything).Maybe()
+
+	cfg := Config{
+		ControlPlane: mockCP,
+		Services: mode.Services{
+			Sounds:    mockSounds,
+			Clipboard: mockClipboard,
+		},
+	}
+
+	m := New(cfg)
+	m.workflows = []*controlplane.WorkflowInstance{wf}
+	m.workflowList = m.workflowList.SetWorkflows(m.workflows)
+	m = m.SetSize(100, 40).(Model)
+	m.selectedIndex = 0
+
+	// Open the panel
+	m.openCoordinatorPanelForSelected()
+
+	// Verify clipboard is not nil
+	require.NotNil(t, m.coordinatorPanel.clipboard,
+		"clipboard should not be nil when Services provides it")
 }
 
 // createTestModelWithFlags creates a dashboard model with flags enabled.

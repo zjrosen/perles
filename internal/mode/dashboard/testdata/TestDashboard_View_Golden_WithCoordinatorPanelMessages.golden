@@ -4,15 +4,15 @@
 │                                                     ││                                                               │
 │                                                     ││                                                               │
 │                                                     ││                                                               │
-│                                                     ││User                                                           │
-│                                                     ││Start working on the authentication feature                    │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
 ╰─────────────────────────────────────────────────────╯│                                                               │
- No epic associated with this workflow                 │Coordinator                                                    │
-                                                       │I'll begin implementing the authentication feature. First,     │
-                                                       │let me analyze the codebase.                                   │
+ No epic associated with this workflow                 │User                                                           │
+                                                       │Start working on the authentication feature                    │
                                                        │                                                               │
                                                        │Coordinator                                                    │
-                                                       │╰╴ Looking at the middleware...                                │
+                                                       │I'll begin implementing the authentication feature. First,     │
+                                                       │let me analyze the codebase.                                   │
                                                        ╰───────────────────────────────────────────────────────────────╯
                                                        ╭───────────────────────────────────────────────────────────────╮
                                                        │ Message coordinator...                                        │

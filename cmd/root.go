@@ -274,7 +274,7 @@ func runApp(cmd *cobra.Command, args []string) error {
 	p := tea.NewProgram(
 		&model,
 		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(),
+		tea.WithMouseAllMotion(),
 	)
 
 	finalModel, err := p.Run()

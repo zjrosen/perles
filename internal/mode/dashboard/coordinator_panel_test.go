@@ -1,9 +1,11 @@
 package dashboard
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/require"
 
 	"github.com/zjrosen/perles/internal/mode"
@@ -17,17 +19,16 @@ import (
 )
 
 func TestNewCoordinatorPanel(t *testing.T) {
-	panel := NewCoordinatorPanel(false, false)
+	panel := NewCoordinatorPanel(false, false, nil)
 
 	require.NotNil(t, panel)
 	require.False(t, panel.IsFocused(), "panel should be unfocused by default")
 	require.Empty(t, panel.coordinatorMessages)
-	require.True(t, panel.coordinatorDirty)
 	require.Equal(t, TabCoordinator, panel.activeTab)
 }
 
 func TestCoordinatorPanel_SetWorkflow(t *testing.T) {
-	panel := NewCoordinatorPanel(false, false)
+	panel := NewCoordinatorPanel(false, false, nil)
 
 	state := &WorkflowUIState{
 		CoordinatorMessages: []chatrender.Message{
@@ -44,11 +45,10 @@ func TestCoordinatorPanel_SetWorkflow(t *testing.T) {
 	require.Len(t, panel.coordinatorMessages, 2)
 	require.Equal(t, events.ProcessStatusWorking, panel.coordinatorStatus)
 	require.Equal(t, 1, panel.coordinatorQueue)
-	require.True(t, panel.coordinatorDirty, "should be dirty after setting workflow")
 }
 
 func TestCoordinatorPanel_SetWorkflow_SameWorkflowNewMessages(t *testing.T) {
-	panel := NewCoordinatorPanel(false, false)
+	panel := NewCoordinatorPanel(false, false, nil)
 
 	// Set initial state
 	state := &WorkflowUIState{
@@ -58,7 +58,6 @@ func TestCoordinatorPanel_SetWorkflow_SameWorkflowNewMessages(t *testing.T) {
 		CoordinatorStatus: events.ProcessStatusReady,
 	}
 	panel.SetWorkflow("wf-123", state)
-	panel.coordinatorDirty = false // simulate View() was called
 
 	// Add more messages
 	state.CoordinatorMessages = append(state.CoordinatorMessages, chatrender.Message{Role: "assistant", Content: "Hi"})
@@ -67,11 +66,10 @@ func TestCoordinatorPanel_SetWorkflow_SameWorkflowNewMessages(t *testing.T) {
 
 	require.Len(t, panel.coordinatorMessages, 2)
 	require.Equal(t, events.ProcessStatusWorking, panel.coordinatorStatus)
-	require.True(t, panel.coordinatorDirty, "should be dirty when message count changes")
 }
 
 func TestCoordinatorPanel_Focus(t *testing.T) {
-	panel := NewCoordinatorPanel(false, false)
+	panel := NewCoordinatorPanel(false, false, nil)
 	panel.Blur()
 
 	require.False(t, panel.IsFocused())
@@ -82,7 +80,7 @@ func TestCoordinatorPanel_Focus(t *testing.T) {
 }
 
 func TestCoordinatorPanel_SetSize(t *testing.T) {
-	panel := NewCoordinatorPanel(false, false)
+	panel := NewCoordinatorPanel(false, false, nil)
 
 	panel.SetSize(100, 50)
 
@@ -91,7 +89,7 @@ func TestCoordinatorPanel_SetSize(t *testing.T) {
 }
 
 func TestCoordinatorPanel_View_EmptyMessages(t *testing.T) {
-	panel := NewCoordinatorPanel(false, false)
+	panel := NewCoordinatorPanel(false, false, nil)
 	panel.SetSize(80, 20)
 	panel.SetWorkflow("wf-123", nil)
 
@@ -102,18 +100,19 @@ func TestCoordinatorPanel_View_EmptyMessages(t *testing.T) {
 	require.Contains(t, view, "Msgs", "should show Messages tab label")
 }
 
-func TestRenderChatContent_EmptyMessages(t *testing.T) {
+func TestRenderChatContentWithSelection_EmptyMessages(t *testing.T) {
 	cfg := chatrender.RenderConfig{
 		AgentLabel: "Coordinator",
 		AgentColor: chatrender.CoordinatorColor,
 		UserLabel:  "User",
 	}
-	content := renderChatContent(nil, 80, cfg)
+	content, plainLines := renderChatContentWithSelection(nil, 80, cfg, nil, nil)
 
 	require.Contains(t, content, "Waiting for the coordinator to initialize.")
+	require.Nil(t, plainLines)
 }
 
-func TestRenderChatContent_WithMessages(t *testing.T) {
+func TestRenderChatContentWithSelection_WithMessages(t *testing.T) {
 	messages := []chatrender.Message{
 		{Role: "user", Content: "Hello world"},
 		{Role: "assistant", Content: "Hi there!"},
@@ -124,15 +123,20 @@ func TestRenderChatContent_WithMessages(t *testing.T) {
 		AgentColor: chatrender.CoordinatorColor,
 		UserLabel:  "User",
 	}
-	content := renderChatContent(messages, 80, cfg)
+	content, plainLines := renderChatContentWithSelection(messages, 80, cfg, nil, nil)
 
 	require.Contains(t, content, "User")
 	require.Contains(t, content, "Hello world")
 	require.Contains(t, content, "Coordinator") // Uses "Coordinator" label from RenderConfig
 	require.Contains(t, content, "Hi there!")
+
+	// Verify plain lines are returned for selection
+	require.NotNil(t, plainLines)
+	require.Contains(t, plainLines, "User")
+	require.Contains(t, plainLines, "Hello world")
 }
 
-func TestRenderChatContent_ToolCall(t *testing.T) {
+func TestRenderChatContentWithSelection_FiltersToolCalls(t *testing.T) {
 	messages := []chatrender.Message{
 		{Role: "assistant", Content: "Using a tool", IsToolCall: true},
 	}
@@ -142,14 +146,14 @@ func TestRenderChatContent_ToolCall(t *testing.T) {
 		AgentColor: chatrender.CoordinatorColor,
 		UserLabel:  "User",
 	}
-	content := renderChatContent(messages, 80, cfg)
+	content, plainLines := renderChatContentWithSelection(messages, 80, cfg, nil, nil)
 
-	// Tool calls use the "╰╴" prefix in shared chatrender
-	require.Contains(t, content, "╰╴")
-	require.Contains(t, content, "Using a tool")
+	// renderChatContentWithSelection filters out tool calls (unlike chatrender.RenderContent)
+	require.Contains(t, content, "Waiting for the coordinator to initialize.")
+	require.Nil(t, plainLines)
 }
 
-func TestRenderChatContent_FiltersEmptyMessages(t *testing.T) {
+func TestRenderChatContentWithSelection_FiltersEmptyMessages(t *testing.T) {
 	messages := []chatrender.Message{
 		{Role: "user", Content: "Hello"},
 		{Role: "assistant", Content: ""},    // Empty - should be filtered
@@ -161,7 +165,7 @@ func TestRenderChatContent_FiltersEmptyMessages(t *testing.T) {
 		AgentColor: chatrender.CoordinatorColor,
 		UserLabel:  "User",
 	}
-	content := renderChatContent(messages, 80, cfg)
+	content, _ := renderChatContentWithSelection(messages, 80, cfg, nil, nil)
 
 	require.Contains(t, content, "Hello")
 	require.Contains(t, content, "Hi!")
@@ -169,7 +173,7 @@ func TestRenderChatContent_FiltersEmptyMessages(t *testing.T) {
 }
 
 func TestNewCoordinatorPanel_InputStartsUnfocused(t *testing.T) {
-	panel := NewCoordinatorPanel(false, false)
+	panel := NewCoordinatorPanel(false, false, nil)
 
 	// Verify the input starts unfocused (focus is given on explicit Focus() call)
 	require.False(t, panel.input.Focused())
@@ -182,7 +186,7 @@ func TestNewCoordinatorPanel_InputStartsUnfocused(t *testing.T) {
 }
 
 func TestCoordinatorPanel_TabNavigation(t *testing.T) {
-	panel := NewCoordinatorPanel(false, false)
+	panel := NewCoordinatorPanel(false, false, nil)
 
 	// Initially on TabCoordinator
 	require.Equal(t, TabCoordinator, panel.ActiveTab())
@@ -201,7 +205,7 @@ func TestCoordinatorPanel_TabNavigation(t *testing.T) {
 }
 
 func TestCoordinatorPanel_TabNavigationDebugMode(t *testing.T) {
-	panel := NewCoordinatorPanel(true, false) // debug mode, no vim
+	panel := NewCoordinatorPanel(true, false, nil) // debug mode, no vim
 
 	// Initially on TabCoordinator
 	require.Equal(t, TabCoordinator, panel.ActiveTab())
@@ -222,7 +226,7 @@ func TestCoordinatorPanel_TabNavigationDebugMode(t *testing.T) {
 }
 
 func TestCoordinatorPanel_TabNavigationWithWorkers(t *testing.T) {
-	panel := NewCoordinatorPanel(false, false)
+	panel := NewCoordinatorPanel(false, false, nil)
 
 	// Set workflow with workers
 	state := &WorkflowUIState{
@@ -250,7 +254,7 @@ func TestCoordinatorPanel_TabNavigationWithWorkers(t *testing.T) {
 }
 
 func TestCoordinatorPanel_SetWorkflow_SyncsWorkerData(t *testing.T) {
-	panel := NewCoordinatorPanel(false, false)
+	panel := NewCoordinatorPanel(false, false, nil)
 
 	state := &WorkflowUIState{
 		WorkerIDs: []string{"worker-1", "worker-2"},
@@ -278,7 +282,7 @@ func TestCoordinatorPanel_SetWorkflow_SyncsWorkerData(t *testing.T) {
 }
 
 func TestCoordinatorPanel_SetWorkflow_ResetsTabWhenWorkerRemoved(t *testing.T) {
-	panel := NewCoordinatorPanel(false, false)
+	panel := NewCoordinatorPanel(false, false, nil)
 
 	// Initial state with workers
 	state := &WorkflowUIState{
@@ -302,7 +306,7 @@ func TestCoordinatorPanel_SetWorkflow_ResetsTabWhenWorkerRemoved(t *testing.T) {
 }
 
 func TestCoordinatorPanel_FormatWorkerTabLabel(t *testing.T) {
-	panel := NewCoordinatorPanel(false, false)
+	panel := NewCoordinatorPanel(false, false, nil)
 
 	require.Equal(t, "W1", panel.formatWorkerTabLabel("worker-1"))
 	require.Equal(t, "W99", panel.formatWorkerTabLabel("worker-99"))
@@ -311,7 +315,7 @@ func TestCoordinatorPanel_FormatWorkerTabLabel(t *testing.T) {
 }
 
 func TestSetWorkflow_SyncsMetrics(t *testing.T) {
-	panel := NewCoordinatorPanel(false, false)
+	panel := NewCoordinatorPanel(false, false, nil)
 
 	coordinatorMetrics := &metrics.TokenMetrics{
 		TokensUsed:  27000,
@@ -346,7 +350,7 @@ func TestSetWorkflow_SyncsMetrics(t *testing.T) {
 }
 
 func TestSetWorkflow_ClearsStaleMetrics(t *testing.T) {
-	panel := NewCoordinatorPanel(false, false)
+	panel := NewCoordinatorPanel(false, false, nil)
 
 	// First workflow with worker-1 and worker-2
 	state1 := &WorkflowUIState{
@@ -394,7 +398,7 @@ func TestSetWorkflow_ClearsStaleMetrics(t *testing.T) {
 }
 
 func TestGetActiveMetricsDisplay_Coordinator(t *testing.T) {
-	panel := NewCoordinatorPanel(false, false)
+	panel := NewCoordinatorPanel(false, false, nil)
 
 	// Set up coordinator with metrics
 	state := &WorkflowUIState{
@@ -415,7 +419,7 @@ func TestGetActiveMetricsDisplay_Coordinator(t *testing.T) {
 }
 
 func TestGetActiveMetricsDisplay_Worker(t *testing.T) {
-	panel := NewCoordinatorPanel(false, false)
+	panel := NewCoordinatorPanel(false, false, nil)
 
 	// Set up with workers and metrics
 	state := &WorkflowUIState{
@@ -453,7 +457,7 @@ func TestGetActiveMetricsDisplay_Worker(t *testing.T) {
 }
 
 func TestGetActiveMetricsDisplay_Messages(t *testing.T) {
-	panel := NewCoordinatorPanel(false, false)
+	panel := NewCoordinatorPanel(false, false, nil)
 
 	// Set up with coordinator metrics
 	state := &WorkflowUIState{
@@ -474,7 +478,7 @@ func TestGetActiveMetricsDisplay_Messages(t *testing.T) {
 }
 
 func TestGetActiveMetricsDisplay_NilMetrics(t *testing.T) {
-	panel := NewCoordinatorPanel(false, false)
+	panel := NewCoordinatorPanel(false, false, nil)
 
 	// Set up without any metrics (nil)
 	state := &WorkflowUIState{
@@ -500,7 +504,7 @@ func TestGetActiveMetricsDisplay_NilMetrics(t *testing.T) {
 }
 
 func TestGetActiveMetricsDisplay_InvalidWorkerTab(t *testing.T) {
-	panel := NewCoordinatorPanel(false, false)
+	panel := NewCoordinatorPanel(false, false, nil)
 
 	// Set up with only one worker
 	state := &WorkflowUIState{
@@ -525,7 +529,7 @@ func TestGetActiveMetricsDisplay_InvalidWorkerTab(t *testing.T) {
 }
 
 func TestView_ShowsMetricsInBottomRight(t *testing.T) {
-	panel := NewCoordinatorPanel(false, false)
+	panel := NewCoordinatorPanel(false, false, nil)
 	panel.SetSize(60, 20)
 
 	// Set up coordinator with metrics
@@ -547,7 +551,7 @@ func TestView_ShowsMetricsInBottomRight(t *testing.T) {
 }
 
 func TestView_MetricsFitInPanelWidth(t *testing.T) {
-	panel := NewCoordinatorPanel(false, false)
+	panel := NewCoordinatorPanel(false, false, nil)
 
 	// Use exactly 60-char width as specified in task
 	panel.SetSize(60, 20)
@@ -970,4 +974,172 @@ func TestReplaceCommand_CreatesCorrectCommand(t *testing.T) {
 			require.Equal(t, command.SourceUser, replaceCmd.Source())
 		})
 	}
+}
+
+// ============================================================================
+// Clipboard Wiring Tests
+// ============================================================================
+
+func TestCoordinatorPanel_HasClipboardField(t *testing.T) {
+	panel := NewCoordinatorPanel(false, false, nil)
+
+	// Verify clipboard field exists and is nil by default (not set by constructor)
+	require.Nil(t, panel.clipboard, "clipboard should be nil by default (set by parent)")
+}
+
+func TestCoordinatorPanel_ClipboardCanBeSet(t *testing.T) {
+	panel := NewCoordinatorPanel(false, false, nil)
+
+	// Create a mock clipboard
+	mockClipboard := &mockClipboardForTest{}
+
+	// Set the clipboard
+	panel.clipboard = mockClipboard
+
+	// Verify it's set
+	require.NotNil(t, panel.clipboard, "clipboard should be set after assignment")
+	require.Same(t, mockClipboard, panel.clipboard, "clipboard should be the same instance")
+}
+
+// mockClipboardForTest is a simple mock clipboard for testing.
+type mockClipboardForTest struct {
+	lastCopiedText string
+}
+
+func (m *mockClipboardForTest) Copy(text string) error {
+	m.lastCopiedText = text
+	return nil
+}
+
+// mockClipboardWithError is a mock clipboard that returns an error on Copy.
+type mockClipboardWithError struct {
+	err error
+}
+
+func (m *mockClipboardWithError) Copy(_ string) error {
+	return m.err
+}
+
+// ============================================================================
+// Integration Tests
+// ============================================================================
+
+func TestCoordinatorPanel_SelectionNilClipboard(t *testing.T) {
+	// Test that selection with nil clipboard does not crash
+	panel := NewCoordinatorPanel(false, false, nil)
+	// clipboard is nil by default
+	panel.SetSize(100, 30)
+	panel.SetScreenXOffset(0)
+
+	state := &WorkflowUIState{
+		CoordinatorMessages: []chatrender.Message{
+			{Role: "user", Content: "Test message"},
+		},
+		CoordinatorStatus: events.ProcessStatusReady,
+	}
+	panel.SetWorkflow("wf-123", state)
+	panel.activeTab = TabCoordinator
+
+	// Render to populate plain lines
+	_ = panel.View()
+
+	// Simulate selection
+	pressMsg := tea.MouseMsg{X: 10, Y: 5, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress}
+	panel.Update(pressMsg)
+
+	releaseMsg := tea.MouseMsg{X: 20, Y: 5, Button: tea.MouseButtonLeft, Action: tea.MouseActionRelease}
+	_, cmd := panel.Update(releaseMsg)
+
+	// No toast should be returned when clipboard is nil
+	require.Nil(t, cmd, "should not return toast when clipboard is nil")
+}
+
+func TestCoordinatorPanel_ScrollAfterSelection(t *testing.T) {
+	// Verify scroll behavior works after selection
+	panel := NewCoordinatorPanel(false, false, nil)
+	mockClip := &mockClipboardForTest{}
+	panel.clipboard = mockClip
+	panel.SetSize(100, 30)
+
+	// Set up messages with enough content to scroll
+	var messages []chatrender.Message
+	for i := 0; i < 20; i++ {
+		messages = append(messages, chatrender.Message{
+			Role:    "assistant",
+			Content: fmt.Sprintf("Message number %d with some content", i),
+		})
+	}
+
+	state := &WorkflowUIState{
+		CoordinatorMessages: messages,
+		CoordinatorStatus:   events.ProcessStatusReady,
+	}
+	panel.SetWorkflow("wf-123", state)
+	panel.activeTab = TabCoordinator
+
+	// Render to initialize viewport
+	_ = panel.View()
+
+	// Viewport starts at bottom due to padContentToBottom, so scroll up first
+	scrollUp := tea.MouseMsg{
+		Button: tea.MouseButtonWheelUp,
+		Action: tea.MouseActionPress,
+	}
+	panel.Update(scrollUp)
+
+	// Record position after scroll up
+	offsetAfterScrollUp := panel.coordinatorPane.YOffset()
+
+	// Now scroll down - should still work
+	scrollDown := tea.MouseMsg{
+		Button: tea.MouseButtonWheelDown,
+		Action: tea.MouseActionPress,
+	}
+	panel.Update(scrollDown)
+
+	// Viewport should scroll down
+	require.Greater(t, panel.coordinatorPane.YOffset(), offsetAfterScrollUp,
+		"scroll down should increase YOffset")
+
+	// Scroll back up - should still work
+	panel.Update(scrollUp)
+
+	// Viewport should scroll up
+	require.Equal(t, offsetAfterScrollUp, panel.coordinatorPane.YOffset(),
+		"scroll up should decrease YOffset back to previous position")
+}
+
+func TestCoordinatorPanel_TabSwitchAfterSelection(t *testing.T) {
+	// Verify tab switching still works after selection
+	panel := NewCoordinatorPanel(false, false, nil)
+	mockClip := &mockClipboardForTest{}
+	panel.clipboard = mockClip
+	panel.SetSize(100, 30)
+
+	state := &WorkflowUIState{
+		CoordinatorMessages: []chatrender.Message{
+			{Role: "user", Content: "Test message"},
+		},
+		CoordinatorStatus: events.ProcessStatusReady,
+	}
+	panel.SetWorkflow("wf-123", state)
+
+	// Verify initial state
+	require.Equal(t, TabCoordinator, panel.ActiveTab())
+
+	// Switch tab using ] key
+	tabNext := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}}
+	panel.Update(tabNext)
+
+	// Tab should switch to messages
+	require.Equal(t, TabMessages, panel.ActiveTab(),
+		"tab should switch")
+
+	// Switch back using [ key
+	tabPrev := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}}
+	panel.Update(tabPrev)
+
+	// Tab should switch back to coordinator
+	require.Equal(t, TabCoordinator, panel.ActiveTab(),
+		"tab should switch back")
 }

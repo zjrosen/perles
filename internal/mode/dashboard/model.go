@@ -910,6 +910,23 @@ func (m Model) handleMouseMsg(msg tea.MouseMsg) (mode.Controller, tea.Cmd) {
 				m.updateComponentFocusStates()
 				return m, nil
 			}
+
+			// Forward click events to coordinator panel for double-click detection
+			var cmd tea.Cmd
+			m.coordinatorPanel, cmd = m.coordinatorPanel.Update(msg)
+			if cmd != nil {
+				return m, cmd
+			}
+		}
+	}
+
+	// Forward mouse events to coordinator panel for text selection
+	if m.showCoordinatorPanel && m.coordinatorPanel != nil {
+		// Forward press, motion, and release for drag-to-select
+		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
+			m.coordinatorPanel, _ = m.coordinatorPanel.Update(msg)
+		} else if msg.Action == tea.MouseActionMotion {
+			m.coordinatorPanel, _ = m.coordinatorPanel.Update(msg)
 		}
 	}
 
@@ -973,8 +990,8 @@ func (m *Model) openCoordinatorPanelForSelected() {
 		return
 	}
 
-	// Create new panel (pass debugMode for command log tab, vimMode for input)
-	panel := NewCoordinatorPanel(m.debugMode, m.vimMode)
+	// Create new panel (pass debugMode for command log tab, vimMode for input, clipboard for copy)
+	panel := NewCoordinatorPanel(m.debugMode, m.vimMode, m.services.Clipboard)
 	panel.SetSize(CoordinatorPanelWidth, m.height)
 
 	// Load cached state for this workflow (ensures state exists)

@@ -315,7 +315,10 @@ func (m Model) renderView() string {
 		tableView := m.renderBorderedWorkflowTable(tableWidth, tableHeight)
 
 		// Render coordinator panel - it spans the full content height
+		// Set screen offsets for mouse coordinate mapping
 		m.coordinatorPanel.SetSize(panelWidth, contentHeight)
+		m.coordinatorPanel.SetScreenXOffset(tableWidth)
+		m.coordinatorPanel.SetScreenYOffset(headerHeight)
 		panelView := m.coordinatorPanel.View()
 
 		// Build left column: table + epic section

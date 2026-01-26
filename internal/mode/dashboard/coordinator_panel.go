@@ -14,6 +14,7 @@ import (
 	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/zjrosen/perles/internal/mode"
+	"github.com/zjrosen/perles/internal/mode/shared"
 	"github.com/zjrosen/perles/internal/orchestration/controlplane"
 	"github.com/zjrosen/perles/internal/orchestration/events"
 	"github.com/zjrosen/perles/internal/orchestration/message"
@@ -23,6 +24,7 @@ import (
 	"github.com/zjrosen/perles/internal/orchestration/v2/repository"
 	"github.com/zjrosen/perles/internal/ui/shared/chatrender"
 	"github.com/zjrosen/perles/internal/ui/shared/panes"
+	"github.com/zjrosen/perles/internal/ui/shared/selection"
 	"github.com/zjrosen/perles/internal/ui/shared/toaster"
 	"github.com/zjrosen/perles/internal/ui/shared/vimtextarea"
 	"github.com/zjrosen/perles/internal/ui/styles"
@@ -41,32 +43,32 @@ type CoordinatorPanel struct {
 	// Input for sending messages to coordinator
 	input vimtextarea.Model
 
+	// Clipboard for copy operations
+	clipboard shared.Clipboard
+
 	// Currently selected workflow ID
 	workflowID controlplane.WorkflowID
 
 	// Tab state
 	activeTab int // Current tab index
 
-	// Coordinator state
-	coordinatorViewport viewport.Model
+	// Coordinator state (uses SelectablePane for viewport + selection)
+	coordinatorPane     *selection.SelectablePane
 	coordinatorMessages []chatrender.Message
 	coordinatorStatus   events.ProcessStatus
 	coordinatorQueue    int
-	coordinatorDirty    bool
 
-	// Message log state
-	messageViewport viewport.Model
-	messageEntries  []message.Entry
-	messageDirty    bool
+	// Message log state (uses SelectablePane for viewport + selection)
+	messagePane    *selection.SelectablePane
+	messageEntries []message.Entry
 
 	// Worker state (dynamic tabs)
-	workerIDs       []string                        // Active worker IDs in display order
-	workerViewports map[string]viewport.Model       // Viewport per worker
-	workerMessages  map[string][]chatrender.Message // Messages per worker
-	workerStatus    map[string]events.ProcessStatus // Status per worker
-	workerPhases    map[string]events.ProcessPhase  // Phase per worker
-	workerQueues    map[string]int                  // Queue count per worker
-	workerDirty     map[string]bool                 // Dirty flag per worker
+	workerIDs      []string                             // Active worker IDs in display order
+	workerPanes    map[string]*selection.SelectablePane // SelectablePane per worker
+	workerMessages map[string][]chatrender.Message      // Messages per worker
+	workerStatus   map[string]events.ProcessStatus      // Status per worker
+	workerPhases   map[string]events.ProcessPhase       // Phase per worker
+	workerQueues   map[string]int                       // Queue count per worker
 
 	// Token metrics for display
 	coordinatorMetrics *metrics.TokenMetrics
@@ -84,6 +86,10 @@ type CoordinatorPanel struct {
 	// Dimensions
 	width  int
 	height int
+
+	// Screen position for mouse coordinate mapping
+	screenXOffset int // X offset from left edge of terminal
+	screenYOffset int // Y offset from top (where viewports start, after tab bar)
 }
 
 // coordinatorTitleColor is the base color for coordinator title text.
@@ -113,9 +119,6 @@ var (
 	errorSenderStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.AdaptiveColor{Light: "#FF6B6B", Dark: "#FF8787"}).
 				Bold(true)
-
-	messageContentStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.AdaptiveColor{Light: "#D9DCCF", Dark: "#CCCCCC"})
 
 	// Border styles for left message border (no bold)
 	coordinatorBorderStyle = lipgloss.NewStyle().Foreground(chatrender.CoordinatorColor)
@@ -155,7 +158,8 @@ var (
 // The panel starts unfocused - use Focus() to give it input focus.
 // If debugMode is true, the command log tab is shown.
 // If vimMode is true, vim keybindings are enabled in the input.
-func NewCoordinatorPanel(debugMode, vimMode bool) *CoordinatorPanel {
+// Clipboard is used for copy operations during text selection.
+func NewCoordinatorPanel(debugMode, vimMode bool, clipboard shared.Clipboard) *CoordinatorPanel {
 	input := vimtextarea.New(vimtextarea.Config{
 		VimEnabled:  vimMode,
 		DefaultMode: vimtextarea.ModeInsert,
@@ -166,28 +170,49 @@ func NewCoordinatorPanel(debugMode, vimMode bool) *CoordinatorPanel {
 	// Don't focus input by default - panel starts unfocused
 	input.Blur()
 
-	return &CoordinatorPanel{
+	panel := &CoordinatorPanel{
 		input:               input,
+		clipboard:           clipboard,
 		activeTab:           TabCoordinator,
-		coordinatorViewport: viewport.New(0, 0),
 		coordinatorMessages: make([]chatrender.Message, 0),
-		coordinatorDirty:    true,
-		messageViewport:     viewport.New(0, 0),
 		messageEntries:      make([]message.Entry, 0),
-		messageDirty:        true,
 		workerIDs:           make([]string, 0),
-		workerViewports:     make(map[string]viewport.Model),
+		workerPanes:         make(map[string]*selection.SelectablePane),
 		workerMessages:      make(map[string][]chatrender.Message),
 		workerStatus:        make(map[string]events.ProcessStatus),
 		workerPhases:        make(map[string]events.ProcessPhase),
 		workerQueues:        make(map[string]int),
-		workerDirty:         make(map[string]bool),
 		workerMetrics:       make(map[string]*metrics.TokenMetrics),
 		commandLogViewport:  viewport.New(0, 0),
 		commandLogEntries:   make([]CommandLogEntry, 0),
 		commandLogDirty:     true,
 		debugMode:           debugMode,
 		focused:             false,
+	}
+
+	// Initialize SelectablePanes using the helper method
+	panel.coordinatorPane = selection.NewPane(selection.PaneConfig{
+		Clipboard: clipboard,
+		MakeToast: panel.makeToastFunc(),
+	})
+	panel.messagePane = selection.NewPane(selection.PaneConfig{
+		Clipboard: clipboard,
+		MakeToast: panel.makeToastFunc(),
+	})
+
+	return panel
+}
+
+// makeToastFunc returns a toast factory function for SelectablePane.
+func (p *CoordinatorPanel) makeToastFunc() selection.ToastFunc {
+	return func(message string, isError bool) tea.Cmd {
+		style := toaster.StyleSuccess
+		if isError {
+			style = toaster.StyleError
+		}
+		return func() tea.Msg {
+			return mode.ShowToastMsg{Message: message, Style: style}
+		}
 	}
 }
 
@@ -199,6 +224,27 @@ func (p *CoordinatorPanel) SetSize(width, height int) {
 	// Width: panel width - 4 (2 for borders, 2 for padding)
 	// Height: 4 lines (allows input to grow/scroll properly)
 	p.input.SetSize(max(width-4, 1), 4)
+}
+
+// SetScreenXOffset sets the panel's X position on screen for mouse coordinate mapping.
+func (p *CoordinatorPanel) SetScreenXOffset(offset int) {
+	p.screenXOffset = offset
+	p.coordinatorPane.SetScreenXOffset(offset)
+	p.messagePane.SetScreenXOffset(offset)
+	for _, pane := range p.workerPanes {
+		pane.SetScreenXOffset(offset)
+	}
+}
+
+// SetScreenYOffset sets the panel's Y position on screen for mouse coordinate mapping.
+func (p *CoordinatorPanel) SetScreenYOffset(offset int) {
+	viewportY := offset
+	p.screenYOffset = viewportY
+	p.coordinatorPane.SetScreenYOffset(viewportY)
+	p.messagePane.SetScreenYOffset(viewportY)
+	for _, pane := range p.workerPanes {
+		pane.SetScreenYOffset(viewportY)
+	}
 }
 
 // SetWorkflow updates the panel to show data for the given workflow.
@@ -213,9 +259,7 @@ func (p *CoordinatorPanel) SetWorkflow(workflowID controlplane.WorkflowID, state
 		p.coordinatorStatus = events.ProcessStatusPending
 		p.coordinatorQueue = 0
 		p.coordinatorMetrics = nil
-		p.coordinatorDirty = true
 		p.messageEntries = make([]message.Entry, 0)
-		p.messageDirty = true
 		p.workerIDs = make([]string, 0)
 		clear(p.workerMetrics)
 		return
@@ -224,7 +268,6 @@ func (p *CoordinatorPanel) SetWorkflow(workflowID controlplane.WorkflowID, state
 	// Sync coordinator state
 	if workflowChanged || len(state.CoordinatorMessages) != len(p.coordinatorMessages) {
 		p.coordinatorMessages = state.CoordinatorMessages
-		p.coordinatorDirty = true
 	}
 	p.coordinatorStatus = state.CoordinatorStatus
 	p.coordinatorQueue = state.CoordinatorQueueCount
@@ -233,17 +276,20 @@ func (p *CoordinatorPanel) SetWorkflow(workflowID controlplane.WorkflowID, state
 	// Sync message log state
 	if workflowChanged || len(state.MessageEntries) != len(p.messageEntries) {
 		p.messageEntries = state.MessageEntries
-		p.messageDirty = true
 	}
 
 	// Sync worker state
 	if workflowChanged || len(state.WorkerIDs) != len(p.workerIDs) {
 		p.workerIDs = state.WorkerIDs
-		// Initialize viewports for new workers
+		// Initialize SelectablePanes for new workers
 		for _, wid := range p.workerIDs {
-			if _, exists := p.workerViewports[wid]; !exists {
-				p.workerViewports[wid] = viewport.New(0, 0)
-				p.workerDirty[wid] = true
+			if _, exists := p.workerPanes[wid]; !exists {
+				p.workerPanes[wid] = selection.NewPane(selection.PaneConfig{
+					Clipboard: p.clipboard,
+					MakeToast: p.makeToastFunc(),
+				})
+				p.workerPanes[wid].SetScreenXOffset(p.screenXOffset)
+				p.workerPanes[wid].SetScreenYOffset(p.screenYOffset)
 			}
 		}
 	}
@@ -254,7 +300,6 @@ func (p *CoordinatorPanel) SetWorkflow(workflowID controlplane.WorkflowID, state
 		stateMessages := state.WorkerMessages[wid]
 		if len(stateMessages) != len(p.workerMessages[wid]) {
 			p.workerMessages[wid] = stateMessages
-			p.workerDirty[wid] = true
 		}
 		// Sync status and phase
 		p.workerStatus[wid] = state.WorkerStatus[wid]
@@ -338,10 +383,28 @@ func (p *CoordinatorPanel) Update(msg tea.Msg) (*CoordinatorPanel, tea.Cmd) {
 		}
 
 	case tea.MouseMsg:
-		// Handle mouse wheel scrolling in the active viewport
-		if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
-			scrollUp := msg.Button == tea.MouseButtonWheelUp
-			p.scrollActiveViewport(scrollUp)
+		// Handle text selection and scrolling for the active tab
+		switch p.activeTab {
+		case TabCoordinator:
+			if cmd := p.coordinatorPane.HandleMouse(msg); cmd != nil {
+				return p, cmd
+			}
+		case TabMessages:
+			if cmd := p.messagePane.HandleMouse(msg); cmd != nil {
+				return p, cmd
+			}
+		default:
+			// Worker tab
+			firstWorker := p.firstWorkerTabIndex()
+			workerIdx := p.activeTab - firstWorker
+			if workerIdx >= 0 && workerIdx < len(p.workerIDs) {
+				workerID := p.workerIDs[workerIdx]
+				if pane, exists := p.workerPanes[workerID]; exists {
+					if cmd := pane.HandleMouse(msg); cmd != nil {
+						return p, cmd
+					}
+				}
+			}
 		}
 
 	case vimtextarea.SubmitMsg:
@@ -359,38 +422,6 @@ func (p *CoordinatorPanel) Update(msg tea.Msg) (*CoordinatorPanel, tea.Cmd) {
 	}
 
 	return p, nil
-}
-
-// scrollActiveViewport scrolls the viewport for the currently active tab.
-func (p *CoordinatorPanel) scrollActiveViewport(up bool) {
-	switch p.activeTab {
-	case TabCoordinator:
-		if up {
-			p.coordinatorViewport.ScrollUp(1)
-		} else {
-			p.coordinatorViewport.ScrollDown(1)
-		}
-	case TabMessages:
-		if up {
-			p.messageViewport.ScrollUp(1)
-		} else {
-			p.messageViewport.ScrollDown(1)
-		}
-	default:
-		// Worker tab
-		workerIdx := p.activeTab - TabFirstWorker
-		if workerIdx >= 0 && workerIdx < len(p.workerIDs) {
-			workerID := p.workerIDs[workerIdx]
-			if vp, exists := p.workerViewports[workerID]; exists {
-				if up {
-					vp.ScrollUp(1)
-				} else {
-					vp.ScrollDown(1)
-				}
-				p.workerViewports[workerID] = vp
-			}
-		}
-	}
 }
 
 // View renders the coordinator panel with tabs.
@@ -573,28 +604,31 @@ func (p *CoordinatorPanel) getActiveMetricsDisplay() string {
 }
 
 // renderCoordinatorContent renders the coordinator chat content for the viewport.
+// Also tracks line positions of each message for click-to-copy detection.
 func (p *CoordinatorPanel) renderCoordinatorContent(height int) string {
 	vpWidth := max(p.width-2, 1)
 	vpHeight := max(height-2, 1)
 
-	content := renderChatContent(p.coordinatorMessages, vpWidth, chatrender.RenderConfig{
+	// Get selection bounds from pane
+	selStart, selEnd := p.coordinatorPane.SelectionBounds()
+
+	// Render content with selection highlighting
+	content, plainLines := renderChatContentWithSelection(p.coordinatorMessages, vpWidth, chatrender.RenderConfig{
 		AgentLabel: "Coordinator",
 		AgentColor: coordinatorTitleColor,
 		UserLabel:  "User",
-	})
-	content = padContentToBottom(content, vpHeight)
+	}, selStart, selEnd)
 
-	// Update viewport
-	wasAtBottom := p.coordinatorViewport.AtBottom()
-	p.coordinatorViewport.Width = vpWidth
-	p.coordinatorViewport.Height = vpHeight
-	p.coordinatorViewport.SetContent(content)
-	if wasAtBottom {
-		p.coordinatorViewport.GotoBottom()
-	}
+	// Pad both styled content and plain lines to keep them aligned
+	content, plainLines, topPadding := padContentAndLinesToBottom(content, plainLines, vpHeight)
 
-	p.coordinatorDirty = false
-	return p.coordinatorViewport.View()
+	// Update pane with content, plain lines, and padding offset for coordinate mapping
+	p.coordinatorPane.SetSize(vpWidth, vpHeight)
+	p.coordinatorPane.SetTopPadding(topPadding)
+	p.coordinatorPane.SetContent(content, plainLines, true)
+	p.coordinatorPane.ClearDirty()
+
+	return p.coordinatorPane.View()
 }
 
 // renderMessageLogContent renders the message log content for the viewport.
@@ -602,20 +636,22 @@ func (p *CoordinatorPanel) renderMessageLogContent(height int) string {
 	vpWidth := max(p.width-2, 1)
 	vpHeight := max(height-2, 1)
 
-	content := p.renderMessageEntries(vpWidth)
-	content = padContentToBottom(content, vpHeight)
+	// Get selection bounds from pane
+	selStart, selEnd := p.messagePane.SelectionBounds()
 
-	// Update viewport
-	wasAtBottom := p.messageViewport.AtBottom()
-	p.messageViewport.Width = vpWidth
-	p.messageViewport.Height = vpHeight
-	p.messageViewport.SetContent(content)
-	if wasAtBottom {
-		p.messageViewport.GotoBottom()
-	}
+	// Render content with selection highlighting
+	content, plainLines := p.renderMessageEntriesWithSelection(vpWidth, selStart, selEnd)
 
-	p.messageDirty = false
-	return p.messageViewport.View()
+	// Pad both styled content and plain lines to keep them aligned
+	content, plainLines, topPadding := padContentAndLinesToBottom(content, plainLines, vpHeight)
+
+	// Update pane with content, plain lines, and padding offset for coordinate mapping
+	p.messagePane.SetSize(vpWidth, vpHeight)
+	p.messagePane.SetTopPadding(topPadding)
+	p.messagePane.SetContent(content, plainLines, true)
+	p.messagePane.ClearDirty()
+
+	return p.messagePane.View()
 }
 
 // renderWorkerContent renders a worker's chat content for the viewport.
@@ -623,34 +659,40 @@ func (p *CoordinatorPanel) renderWorkerContent(workerID string, height int) stri
 	vpWidth := max(p.width-2, 1)
 	vpHeight := max(height-2, 1)
 
+	// Get or create pane for this worker
+	pane, exists := p.workerPanes[workerID]
+	if !exists {
+		pane = selection.NewPane(selection.PaneConfig{
+			Clipboard: p.clipboard,
+			MakeToast: p.makeToastFunc(),
+		})
+		pane.SetScreenXOffset(p.screenXOffset)
+		pane.SetScreenYOffset(p.screenYOffset)
+		p.workerPanes[workerID] = pane
+	}
+
+	// Get selection bounds from pane
+	selStart, selEnd := pane.SelectionBounds()
+
+	// Render content with selection highlighting
 	messages := p.workerMessages[workerID]
-	content := renderChatContent(messages, vpWidth, chatrender.RenderConfig{
+	content, plainLines := renderChatContentWithSelection(messages, vpWidth, chatrender.RenderConfig{
 		AgentLabel:              "Worker",
 		AgentColor:              workerTitleColor,
 		UserLabel:               "User",
 		ShowCoordinatorInWorker: true,
-	})
-	content = padContentToBottom(content, vpHeight)
+	}, selStart, selEnd)
 
-	// Get or create viewport
-	vp, exists := p.workerViewports[workerID]
-	if !exists {
-		vp = viewport.New(vpWidth, vpHeight)
-		p.workerViewports[workerID] = vp
-	}
+	// Pad both styled content and plain lines to keep them aligned
+	content, plainLines, topPadding := padContentAndLinesToBottom(content, plainLines, vpHeight)
 
-	// Update viewport
-	wasAtBottom := vp.AtBottom()
-	vp.Width = vpWidth
-	vp.Height = vpHeight
-	vp.SetContent(content)
-	if wasAtBottom {
-		vp.GotoBottom()
-	}
+	// Update pane with content, plain lines, and padding offset for coordinate mapping
+	pane.SetSize(vpWidth, vpHeight)
+	pane.SetTopPadding(topPadding)
+	pane.SetContent(content, plainLines, true)
+	pane.ClearDirty()
 
-	p.workerViewports[workerID] = vp
-	p.workerDirty[workerID] = false
-	return vp.View()
+	return pane.View()
 }
 
 // renderCommandLogContent renders the command log content for the viewport.
@@ -762,14 +804,17 @@ func formatCommandDuration(d time.Duration) string {
 	return fmt.Sprintf("%.1fs", d.Seconds())
 }
 
-// renderMessageEntries renders the message log entries (matches orchestration mode).
-func (p *CoordinatorPanel) renderMessageEntries(wrapWidth int) string {
+// renderMessageEntriesWithSelection renders the message log entries with optional selection highlighting.
+// Returns: rendered content, plain text lines for selection extraction.
+func (p *CoordinatorPanel) renderMessageEntriesWithSelection(wrapWidth int, selStart, selEnd *selection.Point) (string, []string) {
 	if len(p.messageEntries) == 0 {
 		emptyStyle := lipgloss.NewStyle().Foreground(styles.TextMutedColor)
-		return emptyStyle.Render("No inter-agent messages yet.")
+		return emptyStyle.Render("No inter-agent messages yet."), nil
 	}
 
 	var content strings.Builder
+	var plainLines []string
+	currentLine := 0
 
 	for _, entry := range p.messageEntries {
 		// Check if sender is a worker
@@ -796,6 +841,9 @@ func (p *CoordinatorPanel) renderMessageEntries(wrapWidth int) string {
 		// Format timestamp
 		timestamp := messageTimestampStyle.Render(entry.Timestamp.Format("15:04"))
 
+		// Build plain header
+		headerPlain := fmt.Sprintf("%s %s → %s", entry.Timestamp.Format("15:04"), entry.From, entry.To)
+
 		// Style sender based on who sent it
 		var senderStyled string
 		switch {
@@ -811,26 +859,37 @@ func (p *CoordinatorPanel) renderMessageEntries(wrapWidth int) string {
 			senderStyled = entry.From
 		}
 
-		// Format header: timestamp | SENDER → RECIPIENT
-		header := fmt.Sprintf("%s %s → %s", timestamp, senderStyled, entry.To)
+		// Format styled header: timestamp | SENDER → RECIPIENT
+		headerStyled := fmt.Sprintf("%s %s → %s", timestamp, senderStyled, entry.To)
 
 		// Word wrap content (account for left border + space)
 		wrappedContent := chatrender.WordWrap(entry.Content, wrapWidth-4)
-		styledContent := messageContentStyle.Render(wrappedContent)
+		wrappedLines := strings.Split(wrappedContent, "\n")
 
-		// Add left border to header
-		content.WriteString(leftBorder + " " + header)
+		// Build plain lines for this entry
+		plainLines = append(plainLines, headerPlain)
+		plainLines = append(plainLines, wrappedLines...)
+		plainLines = append(plainLines, "") // blank line
+
+		// Header line with optional selection
+		content.WriteString(leftBorder + " " + renderLineWithSelection(headerStyled, headerPlain, currentLine, wrapWidth, selStart, selEnd))
 		content.WriteString("\n")
+		currentLine++
 
-		// Add left border to each content line
-		for line := range strings.SplitSeq(styledContent, "\n") {
-			content.WriteString(leftBorder + " " + line)
+		// Content lines with optional selection (unstyled, matches coordinator pane)
+		for _, line := range wrappedLines {
+			content.WriteString(leftBorder + " " + renderLineWithSelection(line, line, currentLine, wrapWidth, selStart, selEnd))
 			content.WriteString("\n")
+			currentLine++
 		}
+
+		// Blank line
+		content.WriteString(renderLineWithSelection("", "", currentLine, wrapWidth, selStart, selEnd))
 		content.WriteString("\n")
+		currentLine++
 	}
 
-	return strings.TrimRight(content.String(), "\n")
+	return strings.TrimRight(content.String(), "\n"), plainLines
 }
 
 // padContentToBottom pads content to push it to the bottom of the viewport.
@@ -842,6 +901,22 @@ func padContentToBottom(content string, vpHeight int) string {
 		content = strings.Join(contentLines, "\n")
 	}
 	return content
+}
+
+// padContentAndLinesToBottom pads both styled content and plain lines to keep them aligned.
+// This ensures line indices match between styled viewport content and plain text for selection.
+// Returns the padded content, padded plain lines, and the number of padding lines added.
+func padContentAndLinesToBottom(content string, plainLines []string, vpHeight int) (string, []string, int) {
+	contentLines := strings.Split(content, "\n")
+	paddingCount := 0
+	if len(contentLines) < vpHeight {
+		paddingCount = vpHeight - len(contentLines)
+		contentPadding := make([]string, paddingCount)
+		plainPadding := make([]string, paddingCount)
+		contentLines = append(contentPadding, contentLines...)
+		plainLines = append(plainPadding, plainLines...)
+	}
+	return strings.Join(contentLines, "\n"), plainLines, paddingCount
 }
 
 // renderInputPane renders the input area.
@@ -894,24 +969,141 @@ func (p *CoordinatorPanel) IsInputInNormalMode() bool {
 	return p.input.InNormalMode()
 }
 
-// renderChatContent builds the chat content string for the viewport.
-// Uses the shared chatrender package for consistent styling with orchestration mode.
-// Filters out empty messages that can occur from delta streaming.
-func renderChatContent(messages []chatrender.Message, wrapWidth int, cfg chatrender.RenderConfig) string {
-	// Filter out empty messages
-	filtered := make([]chatrender.Message, 0, len(messages))
+// selectionBgStyle is the background highlight for selected text.
+var selectionBgStyle = lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Light: "#ADD8E6", Dark: "#264F78"})
+
+// renderChatContentWithSelection renders chat messages with optional selection highlighting.
+// If selStart and selEnd are provided, the selected range will be highlighted.
+// Returns: rendered content, plain text lines for selection extraction.
+func renderChatContentWithSelection(messages []chatrender.Message, wrapWidth int, cfg chatrender.RenderConfig, selStart, selEnd *selection.Point) (string, []string) {
+	userLabel := cfg.UserLabel
+	if userLabel == "" {
+		userLabel = "You"
+	}
+
+	// Filter to non-empty text messages (skip tool calls)
+	var filtered []chatrender.Message
 	for _, msg := range messages {
-		if msg.Content != "" || msg.IsToolCall {
+		if msg.Content != "" && !msg.IsToolCall {
 			filtered = append(filtered, msg)
 		}
 	}
 
 	if len(filtered) == 0 {
 		emptyStyle := lipgloss.NewStyle().Foreground(styles.TextMutedColor).PaddingLeft(1).PaddingBottom(1)
-		return emptyStyle.Render("Waiting for the coordinator to initialize.")
+		return emptyStyle.Render("Waiting for the coordinator to initialize."), nil
 	}
 
-	return chatrender.RenderContent(filtered, wrapWidth, cfg)
+	var content strings.Builder
+	var plainLines []string
+	currentLine := 0
+
+	for _, msg := range filtered {
+		// Role label (plain text for selection)
+		var rolePlain string
+		var roleLabel string
+		switch msg.Role {
+		case "user":
+			rolePlain = userLabel
+			roleLabel = chatrender.RoleStyle.Foreground(chatrender.UserMessageStyle.GetForeground()).Render(userLabel)
+		case "system":
+			rolePlain = "System"
+			roleLabel = chatrender.RoleStyle.Foreground(chatrender.SystemColor).Render("System")
+		case "coordinator":
+			if cfg.ShowCoordinatorInWorker {
+				rolePlain = "Coordinator"
+				roleLabel = chatrender.RoleStyle.Foreground(chatrender.CoordinatorColor).Render("Coordinator")
+			} else {
+				rolePlain = cfg.AgentLabel
+				roleLabel = chatrender.RoleStyle.Foreground(cfg.AgentColor).Render(cfg.AgentLabel)
+			}
+		default:
+			rolePlain = cfg.AgentLabel
+			roleLabel = chatrender.RoleStyle.Foreground(cfg.AgentColor).Render(cfg.AgentLabel)
+		}
+
+		// Content lines (word-wrapped)
+		wrapped := chatrender.WordWrap(msg.Content, wrapWidth-4)
+		wrappedLines := strings.Split(wrapped, "\n")
+
+		// Build plain lines for this message
+		plainLines = append(plainLines, rolePlain)
+		plainLines = append(plainLines, wrappedLines...)
+		plainLines = append(plainLines, "") // blank line
+
+		// Role line with optional selection
+		content.WriteString(renderLineWithSelection(roleLabel, rolePlain, currentLine, wrapWidth, selStart, selEnd))
+		content.WriteString("\n")
+		currentLine++
+
+		// Content lines with optional selection
+		for _, line := range wrappedLines {
+			content.WriteString(renderLineWithSelection(line, line, currentLine, wrapWidth, selStart, selEnd))
+			content.WriteString("\n")
+			currentLine++
+		}
+
+		// Blank line
+		content.WriteString(renderLineWithSelection("", "", currentLine, wrapWidth, selStart, selEnd))
+		content.WriteString("\n")
+		currentLine++
+	}
+
+	return strings.TrimRight(content.String(), "\n"), plainLines
+}
+
+// renderLineWithSelection renders a line with selection highlighting applied.
+func renderLineWithSelection(styledLine, plainLine string, lineNum, width int, selStart, selEnd *selection.Point) string {
+	if selStart == nil || selEnd == nil {
+		return styledLine
+	}
+
+	// Check if this line is within the selection range
+	if lineNum < selStart.Line || lineNum > selEnd.Line {
+		return styledLine
+	}
+
+	// Determine selection columns for this line
+	startCol := 0
+	endCol := len(plainLine)
+
+	if lineNum == selStart.Line {
+		startCol = selStart.Col
+	}
+	if lineNum == selEnd.Line {
+		endCol = selEnd.Col
+	}
+
+	// Clamp to valid range
+	if startCol > len(plainLine) {
+		startCol = len(plainLine)
+	}
+	if endCol > len(plainLine) {
+		endCol = len(plainLine)
+	}
+	if startCol >= endCol {
+		return styledLine
+	}
+
+	// For simplicity, we'll highlight using the plain line
+	// This loses ANSI styling but ensures accurate selection
+	before := plainLine[:startCol]
+	selected := plainLine[startCol:endCol]
+	after := plainLine[endCol:]
+
+	result := before + selectionBgStyle.Render(selected) + after
+
+	// Pad to width for consistent appearance
+	return padLineToWidth(result, width)
+}
+
+// padLineToWidth pads a line with spaces to the given width for consistent hover backgrounds.
+func padLineToWidth(line string, width int) string {
+	lineWidth := ansi.StringWidth(line)
+	if lineWidth >= width {
+		return line
+	}
+	return line + strings.Repeat(" ", width-lineWidth)
 }
 
 // CoordinatorPanelSubmitMsg is sent when the user submits a message.
