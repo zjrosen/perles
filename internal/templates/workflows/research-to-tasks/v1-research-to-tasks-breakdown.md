@@ -11,7 +11,7 @@ Read the research document, create a beads epic, break it down into implementabl
 ## Input
 
 - **Research Document:** (read from plan document's Source section)
-- **Plan Document:** `docs/proposals/{{ .Date }}--{{ .Name }}/plan.md`
+- **Plan Document:** `{{.Config.document_path}}/{{ .Date }}--{{ .Name }}/plan.md`
 
 ## Critical Rules
 
@@ -33,7 +33,7 @@ bd create "{{ .Name }}" -t epic -d "
 See: [research document path from plan]
 
 ## Plan Document
-See: docs/proposals/{{ .Date }}--{{ .Name }}/plan.md
+See: {{.Config.document_path}}/{{ .Date }}--{{ .Name }}/plan.md
 
 ## Tasks
 This epic contains N tasks to implement the feature.

@@ -60,7 +60,7 @@ func runWorkflowCreate(cmd *cobra.Command, args []string) error {
 	executor := infrabeads.NewBDExecutor("", "")
 
 	// Create WorkflowCreator with dependencies
-	creator := appreg.NewWorkflowCreator(registryService, executor)
+	creator := appreg.NewWorkflowCreator(registryService, executor, cfg.Orchestration.Templates)
 
 	// Create the epic and tasks
 	result, err := creator.Create(workflowFeatureSlug, workflowKey)

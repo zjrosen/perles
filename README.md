@@ -458,8 +458,8 @@ Perles looks for configuration in these locations (in order):
 | `theme.colors.*`                                 | hex | varies               | Individual color token overrides                              |
 | `orchestration.coordinator_client`               | string | `"claude"`           | AI client: claude, amp, codex or opencode                     |
 | `orchestration.worker_client`                    | string | `"claude"`           | AI client: claude, amp, codex or opencode                     |
-| `orchestration.session_storage.base_dir`         | string | `~/.perles/sessions` | Root directory for session storage                            |
 | `orchestration.session_storage.application_name` | string | auto                 | Override application name (default: derived from git remote)  |
+| `orchestration.templates.document_path`          | string | `"docs/proposals"`   | Base path for generated workflow documents                    |
 
 ### Example Configuration
 
@@ -531,8 +531,9 @@ orchestration:
   coordinator_client: claude           # claude (default), amp, codex or opencode
   worker_client: claude                # claude (default), amp, or codex or opencode
   session_storage:
-    base_dir: ~/.perles/sessions       # Default session storage location
     # application_name: my-project     # Optional: override auto-derived name
+  templates:
+    document_path: docs/proposals      # Base path for generated workflow documents
 ```
 
 ---

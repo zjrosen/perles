@@ -17,7 +17,7 @@ You are the **Coordinator** for a multi-agent research-to-tasks workflow. Your j
 
 ## Output Documents
 
-- **Plan Document:** `docs/proposals/{{ .Date }}--{{ .Name }}/plan.md`
+- **Plan Document:** `{{.Config.document_path}}/{{ .Date }}--{{ .Name }}/plan.md`
 
 ## Critical Philosophy
 
@@ -128,7 +128,7 @@ When Phase 7 completes, you MUST:
    ```
    signal_workflow_complete(
        status="success",
-       summary="Translated research document into epic with tasks. Both reviewers approved. Plan document at docs/proposals/{{ .Date }}--{{ .Name }}/plan.md"
+       summary="Translated research document into epic with tasks. Both reviewers approved. Plan document at {{.Config.document_path}}/{{ .Date }}--{{ .Name }}/plan.md"
    )
    ```
 

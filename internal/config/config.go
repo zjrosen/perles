@@ -131,6 +131,30 @@ type SessionStorageConfig struct {
 	ApplicationName string `mapstructure:"application_name"`
 }
 
+// TemplatesConfig holds user-configurable template variables.
+// These values are injected into template rendering context as {{.Config.key}}.
+type TemplatesConfig struct {
+	// DocumentPath is the base path for generated workflow documents.
+	// Used in templates as {{.Config.document_path}}
+	// Default: "docs/proposals" (applied by ToTemplateConfig() when empty)
+	DocumentPath string `mapstructure:"document_path"`
+}
+
+// ToTemplateConfig converts TemplatesConfig to a map for template injection.
+// Always returns populated values with defaults applied - templates never see empty values.
+// The returned map is used as {{.Config}} in workflow templates.
+func (t TemplatesConfig) ToTemplateConfig() map[string]string {
+	config := make(map[string]string)
+
+	if t.DocumentPath != "" {
+		config["document_path"] = t.DocumentPath
+	} else {
+		config["document_path"] = "docs/proposals"
+	}
+
+	return config
+}
+
 // TimeoutsConfig holds timeout settings for orchestration initialization phases.
 type TimeoutsConfig struct {
 	// WorktreeCreation is the timeout for git worktree creation.
@@ -176,6 +200,7 @@ type OrchestrationConfig struct {
 	Workflows         []WorkflowConfig     `mapstructure:"workflows"`       // Workflow template configurations
 	Tracing           TracingConfig        `mapstructure:"tracing"`         // Distributed tracing configuration
 	SessionStorage    SessionStorageConfig `mapstructure:"session_storage"` // Session storage location configuration
+	Templates         TemplatesConfig      `mapstructure:"templates"`       // Template rendering variables
 	Timeouts          TimeoutsConfig       `mapstructure:"timeouts"`        // Initialization phase timeout configuration
 }
 
@@ -520,6 +545,11 @@ func ValidateOrchestration(orch OrchestrationConfig) error {
 		return err
 	}
 
+	// Validate template variables
+	if err := ValidateTemplates(orch.Templates); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -626,6 +656,31 @@ func ValidateSessionStorage(storage SessionStorageConfig) error {
 	// BaseDir must be absolute if set
 	if storage.BaseDir != "" && !filepath.IsAbs(storage.BaseDir) {
 		return fmt.Errorf("orchestration.session_storage.base_dir must be an absolute path, got %q", storage.BaseDir)
+	}
+
+	return nil
+}
+
+// ValidateTemplates validates template configuration values.
+// Security: only allow relative paths without traversal to prevent escaping the project root.
+func ValidateTemplates(templates TemplatesConfig) error {
+	if templates.DocumentPath == "" {
+		return nil // Empty is valid; defaults applied in ToTemplateConfig()
+	}
+
+	path := templates.DocumentPath
+
+	// Block absolute paths (Unix and Windows drive letter).
+	if filepath.IsAbs(path) || (len(path) >= 2 && path[1] == ':') {
+		return fmt.Errorf("orchestration.templates.document_path must be relative, got %q", path)
+	}
+
+	// Block path traversal.
+	segments := strings.FieldsFunc(path, func(r rune) bool {
+		return r == '/' || r == '\\'
+	})
+	if slices.Contains(segments, "..") {
+		return fmt.Errorf("orchestration.templates.document_path cannot contain path traversal")
 	}
 
 	return nil

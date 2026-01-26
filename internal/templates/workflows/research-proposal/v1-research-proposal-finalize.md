@@ -66,7 +66,7 @@ After finalizing acceptance criteria, signal completion:
 ```
 signal_workflow_complete(
     status="success",
-    summary="Completed research proposal for {{ .Name }}. All workers approved. Proposal at docs/proposals/{{ .Name }}-proposal.md with [count] acceptance criteria defined."
+    summary="Completed research proposal for {{ .Name }}. All workers approved. Proposal at {{.Config.document_path}}/{{ .Name }}-proposal.md with [count] acceptance criteria defined."
 )
 ```
 

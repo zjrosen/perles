@@ -11,7 +11,7 @@ Review the epic and tasks to verify that every task includes specific, comprehen
 ## Input
 
 - **Research Document:** (read from plan document's Source section)
-- **Plan Document:** `docs/proposals/{{ .Date }}--{{ .Name }}/plan.md`
+- **Plan Document:** `{{.Config.document_path}}/{{ .Date }}--{{ .Name }}/plan.md`
 
 ## Instructions
 

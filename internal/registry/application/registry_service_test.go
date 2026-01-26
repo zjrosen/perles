@@ -1,14 +1,18 @@
 package registry
 
 import (
+	"bytes"
 	"io/fs"
 	"os"
 	"testing"
 	"testing/fstest"
+	"text/template"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/zjrosen/perles/internal/config"
 	"github.com/zjrosen/perles/internal/registry/domain"
+	"github.com/zjrosen/perles/internal/templates"
 )
 
 // createTestFS creates a MapFS for testing with workflow subdirectories containing template.yaml and templates
@@ -420,6 +424,23 @@ func createTestRegistryWithArtifacts() *registry.Registry {
 	return reg
 }
 
+func TestTemplateContext_WithConfig(t *testing.T) {
+	ctx := TemplateContext{
+		Slug: "my-feature",
+		Config: map[string]string{
+			"document_path": "docs/proposals",
+		},
+	}
+
+	tmpl := template.Must(template.New("test").Parse("Path: {{.Config.document_path}}"))
+	var buf bytes.Buffer
+
+	err := tmpl.Execute(&buf, ctx)
+
+	require.NoError(t, err)
+	require.Equal(t, "Path: docs/proposals", buf.String())
+}
+
 // TestRenderTemplate_ValidContext tests successful rendering with all context fields
 func TestRenderTemplate_ValidContext(t *testing.T) {
 	// Create test filesystem with template containing Go template syntax
@@ -446,6 +467,96 @@ func TestRenderTemplate_ValidContext(t *testing.T) {
 	require.Contains(t, result, "Slug: my-feature")
 	require.Contains(t, result, "Input: docs/research.md")
 	require.Contains(t, result, "Output: docs/proposal.md")
+}
+
+func TestRenderTemplate_ConfigInjection(t *testing.T) {
+	testFS := fstest.MapFS{
+		"test-template.md": &fstest.MapFile{
+			Data: []byte("Config: {{.Config.document_path}}"),
+		},
+	}
+
+	svc := &RegistryService{
+		registry:   createTestRegistryWithArtifacts(),
+		templateFS: fs.ReadFileFS(testFS),
+	}
+
+	ctx := TemplateContext{
+		Slug: "my-feature",
+		Config: map[string]string{
+			"document_path": "docs/proposals",
+		},
+	}
+
+	result, err := svc.RenderTemplate("workflow::test-workflow::v1::research", ctx)
+
+	require.NoError(t, err)
+	require.Contains(t, result, "Config: docs/proposals")
+}
+
+func TestRenderTemplate_ConfigEmpty(t *testing.T) {
+	testFS := fstest.MapFS{
+		"test-template.md": &fstest.MapFile{
+			Data: []byte("Config: {{.Config.document_path}}"),
+		},
+	}
+
+	svc := &RegistryService{
+		registry:   createTestRegistryWithArtifacts(),
+		templateFS: fs.ReadFileFS(testFS),
+	}
+
+	ctx := TemplateContext{
+		Slug:   "my-feature",
+		Config: map[string]string{},
+	}
+
+	result, err := svc.RenderTemplate("workflow::test-workflow::v1::research", ctx)
+
+	require.NoError(t, err)
+	require.Contains(t, result, "Config: <no value>")
+}
+
+func TestTemplate_ResearchProposal_ConfigPath(t *testing.T) {
+	svc, err := NewRegistryService(templates.RegistryFS(), "")
+	require.NoError(t, err)
+
+	ctx := TemplateContext{
+		Slug: "test-feature",
+		Name: "test-feature",
+		Date: "2026-01-26",
+		Args: map[string]string{
+			"goal": "Test goal",
+		},
+		Config: config.TemplatesConfig{DocumentPath: "docs/custom"}.ToTemplateConfig(),
+	}
+
+	result, err := svc.RenderTemplate("workflow::research-proposal::v1::setup", ctx)
+
+	require.NoError(t, err)
+	require.Contains(t, result, "docs/custom/2026-01-26--test-feature/")
+	require.Contains(t, result, "docs/custom/2026-01-26--test-feature/research-proposal.md")
+}
+
+func TestTemplate_ResearchProposal_DefaultPath(t *testing.T) {
+	svc, err := NewRegistryService(templates.RegistryFS(), "")
+	require.NoError(t, err)
+
+	ctx := TemplateContext{
+		Slug: "test-feature",
+		Name: "test-feature",
+		Date: "2026-01-26",
+		Args: map[string]string{
+			"goal": "Test goal",
+		},
+		Config: config.TemplatesConfig{}.ToTemplateConfig(),
+	}
+
+	result, err := svc.RenderTemplate("workflow::research-proposal::v1::setup", ctx)
+
+	require.NoError(t, err)
+	require.Contains(t, result, "docs/proposals/2026-01-26--test-feature/")
+	require.Contains(t, result, "docs/proposals/2026-01-26--test-feature/research-proposal.md")
 }
 
 // TestRenderTemplate_MissingSlug tests error when slug is empty
@@ -1232,6 +1343,46 @@ func TestRenderEpicTemplate_BuiltInWorkflow(t *testing.T) {
 	require.Contains(t, result, "# Epic: My Feature")
 	require.Contains(t, result, "Date: 2025-01-22")
 	require.Contains(t, result, "Slug: my-feature")
+}
+
+func TestRenderEpicTemplate_ConfigInjection(t *testing.T) {
+	builtinFS := fstest.MapFS{
+		"workflows/builtin/template.yaml": &fstest.MapFile{
+			Data: []byte(`registry:
+  - namespace: "workflow"
+    key: "builtin-wf"
+    version: "v1"
+    name: "Built-in Workflow"
+    description: "A built-in workflow"
+    epic_template: "workflows/builtin/epic.md"
+    nodes:
+      - key: "step1"
+        name: "Step 1"
+        template: "builtin-step1.md"
+`),
+		},
+		"workflows/builtin/builtin-step1.md": &fstest.MapFile{Data: []byte("# Built-in Step 1")},
+		"workflows/builtin/epic.md": &fstest.MapFile{
+			Data: []byte("Config: {{.Config.document_path}}"),
+		},
+	}
+
+	svc, err := NewRegistryService(builtinFS, "")
+	require.NoError(t, err)
+
+	reg, err := svc.GetByKey("workflow", "builtin-wf")
+	require.NoError(t, err)
+
+	ctx := TemplateContext{
+		Slug: "my-feature",
+		Config: map[string]string{
+			"document_path": "docs/proposals",
+		},
+	}
+
+	result, err := svc.RenderEpicTemplate(reg, ctx)
+	require.NoError(t, err)
+	require.Contains(t, result, "Config: docs/proposals")
 }
 
 func TestRenderEpicTemplate_UserWorkflow(t *testing.T) {

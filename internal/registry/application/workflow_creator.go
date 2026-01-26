@@ -6,6 +6,7 @@ import (
 	"time"
 
 	beads "github.com/zjrosen/perles/internal/beads/application"
+	"github.com/zjrosen/perles/internal/config"
 	"github.com/zjrosen/perles/internal/registry/domain"
 )
 
@@ -39,15 +40,17 @@ type TaskResultDTO struct {
 
 // WorkflowCreator handles epic/task creation from workflow DAGs.
 type WorkflowCreator struct {
-	registry *RegistryService
-	executor beads.IssueExecutor
+	registry        *RegistryService
+	executor        beads.IssueExecutor
+	templatesConfig config.TemplatesConfig
 }
 
 // NewWorkflowCreator creates a new WorkflowCreator with dependency injection.
-func NewWorkflowCreator(registry *RegistryService, executor beads.IssueExecutor) *WorkflowCreator {
+func NewWorkflowCreator(registry *RegistryService, executor beads.IssueExecutor, templatesConfig config.TemplatesConfig) *WorkflowCreator {
 	return &WorkflowCreator{
-		registry: registry,
-		executor: executor,
+		registry:        registry,
+		executor:        executor,
+		templatesConfig: templatesConfig,
 	}
 }
 
@@ -70,10 +73,11 @@ func (c *WorkflowCreator) CreateWithArgs(feature, workflowKey string, args map[s
 
 	// 2. Build template context with arguments
 	baseCtx := TemplateContext{
-		Slug: feature,
-		Name: feature,
-		Date: time.Now().Format("2006-01-02"),
-		Args: args, // User-provided argument values
+		Slug:   feature,
+		Name:   feature,
+		Date:   time.Now().Format("2006-01-02"),
+		Args:   args, // User-provided argument values
+		Config: c.templatesConfig.ToTemplateConfig(),
 	}
 
 	// 3. Render epic description from template (or use default)

@@ -122,7 +122,7 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 	// Create beads executor for workflow creator
 	beadsExec = infrabeads.NewBDExecutor(workDir, cfg.ResolvedBeadsDir)
 	if registryService != nil {
-		workflowCreator = appreg.NewWorkflowCreator(registryService, beadsExec)
+		workflowCreator = appreg.NewWorkflowCreator(registryService, beadsExec, cfg.Orchestration.Templates)
 	}
 
 	// Create control plane

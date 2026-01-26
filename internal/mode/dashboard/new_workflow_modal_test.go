@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	beadsdomain "github.com/zjrosen/perles/internal/beads/domain"
+	"github.com/zjrosen/perles/internal/config"
 	domaingit "github.com/zjrosen/perles/internal/git/domain"
 	"github.com/zjrosen/perles/internal/keys"
 	"github.com/zjrosen/perles/internal/mocks"
@@ -93,7 +94,7 @@ func createTestWorkflowCreator(t *testing.T, registryService *appreg.RegistrySer
 	mockExecutor.EXPECT().CreateTask(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Return(beadsdomain.CreateResult{ID: "task-456"}, nil).Maybe()
 	mockExecutor.EXPECT().AddDependency(mock.Anything, mock.Anything).Return(nil).Maybe()
-	return appreg.NewWorkflowCreator(registryService, mockExecutor)
+	return appreg.NewWorkflowCreator(registryService, mockExecutor, config.TemplatesConfig{})
 }
 
 // simulateAsyncSubmit simulates the full async form submission flow:

@@ -2,13 +2,19 @@ package app
 
 import (
 	"os"
+	"reflect"
+	"strings"
 	"testing"
+	"testing/fstest"
+	"unsafe"
 
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	beadsapp "github.com/zjrosen/perles/internal/beads/application"
+	beadsdomain "github.com/zjrosen/perles/internal/beads/domain"
 	"github.com/zjrosen/perles/internal/config"
 	"github.com/zjrosen/perles/internal/flags"
 	"github.com/zjrosen/perles/internal/mocks"
@@ -18,6 +24,7 @@ import (
 	"github.com/zjrosen/perles/internal/mode/search"
 	"github.com/zjrosen/perles/internal/orchestration/client"
 	v2 "github.com/zjrosen/perles/internal/orchestration/v2"
+	appreg "github.com/zjrosen/perles/internal/registry/application"
 	"github.com/zjrosen/perles/internal/ui/shared/chatpanel"
 	"github.com/zjrosen/perles/internal/ui/shared/diffviewer"
 )
@@ -89,6 +96,46 @@ func createTestModel(t *testing.T) Model {
 		width:       100,
 		height:      40,
 	}
+}
+
+func createWorkflowCreatorConfigFS(templateContent string) fstest.MapFS {
+	return fstest.MapFS{
+		"workflows/config-workflow/template.yaml": &fstest.MapFile{
+			Data: []byte(`
+registry:
+  - namespace: "workflow"
+    key: "config-workflow"
+    version: "v1"
+    name: "Config Workflow"
+    description: "Config test workflow"
+    nodes:
+      - key: "task"
+        name: "Task"
+        template: "task.md"
+`),
+		},
+		"workflows/config-workflow/task.md": &fstest.MapFile{
+			Data: []byte(templateContent),
+		},
+	}
+}
+
+func getWorkflowCreatorTemplatesConfig(t *testing.T, creator *appreg.WorkflowCreator) config.TemplatesConfig {
+	t.Helper()
+
+	field := reflect.ValueOf(creator).Elem().FieldByName("templatesConfig")
+	require.True(t, field.IsValid(), "templatesConfig field missing")
+	return *(*config.TemplatesConfig)(unsafe.Pointer(field.UnsafeAddr()))
+}
+
+func setWorkflowCreatorExecutor(t *testing.T, creator *appreg.WorkflowCreator, executor beadsapp.IssueExecutor) {
+	t.Helper()
+
+	field := reflect.ValueOf(creator).Elem().FieldByName("executor")
+	require.True(t, field.IsValid(), "executor field missing")
+
+	ptr := unsafe.Pointer(field.UnsafeAddr())
+	reflect.NewAt(field.Type(), ptr).Elem().Set(reflect.ValueOf(executor))
 }
 
 func TestApp_DefaultMode(t *testing.T) {
@@ -514,6 +561,116 @@ func TestApp_SwitchToSearchMsg_EmptyQuery(t *testing.T) {
 	// View should render
 	view := m.View()
 	require.NotEmpty(t, view, "search view should render")
+}
+
+func TestApp_WorkflowCreatorReceivesConfig(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Orchestration.Templates = config.TemplatesConfig{DocumentPath: "docs/custom-proposals"}
+
+	registryService, err := appreg.NewRegistryService(createWorkflowCreatorConfigFS("Doc: {{.Config.document_path}}"), "")
+	require.NoError(t, err)
+
+	model, err := NewWithConfig(
+		nil,
+		cfg,
+		nil,
+		nil,
+		"",
+		"",
+		t.TempDir(),
+		false,
+		registryService,
+	)
+	require.NoError(t, err)
+
+	got := getWorkflowCreatorTemplatesConfig(t, model.workflowCreator)
+	require.Equal(t, cfg.Orchestration.Templates, got)
+}
+
+func TestApp_EndToEnd_CustomPath(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Orchestration.Templates = config.TemplatesConfig{DocumentPath: "docs/custom-proposals"}
+
+	registryService, err := appreg.NewRegistryService(createWorkflowCreatorConfigFS("Doc: {{.Config.document_path}}/plan.md"), "")
+	require.NoError(t, err)
+
+	model, err := NewWithConfig(
+		nil,
+		cfg,
+		nil,
+		nil,
+		"",
+		"",
+		t.TempDir(),
+		false,
+		registryService,
+	)
+	require.NoError(t, err)
+
+	mockExecutor := mocks.NewMockIssueExecutor(t)
+	mockExecutor.EXPECT().CreateEpic(
+		"Config Workflow: Test Feature",
+		mock.AnythingOfType("string"),
+		[]string{"feature:test-feature", "workflow:config-workflow"},
+	).Return(beadsdomain.CreateResult{ID: "test-epic", Title: "Config Workflow: Test Feature"}, nil)
+
+	mockExecutor.EXPECT().CreateTask(
+		"Task",
+		mock.MatchedBy(func(content string) bool {
+			return strings.Contains(content, "Doc: docs/custom-proposals/plan.md")
+		}),
+		"test-epic",
+		mock.AnythingOfType("string"),
+		[]string{"spec:plan"},
+	).Return(beadsdomain.CreateResult{ID: "task-1", Title: "Task"}, nil)
+
+	setWorkflowCreatorExecutor(t, model.workflowCreator, mockExecutor)
+
+	_, err = model.workflowCreator.CreateWithArgs("test-feature", "config-workflow", nil)
+	require.NoError(t, err)
+}
+
+func TestApp_EndToEnd_DefaultPath(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Orchestration.Templates = config.TemplatesConfig{}
+
+	registryService, err := appreg.NewRegistryService(createWorkflowCreatorConfigFS("Doc: {{.Config.document_path}}/plan.md"), "")
+	require.NoError(t, err)
+
+	model, err := NewWithConfig(
+		nil,
+		cfg,
+		nil,
+		nil,
+		"",
+		"",
+		t.TempDir(),
+		false,
+		registryService,
+	)
+	require.NoError(t, err)
+
+	mockExecutor := mocks.NewMockIssueExecutor(t)
+	mockExecutor.EXPECT().CreateEpic(
+		"Config Workflow: Test Feature",
+		mock.AnythingOfType("string"),
+		[]string{"feature:test-feature", "workflow:config-workflow"},
+	).Return(beadsdomain.CreateResult{ID: "test-epic", Title: "Config Workflow: Test Feature"}, nil)
+
+	mockExecutor.EXPECT().CreateTask(
+		"Task",
+		mock.MatchedBy(func(content string) bool {
+			return strings.Contains(content, "Doc: docs/proposals/plan.md")
+		}),
+		"test-epic",
+		mock.AnythingOfType("string"),
+		[]string{"spec:plan"},
+	).Return(beadsdomain.CreateResult{ID: "task-1", Title: "Task"}, nil)
+
+	setWorkflowCreatorExecutor(t, model.workflowCreator, mockExecutor)
+
+	_, err = model.workflowCreator.CreateWithArgs("test-feature", "config-workflow", nil)
+	require.NoError(t, err)
 }
 
 // TestApp_SwitchToSearchMsg_SetsSizeCorrectly verifies that the SwitchToSearchMsg

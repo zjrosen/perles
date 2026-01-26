@@ -10,7 +10,7 @@ Write the final summary synthesizing the planning process and confirming the epi
 
 ## Input
 
-- **Plan Document:** `docs/proposals/{{ .Date }}--{{ .Name }}/plan.md`
+- **Plan Document:** `{{.Config.document_path}}/{{ .Date }}--{{ .Name }}/plan.md`
 
 ## Instructions
 

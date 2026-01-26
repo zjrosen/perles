@@ -10,7 +10,7 @@ Read the review findings and make necessary revisions to the epic and tasks. Doc
 
 ## Input
 
-- **Plan Document:** `docs/proposals/{{ .Date }}--{{ .Name }}/plan.md`
+- **Plan Document:** `{{.Config.document_path}}/{{ .Date }}--{{ .Name }}/plan.md`
 
 ## Instructions
 

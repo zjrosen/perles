@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"testing"
 	"time"
@@ -1104,6 +1105,154 @@ func TestSessionStorageConfig_ApplicationNameOverridePreserved(t *testing.T) {
 		ApplicationName: "my-custom-app-name",
 	}
 	require.Equal(t, "my-custom-app-name", cfg.ApplicationName)
+}
+
+func TestConfig_OrchestrationTemplates_Unmarshal(t *testing.T) {
+	cfg := loadConfigFromYAML(t, `
+orchestration:
+  templates:
+    document_path: "docs/custom-proposals"
+`)
+
+	require.Equal(t, "docs/custom-proposals", cfg.Orchestration.Templates.DocumentPath)
+}
+
+func TestConfig_OrchestrationTemplates_Empty(t *testing.T) {
+	cfg := loadConfigFromYAML(t, `
+orchestration:
+  client: "claude"
+`)
+
+	require.Empty(t, cfg.Orchestration.Templates.DocumentPath, "DocumentPath should be empty when not specified")
+}
+
+func TestConfig_OrchestrationTemplates_Struct(t *testing.T) {
+	cfgType := reflect.TypeOf(TemplatesConfig{})
+
+	field, ok := cfgType.FieldByName("DocumentPath")
+	require.True(t, ok, "TemplatesConfig should have DocumentPath field")
+	require.Equal(t, reflect.String, field.Type.Kind(), "DocumentPath should be a string")
+	require.Equal(t, "document_path", field.Tag.Get("mapstructure"))
+	require.Equal(t, 1, cfgType.NumField(), "TemplatesConfig should only have one field")
+}
+
+func TestToTemplateConfig_Default(t *testing.T) {
+	cfg := TemplatesConfig{}
+
+	got := cfg.ToTemplateConfig()
+
+	require.Equal(t, map[string]string{
+		"document_path": "docs/proposals",
+	}, got)
+}
+
+func TestToTemplateConfig_Custom(t *testing.T) {
+	cfg := TemplatesConfig{
+		DocumentPath: "packages/core/docs",
+	}
+
+	got := cfg.ToTemplateConfig()
+
+	require.Equal(t, map[string]string{
+		"document_path": "packages/core/docs",
+	}, got)
+}
+
+func TestToTemplateConfig_TrailingSlash(t *testing.T) {
+	cfg := TemplatesConfig{
+		DocumentPath: "docs/proposals/",
+	}
+
+	got := cfg.ToTemplateConfig()
+
+	require.Equal(t, map[string]string{
+		"document_path": "docs/proposals/",
+	}, got)
+}
+
+func TestToTemplateConfig_AlwaysPopulated(t *testing.T) {
+	cfg := TemplatesConfig{}
+
+	got := cfg.ToTemplateConfig()
+
+	require.NotNil(t, got)
+	_, ok := got["document_path"]
+	require.True(t, ok, "document_path key should always be present")
+}
+
+func TestValidateTemplates_PathTraversal(t *testing.T) {
+	paths := []string{
+		"../outside",
+		"foo/../bar",
+		"./foo/../../../etc",
+	}
+
+	for _, path := range paths {
+		err := ValidateTemplates(TemplatesConfig{DocumentPath: path})
+		require.Error(t, err, "expected path traversal to be rejected for %q", path)
+		require.Contains(t, err.Error(), "path traversal")
+	}
+}
+
+func TestValidateTemplates_AbsolutePath_Unix(t *testing.T) {
+	paths := []string{
+		"/tmp/path",
+		"/etc/passwd",
+	}
+
+	for _, path := range paths {
+		err := ValidateTemplates(TemplatesConfig{DocumentPath: path})
+		require.Error(t, err, "expected absolute unix path to be rejected for %q", path)
+		require.Contains(t, err.Error(), "must be relative")
+	}
+}
+
+func TestValidateTemplates_AbsolutePath_Windows(t *testing.T) {
+	paths := []string{
+		`C:\path`,
+		`D:\docs`,
+	}
+
+	for _, path := range paths {
+		err := ValidateTemplates(TemplatesConfig{DocumentPath: path})
+		require.Error(t, err, "expected absolute windows path to be rejected for %q", path)
+		require.Contains(t, err.Error(), "must be relative")
+	}
+}
+
+func TestValidateTemplates_EmptyPath(t *testing.T) {
+	err := ValidateTemplates(TemplatesConfig{DocumentPath: ""})
+	require.NoError(t, err)
+}
+
+func TestValidateTemplates_ValidPath(t *testing.T) {
+	paths := []string{
+		"docs/proposals",
+		"packages/core/docs",
+		"my-docs",
+	}
+
+	for _, path := range paths {
+		err := ValidateTemplates(TemplatesConfig{DocumentPath: path})
+		require.NoError(t, err, "expected path to be accepted for %q", path)
+	}
+}
+
+func TestValidateTemplates_PathWithSpaces(t *testing.T) {
+	err := ValidateTemplates(TemplatesConfig{DocumentPath: "docs/my proposals"})
+	require.NoError(t, err)
+}
+
+func TestValidateOrchestration_WithInvalidTemplates(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Client: "claude",
+		Templates: TemplatesConfig{
+			DocumentPath: "../outside",
+		},
+	}
+	err := ValidateOrchestration(cfg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "path traversal")
 }
 
 // Tests for SoundConfig

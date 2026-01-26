@@ -233,7 +233,7 @@ func NewWithConfig(
 	}
 
 	// Create WorkflowCreator using the passed-in registryService
-	workflowCreator := appreg.NewWorkflowCreator(registryService, beadsExec)
+	workflowCreator := appreg.NewWorkflowCreator(registryService, beadsExec, cfg.Orchestration.Templates)
 
 	// Create chat panel with config from services
 	// Panel defaults to hidden (visible = false)

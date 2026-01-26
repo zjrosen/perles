@@ -27,6 +27,7 @@ type TemplateContext struct {
 	Inputs  map[string]string // Auto-computed: artifact name → full path
 	Outputs map[string]string // Auto-computed: artifact name → full path
 	Args    map[string]string // User-provided argument values (key → value)
+	Config  map[string]string // User config values from orchestration.templates
 }
 
 // regKey is a struct key for per-registration FS tracking.
