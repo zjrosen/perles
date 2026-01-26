@@ -14,6 +14,7 @@ import (
 // Input normalization:
 //   - "/path/to/project" -> "/path/to/project/.beads"
 //   - "/path/to/project/.beads" -> "/path/to/project/.beads"
+//   - "/path/to/beads-data" (containing beads.db) -> "/path/to/beads-data"
 //   - "" -> "./.beads"
 //
 // Redirect handling:
@@ -27,13 +28,20 @@ func ResolveBeadsDir(path string) string {
 	}
 	path = filepath.Clean(path)
 
-	// Normalize: ensure path ends with .beads
-	var beadsDir string
+	// If path already ends with .beads, use it directly
 	if filepath.Base(path) == ".beads" {
-		beadsDir = path
-	} else {
-		beadsDir = filepath.Join(path, ".beads")
+		return followRedirect(path)
 	}
+
+	// If path contains beads.db directly, use it as the beads directory
+	// This supports BEADS_DIR pointing directly to a beads data directory
+	dbPath := filepath.Join(path, "beads.db")
+	if _, err := os.Stat(dbPath); err == nil {
+		return followRedirect(path)
+	}
+
+	// Otherwise, append .beads to the path
+	beadsDir := filepath.Join(path, ".beads")
 
 	// Follow redirect if present (for git worktrees)
 	return followRedirect(beadsDir)

@@ -88,15 +88,16 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 	}
 
 	// Resolution priority for beads directory (same as TUI):
-	// 1. -b flag (already in cfg.BeadsDir via viper binding)
-	// 2. BEADS_DIR environment variable
-	// 3. beads_dir config file setting (already in cfg.BeadsDir)
-	// 4. Current working directory
-	dbPath := cfg.BeadsDir
-	if dbPath == "" {
-		dbPath = os.Getenv("BEADS_DIR")
-	}
-	if dbPath == "" {
+	// 1. BEADS_DIR environment variable
+	// 2. beads_dir config file setting
+	// 3. Current working directory
+	// Note: daemon doesn't have -b flag; use root command for explicit path
+	var dbPath string
+	if envDir := os.Getenv("BEADS_DIR"); envDir != "" {
+		dbPath = envDir
+	} else if cfg.BeadsDir != "" {
+		dbPath = cfg.BeadsDir
+	} else {
 		dbPath = workDir
 	}
 

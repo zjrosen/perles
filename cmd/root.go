@@ -174,15 +174,22 @@ func runApp(cmd *cobra.Command, args []string) error {
 	}
 
 	// Resolution priority for beads directory:
-	// 1. -b flag (already in cfg.BeadsDir via viper binding)
+	// 1. -b flag (explicitly provided on command line)
 	// 2. BEADS_DIR environment variable
-	// 3. beads_dir config file setting (already in cfg.BeadsDir)
+	// 3. beads_dir config file setting
 	// 4. Current working directory
-	dbPath := cfg.BeadsDir
-	if dbPath == "" {
-		dbPath = os.Getenv("BEADS_DIR")
-	}
-	if dbPath == "" {
+	var dbPath string
+	if cmd.Flags().Changed("beads-dir") {
+		// -b flag explicitly provided on command line
+		dbPath, _ = cmd.Flags().GetString("beads-dir")
+	} else if envDir := os.Getenv("BEADS_DIR"); envDir != "" {
+		// BEADS_DIR environment variable
+		dbPath = envDir
+	} else if cfg.BeadsDir != "" {
+		// beads_dir from config file
+		dbPath = cfg.BeadsDir
+	} else {
+		// Default to working directory
 		dbPath = workDir
 	}
 
