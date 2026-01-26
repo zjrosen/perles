@@ -106,9 +106,16 @@ func (r *DurableRegistry) Update(id WorkflowID, fn func(*WorkflowInstance)) erro
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	inst, ok := r.runtimes[id]
-	if !ok {
-		return fmt.Errorf("workflow with ID %s not found in runtime", id)
+	// Check if workflow is in runtime (active/running)
+	inst, inRuntime := r.runtimes[id]
+
+	// If not in runtime, load from database
+	if !inRuntime {
+		existingSession, err := r.sessionRepo.FindByGUID(r.project, string(id))
+		if err != nil {
+			return fmt.Errorf("workflow with ID %s not found: %w", id, err)
+		}
+		inst = r.sessionToWorkflow(existingSession)
 	}
 
 	// Apply the update

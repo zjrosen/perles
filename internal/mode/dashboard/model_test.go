@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,6 +21,9 @@ import (
 	controlplanemocks "github.com/zjrosen/perles/internal/orchestration/controlplane/mocks"
 	"github.com/zjrosen/perles/internal/orchestration/events"
 	"github.com/zjrosen/perles/internal/orchestration/message"
+	"github.com/zjrosen/perles/internal/ui/shared/formmodal"
+	"github.com/zjrosen/perles/internal/ui/shared/modal"
+	"github.com/zjrosen/perles/internal/ui/shared/toaster"
 )
 
 // === Test Helpers ===
@@ -617,6 +621,46 @@ func TestModel_Help_ViewShowsHelpOverlay(t *testing.T) {
 	view := m.View()
 	// Help overlay should contain "Dashboard Help"
 	require.Contains(t, view, "Dashboard Help")
+}
+
+func TestModel_RenameModal_ViewShowsRenameOverlay(t *testing.T) {
+	workflows := []*controlplane.WorkflowInstance{
+		createTestWorkflow("wf-1", "Workflow 1", controlplane.WorkflowRunning),
+	}
+
+	m, _ := createTestModel(t, workflows)
+	m.selectedIndex = 0
+
+	result, _ := m.renameSelectedWorkflow()
+	m = result.(Model)
+
+	view := m.View()
+	require.Contains(t, view, "Rename Workflow")
+}
+
+func TestModel_RenameModal_TakesPrecedenceOverArchive(t *testing.T) {
+	workflows := []*controlplane.WorkflowInstance{
+		createTestWorkflow("wf-1", "Workflow 1", controlplane.WorkflowPaused),
+	}
+
+	m, _ := createTestModel(t, workflows)
+	m.selectedIndex = 0
+
+	result, _ := m.renameSelectedWorkflow()
+	m = result.(Model)
+
+	archiveModal := modal.New(modal.Config{
+		Title:          "Archive Workflow",
+		Message:        "Archive this workflow?\n\n\"Workflow 1\"",
+		ConfirmVariant: modal.ButtonDanger,
+		ConfirmText:    "Archive",
+	})
+	archiveModal.SetSize(m.width, m.height)
+	m.archiveModal = &archiveModal
+
+	view := m.View()
+	require.Contains(t, view, "Rename Workflow")
+	require.NotContains(t, view, "Archive Workflow")
 }
 
 // (Focus and split-view tests removed - table view only now)
@@ -2463,6 +2507,173 @@ func TestWorkflowTableRow_UnlockedWorkflow_EmptyLockColumn(t *testing.T) {
 
 	// Verify lock column would be empty (based on IsLocked field)
 	require.False(t, row.Workflow.IsLocked, "workflow should not be marked as locked")
+}
+
+// === Unit Tests: Rename Workflow ===
+
+func TestRenameSelectedWorkflow_NoSelection_ReturnsNil(t *testing.T) {
+	m, _ := createTestModel(t, []*controlplane.WorkflowInstance{})
+
+	result, cmd := m.renameSelectedWorkflow()
+
+	require.Nil(t, result, "no selection should return nil controller")
+	require.Nil(t, cmd, "no selection should return nil command")
+}
+
+func TestRenameSelectedWorkflow_LockedWorkflow_ReturnsToast(t *testing.T) {
+	wf := createTestWorkflow("wf-locked", "Locked Workflow", controlplane.WorkflowPending)
+	wf.IsLocked = true
+
+	m, _ := createTestModel(t, []*controlplane.WorkflowInstance{wf})
+	m.selectedIndex = 0
+
+	_, cmd := m.renameSelectedWorkflow()
+
+	require.NotNil(t, cmd, "should return a command")
+	msg := cmd()
+	toastMsg, ok := msg.(mode.ShowToastMsg)
+	require.True(t, ok, "should return ShowToastMsg")
+	require.Contains(t, toastMsg.Message, "🔒")
+	require.Contains(t, toastMsg.Message, "owned by another Perles process")
+}
+
+func TestRenameSelectedWorkflow_ShowsModalWithCurrentName(t *testing.T) {
+	wf := createTestWorkflow("wf-rename", "Rename Me", controlplane.WorkflowPaused)
+
+	m, _ := createTestModel(t, []*controlplane.WorkflowInstance{wf})
+	m.selectedIndex = 0
+
+	result, cmd := m.renameSelectedWorkflow()
+
+	require.NotNil(t, cmd, "should return modal init command")
+	resultModel := result.(Model)
+	require.NotNil(t, resultModel.renameModal, "rename modal should be shown")
+	require.Equal(t, wf.ID, resultModel.renameModalWfID, "modal should store workflow ID")
+
+	modalView := resultModel.renameModal.View()
+	require.True(t, strings.Contains(modalView, "Rename Workflow"), "modal title should be present")
+	require.True(t, strings.Contains(modalView, wf.Name), "modal should be prefilled with current name")
+}
+
+func TestHandleTableKeys_RenameKeyShowsModal(t *testing.T) {
+	wf := createTestWorkflow("wf-rename", "Rename Me", controlplane.WorkflowPaused)
+
+	m, _ := createTestModel(t, []*controlplane.WorkflowInstance{wf})
+	m.focus = FocusTable
+	m.selectedIndex = 0
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	m = result.(Model)
+
+	require.NotNil(t, m.renameModal, "rename modal should be shown when table has focus and r is pressed")
+	require.Equal(t, wf.ID, m.renameModalWfID, "rename modal should target selected workflow")
+}
+
+func TestHandleTableKeys_RenameKeyIgnoredWhenNotTableFocus(t *testing.T) {
+	wf := createTestWorkflow("wf-rename", "Rename Me", controlplane.WorkflowPaused)
+
+	m, _ := createTestModel(t, []*controlplane.WorkflowInstance{wf})
+	m.focus = FocusEpicView
+	m.epicViewFocus = EpicFocusTree
+	m.selectedIndex = 0
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	m = result.(Model)
+
+	require.Nil(t, m.renameModal, "rename modal should not be shown when table is not focused")
+}
+
+func TestRenameSelectedWorkflow_Submit_UpdatesRegistry(t *testing.T) {
+	workflowID := controlplane.NewWorkflowID()
+	wf := createTestWorkflow(workflowID, "Old Name", controlplane.WorkflowPaused)
+	registry := controlplane.NewInMemoryRegistry()
+	require.NoError(t, registry.Put(wf))
+
+	m, mockCP := createTestModel(t, []*controlplane.WorkflowInstance{wf})
+	m.selectedIndex = 0
+	mockCP.On("Registry").Return(registry).Once()
+
+	result, _ := m.renameSelectedWorkflow()
+	m = result.(Model)
+
+	result, cmd := m.Update(formmodal.SubmitMsg{Values: map[string]any{"name": "New Name"}})
+	m = result.(Model)
+
+	require.Nil(t, m.renameModal, "rename modal should be cleared after submit")
+	require.Empty(t, m.renameModalWfID, "rename modal workflow ID should be cleared after submit")
+
+	updated, ok := registry.Get(wf.ID)
+	require.True(t, ok, "workflow should exist in registry")
+	require.Equal(t, "New Name", updated.Name, "workflow name should be updated in registry")
+
+	require.NotNil(t, cmd, "submit should return a batched command")
+	// Execute the batch to get the individual commands
+	batchMsg := cmd()
+	batchCmds, ok := batchMsg.(tea.BatchMsg)
+	require.True(t, ok, "should return BatchMsg")
+
+	// Find the toast message in the batch
+	var foundToast bool
+	for _, batchCmd := range batchCmds {
+		if batchCmd == nil {
+			continue
+		}
+		msg := batchCmd()
+		if toastMsg, ok := msg.(mode.ShowToastMsg); ok {
+			require.Equal(t, "Workflow renamed", toastMsg.Message)
+			require.Equal(t, toaster.StyleSuccess, toastMsg.Style)
+			foundToast = true
+			break
+		}
+	}
+	require.True(t, foundToast, "should find ShowToastMsg in batch")
+}
+
+func TestRenameSelectedWorkflow_Submit_EmptyName_ShowsError(t *testing.T) {
+	workflowID := controlplane.NewWorkflowID()
+	wf := createTestWorkflow(workflowID, "Old Name", controlplane.WorkflowPaused)
+	registry := controlplane.NewInMemoryRegistry()
+	require.NoError(t, registry.Put(wf))
+
+	m, _ := createTestModel(t, []*controlplane.WorkflowInstance{wf})
+	m.selectedIndex = 0
+
+	result, _ := m.renameSelectedWorkflow()
+	m = result.(Model)
+
+	result, cmd := m.Update(formmodal.SubmitMsg{Values: map[string]any{"name": "   "}})
+	m = result.(Model)
+
+	require.NotNil(t, m.renameModal, "rename modal should remain open on empty name")
+	require.Equal(t, wf.ID, m.renameModalWfID, "rename modal should still track workflow ID")
+
+	updated, ok := registry.Get(wf.ID)
+	require.True(t, ok, "workflow should still exist in registry")
+	require.Equal(t, "Old Name", updated.Name, "workflow name should not change on empty input")
+
+	require.NotNil(t, cmd, "empty name should return a toast command")
+	msg := cmd()
+	toastMsg, ok := msg.(mode.ShowToastMsg)
+	require.True(t, ok, "should return ShowToastMsg")
+	require.Contains(t, toastMsg.Message, "cannot be empty")
+	require.Equal(t, toaster.StyleError, toastMsg.Style)
+}
+
+func TestRenameSelectedWorkflow_Cancel_ClosesModal(t *testing.T) {
+	wf := createTestWorkflow(controlplane.NewWorkflowID(), "Rename Me", controlplane.WorkflowPaused)
+
+	m, _ := createTestModel(t, []*controlplane.WorkflowInstance{wf})
+	m.selectedIndex = 0
+
+	result, _ := m.renameSelectedWorkflow()
+	m = result.(Model)
+
+	result, cmd := m.Update(formmodal.CancelMsg{})
+	m = result.(Model)
+
+	require.Nil(t, m.renameModal, "rename modal should be cleared on cancel")
+	require.Empty(t, m.renameModalWfID, "rename modal workflow ID should be cleared on cancel")
+	require.Nil(t, cmd, "cancel should not return a toast command")
 }
 
 // === Unit Tests: Archive Workflow ===

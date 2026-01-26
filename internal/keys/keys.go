@@ -528,6 +528,7 @@ var Dashboard = struct {
 	Start           key.Binding
 	Stop            key.Binding
 	New             key.Binding
+	Rename          key.Binding
 	Filter          key.Binding
 	ClearFilter     key.Binding
 	Help            key.Binding
@@ -577,6 +578,10 @@ var Dashboard = struct {
 	New: key.NewBinding(
 		key.WithKeys("n", "N"),
 		key.WithHelp("n", "new workflow"),
+	),
+	Rename: key.NewBinding(
+		key.WithKeys("r"),
+		key.WithHelp("r", "rename workflow"),
 	),
 	Filter: key.NewBinding(
 		key.WithKeys("/"),
@@ -632,7 +637,7 @@ func DashboardFullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{Dashboard.Up, Dashboard.Down, Dashboard.GotoTop, Dashboard.GotoBottom},
 		{Dashboard.Enter, Dashboard.Stop},
-		{Dashboard.New, Dashboard.Filter, Dashboard.ClearFilter},
+		{Dashboard.New, Dashboard.Rename, Dashboard.Filter, Dashboard.ClearFilter},
 		{Dashboard.Help, Dashboard.Quit},
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/zjrosen/perles/internal/flags"
 	appgit "github.com/zjrosen/perles/internal/git/application"
 	domaingit "github.com/zjrosen/perles/internal/git/domain"
+	"github.com/zjrosen/perles/internal/keys"
 	"github.com/zjrosen/perles/internal/mode"
 	"github.com/zjrosen/perles/internal/orchestration/controlplane"
 	"github.com/zjrosen/perles/internal/orchestration/events"
@@ -31,6 +33,7 @@ import (
 	"github.com/zjrosen/perles/internal/ui/details"
 	"github.com/zjrosen/perles/internal/ui/modals/help"
 	"github.com/zjrosen/perles/internal/ui/shared/chatrender"
+	"github.com/zjrosen/perles/internal/ui/shared/formmodal"
 	"github.com/zjrosen/perles/internal/ui/shared/modal"
 	"github.com/zjrosen/perles/internal/ui/shared/table"
 	"github.com/zjrosen/perles/internal/ui/shared/toaster"
@@ -108,6 +111,10 @@ type Model struct {
 	archiveModal       *modal.Model            // nil when not showing
 	archiveModalWfID   controlplane.WorkflowID // Workflow ID to archive on confirm
 	archiveModalWfName string                  // Workflow name for display/toast
+
+	// Rename modal state
+	renameModal     *formmodal.Model        // nil when not showing
+	renameModalWfID controlplane.WorkflowID // Workflow ID to rename on confirm
 
 	// Filter state
 	filter FilterState
@@ -307,9 +314,81 @@ func (m Model) Update(msg tea.Msg) (mode.Controller, tea.Cmd) {
 			m.height = msg.Height
 			m.archiveModal.SetSize(msg.Width, msg.Height)
 			return m, nil
+		case controlplane.ControlPlaneEvent:
+			// Handle control plane events even when modal is open to maintain event subscription.
+			return m.handleControlPlaneEvent(msg)
+		case eventSubscriptionReadyMsg:
+			m.eventCh = msg.eventCh
+			m.unsubscribe = msg.unsubscribe
+			return m, m.listenForEvents()
 		default:
 			var cmd tea.Cmd
 			*m.archiveModal, cmd = m.archiveModal.Update(msg)
+			return m, cmd
+		}
+	}
+
+	// Handle rename modal when visible
+	if m.renameModal != nil {
+		switch msg := msg.(type) {
+		case formmodal.SubmitMsg:
+			newName := strings.TrimSpace(msg.Values["name"].(string))
+			if newName == "" {
+				return m, func() tea.Msg {
+					return mode.ShowToastMsg{
+						Message: "Workflow name cannot be empty",
+						Style:   toaster.StyleError,
+					}
+				}
+			}
+			if m.controlPlane == nil {
+				return m, func() tea.Msg {
+					return mode.ShowToastMsg{
+						Message: "Control plane unavailable",
+						Style:   toaster.StyleError,
+					}
+				}
+			}
+			if err := m.controlPlane.Registry().Update(m.renameModalWfID, func(wf *controlplane.WorkflowInstance) {
+				wf.Name = newName
+			}); err != nil {
+				return m, func() tea.Msg {
+					return mode.ShowToastMsg{
+						Message: "Failed to rename workflow: " + err.Error(),
+						Style:   toaster.StyleError,
+					}
+				}
+			}
+			m.renameModal = nil
+			m.renameModalWfID = ""
+			return m, tea.Batch(
+				m.loadWorkflows(),
+				func() tea.Msg {
+					return mode.ShowToastMsg{
+						Message: "Workflow renamed",
+						Style:   toaster.StyleSuccess,
+					}
+				},
+			)
+		case formmodal.CancelMsg:
+			m.renameModal = nil
+			m.renameModalWfID = ""
+			return m, nil
+		case tea.WindowSizeMsg:
+			m.width = msg.Width
+			m.height = msg.Height
+			*m.renameModal = m.renameModal.SetSize(msg.Width, msg.Height)
+			return m, nil
+		case controlplane.ControlPlaneEvent:
+			// Handle control plane events even when modal is open to maintain event subscription.
+			return m.handleControlPlaneEvent(msg)
+		case eventSubscriptionReadyMsg:
+			m.eventCh = msg.eventCh
+			m.unsubscribe = msg.unsubscribe
+			return m, m.listenForEvents()
+		default:
+			var cmd tea.Cmd
+			*m.renameModal, cmd = m.renameModal.Update(msg)
 			return m, cmd
 		}
 	}
@@ -464,6 +543,12 @@ func (m Model) View() string {
 	// If help modal is showing, render it as an overlay
 	if m.showHelp {
 		return zone.Scan(m.helpModal.Overlay(dashboardView))
+	}
+
+	// If rename modal is showing, render it as an overlay
+	// Note: formmodal already calls zone.Scan() internally, so we don't scan here
+	if m.renameModal != nil {
+		return m.renameModal.Overlay(dashboardView)
 	}
 
 	// If archive confirmation modal is showing, render it as an overlay
@@ -688,6 +773,11 @@ func (m Model) handleTableKeys(msg tea.KeyMsg) (mode.Controller, tea.Cmd) {
 	}
 
 	// Global actions (available from table focus)
+	switch {
+	case key.Matches(msg, keys.Dashboard.Rename):
+		return m.renameSelectedWorkflow()
+	}
+
 	switch msg.String() {
 	// Filter
 	case "/": // Activate filter
@@ -1502,6 +1592,35 @@ func (m Model) archiveSelectedWorkflow() (mode.Controller, tea.Cmd) {
 	archiveModal.SetSize(m.width, m.height)
 	m.archiveModal = &archiveModal
 	return m, nil
+}
+
+// renameSelectedWorkflow shows the rename modal after validating the workflow.
+func (m Model) renameSelectedWorkflow() (mode.Controller, tea.Cmd) {
+	workflow := m.SelectedWorkflow()
+	if workflow == nil {
+		return nil, nil
+	}
+
+	// Check if workflow is locked by another process
+	if workflow.IsLocked {
+		return m, func() tea.Msg {
+			return mode.ShowToastMsg{
+				Message: "🔒 Workflow is owned by another Perles process",
+				Style:   toaster.StyleWarn,
+			}
+		}
+	}
+
+	// Show rename modal
+	m.renameModalWfID = workflow.ID
+	renameModal := formmodal.New(formmodal.FormConfig{
+		Title: "Rename Workflow",
+		Fields: []formmodal.FieldConfig{
+			{Key: "name", Label: "Name", Type: formmodal.FieldTypeText, InitialValue: workflow.Name},
+		},
+	}).SetSize(m.width, m.height)
+	m.renameModal = &renameModal
+	return m, renameModal.Init()
 }
 
 // doArchiveWorkflow performs the actual archive operation after user confirms.

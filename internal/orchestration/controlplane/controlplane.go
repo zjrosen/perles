@@ -54,6 +54,10 @@ type ControlPlane interface {
 	// List returns workflows matching the query.
 	List(ctx context.Context, q ListQuery) ([]*WorkflowInstance, error)
 
+	// Registry returns the underlying workflow registry.
+	// This enables direct registry updates for dashboard operations.
+	Registry() Registry
+
 	// Archive marks a workflow as archived. Archived workflows are excluded
 	// from List queries by default. This is only supported when session
 	// persistence is enabled (DurableRegistry). Returns nil when using
@@ -489,6 +493,11 @@ func (cp *defaultControlPlane) Get(ctx context.Context, id WorkflowID) (*Workflo
 // List returns workflows matching the query.
 func (cp *defaultControlPlane) List(ctx context.Context, q ListQuery) ([]*WorkflowInstance, error) {
 	return cp.registry.List(q), nil
+}
+
+// Registry returns the underlying workflow registry.
+func (cp *defaultControlPlane) Registry() Registry {
+	return cp.registry
 }
 
 // Archive marks a workflow as archived.

@@ -26,6 +26,24 @@ func TestKanban_Dashboard_HelpText(t *testing.T) {
 	require.Equal(t, "dashboard", help.Desc, "Dashboard help desc should be 'dashboard'")
 }
 
+func TestDashboard_Rename_KeyAssignment(t *testing.T) {
+	keys := Dashboard.Rename.Keys()
+	require.Equal(t, []string{"r"}, keys, "Rename should be bound to r")
+}
+
+func TestDashboard_Rename_HelpText(t *testing.T) {
+	help := Dashboard.Rename.Help()
+	require.Equal(t, "r", help.Key, "Rename help key should be r")
+	require.Equal(t, "rename workflow", help.Desc, "Rename help desc should be 'rename workflow'")
+}
+
+func TestDashboardFullHelp_IncludesRename(t *testing.T) {
+	help := DashboardFullHelp()
+	require.NotEmpty(t, help, "full help should not be empty")
+	require.Len(t, help, 4, "full help should contain 4 rows")
+	require.Contains(t, help[2], Dashboard.Rename)
+}
+
 func TestDiffViewer_ExportedStruct(t *testing.T) {
 	// Verify DiffViewer struct is exported and accessible
 	require.NotNil(t, DiffViewer.Open)

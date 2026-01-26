@@ -394,6 +394,53 @@ func (_c *MockControlPlane_List_Call) RunAndReturn(run func(context.Context, con
 	return _c
 }
 
+// Registry provides a mock function with given fields:
+func (_m *MockControlPlane) Registry() controlplane.Registry {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Registry")
+	}
+
+	var r0 controlplane.Registry
+	if rf, ok := ret.Get(0).(func() controlplane.Registry); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(controlplane.Registry)
+		}
+	}
+
+	return r0
+}
+
+// MockControlPlane_Registry_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Registry'
+type MockControlPlane_Registry_Call struct {
+	*mock.Call
+}
+
+// Registry is a helper method to define mock.On call
+func (_e *MockControlPlane_Expecter) Registry() *MockControlPlane_Registry_Call {
+	return &MockControlPlane_Registry_Call{Call: _e.mock.On("Registry")}
+}
+
+func (_c *MockControlPlane_Registry_Call) Run(run func()) *MockControlPlane_Registry_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockControlPlane_Registry_Call) Return(_a0 controlplane.Registry) *MockControlPlane_Registry_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockControlPlane_Registry_Call) RunAndReturn(run func() controlplane.Registry) *MockControlPlane_Registry_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Pause provides a mock function with given fields: ctx, id
 func (_m *MockControlPlane) Pause(ctx context.Context, id controlplane.WorkflowID) error {
 	ret := _m.Called(ctx, id)

@@ -94,6 +94,39 @@ func TestDurableRegistry_Update(t *testing.T) {
 	require.Equal(t, int64(1000), retrieved.TokensUsed)
 }
 
+func TestDurableRegistry_Update_NotInRuntime(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	registry := NewDurableRegistry("test-project", db.SessionRepository())
+
+	spec := &WorkflowSpec{
+		TemplateID:    "test-template",
+		InitialPrompt: "Test prompt",
+		Name:          "Original Name",
+	}
+	inst, err := NewWorkflowInstance(spec)
+	require.NoError(t, err)
+
+	err = registry.Put(inst)
+	require.NoError(t, err)
+
+	// Simulate app restart by creating a new registry instance
+	// pointing to the same database - workflow won't be in runtimes
+	registry2 := NewDurableRegistry("test-project", db.SessionRepository())
+
+	// Update the workflow (not in runtimes, only in database)
+	err = registry2.Update(inst.ID, func(w *WorkflowInstance) {
+		w.Name = "Renamed After Restart"
+	})
+	require.NoError(t, err)
+
+	// Verify update persisted
+	retrieved, found := registry2.Get(inst.ID)
+	require.True(t, found)
+	require.Equal(t, "Renamed After Restart", retrieved.Name)
+}
+
 func TestDurableRegistry_List(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
