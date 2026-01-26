@@ -1195,6 +1195,10 @@ func TestValidateTemplates_PathTraversal(t *testing.T) {
 }
 
 func TestValidateTemplates_AbsolutePath_Unix(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix absolute paths are not detected as absolute on Windows")
+	}
+
 	paths := []string{
 		"/tmp/path",
 		"/etc/passwd",

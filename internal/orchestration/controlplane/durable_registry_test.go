@@ -399,12 +399,13 @@ func TestDurableRegistry_List_OwnedByLiveProcess_IsLocked(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, registry.Put(inst))
 
-	// Simulate the workflow being owned by another live process
-	// PID 1 is always the init process and should always be alive
-	initPID := 1
+	// Simulate the workflow being owned by another live process.
+	// Use current process PID (we know it's alive) but trick the test
+	// by using os.Getppid() - the parent process which is always alive.
+	parentPID := os.Getppid()
 	session, err := db.SessionRepository().FindByGUID("test-project", string(inst.ID))
 	require.NoError(t, err)
-	session.SetOwnerCurrentPID(&initPID)
+	session.SetOwnerCurrentPID(&parentPID)
 	require.NoError(t, db.SessionRepository().Save(session))
 
 	// List should mark as locked (owned by another live process)
@@ -412,11 +413,11 @@ func TestDurableRegistry_List_OwnedByLiveProcess_IsLocked(t *testing.T) {
 	require.Len(t, results, 1)
 	require.True(t, results[0].IsLocked, "workflow owned by live process should be locked")
 
-	// Verify ownership was NOT claimed (still owned by PID 1)
+	// Verify ownership was NOT claimed (still owned by parent PID)
 	session, err = db.SessionRepository().FindByGUID("test-project", string(inst.ID))
 	require.NoError(t, err)
 	require.NotNil(t, session.OwnerCurrentPID())
-	require.Equal(t, initPID, *session.OwnerCurrentPID(), "should not have claimed ownership")
+	require.Equal(t, parentPID, *session.OwnerCurrentPID(), "should not have claimed ownership")
 }
 
 func TestDurableRegistry_Archive(t *testing.T) {

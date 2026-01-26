@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -25,8 +26,10 @@ func TestNewDB_CreatesDirectory(t *testing.T) {
 	require.NoError(t, err, "Directory should exist after NewDB")
 	require.True(t, info.IsDir(), "Should be a directory")
 
-	// Verify directory permissions are 0700
-	require.Equal(t, os.FileMode(0700), info.Mode().Perm(), "Directory should have 0700 permissions")
+	// Verify directory permissions are 0700 (Unix only - Windows doesn't support Unix permissions)
+	if runtime.GOOS != "windows" {
+		require.Equal(t, os.FileMode(0700), info.Mode().Perm(), "Directory should have 0700 permissions")
+	}
 }
 
 // TestNewDB_CreatesDatabaseFile verifies that NewDB creates the database file on first run.
@@ -226,6 +229,10 @@ func TestNewDB_MultipleCalls(t *testing.T) {
 
 // TestNewDB_InvalidPath verifies that NewDB returns an error for invalid paths.
 func TestNewDB_InvalidPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix-specific restricted path test")
+	}
+
 	// Path in a restricted directory (root)
 	invalidPath := "/root/perles-test-db.sqlite"
 
