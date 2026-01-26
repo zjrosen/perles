@@ -912,9 +912,7 @@ func padContentAndLinesToBottom(content string, plainLines []string, vpHeight in
 	if len(contentLines) < vpHeight {
 		paddingCount = vpHeight - len(contentLines)
 		contentPadding := make([]string, paddingCount)
-		plainPadding := make([]string, paddingCount)
 		contentLines = append(contentPadding, contentLines...)
-		plainLines = append(plainPadding, plainLines...)
 	}
 	return strings.Join(contentLines, "\n"), plainLines, paddingCount
 }
