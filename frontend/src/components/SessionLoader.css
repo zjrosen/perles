@@ -1,0 +1,240 @@
+.session-loader {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 2rem;
+  overflow-y: auto;
+}
+
+.loader-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 2rem;
+  max-width: 600px;
+  width: 100%;
+}
+
+.loader-card.explorer-card {
+  max-width: 700px;
+}
+
+.loader-card h2 {
+  font-size: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.loader-description {
+  color: var(--text-secondary);
+  margin-bottom: 1.5rem;
+}
+
+.loader-description code {
+  background: var(--bg-tertiary);
+  padding: 0.125rem 0.375rem;
+  border-radius: 4px;
+  font-size: 0.8125rem;
+}
+
+.loading-state {
+  color: var(--text-muted);
+  text-align: center;
+  padding: 2rem;
+}
+
+.error-message {
+  background: rgba(248, 81, 73, 0.1);
+  border: 1px solid var(--accent-red);
+  color: var(--accent-red);
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  font-size: 0.875rem;
+}
+
+/* Session Explorer */
+.session-explorer {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+.empty-state {
+  padding: 2rem;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.empty-hint {
+  font-size: 0.8125rem;
+  margin-top: 0.5rem;
+}
+
+/* App Group */
+.app-group {
+  border-bottom: 1px solid var(--border-color);
+}
+
+.app-group:last-child {
+  border-bottom: none;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s;
+}
+
+.app-header:hover {
+  background: var(--bg-secondary);
+}
+
+.expand-icon {
+  width: 1rem;
+  font-size: 0.625rem;
+  color: var(--text-muted);
+}
+
+.app-icon, .date-icon {
+  font-size: 1rem;
+}
+
+.app-name {
+  flex: 1;
+}
+
+.app-count, .date-count {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.app-content {
+  padding-left: 1rem;
+}
+
+/* Date Group */
+.date-group {
+  border-top: 1px solid var(--border-color);
+}
+
+.date-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.625rem 1rem;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s;
+}
+
+.date-header:hover {
+  background: var(--bg-secondary);
+}
+
+.date-name {
+  flex: 1;
+}
+
+.date-content {
+  padding-left: 1rem;
+}
+
+/* Session Item */
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.625rem 1rem;
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--border-color);
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s;
+}
+
+.session-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.session-status {
+  font-size: 0.875rem;
+  width: 1.25rem;
+  text-align: center;
+}
+
+.session-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 100px;
+}
+
+.session-time {
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.session-id {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  font-family: 'SF Mono', Monaco, monospace;
+}
+
+.session-meta {
+  flex: 1;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
+.session-client {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  padding: 0.125rem 0.5rem;
+  border-radius: 4px;
+}
+
+.session-workers {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+/* Scrollbar */
+.session-explorer::-webkit-scrollbar {
+  width: 6px;
+}
+
+.session-explorer::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.session-explorer::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+
+.session-explorer::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}

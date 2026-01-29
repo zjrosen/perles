@@ -1,0 +1,214 @@
+.commands-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  margin: -1rem;
+  overflow-y: auto;
+}
+
+.commands-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  position: sticky;
+  top: 0;
+  background: var(--bg-primary);
+  padding: 1rem;
+  z-index: 10;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.filter-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.filter-buttons {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  padding-left: 55px;
+}
+
+.filter-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  min-width: 50px;
+  margin-left: -55px;
+}
+
+.filter-btn {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  padding: 0.375rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.filter-btn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.filter-btn.active {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-color: var(--accent-blue);
+}
+
+.commands-list {
+  flex: 1;
+}
+
+.command-item {
+  border-bottom: 1px solid var(--border-color);
+}
+
+.command-item.failed {
+  background: rgba(248, 81, 73, 0.05);
+}
+
+.command-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.command-header:hover {
+  background: var(--bg-tertiary);
+}
+
+.command-expand {
+  font-size: 0.625rem;
+  width: 0.75rem;
+  color: var(--text-muted);
+}
+
+.command-type {
+  font-family: 'SF Mono', Monaco, monospace;
+  font-weight: 500;
+  font-size: 0.75rem;
+}
+
+.command-source {
+  font-size: 0.625rem;
+  padding: 0.0625rem 0.25rem;
+  border-radius: 3px;
+  font-weight: 500;
+}
+
+.command-source.source-mcp_tool {
+  background: rgba(88, 166, 255, 0.15);
+  color: var(--accent-blue);
+}
+
+.command-source.source-internal {
+  background: rgba(139, 148, 158, 0.15);
+  color: var(--text-muted);
+}
+
+.command-source.source-callback {
+  background: rgba(163, 113, 247, 0.15);
+  color: var(--accent-purple);
+}
+
+.command-process,
+.command-worker {
+  font-size: 0.6875rem;
+  color: var(--accent-purple);
+  background: rgba(163, 113, 247, 0.1);
+  padding: 0.0625rem 0.375rem;
+  border-radius: 3px;
+}
+
+.command-worker {
+  color: var(--accent-blue);
+  background: rgba(88, 166, 255, 0.1);
+}
+
+.command-task {
+  font-size: 0.6875rem;
+  font-family: 'SF Mono', Monaco, monospace;
+  color: var(--accent-yellow);
+  background: rgba(210, 153, 34, 0.1);
+  padding: 0.0625rem 0.375rem;
+  border-radius: 3px;
+}
+
+.command-duration {
+  font-size: 0.625rem;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.command-time {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
+
+.command-failed-badge {
+  font-size: 0.625rem;
+  color: var(--accent-red);
+  background: rgba(248, 81, 73, 0.15);
+  padding: 0.0625rem 0.375rem;
+  border-radius: 3px;
+  font-weight: 600;
+}
+
+.command-detail {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  padding: 1rem 1rem 1rem 2rem;
+  background: var(--bg-tertiary);
+  min-height: 300px;
+}
+
+.command-detail.single-column {
+  grid-template-columns: 1fr;
+}
+
+.detail-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.detail-section h4 {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin: 0 0 0.5rem 0;
+  flex-shrink: 0;
+}
+
+.detail-section pre {
+  margin: 0;
+  font-size: 0.75rem;
+  font-family: 'SF Mono', Monaco, monospace;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-all;
+  flex: 1;
+  overflow-y: auto;
+  max-height: 400px;
+  background: var(--bg-primary);
+  padding: 0.5rem;
+  border-radius: 4px;
+}
