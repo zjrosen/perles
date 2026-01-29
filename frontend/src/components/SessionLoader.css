@@ -18,6 +18,9 @@
 
 .loader-card.explorer-card {
   max-width: 700px;
+  max-height: calc(100vh - 8rem);
+  display: flex;
+  flex-direction: column;
 }
 
 .loader-card h2 {
@@ -58,7 +61,8 @@
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  max-height: 500px;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
 }
 

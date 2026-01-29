@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import type { Session, SessionMetadata } from '../types'
+import MarkdownModal from './MarkdownModal'
 import './MetadataPanel.css'
 
 interface Props {
@@ -7,6 +9,8 @@ interface Props {
 }
 
 export default function MetadataPanel({ metadata, session }: Props) {
+  const [showSummary, setShowSummary] = useState(false)
+  const [workerSummary, setWorkerSummary] = useState<{ id: string; content: string } | null>(null)
   const formatTime = (ts: string) => {
     return new Date(ts).toLocaleString()
   }
@@ -50,6 +54,35 @@ export default function MetadataPanel({ metadata, session }: Props) {
 
   return (
     <div className="metadata-panel">
+      {session.accountabilitySummary && (
+        <section className="meta-section summary-section">
+          <button 
+            className="summary-btn"
+            onClick={() => setShowSummary(true)}
+          >
+            <span className="summary-icon">📋</span>
+            <span className="summary-text">View Accountability Summary</span>
+            <span className="summary-arrow">→</span>
+          </button>
+        </section>
+      )}
+
+      {showSummary && session.accountabilitySummary && (
+        <MarkdownModal
+          title="Accountability Summary"
+          content={session.accountabilitySummary}
+          onClose={() => setShowSummary(false)}
+        />
+      )}
+
+      {workerSummary && (
+        <MarkdownModal
+          title={`${workerSummary.id} Summary`}
+          content={workerSummary.content}
+          onClose={() => setWorkerSummary(null)}
+        />
+      )}
+
       <div className="overview-columns">
         {/* Left Column */}
         <div className="overview-left">
@@ -167,17 +200,29 @@ export default function MetadataPanel({ metadata, session }: Props) {
           <section className="meta-section">
             <h2>Workers ({metadata.workers.length})</h2>
             <div className="workers-list">
-              {metadata.workers.map(worker => (
-                <div key={worker.id} className="worker-card">
-                  <div className="worker-header">
-                    <span className="worker-id">{worker.id}</span>
-                    <span className="worker-time">{formatTime(worker.spawned_at)}</span>
+              {metadata.workers.map(worker => {
+                const workerData = session.workers[worker.id]
+                const hasSummary = workerData?.accountabilitySummary
+                return (
+                  <div key={worker.id} className="worker-card">
+                    <div className="worker-header">
+                      <span className="worker-id">{worker.id}</span>
+                      <span className="worker-time">{formatTime(worker.spawned_at)}</span>
+                    </div>
+                    <div className="worker-details">
+                      <code>{worker.headless_session_ref}</code>
+                      {hasSummary && (
+                        <button 
+                          className="worker-summary-btn"
+                          onClick={() => setWorkerSummary({ id: worker.id, content: workerData.accountabilitySummary! })}
+                        >
+                          📋 Summary
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <div className="worker-details">
-                    <code>{worker.headless_session_ref}</code>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </section>
         </div>

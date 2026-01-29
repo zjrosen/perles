@@ -127,7 +127,8 @@ async function loadSession(sessionPath) {
     commands: [],
     messages: [],
     coordinator: { messages: [], raw: [] },
-    workers: {}
+    workers: {},
+    accountabilitySummary: null
   };
 
   // Load metadata.json
@@ -137,6 +138,12 @@ async function loadSession(sessionPath) {
     if (content.trim()) {
       result.metadata = JSON.parse(content);
     }
+  }
+
+  // Load accountability_summary.md
+  const summaryPath = path.join(sessionPath, 'accountability_summary.md');
+  if (fs.existsSync(summaryPath)) {
+    result.accountabilitySummary = fs.readFileSync(summaryPath, 'utf-8');
   }
 
   // Load fabric.jsonl
@@ -194,6 +201,10 @@ async function loadSession(sessionPath) {
       const workerRawPath = path.join(workerPath, 'raw.jsonl');
       if (fs.existsSync(workerRawPath)) {
         result.workers[workerDir].raw = await loadJsonl(workerRawPath);
+      }
+      const workerSummaryPath = path.join(workerPath, 'accountability_summary.md');
+      if (fs.existsSync(workerSummaryPath)) {
+        result.workers[workerDir].accountabilitySummary = fs.readFileSync(workerSummaryPath, 'utf-8');
       }
     }
   }

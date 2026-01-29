@@ -99,6 +99,8 @@ export interface Session {
     [key: string]: {
       messages: AgentMessage[];
       raw: unknown[];
+      accountabilitySummary?: string;
     };
   };
+  accountabilitySummary: string | null;
 }
