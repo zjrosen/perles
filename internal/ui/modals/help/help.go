@@ -262,7 +262,7 @@ func (m Model) renderKanbanContent() string {
 	viewsCol.WriteString(renderBinding(keys.Kanban.ViewMenu))
 	viewsCol.WriteString(renderBinding(keys.Kanban.SearchFromColumn))
 
-	// General column
+	// General column (with User Actions below if configured)
 	var generalCol strings.Builder
 	generalCol.WriteString(sectionStyle.Render("General"))
 	generalCol.WriteString("\n")
@@ -271,36 +271,24 @@ func (m Model) renderKanbanContent() string {
 	generalCol.WriteString(renderBinding(keys.Kanban.Escape))
 	generalCol.WriteString(renderBinding(keys.Kanban.QuitConfirm))
 
-	// User Actions column (only if user has configured actions)
-	var userActionsCol strings.Builder
+	// User Actions below General (only if user has configured actions)
 	if len(m.userActions) > 0 {
-		userActionsCol.WriteString(sectionStyle.Render("User Actions"))
-		userActionsCol.WriteString("\n")
+		generalCol.WriteString("\n")
+		generalCol.WriteString(sectionStyle.Render("User Actions"))
+		generalCol.WriteString("\n")
 		for _, action := range m.userActions {
-			userActionsCol.WriteString(renderKeyDesc(action.Key, action.Description))
+			generalCol.WriteString(renderKeyDesc(action.Key, action.Description))
 		}
 	}
 
 	// Join columns horizontally, aligned at top
-	var columns string
-	if len(m.userActions) > 0 {
-		columns = lipgloss.JoinHorizontal(
-			lipgloss.Top,
-			columnStyle.Render(actionsCol.String()),
-			columnStyle.Render(viewsCol.String()),
-			columnStyle.Render(navCol.String()),
-			columnStyle.Render(generalCol.String()),
-			userActionsCol.String(), // User actions as last column
-		)
-	} else {
-		columns = lipgloss.JoinHorizontal(
-			lipgloss.Top,
-			columnStyle.Render(actionsCol.String()),
-			columnStyle.Render(viewsCol.String()),
-			columnStyle.Render(navCol.String()),
-			generalCol.String(), // Last column doesn't need right margin
-		)
-	}
+	columns := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		columnStyle.Render(actionsCol.String()),
+		columnStyle.Render(viewsCol.String()),
+		columnStyle.Render(navCol.String()),
+		generalCol.String(), // Last column doesn't need right margin
+	)
 
 	// Calculate box width based on columns content
 	columnsWidth := lipgloss.Width(columns)
