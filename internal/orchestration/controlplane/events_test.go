@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/zjrosen/perles/internal/orchestration/events"
+	"github.com/zjrosen/perles/internal/orchestration/fabric"
 	"github.com/zjrosen/perles/internal/orchestration/v2/processor"
 )
 
@@ -36,8 +37,6 @@ func TestEventTypeConstants(t *testing.T) {
 		{"TaskAssigned", EventTaskAssigned, "task.assigned"},
 		{"TaskCompleted", EventTaskCompleted, "task.completed"},
 		{"TaskFailed", EventTaskFailed, "task.failed"},
-		// Message events
-		{"MessagePosted", EventMessagePosted, "message.posted"},
 		// Health events
 		{"HealthUnhealthy", EventHealthUnhealthy, "health.unhealthy"},
 		{"HealthStuck", EventHealthStuck, "health.stuck"},
@@ -45,6 +44,8 @@ func TestEventTypeConstants(t *testing.T) {
 		{"HealthRecovered", EventHealthRecovered, "health.recovered"},
 		// Command log events
 		{"CommandLog", EventCommandLog, "command.log"},
+		// Fabric events
+		{"FabricPosted", EventFabricPosted, "fabric.posted"},
 		// Unknown
 		{"Unknown", EventUnknown, "unknown"},
 	}
@@ -427,7 +428,6 @@ func TestIsLifecycleEvent(t *testing.T) {
 		EventCoordinatorSpawned,
 		EventWorkerSpawned,
 		EventTaskAssigned,
-		EventMessagePosted,
 		EventHealthUnhealthy,
 		EventUnknown,
 	}
@@ -510,30 +510,11 @@ func TestIsTaskEvent(t *testing.T) {
 	nonTaskEvents := []EventType{
 		EventWorkerSpawned,
 		EventCoordinatorSpawned,
-		EventMessagePosted,
 	}
 
 	for _, e := range nonTaskEvents {
 		t.Run(e.String()+"_not_task", func(t *testing.T) {
 			require.False(t, e.IsTaskEvent())
-		})
-	}
-}
-
-func TestIsMessageEvent(t *testing.T) {
-	// Message event
-	require.True(t, EventMessagePosted.IsMessageEvent())
-
-	// Non-message events
-	nonMessageEvents := []EventType{
-		EventWorkerSpawned,
-		EventTaskAssigned,
-		EventHealthUnhealthy,
-	}
-
-	for _, e := range nonMessageEvents {
-		t.Run(e.String()+"_not_message", func(t *testing.T) {
-			require.False(t, e.IsMessageEvent())
 		})
 	}
 }
@@ -556,7 +537,6 @@ func TestIsHealthEvent(t *testing.T) {
 	nonHealthEvents := []EventType{
 		EventWorkerSpawned,
 		EventTaskAssigned,
-		EventMessagePosted,
 	}
 
 	for _, e := range nonHealthEvents {
@@ -884,4 +864,112 @@ func TestEventFilter_MultipleExcludeTypes(t *testing.T) {
 	require.False(t, filter.Matches(ControlPlaneEvent{Type: EventWorkerOutput}))
 	require.False(t, filter.Matches(ControlPlaneEvent{Type: EventHealthUnhealthy}))
 	require.True(t, filter.Matches(ControlPlaneEvent{Type: EventWorkerSpawned}))
+}
+
+// === Fabric Event Tests ===
+
+func TestEventType_EventFabricPosted(t *testing.T) {
+	// Verify constant exists with correct value
+	require.Equal(t, "fabric.posted", string(EventFabricPosted))
+	require.Equal(t, "fabric.posted", EventFabricPosted.String())
+}
+
+func TestIsFabricEvent_True(t *testing.T) {
+	// Verify IsFabricEvent() returns true for EventFabricPosted
+	require.True(t, EventFabricPosted.IsFabricEvent())
+}
+
+func TestIsFabricEvent_False(t *testing.T) {
+	// Verify IsFabricEvent() returns false for other event types
+	nonFabricEvents := []EventType{
+		EventWorkflowCreated,
+		EventWorkflowStarted,
+		EventCoordinatorSpawned,
+		EventCoordinatorOutput,
+		EventWorkerSpawned,
+		EventWorkerOutput,
+		EventTaskAssigned,
+		EventHealthUnhealthy,
+		EventCommandLog,
+		EventUnknown,
+	}
+
+	for _, e := range nonFabricEvents {
+		t.Run(e.String()+"_not_fabric", func(t *testing.T) {
+			require.False(t, e.IsFabricEvent())
+		})
+	}
+}
+
+func TestClassifyEvent_FabricEvent(t *testing.T) {
+	// Verify fabric.Event is classified as EventFabricPosted
+	fabricEvent := fabric.Event{
+		Type:        fabric.EventMessagePosted,
+		ChannelID:   "channel-123",
+		ChannelSlug: "tasks",
+		AgentID:     "worker-1",
+	}
+
+	result := ClassifyEvent(fabricEvent)
+	require.Equal(t, EventFabricPosted, result)
+}
+
+func TestClassifyEvent_OtherTypes_Unchanged(t *testing.T) {
+	// Verify existing classifications still work after adding fabric.Event support
+	tests := []struct {
+		name     string
+		event    any
+		expected EventType
+	}{
+		{
+			name: "ProcessEventStillWorks",
+			event: events.ProcessEvent{
+				Type:      events.ProcessSpawned,
+				Role:      events.RoleCoordinator,
+				ProcessID: "coord-1",
+			},
+			expected: EventCoordinatorSpawned,
+		},
+		{
+			name: "CommandLogEventStillWorks",
+			event: processor.CommandLogEvent{
+				CommandID:   "cmd-123",
+				CommandType: "spawn_worker",
+				Success:     true,
+				Duration:    time.Millisecond * 100,
+				Timestamp:   time.Now(),
+			},
+			expected: EventCommandLog,
+		},
+		{
+			name:     "UnknownEventStillWorks",
+			event:    "not a recognized event",
+			expected: EventUnknown,
+		},
+		{
+			name: "WorkerEventStillWorks",
+			event: events.ProcessEvent{
+				Type:      events.ProcessOutput,
+				Role:      events.RoleWorker,
+				ProcessID: "worker-1",
+				Output:    "implementing...",
+			},
+			expected: EventWorkerOutput,
+		},
+		{
+			name: "WorkflowCompleteStillWorks",
+			event: events.ProcessEvent{
+				Type: events.ProcessWorkflowComplete,
+				Role: events.RoleCoordinator,
+			},
+			expected: EventWorkflowCompleted,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := ClassifyEvent(tc.event)
+			require.Equal(t, tc.expected, result)
+		})
+	}
 }

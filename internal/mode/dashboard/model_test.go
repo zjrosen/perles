@@ -20,7 +20,6 @@ import (
 	"github.com/zjrosen/perles/internal/orchestration/controlplane"
 	controlplanemocks "github.com/zjrosen/perles/internal/orchestration/controlplane/mocks"
 	"github.com/zjrosen/perles/internal/orchestration/events"
-	"github.com/zjrosen/perles/internal/orchestration/message"
 	"github.com/zjrosen/perles/internal/ui/shared/formmodal"
 	"github.com/zjrosen/perles/internal/ui/shared/modal"
 	"github.com/zjrosen/perles/internal/ui/shared/toaster"
@@ -864,38 +863,6 @@ func TestModel_EventWorkerOutput_AccumulatesDeltaMessages(t *testing.T) {
 	state := m.workflowUIState["wf-1"]
 	require.Len(t, state.WorkerMessages["worker-1"], 1)
 	require.Equal(t, "Starting task...", state.WorkerMessages["worker-1"][0].Content)
-}
-
-func TestModel_EventMessagePosted_UpdatesCache(t *testing.T) {
-	workflows := []*controlplane.WorkflowInstance{
-		createTestWorkflow("wf-1", "Workflow 1", controlplane.WorkflowRunning),
-	}
-
-	m, _ := createTestModel(t, workflows)
-
-	// Simulate message posted event
-	entry := message.Entry{
-		ID:      "msg-1",
-		From:    "COORDINATOR",
-		To:      "WORKER.1",
-		Content: "Task assignment",
-	}
-	event := controlplane.ControlPlaneEvent{
-		Type:       controlplane.EventMessagePosted,
-		WorkflowID: "wf-1",
-		Payload:    message.Event{Entry: entry},
-	}
-
-	result, _ := m.Update(event)
-	m = result.(Model)
-
-	// Verify cache was updated
-	state := m.workflowUIState["wf-1"]
-	require.NotNil(t, state)
-	require.Len(t, state.MessageEntries, 1)
-	require.Equal(t, "msg-1", state.MessageEntries[0].ID)
-	require.Equal(t, "COORDINATOR", state.MessageEntries[0].From)
-	require.Equal(t, "Task assignment", state.MessageEntries[0].Content)
 }
 
 func TestModel_EventWorkerSpawned_UpdatesCache(t *testing.T) {

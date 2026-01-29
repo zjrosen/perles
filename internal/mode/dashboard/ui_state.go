@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/zjrosen/perles/internal/orchestration/events"
-	"github.com/zjrosen/perles/internal/orchestration/message"
+	"github.com/zjrosen/perles/internal/orchestration/fabric"
 	"github.com/zjrosen/perles/internal/orchestration/metrics"
 	"github.com/zjrosen/perles/internal/orchestration/v2/command"
 	"github.com/zjrosen/perles/internal/ui/shared/chatrender"
@@ -32,6 +32,11 @@ type CommandLogEntry struct {
 // When exceeded, the oldest non-running, non-selected workflow state is evicted.
 const maxCachedWorkflows = 10
 
+// maxFabricEvents is the maximum number of fabric events to keep per workflow.
+// This cap prevents unbounded memory growth in long-running sessions.
+// When exceeded, oldest events are removed (FIFO eviction).
+const maxFabricEvents = 500
+
 // WorkflowUIState holds accumulated UI state for a single workflow.
 // This state persists across workflow switches in the dashboard.
 type WorkflowUIState struct {
@@ -41,8 +46,8 @@ type WorkflowUIState struct {
 	CoordinatorStatus     events.ProcessStatus
 	CoordinatorQueueCount int
 
-	// Message pane state
-	MessageEntries []message.Entry
+	// Message pane state (filtered to message.posted and reply.posted events only)
+	FabricEvents []fabric.Event
 
 	// Worker pane state
 	WorkerIDs         []string
@@ -81,7 +86,7 @@ type WorkflowUIState struct {
 func NewWorkflowUIState() *WorkflowUIState {
 	return &WorkflowUIState{
 		CoordinatorMessages:      make([]chatrender.Message, 0),
-		MessageEntries:           make([]message.Entry, 0),
+		FabricEvents:             make([]fabric.Event, 0),
 		WorkerIDs:                make([]string, 0),
 		WorkerStatus:             make(map[string]events.ProcessStatus),
 		WorkerPhases:             make(map[string]events.ProcessPhase),
@@ -99,6 +104,6 @@ func NewWorkflowUIState() *WorkflowUIState {
 // IsEmpty returns true if the state has no content.
 func (s *WorkflowUIState) IsEmpty() bool {
 	return len(s.CoordinatorMessages) == 0 &&
-		len(s.MessageEntries) == 0 &&
+		len(s.FabricEvents) == 0 &&
 		len(s.WorkerIDs) == 0
 }

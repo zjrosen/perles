@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,6 +17,8 @@ import (
 	domaingit "github.com/zjrosen/perles/internal/git/domain"
 	"github.com/zjrosen/perles/internal/mocks"
 	"github.com/zjrosen/perles/internal/orchestration/client"
+	"github.com/zjrosen/perles/internal/orchestration/fabric"
+	fabricpersist "github.com/zjrosen/perles/internal/orchestration/fabric/persistence"
 	"github.com/zjrosen/perles/internal/orchestration/session"
 	v2 "github.com/zjrosen/perles/internal/orchestration/v2"
 	"github.com/zjrosen/perles/internal/orchestration/v2/adapter"
@@ -1540,4 +1543,194 @@ func TestSupervisor_Shutdown_ClosesSession(t *testing.T) {
 	meta, err := session.Load(sessionDir)
 	require.NoError(t, err)
 	require.Equal(t, session.StatusCompleted, meta.Status, "Session should be marked completed")
+}
+
+// === Unit Tests: Fabric Forwarder ===
+
+func TestFabricForwarder_PublishesToEventBus(t *testing.T) {
+	// Test that the fabricForwarder pattern correctly publishes fabric.Event to the event bus.
+	// This tests the forwarder function logic in isolation.
+
+	eventBus := pubsub.NewBroker[any]()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Subscribe to the event bus
+	eventCh := eventBus.Subscribe(ctx)
+
+	// Create the forwarder function (same pattern as in AllocateResources)
+	fabricForwarder := func(event fabric.Event) {
+		eventBus.Publish(pubsub.UpdatedEvent, event)
+	}
+
+	// Create a test fabric event
+	testEvent := fabric.Event{
+		Type:        fabric.EventMessagePosted,
+		ChannelID:   "ch-123",
+		ChannelSlug: "tasks",
+		AgentID:     "COORDINATOR",
+	}
+
+	// Call the forwarder
+	fabricForwarder(testEvent)
+
+	// Verify the event was published to the bus
+	select {
+	case received := <-eventCh:
+		require.Equal(t, pubsub.UpdatedEvent, received.Type)
+		fabricEvent, ok := received.Payload.(fabric.Event)
+		require.True(t, ok, "payload should be fabric.Event")
+		require.Equal(t, fabric.EventMessagePosted, fabricEvent.Type)
+		require.Equal(t, "ch-123", fabricEvent.ChannelID)
+		require.Equal(t, "tasks", fabricEvent.ChannelSlug)
+		require.Equal(t, "COORDINATOR", fabricEvent.AgentID)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout waiting for event on bus")
+	}
+}
+
+func TestChainHandler_ThreeHandlers(t *testing.T) {
+	// Test that ChainHandler correctly calls all three handlers in sequence.
+	// This verifies the pattern used in supervisor.go works with 3 handlers.
+
+	var calls []string
+
+	h1 := func(e fabric.Event) { calls = append(calls, "logger:"+string(e.Type)) }
+	h2 := func(e fabric.Event) { calls = append(calls, "broker:"+string(e.Type)) }
+	h3 := func(e fabric.Event) { calls = append(calls, "forwarder:"+string(e.Type)) }
+
+	// Use the same ChainHandler pattern as in supervisor.go
+	chained := fabricpersist.ChainHandler(h1, h2, h3)
+
+	event := fabric.Event{Type: fabric.EventMessagePosted}
+	chained(event)
+
+	// All three handlers should be called in order
+	require.Len(t, calls, 3)
+	require.Equal(t, "logger:message.posted", calls[0])
+	require.Equal(t, "broker:message.posted", calls[1])
+	require.Equal(t, "forwarder:message.posted", calls[2])
+}
+
+func TestFabricEventPipeline_EndToEnd(t *testing.T) {
+	// Integration test: verify event flows from FabricService through ChainHandler to EventBus.
+	// This simulates the complete event pipeline set up in AllocateResources.
+
+	eventBus := pubsub.NewBroker[any]()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Subscribe to the event bus
+	eventCh := eventBus.Subscribe(ctx)
+
+	// Track what handlers were called
+	var handlersCalled []string
+	var mu sync.Mutex
+
+	// Create mock handlers like those in AllocateResources
+	mockLogger := func(e fabric.Event) {
+		mu.Lock()
+		handlersCalled = append(handlersCalled, "logger")
+		mu.Unlock()
+	}
+	mockBroker := func(e fabric.Event) {
+		mu.Lock()
+		handlersCalled = append(handlersCalled, "broker")
+		mu.Unlock()
+	}
+	fabricForwarder := func(event fabric.Event) {
+		mu.Lock()
+		handlersCalled = append(handlersCalled, "forwarder")
+		mu.Unlock()
+		eventBus.Publish(pubsub.UpdatedEvent, event)
+	}
+
+	// Create the chained handler
+	chained := fabricpersist.ChainHandler(mockLogger, mockBroker, fabricForwarder)
+
+	// Simulate FabricService emitting an event
+	testEvent := fabric.Event{
+		Type:        fabric.EventReplyPosted,
+		ChannelID:   "ch-general",
+		ChannelSlug: "general",
+		AgentID:     "WORKER.1",
+		ParentID:    "msg-123",
+	}
+
+	// Emit through the chain (simulates FabricService.emit())
+	chained(testEvent)
+
+	// Verify all handlers were called
+	mu.Lock()
+	require.Equal(t, []string{"logger", "broker", "forwarder"}, handlersCalled)
+	mu.Unlock()
+
+	// Verify the event reached the event bus
+	select {
+	case received := <-eventCh:
+		fabricEvent, ok := received.Payload.(fabric.Event)
+		require.True(t, ok)
+		require.Equal(t, fabric.EventReplyPosted, fabricEvent.Type)
+		require.Equal(t, "general", fabricEvent.ChannelSlug)
+		require.Equal(t, "msg-123", fabricEvent.ParentID)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout waiting for event on bus")
+	}
+}
+
+func TestExistingHandlers_StillCalled(t *testing.T) {
+	// Verify that adding the forwarder doesn't break the existing handlers.
+	// EventLogger and Broker handlers should still receive all events.
+
+	eventBus := pubsub.NewBroker[any]()
+
+	// Track handler invocations
+	var loggerEvents []fabric.Event
+	var brokerEvents []fabric.Event
+	var forwarderEvents []fabric.Event
+	var mu sync.Mutex
+
+	mockLogger := func(e fabric.Event) {
+		mu.Lock()
+		loggerEvents = append(loggerEvents, e)
+		mu.Unlock()
+	}
+	mockBroker := func(e fabric.Event) {
+		mu.Lock()
+		brokerEvents = append(brokerEvents, e)
+		mu.Unlock()
+	}
+	fabricForwarder := func(e fabric.Event) {
+		mu.Lock()
+		forwarderEvents = append(forwarderEvents, e)
+		mu.Unlock()
+		eventBus.Publish(pubsub.UpdatedEvent, e)
+	}
+
+	chained := fabricpersist.ChainHandler(mockLogger, mockBroker, fabricForwarder)
+
+	// Send multiple different event types
+	events := []fabric.Event{
+		{Type: fabric.EventMessagePosted, ChannelID: "ch-1"},
+		{Type: fabric.EventReplyPosted, ChannelID: "ch-2"},
+		{Type: fabric.EventSubscribed, ChannelID: "ch-3"},
+		{Type: fabric.EventChannelCreated, ChannelID: "ch-4"},
+	}
+
+	for _, e := range events {
+		chained(e)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// All handlers should receive all events
+	require.Len(t, loggerEvents, 4, "EventLogger should receive all events")
+	require.Len(t, brokerEvents, 4, "Broker should receive all events")
+	require.Len(t, forwarderEvents, 4, "Forwarder should receive all events")
+
+	// Verify event types were preserved
+	require.Equal(t, fabric.EventMessagePosted, loggerEvents[0].Type)
+	require.Equal(t, fabric.EventReplyPosted, brokerEvents[1].Type)
+	require.Equal(t, fabric.EventSubscribed, forwarderEvents[2].Type)
 }

@@ -31,6 +31,7 @@ import (
 	"github.com/zjrosen/perles/internal/orchestration/v2/prompt/roles"
 	"github.com/zjrosen/perles/internal/orchestration/v2/repository"
 	"github.com/zjrosen/perles/internal/orchestration/workflow"
+	"github.com/zjrosen/perles/internal/pubsub"
 	"github.com/zjrosen/perles/internal/sound"
 )
 
@@ -429,9 +430,18 @@ func (s *defaultSupervisor) AllocateResources(ctx context.Context, inst *Workflo
 			SlugLookup:    infra.Core.FabricService,
 		})
 
-		// Wire both handlers to FabricService using ChainHandler
+		// Create forwarder that publishes fabric events to the control plane event bus.
+		// This enables the dashboard to receive fabric events for the message log.
+		fabricForwarder := func(event fabric.Event) {
+			infra.Core.EventBus.Publish(pubsub.UpdatedEvent, event)
+		}
+
+		// Wire all three handlers to FabricService using ChainHandler:
+		// 1. fabricLogger - persists events to fabric.jsonl
+		// 2. fabricBroker - handles @mention notifications
+		// 3. fabricForwarder - publishes events to control plane event bus for dashboard
 		infra.Core.FabricService.SetEventHandler(
-			fabricpersist.ChainHandler(fabricLogger.HandleEvent, fabricBroker.HandleEvent),
+			fabricpersist.ChainHandler(fabricLogger.HandleEvent, fabricBroker.HandleEvent, fabricForwarder),
 		)
 
 		// Start the broker's event loop

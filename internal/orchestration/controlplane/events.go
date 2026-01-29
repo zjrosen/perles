@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/zjrosen/perles/internal/orchestration/events"
+	"github.com/zjrosen/perles/internal/orchestration/fabric"
 	"github.com/zjrosen/perles/internal/orchestration/v2/processor"
 )
 
@@ -38,9 +39,6 @@ const (
 	EventTaskCompleted EventType = "task.completed"
 	EventTaskFailed    EventType = "task.failed"
 
-	// Message events
-	EventMessagePosted EventType = "message.posted"
-
 	// User notification events
 	EventUserNotification EventType = "user.notification"
 
@@ -52,6 +50,9 @@ const (
 
 	// Command log events (for debug mode)
 	EventCommandLog EventType = "command.log"
+
+	// Fabric events (inter-agent messaging)
+	EventFabricPosted EventType = "fabric.posted"
 
 	// Unknown event type for unclassified events
 	EventUnknown EventType = "unknown"
@@ -118,11 +119,16 @@ type WorkflowPausedPayload struct {
 	TriggeredBy string
 }
 
-// ClassifyEvent maps a v2 ProcessEvent or CommandLogEvent to the appropriate ControlPlane EventType.
+// ClassifyEvent maps a v2 ProcessEvent, CommandLogEvent, or fabric.Event to the appropriate ControlPlane EventType.
 // It inspects the event's Type and Role to determine the correct classification.
 // Unknown events are mapped to EventUnknown.
 func ClassifyEvent(v2Event any) EventType {
-	// Check for CommandLogEvent first (debug mode command logging)
+	// Check for fabric.Event first (inter-agent messaging)
+	if _, ok := v2Event.(fabric.Event); ok {
+		return EventFabricPosted
+	}
+
+	// Check for CommandLogEvent (debug mode command logging)
 	if _, ok := v2Event.(processor.CommandLogEvent); ok {
 		return EventCommandLog
 	}
@@ -245,11 +251,6 @@ func (t EventType) IsTaskEvent() bool {
 	}
 }
 
-// IsMessageEvent returns true if the event type is a message event.
-func (t EventType) IsMessageEvent() bool {
-	return t == EventMessagePosted
-}
-
 // IsHealthEvent returns true if the event type is a health event.
 func (t EventType) IsHealthEvent() bool {
 	switch t {
@@ -261,6 +262,11 @@ func (t EventType) IsHealthEvent() bool {
 	default:
 		return false
 	}
+}
+
+// IsFabricEvent returns true if the event type is a fabric event.
+func (t EventType) IsFabricEvent() bool {
+	return t == EventFabricPosted
 }
 
 // String returns the string representation of the EventType.

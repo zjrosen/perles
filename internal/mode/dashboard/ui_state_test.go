@@ -12,7 +12,7 @@ import (
 	"github.com/zjrosen/perles/internal/mode"
 	"github.com/zjrosen/perles/internal/orchestration/controlplane"
 	"github.com/zjrosen/perles/internal/orchestration/events"
-	"github.com/zjrosen/perles/internal/orchestration/message"
+	"github.com/zjrosen/perles/internal/orchestration/fabric"
 	"github.com/zjrosen/perles/internal/orchestration/metrics"
 	"github.com/zjrosen/perles/internal/ui/shared/chatrender"
 	"github.com/zjrosen/perles/internal/ui/tree"
@@ -23,7 +23,7 @@ func TestNewWorkflowUIState_CreatesEmptyState(t *testing.T) {
 
 	require.NotNil(t, state)
 	require.Empty(t, state.CoordinatorMessages)
-	require.Empty(t, state.MessageEntries)
+	require.Empty(t, state.FabricEvents)
 	require.Empty(t, state.WorkerIDs)
 	require.Nil(t, state.CoordinatorMetrics)
 	require.Equal(t, events.ProcessStatus(""), state.CoordinatorStatus)
@@ -76,13 +76,12 @@ func TestWorkflowUIState_IsEmpty_ReturnsFalseAfterAddingCoordinatorMessage(t *te
 	require.False(t, state.IsEmpty())
 }
 
-func TestWorkflowUIState_IsEmpty_ReturnsFalseAfterAddingMessageEntry(t *testing.T) {
+func TestWorkflowUIState_IsEmpty_ReturnsFalseAfterAddingFabricEvent(t *testing.T) {
 	state := NewWorkflowUIState()
-	state.MessageEntries = append(state.MessageEntries, message.Entry{
-		ID:      "msg-1",
-		From:    "COORDINATOR",
-		To:      "WORKER.1",
-		Content: "Task assignment",
+	state.FabricEvents = append(state.FabricEvents, fabric.Event{
+		Type:        fabric.EventMessagePosted,
+		ChannelSlug: "tasks",
+		Timestamp:   time.Now(),
 	})
 
 	require.False(t, state.IsEmpty())
@@ -117,16 +116,16 @@ func TestWorkflowUIState_AllSlicesInitialized(t *testing.T) {
 
 	// All slices should be initialized (not nil) for safe appending
 	require.NotNil(t, state.CoordinatorMessages, "CoordinatorMessages slice should be initialized")
-	require.NotNil(t, state.MessageEntries, "MessageEntries slice should be initialized")
+	require.NotNil(t, state.FabricEvents, "FabricEvents slice should be initialized")
 	require.NotNil(t, state.WorkerIDs, "WorkerIDs slice should be initialized")
 
 	// Verify slices are usable without panic
 	state.CoordinatorMessages = append(state.CoordinatorMessages, chatrender.Message{Role: "test"})
-	state.MessageEntries = append(state.MessageEntries, message.Entry{ID: "test"})
+	state.FabricEvents = append(state.FabricEvents, fabric.Event{Type: fabric.EventMessagePosted})
 	state.WorkerIDs = append(state.WorkerIDs, "worker-1")
 
 	require.Len(t, state.CoordinatorMessages, 1)
-	require.Len(t, state.MessageEntries, 1)
+	require.Len(t, state.FabricEvents, 1)
 	require.Len(t, state.WorkerIDs, 1)
 }
 
@@ -141,8 +140,8 @@ func TestModel_StateIsolation_WorkflowAStateDoesNotLeakToWorkflowB(t *testing.T)
 	stateA.CoordinatorMessages = []chatrender.Message{
 		{Role: "assistant", Content: "Message for workflow A"},
 	}
-	stateA.MessageEntries = []message.Entry{
-		{ID: "msg-a-1", From: "COORDINATOR", To: "WORKER.1", Content: "Task A"},
+	stateA.FabricEvents = []fabric.Event{
+		{Type: fabric.EventMessagePosted, ChannelSlug: "tasks"},
 	}
 	stateA.WorkerIDs = []string{"worker-a-1", "worker-a-2"}
 	stateA.CoordinatorScrollPercent = 0.75
@@ -152,8 +151,8 @@ func TestModel_StateIsolation_WorkflowAStateDoesNotLeakToWorkflowB(t *testing.T)
 	stateB.CoordinatorMessages = []chatrender.Message{
 		{Role: "user", Content: "Message for workflow B"},
 	}
-	stateB.MessageEntries = []message.Entry{
-		{ID: "msg-b-1", From: "COORDINATOR", To: "WORKER.2", Content: "Task B"},
+	stateB.FabricEvents = []fabric.Event{
+		{Type: fabric.EventReplyPosted, ChannelSlug: "planning"},
 	}
 	stateB.WorkerIDs = []string{"worker-b-1"}
 	stateB.CoordinatorScrollPercent = 0.25
@@ -161,7 +160,7 @@ func TestModel_StateIsolation_WorkflowAStateDoesNotLeakToWorkflowB(t *testing.T)
 
 	// Verify states are completely independent
 	require.NotEqual(t, stateA.CoordinatorMessages[0].Content, stateB.CoordinatorMessages[0].Content)
-	require.NotEqual(t, stateA.MessageEntries[0].ID, stateB.MessageEntries[0].ID)
+	require.NotEqual(t, stateA.FabricEvents[0].ChannelSlug, stateB.FabricEvents[0].ChannelSlug)
 	require.NotEqual(t, len(stateA.WorkerIDs), len(stateB.WorkerIDs))
 	require.NotEqual(t, stateA.CoordinatorScrollPercent, stateB.CoordinatorScrollPercent)
 	require.NotEqual(t, stateA.MessageScrollPercent, stateB.MessageScrollPercent)
@@ -228,10 +227,10 @@ func TestModel_RoundTrip_StatePreservedAfterSaveAndLoad(t *testing.T) {
 	originalState.CoordinatorQueueCount = 3
 	originalState.CoordinatorScrollPercent = 0.75
 
-	// Populate message data
-	originalState.MessageEntries = []message.Entry{
-		{ID: "msg-1", From: "COORDINATOR", To: "WORKER.1", Content: "Task 1"},
-		{ID: "msg-2", From: "WORKER.1", To: "COORDINATOR", Content: "Done"},
+	// Populate fabric events data
+	originalState.FabricEvents = []fabric.Event{
+		{Type: fabric.EventMessagePosted, ChannelSlug: "tasks"},
+		{Type: fabric.EventReplyPosted, ChannelSlug: "tasks"},
 	}
 	originalState.MessageScrollPercent = 0.50
 
@@ -262,9 +261,9 @@ func TestModel_RoundTrip_StatePreservedAfterSaveAndLoad(t *testing.T) {
 	restoredState.CoordinatorQueueCount = originalState.CoordinatorQueueCount
 	restoredState.CoordinatorScrollPercent = originalState.CoordinatorScrollPercent
 
-	// Copy message data
-	restoredState.MessageEntries = make([]message.Entry, len(originalState.MessageEntries))
-	copy(restoredState.MessageEntries, originalState.MessageEntries)
+	// Copy fabric events data
+	restoredState.FabricEvents = make([]fabric.Event, len(originalState.FabricEvents))
+	copy(restoredState.FabricEvents, originalState.FabricEvents)
 	restoredState.MessageScrollPercent = originalState.MessageScrollPercent
 
 	// Copy worker data
@@ -298,8 +297,8 @@ func TestModel_RoundTrip_StatePreservedAfterSaveAndLoad(t *testing.T) {
 	require.Equal(t, originalState.CoordinatorQueueCount, restoredState.CoordinatorQueueCount)
 	require.Equal(t, originalState.CoordinatorScrollPercent, restoredState.CoordinatorScrollPercent)
 
-	require.Equal(t, len(originalState.MessageEntries), len(restoredState.MessageEntries))
-	require.Equal(t, originalState.MessageEntries[0].ID, restoredState.MessageEntries[0].ID)
+	require.Equal(t, len(originalState.FabricEvents), len(restoredState.FabricEvents))
+	require.Equal(t, originalState.FabricEvents[0].ChannelSlug, restoredState.FabricEvents[0].ChannelSlug)
 	require.Equal(t, originalState.MessageScrollPercent, restoredState.MessageScrollPercent)
 
 	require.Equal(t, originalState.WorkerIDs, restoredState.WorkerIDs)
@@ -316,7 +315,7 @@ func TestModel_NewWorkflowState_InitializesEmpty(t *testing.T) {
 	// New state should be empty
 	require.True(t, state.IsEmpty())
 	require.Empty(t, state.CoordinatorMessages)
-	require.Empty(t, state.MessageEntries)
+	require.Empty(t, state.FabricEvents)
 	require.Empty(t, state.WorkerIDs)
 	require.Equal(t, 0.0, state.CoordinatorScrollPercent)
 	require.Equal(t, 0.0, state.MessageScrollPercent)
@@ -443,6 +442,54 @@ func TestWorkflowUIState_ScrollPositions_PreservedOnCopy(t *testing.T) {
 
 func TestMaxCachedWorkflows_HasExpectedValue(t *testing.T) {
 	require.Equal(t, 10, maxCachedWorkflows)
+}
+
+// === Unit Tests: Fabric Events Field ===
+
+func TestWorkflowUIState_HasFabricEvents(t *testing.T) {
+	// Verify struct has FabricEvents field with correct type
+	state := NewWorkflowUIState()
+
+	// FabricEvents should exist and be a slice of fabric.Event
+	require.NotNil(t, state.FabricEvents, "FabricEvents field should exist")
+
+	// Should be appendable
+	event := fabric.Event{
+		Type:        fabric.EventMessagePosted,
+		ChannelSlug: "tasks",
+		Timestamp:   time.Now(),
+	}
+	state.FabricEvents = append(state.FabricEvents, event)
+	require.Len(t, state.FabricEvents, 1)
+	require.Equal(t, fabric.EventMessagePosted, state.FabricEvents[0].Type)
+	require.Equal(t, "tasks", state.FabricEvents[0].ChannelSlug)
+}
+
+func TestMaxFabricEvents_Constant(t *testing.T) {
+	// Verify constant is 500 as specified in the task
+	require.Equal(t, 500, maxFabricEvents)
+}
+
+func TestNewWorkflowUIState_InitializesFabricEvents(t *testing.T) {
+	// Verify FabricEvents is initialized as empty slice (not nil)
+	state := NewWorkflowUIState()
+
+	// FabricEvents should be initialized as empty slice, not nil
+	require.NotNil(t, state.FabricEvents, "FabricEvents should not be nil")
+	require.Empty(t, state.FabricEvents, "FabricEvents should be empty")
+
+	// Verify it's actually a slice (not nil) by checking length and capacity
+	require.Equal(t, 0, len(state.FabricEvents), "FabricEvents length should be 0")
+
+	// Should be usable for append without nil pointer issues
+	require.NotPanics(t, func() {
+		state.FabricEvents = append(state.FabricEvents, fabric.Event{
+			Type:        fabric.EventMessagePosted,
+			ChannelSlug: "general",
+		})
+	})
+
+	require.Len(t, state.FabricEvents, 1)
 }
 
 // === Unit Tests: Global Event Caching ===
@@ -1035,4 +1082,286 @@ func TestUpdateCachedUIState_ProcessTokenUsage_NilMetrics(t *testing.T) {
 	state = m.getOrCreateUIState("wf-1")
 	require.NotNil(t, state.WorkerMetrics["worker-1"], "existing WorkerMetrics should be preserved when nil event received")
 	require.Equal(t, 1000, state.WorkerMetrics["worker-1"].TokensUsed)
+}
+
+// === Unit Tests: EventFabricPosted Handler ===
+
+func TestUpdateCachedUIState_FabricPosted_MessagePosted(t *testing.T) {
+	// Verify that EventFabricPosted with message.posted event type stores the event
+	workflows := []*controlplane.WorkflowInstance{
+		createTestWorkflow("wf-1", "Workflow 1", controlplane.WorkflowRunning),
+	}
+
+	mockCP := newMockControlPlane(t)
+	mockCP.On("List", mock.Anything, mock.Anything).Return(workflows, nil).Maybe()
+
+	globalEventCh := make(chan controlplane.ControlPlaneEvent)
+	close(globalEventCh)
+	mockCP.On("Subscribe", mock.Anything).Return((<-chan controlplane.ControlPlaneEvent)(globalEventCh), func() {}).Maybe()
+
+	cfg := Config{
+		ControlPlane: mockCP,
+		Services:     mode.Services{},
+	}
+
+	m := New(cfg)
+	m.workflows = workflows
+	m.selectedIndex = 0
+	m = m.SetSize(100, 40).(Model)
+
+	// Initial state should have empty FabricEvents
+	state := m.getOrCreateUIState("wf-1")
+	require.Empty(t, state.FabricEvents, "initial FabricEvents should be empty")
+
+	// Simulate EventFabricPosted with message.posted type
+	fabricEvent := fabric.Event{
+		Type:        fabric.EventMessagePosted,
+		ChannelID:   "channel-1",
+		ChannelSlug: "tasks",
+		AgentID:     "coordinator",
+	}
+	event := controlplane.ControlPlaneEvent{
+		Type:       controlplane.EventFabricPosted,
+		WorkflowID: "wf-1",
+		Payload:    fabricEvent,
+	}
+	result, _ := m.Update(event)
+	m = result.(Model)
+
+	// FabricEvents should now contain the event
+	state = m.getOrCreateUIState("wf-1")
+	require.Len(t, state.FabricEvents, 1, "FabricEvents should contain the message.posted event")
+	require.Equal(t, fabric.EventMessagePosted, state.FabricEvents[0].Type)
+	require.Equal(t, "tasks", state.FabricEvents[0].ChannelSlug)
+}
+
+func TestUpdateCachedUIState_FabricPosted_ReplyPosted(t *testing.T) {
+	// Verify that EventFabricPosted with reply.posted event type stores the event
+	workflows := []*controlplane.WorkflowInstance{
+		createTestWorkflow("wf-1", "Workflow 1", controlplane.WorkflowRunning),
+	}
+
+	mockCP := newMockControlPlane(t)
+	mockCP.On("List", mock.Anything, mock.Anything).Return(workflows, nil).Maybe()
+
+	globalEventCh := make(chan controlplane.ControlPlaneEvent)
+	close(globalEventCh)
+	mockCP.On("Subscribe", mock.Anything).Return((<-chan controlplane.ControlPlaneEvent)(globalEventCh), func() {}).Maybe()
+
+	cfg := Config{
+		ControlPlane: mockCP,
+		Services:     mode.Services{},
+	}
+
+	m := New(cfg)
+	m.workflows = workflows
+	m.selectedIndex = 0
+	m = m.SetSize(100, 40).(Model)
+
+	// Initial state should have empty FabricEvents
+	state := m.getOrCreateUIState("wf-1")
+	require.Empty(t, state.FabricEvents, "initial FabricEvents should be empty")
+
+	// Simulate EventFabricPosted with reply.posted type
+	fabricEvent := fabric.Event{
+		Type:        fabric.EventReplyPosted,
+		ChannelID:   "channel-1",
+		ChannelSlug: "general",
+		ParentID:    "msg-123",
+		AgentID:     "worker-1",
+	}
+	event := controlplane.ControlPlaneEvent{
+		Type:       controlplane.EventFabricPosted,
+		WorkflowID: "wf-1",
+		Payload:    fabricEvent,
+	}
+	result, _ := m.Update(event)
+	m = result.(Model)
+
+	// FabricEvents should now contain the event
+	state = m.getOrCreateUIState("wf-1")
+	require.Len(t, state.FabricEvents, 1, "FabricEvents should contain the reply.posted event")
+	require.Equal(t, fabric.EventReplyPosted, state.FabricEvents[0].Type)
+	require.Equal(t, "msg-123", state.FabricEvents[0].ParentID)
+}
+
+func TestUpdateCachedUIState_FabricPosted_FilteredEvents(t *testing.T) {
+	// Verify that non-message events (subscribed, acked, channel.created) are NOT stored
+	workflows := []*controlplane.WorkflowInstance{
+		createTestWorkflow("wf-1", "Workflow 1", controlplane.WorkflowRunning),
+	}
+
+	mockCP := newMockControlPlane(t)
+	mockCP.On("List", mock.Anything, mock.Anything).Return(workflows, nil).Maybe()
+
+	globalEventCh := make(chan controlplane.ControlPlaneEvent)
+	close(globalEventCh)
+	mockCP.On("Subscribe", mock.Anything).Return((<-chan controlplane.ControlPlaneEvent)(globalEventCh), func() {}).Maybe()
+
+	cfg := Config{
+		ControlPlane: mockCP,
+		Services:     mode.Services{},
+	}
+
+	m := New(cfg)
+	m.workflows = workflows
+	m.selectedIndex = 0
+	m = m.SetSize(100, 40).(Model)
+
+	// Initial state should have empty FabricEvents
+	state := m.getOrCreateUIState("wf-1")
+	require.Empty(t, state.FabricEvents, "initial FabricEvents should be empty")
+
+	// Send EventSubscribed - should NOT be stored
+	subscribedEvent := fabric.Event{
+		Type:        fabric.EventSubscribed,
+		ChannelID:   "channel-1",
+		ChannelSlug: "tasks",
+		AgentID:     "worker-1",
+	}
+	event := controlplane.ControlPlaneEvent{
+		Type:       controlplane.EventFabricPosted,
+		WorkflowID: "wf-1",
+		Payload:    subscribedEvent,
+	}
+	result, _ := m.Update(event)
+	m = result.(Model)
+
+	// Send EventAcked - should NOT be stored
+	ackedEvent := fabric.Event{
+		Type:    fabric.EventAcked,
+		AgentID: "worker-1",
+	}
+	event = controlplane.ControlPlaneEvent{
+		Type:       controlplane.EventFabricPosted,
+		WorkflowID: "wf-1",
+		Payload:    ackedEvent,
+	}
+	result, _ = m.Update(event)
+	m = result.(Model)
+
+	// Send EventChannelCreated - should NOT be stored
+	channelEvent := fabric.Event{
+		Type:        fabric.EventChannelCreated,
+		ChannelID:   "channel-2",
+		ChannelSlug: "planning",
+	}
+	event = controlplane.ControlPlaneEvent{
+		Type:       controlplane.EventFabricPosted,
+		WorkflowID: "wf-1",
+		Payload:    channelEvent,
+	}
+	result, _ = m.Update(event)
+	m = result.(Model)
+
+	// FabricEvents should still be empty - all events were filtered out
+	state = m.getOrCreateUIState("wf-1")
+	require.Empty(t, state.FabricEvents, "FabricEvents should be empty - subscribed, acked, channel.created events should NOT be stored")
+}
+
+func TestUpdateCachedUIState_FabricEventsCap(t *testing.T) {
+	// Verify FIFO eviction at 500 events (oldest removed when cap exceeded)
+	workflows := []*controlplane.WorkflowInstance{
+		createTestWorkflow("wf-1", "Workflow 1", controlplane.WorkflowRunning),
+	}
+
+	mockCP := newMockControlPlane(t)
+	mockCP.On("List", mock.Anything, mock.Anything).Return(workflows, nil).Maybe()
+
+	globalEventCh := make(chan controlplane.ControlPlaneEvent)
+	close(globalEventCh)
+	mockCP.On("Subscribe", mock.Anything).Return((<-chan controlplane.ControlPlaneEvent)(globalEventCh), func() {}).Maybe()
+
+	cfg := Config{
+		ControlPlane: mockCP,
+		Services:     mode.Services{},
+	}
+
+	m := New(cfg)
+	m.workflows = workflows
+	m.selectedIndex = 0
+	m = m.SetSize(100, 40).(Model)
+
+	// Add maxFabricEvents + 5 events
+	for i := 0; i < maxFabricEvents+5; i++ {
+		fabricEvent := fabric.Event{
+			Type:        fabric.EventMessagePosted,
+			ChannelID:   fmt.Sprintf("channel-%d", i),
+			ChannelSlug: "tasks",
+			AgentID:     fmt.Sprintf("agent-%d", i),
+		}
+		event := controlplane.ControlPlaneEvent{
+			Type:       controlplane.EventFabricPosted,
+			WorkflowID: "wf-1",
+			Payload:    fabricEvent,
+		}
+		result, _ := m.Update(event)
+		m = result.(Model)
+	}
+
+	// FabricEvents should be capped at maxFabricEvents
+	state := m.getOrCreateUIState("wf-1")
+	require.Len(t, state.FabricEvents, maxFabricEvents, "FabricEvents should be capped at maxFabricEvents")
+
+	// Oldest events (0-4) should have been evicted via FIFO
+	require.Equal(t, "channel-5", state.FabricEvents[0].ChannelID,
+		"oldest events should be evicted - first event should be channel-5")
+}
+
+func TestUpdateCachedUIState_FabricEventsCap_PreservesNewest(t *testing.T) {
+	// Verify newest 500 events are kept after eviction
+	workflows := []*controlplane.WorkflowInstance{
+		createTestWorkflow("wf-1", "Workflow 1", controlplane.WorkflowRunning),
+	}
+
+	mockCP := newMockControlPlane(t)
+	mockCP.On("List", mock.Anything, mock.Anything).Return(workflows, nil).Maybe()
+
+	globalEventCh := make(chan controlplane.ControlPlaneEvent)
+	close(globalEventCh)
+	mockCP.On("Subscribe", mock.Anything).Return((<-chan controlplane.ControlPlaneEvent)(globalEventCh), func() {}).Maybe()
+
+	cfg := Config{
+		ControlPlane: mockCP,
+		Services:     mode.Services{},
+	}
+
+	m := New(cfg)
+	m.workflows = workflows
+	m.selectedIndex = 0
+	m = m.SetSize(100, 40).(Model)
+
+	// Add maxFabricEvents + 10 events to trigger multiple evictions
+	totalEvents := maxFabricEvents + 10
+	for i := 0; i < totalEvents; i++ {
+		fabricEvent := fabric.Event{
+			Type:        fabric.EventMessagePosted,
+			ChannelID:   fmt.Sprintf("msg-%d", i),
+			ChannelSlug: "general",
+			AgentID:     "coordinator",
+		}
+		event := controlplane.ControlPlaneEvent{
+			Type:       controlplane.EventFabricPosted,
+			WorkflowID: "wf-1",
+			Payload:    fabricEvent,
+		}
+		result, _ := m.Update(event)
+		m = result.(Model)
+	}
+
+	// Verify newest events are preserved
+	state := m.getOrCreateUIState("wf-1")
+	require.Len(t, state.FabricEvents, maxFabricEvents, "FabricEvents should be capped at maxFabricEvents")
+
+	// First event should be event #10 (indices 0-9 were evicted)
+	require.Equal(t, "msg-10", state.FabricEvents[0].ChannelID,
+		"first event should be msg-10 after eviction")
+
+	// Last event should be the newest one (maxFabricEvents + 9 = 509)
+	lastIdx := len(state.FabricEvents) - 1
+	require.Equal(t, fmt.Sprintf("msg-%d", totalEvents-1), state.FabricEvents[lastIdx].ChannelID,
+		"last event should be the newest one")
+
+	// Verify the constant is what we expect
+	require.Equal(t, 500, maxFabricEvents, "maxFabricEvents constant should be 500")
 }

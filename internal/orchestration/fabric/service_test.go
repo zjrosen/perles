@@ -528,3 +528,95 @@ func TestService_findThreadRoot(t *testing.T) {
 	foundRoot = svc.findThreadRoot(reply2.ID)
 	require.Equal(t, root.ID, foundRoot, "reply2 should find root as its thread root (flattened)")
 }
+
+func TestEventStruct_HasChannelSlug(t *testing.T) {
+	// Verify the Event struct has the ChannelSlug field by creating an event and setting it
+	event := Event{
+		Type:        EventMessagePosted,
+		ChannelSlug: "tasks",
+	}
+	require.Equal(t, "tasks", event.ChannelSlug)
+}
+
+func TestEmitMessagePosted_PopulatesChannelSlug(t *testing.T) {
+	svc := newTestService()
+	err := svc.InitSession("system")
+	require.NoError(t, err)
+
+	var capturedEvent Event
+	svc.SetEventHandler(func(e Event) {
+		if e.Type == EventMessagePosted {
+			capturedEvent = e
+		}
+	})
+
+	_, err = svc.SendMessage(SendMessageInput{
+		ChannelSlug: domain.SlugTasks,
+		Content:     "Test message",
+		CreatedBy:   "COORDINATOR",
+	})
+	require.NoError(t, err)
+
+	require.Equal(t, EventMessagePosted, capturedEvent.Type)
+	require.Equal(t, domain.SlugTasks, capturedEvent.ChannelSlug)
+}
+
+func TestEmitReplyPosted_PopulatesChannelSlug(t *testing.T) {
+	svc := newTestService()
+	err := svc.InitSession("system")
+	require.NoError(t, err)
+
+	msg, err := svc.SendMessage(SendMessageInput{
+		ChannelSlug: domain.SlugPlanning,
+		Content:     "Original message",
+		CreatedBy:   "COORDINATOR",
+	})
+	require.NoError(t, err)
+
+	var capturedEvent Event
+	svc.SetEventHandler(func(e Event) {
+		if e.Type == EventReplyPosted {
+			capturedEvent = e
+		}
+	})
+
+	_, err = svc.Reply(ReplyInput{
+		MessageID: msg.ID,
+		Content:   "Reply message",
+		CreatedBy: "WORKER.1",
+	})
+	require.NoError(t, err)
+
+	require.Equal(t, EventReplyPosted, capturedEvent.Type)
+	require.Equal(t, domain.SlugPlanning, capturedEvent.ChannelSlug)
+}
+
+func TestChannelSlug_AllChannelTypes(t *testing.T) {
+	// Test that all 4 user-facing channel types populate ChannelSlug correctly
+	channels := []string{domain.SlugTasks, domain.SlugPlanning, domain.SlugGeneral, domain.SlugSystem}
+
+	for _, channelSlug := range channels {
+		t.Run(channelSlug, func(t *testing.T) {
+			svc := newTestService()
+			err := svc.InitSession("system")
+			require.NoError(t, err)
+
+			var capturedEvent Event
+			svc.SetEventHandler(func(e Event) {
+				if e.Type == EventMessagePosted {
+					capturedEvent = e
+				}
+			})
+
+			_, err = svc.SendMessage(SendMessageInput{
+				ChannelSlug: channelSlug,
+				Content:     "Test message for " + channelSlug,
+				CreatedBy:   "COORDINATOR",
+			})
+			require.NoError(t, err)
+
+			require.Equal(t, EventMessagePosted, capturedEvent.Type)
+			require.Equal(t, channelSlug, capturedEvent.ChannelSlug, "ChannelSlug should be populated for %s", channelSlug)
+		})
+	}
+}

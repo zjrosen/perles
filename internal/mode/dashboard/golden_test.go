@@ -14,6 +14,8 @@ import (
 	"github.com/zjrosen/perles/internal/mode"
 	"github.com/zjrosen/perles/internal/orchestration/controlplane"
 	"github.com/zjrosen/perles/internal/orchestration/events"
+	"github.com/zjrosen/perles/internal/orchestration/fabric"
+	fabricDomain "github.com/zjrosen/perles/internal/orchestration/fabric/domain"
 	appreg "github.com/zjrosen/perles/internal/registry/application"
 	"github.com/zjrosen/perles/internal/ui/modals/issueeditor"
 	"github.com/zjrosen/perles/internal/ui/shared/chatrender"
@@ -860,5 +862,67 @@ func TestDashboard_View_Golden_WithIssueEditorModal(t *testing.T) {
 	m.issueEditor = &editor
 
 	view := m.View()
+	teatest.RequireEqualOutput(t, []byte(view))
+}
+
+// === Golden tests for Fabric Events Rendering (perles-3rtel.7) ===
+
+func TestCoordinatorPanel_MsgsTab_Golden(t *testing.T) {
+	// Test coordinator panel Messages tab with fabric events
+	panel := NewCoordinatorPanel(false, false, nil)
+	panel.SetSize(60, 20)
+	panel.activeTab = TabMessages
+
+	// Create test fabric events with fixed timestamps for reproducible output
+	state := &WorkflowUIState{
+		FabricEvents: []fabric.Event{
+			{
+				Type:        fabric.EventMessagePosted,
+				Timestamp:   testNow,
+				ChannelSlug: "tasks",
+				Thread: &fabricDomain.Thread{
+					CreatedBy: "coordinator",
+					Content:   "Task assigned: Implement authentication feature",
+				},
+			},
+			{
+				Type:        fabric.EventReplyPosted,
+				Timestamp:   testNow.Add(5 * time.Minute),
+				ChannelSlug: "tasks",
+				Thread: &fabricDomain.Thread{
+					CreatedBy: "worker-1",
+					Content:   "Implementation complete, ready for review",
+				},
+			},
+			{
+				Type:        fabric.EventMessagePosted,
+				Timestamp:   testNow.Add(10 * time.Minute),
+				ChannelSlug: "general",
+				Thread: &fabricDomain.Thread{
+					CreatedBy: "worker-2",
+					Content:   "Question about API design",
+				},
+			},
+		},
+	}
+	panel.SetWorkflow("wf-123", state)
+
+	view := panel.View()
+	teatest.RequireEqualOutput(t, []byte(view))
+}
+
+func TestCoordinatorPanel_MsgsTab_Empty_Golden(t *testing.T) {
+	// Test coordinator panel Messages tab with empty state
+	panel := NewCoordinatorPanel(false, false, nil)
+	panel.SetSize(60, 20)
+	panel.activeTab = TabMessages
+
+	// Empty fabric events
+	state := &WorkflowUIState{
+		FabricEvents: []fabric.Event{},
+	}
+	panel.SetWorkflow("wf-123", state)
+
+	view := panel.View()
 	teatest.RequireEqualOutput(t, []byte(view))
 }

@@ -206,7 +206,7 @@ func (s *Service) SendMessage(input SendMessageInput) (*domain.Thread, error) {
 		return nil, fmt.Errorf("add dependency: %w", err)
 	}
 
-	s.emit(NewMessagePostedEvent(created, channelID))
+	s.emit(NewMessagePostedEvent(created, channelID, input.ChannelSlug))
 
 	return created, nil
 }
@@ -288,9 +288,10 @@ func (s *Service) Reply(input ReplyInput) (*domain.Thread, error) {
 
 	// Find the channel this message belongs to
 	channelID := s.findChannelForMessage(rootID)
+	channelSlug := s.GetChannelSlug(channelID)
 
 	// Pass root's participants so broker can notify them of the reply
-	s.emit(NewReplyPostedEvent(created, channelID, rootID, root.Participants))
+	s.emit(NewReplyPostedEvent(created, channelID, channelSlug, rootID, root.Participants))
 
 	return created, nil
 }
@@ -573,7 +574,7 @@ func (s *Service) Subscribe(channelSlug, agentID string, mode domain.Subscriptio
 	if err != nil {
 		return nil, err
 	}
-	s.emit(NewSubscribedEvent(sub))
+	s.emit(NewSubscribedEvent(sub, channelSlug))
 	return sub, nil
 }
 
@@ -586,7 +587,7 @@ func (s *Service) Unsubscribe(channelSlug, agentID string) error {
 	if err := s.subscriptions.Unsubscribe(channelID, agentID); err != nil {
 		return err
 	}
-	s.emit(NewUnsubscribedEvent(channelID, agentID))
+	s.emit(NewUnsubscribedEvent(channelID, channelSlug, agentID))
 	return nil
 }
 

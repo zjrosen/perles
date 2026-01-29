@@ -43,7 +43,7 @@ func TestEventLogger_WriteAndLoad(t *testing.T) {
 
 	// Write events
 	logger.HandleEvent(fabric.NewChannelCreatedEvent(channelThread))
-	logger.HandleEvent(fabric.NewMessagePostedEvent(messageThread, "ch-1"))
+	logger.HandleEvent(fabric.NewMessagePostedEvent(messageThread, "ch-1", "tasks"))
 
 	// Check stats
 	written, errors, lastErr := logger.Stats()
@@ -276,7 +276,7 @@ func TestRestoreFabricService(t *testing.T) {
 		Mentions:  []string{"WORKER.1"},
 		Seq:       10,
 	}
-	logger.HandleEvent(fabric.NewMessagePostedEvent(msg, "ch-tasks"))
+	logger.HandleEvent(fabric.NewMessagePostedEvent(msg, "ch-tasks", "tasks"))
 
 	require.NoError(t, logger.Close())
 

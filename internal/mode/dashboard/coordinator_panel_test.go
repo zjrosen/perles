@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/require"
@@ -11,6 +12,8 @@ import (
 	"github.com/zjrosen/perles/internal/mode"
 	"github.com/zjrosen/perles/internal/orchestration/controlplane"
 	"github.com/zjrosen/perles/internal/orchestration/events"
+	"github.com/zjrosen/perles/internal/orchestration/fabric"
+	fabricDomain "github.com/zjrosen/perles/internal/orchestration/fabric/domain"
 	"github.com/zjrosen/perles/internal/orchestration/metrics"
 	"github.com/zjrosen/perles/internal/orchestration/v2/command"
 	"github.com/zjrosen/perles/internal/orchestration/v2/repository"
@@ -1147,4 +1150,280 @@ func TestCoordinatorPanel_TabSwitchAfterSelection(t *testing.T) {
 	// Tab should switch back to coordinator
 	require.Equal(t, TabCoordinator, panel.ActiveTab(),
 		"tab should switch back")
+}
+
+// ============================================================================
+// Fabric Events Tests (Task .6)
+// ============================================================================
+
+func TestCoordinatorPanel_HasFabricEvents(t *testing.T) {
+	// Verify struct has fabricEvents field with correct type
+	panel := NewCoordinatorPanel(false, false, nil)
+
+	// fabricEvents should exist and be initialized as empty slice
+	require.NotNil(t, panel.fabricEvents, "fabricEvents field should exist")
+	require.Empty(t, panel.fabricEvents, "fabricEvents should start empty")
+
+	// Should be a slice of fabric.Event that can be appended
+	panel.fabricEvents = append(panel.fabricEvents, fabric.Event{
+		Type:        fabric.EventMessagePosted,
+		ChannelSlug: "tasks",
+	})
+	require.Len(t, panel.fabricEvents, 1)
+	require.Equal(t, fabric.EventMessagePosted, panel.fabricEvents[0].Type)
+	require.Equal(t, "tasks", panel.fabricEvents[0].ChannelSlug)
+}
+
+func TestSetWorkflow_SyncsFabricEvents(t *testing.T) {
+	// Verify fabricEvents synced from WorkflowUIState
+	panel := NewCoordinatorPanel(false, false, nil)
+
+	// Create state with fabric events
+	state := &WorkflowUIState{
+		FabricEvents: []fabric.Event{
+			{Type: fabric.EventMessagePosted, ChannelSlug: "tasks", AgentID: "coordinator"},
+			{Type: fabric.EventReplyPosted, ChannelSlug: "tasks", AgentID: "worker-1"},
+		},
+	}
+
+	panel.SetWorkflow("wf-123", state)
+
+	// Verify fabricEvents were synced
+	require.Len(t, panel.fabricEvents, 2, "fabricEvents should be synced from state")
+	require.Equal(t, fabric.EventMessagePosted, panel.fabricEvents[0].Type)
+	require.Equal(t, fabric.EventReplyPosted, panel.fabricEvents[1].Type)
+	require.Equal(t, "coordinator", panel.fabricEvents[0].AgentID)
+	require.Equal(t, "worker-1", panel.fabricEvents[1].AgentID)
+}
+
+func TestWorkflowSwitch_PreservesFabricEvents(t *testing.T) {
+	// Verify events are preserved when switching workflows
+	panel := NewCoordinatorPanel(false, false, nil)
+
+	// Set workflow 1 with some events
+	state1 := &WorkflowUIState{
+		FabricEvents: []fabric.Event{
+			{Type: fabric.EventMessagePosted, ChannelSlug: "tasks", AgentID: "coordinator"},
+		},
+	}
+	panel.SetWorkflow("wf-1", state1)
+	require.Len(t, panel.fabricEvents, 1, "wf-1 events should be synced")
+
+	// Switch to workflow 2 with different events
+	state2 := &WorkflowUIState{
+		FabricEvents: []fabric.Event{
+			{Type: fabric.EventMessagePosted, ChannelSlug: "general", AgentID: "worker-1"},
+			{Type: fabric.EventReplyPosted, ChannelSlug: "general", AgentID: "coordinator"},
+			{Type: fabric.EventMessagePosted, ChannelSlug: "planning", AgentID: "worker-2"},
+		},
+	}
+	panel.SetWorkflow("wf-2", state2)
+
+	// Verify wf-2 events are now active
+	require.Len(t, panel.fabricEvents, 3, "wf-2 events should be synced")
+	require.Equal(t, "general", panel.fabricEvents[0].ChannelSlug)
+	require.Equal(t, "worker-1", panel.fabricEvents[0].AgentID)
+
+	// Switch back to workflow 1 (simulating preserved UI state)
+	panel.SetWorkflow("wf-1", state1)
+
+	// Verify wf-1 events are restored
+	require.Len(t, panel.fabricEvents, 1, "wf-1 events should be restored after switch")
+	require.Equal(t, "tasks", panel.fabricEvents[0].ChannelSlug)
+	require.Equal(t, "coordinator", panel.fabricEvents[0].AgentID)
+}
+
+// ============================================================================
+// Fabric Events Rendering Tests (Task .7)
+// ============================================================================
+
+func TestRenderFabricEvents_MessagePosted(t *testing.T) {
+	// Verify format: timestamp, channel, sender, content
+	panel := NewCoordinatorPanel(false, false, nil)
+	panel.SetSize(80, 20)
+
+	// Create test event with specific timestamp for verification
+	testTime := time.Date(2025, 1, 15, 14, 30, 0, 0, time.UTC)
+	state := &WorkflowUIState{
+		FabricEvents: []fabric.Event{
+			{
+				Type:        fabric.EventMessagePosted,
+				Timestamp:   testTime,
+				ChannelSlug: "tasks",
+				Thread: &fabricDomain.Thread{
+					CreatedBy: "coordinator",
+					Content:   "Task assignment for worker-1",
+				},
+			},
+		},
+	}
+	panel.SetWorkflow("wf-123", state)
+
+	// Render the fabric events
+	content, plainLines := panel.renderFabricEventsWithSelection(80, nil, nil)
+
+	// Verify timestamp format (HH:MM)
+	require.Contains(t, content, "14:30", "should show timestamp in HH:MM format")
+
+	// Verify channel format [#channelslug]
+	require.Contains(t, content, "[#tasks]", "should show channel as [#channelslug]")
+
+	// Verify sender displayed
+	require.Contains(t, content, "coordinator", "should show sender")
+
+	// Verify content displayed
+	require.Contains(t, content, "Task assignment for worker-1", "should show message content")
+
+	// Verify plain lines for selection extraction
+	require.NotNil(t, plainLines, "should return plain lines for selection")
+	foundHeader := false
+	for _, line := range plainLines {
+		if strings.Contains(line, "14:30") && strings.Contains(line, "[#tasks]") && strings.Contains(line, "coordinator") {
+			foundHeader = true
+			break
+		}
+	}
+	require.True(t, foundHeader, "plain lines should contain header with timestamp, channel, and sender")
+}
+
+func TestRenderFabricEvents_ReplyPosted(t *testing.T) {
+	// Verify "↳ reply:" prefix shown for reply.posted events
+	panel := NewCoordinatorPanel(false, false, nil)
+	panel.SetSize(80, 20)
+
+	testTime := time.Date(2025, 1, 15, 15, 45, 0, 0, time.UTC)
+	state := &WorkflowUIState{
+		FabricEvents: []fabric.Event{
+			{
+				Type:        fabric.EventReplyPosted,
+				Timestamp:   testTime,
+				ChannelSlug: "tasks",
+				Thread: &fabricDomain.Thread{
+					CreatedBy: "worker-1",
+					Content:   "Implementation complete",
+				},
+			},
+		},
+	}
+	panel.SetWorkflow("wf-123", state)
+
+	// Render the fabric events
+	content, plainLines := panel.renderFabricEventsWithSelection(80, nil, nil)
+
+	// Verify reply indicator present
+	require.Contains(t, content, "↳ reply:", "should show reply indicator prefix")
+
+	// Verify content follows reply indicator
+	require.Contains(t, content, "Implementation complete", "should show reply content")
+
+	// Verify plain lines contain reply indicator
+	foundReply := false
+	for _, line := range plainLines {
+		if strings.Contains(line, "↳ reply:") {
+			foundReply = true
+			break
+		}
+	}
+	require.True(t, foundReply, "plain lines should contain reply indicator")
+}
+
+func TestRenderFabricEvents_EmptyList(t *testing.T) {
+	// Verify "No inter-agent messages yet." shown for empty state
+	panel := NewCoordinatorPanel(false, false, nil)
+	panel.SetSize(80, 20)
+
+	// Empty fabric events
+	state := &WorkflowUIState{
+		FabricEvents: []fabric.Event{},
+	}
+	panel.SetWorkflow("wf-123", state)
+
+	// Render the fabric events
+	content, plainLines := panel.renderFabricEventsWithSelection(80, nil, nil)
+
+	// Verify empty state message
+	require.Contains(t, content, "No inter-agent messages yet.", "should show empty state message")
+
+	// Verify no plain lines for empty state
+	require.Nil(t, plainLines, "plain lines should be nil for empty state")
+}
+
+func TestRenderFabricEvents_CoordinatorStyle(t *testing.T) {
+	// Verify coordinator messages have correct format and use coordinator styling path
+	panel := NewCoordinatorPanel(false, false, nil)
+	panel.SetSize(80, 20)
+
+	testTime := time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)
+	state := &WorkflowUIState{
+		FabricEvents: []fabric.Event{
+			{
+				Type:        fabric.EventMessagePosted,
+				Timestamp:   testTime,
+				ChannelSlug: "planning",
+				Thread: &fabricDomain.Thread{
+					CreatedBy: "coordinator",
+					Content:   "Planning discussion",
+				},
+			},
+		},
+	}
+	panel.SetWorkflow("wf-123", state)
+
+	// Render the fabric events
+	content, plainLines := panel.renderFabricEventsWithSelection(80, nil, nil)
+
+	// Verify the content contains the coordinator name
+	require.Contains(t, content, "coordinator", "should show coordinator name")
+
+	// Verify content structure: timestamp, channel, sender
+	require.Contains(t, content, "10:00", "should show timestamp")
+	require.Contains(t, content, "[#planning]", "should show channel")
+	require.Contains(t, content, "Planning discussion", "should show content")
+
+	// Verify left border uses coordinator color (verified by having the "│" prefix)
+	require.Contains(t, content, "│", "should have left border for coordinator")
+
+	// Verify plain lines have correct header format
+	require.NotNil(t, plainLines)
+	require.Contains(t, plainLines[0], "coordinator", "plain header should contain sender")
+}
+
+func TestRenderFabricEvents_WorkerStyle(t *testing.T) {
+	// Verify worker messages have correct format and use worker styling path
+	panel := NewCoordinatorPanel(false, false, nil)
+	panel.SetSize(80, 20)
+
+	testTime := time.Date(2025, 1, 15, 11, 30, 0, 0, time.UTC)
+	state := &WorkflowUIState{
+		FabricEvents: []fabric.Event{
+			{
+				Type:        fabric.EventMessagePosted,
+				Timestamp:   testTime,
+				ChannelSlug: "tasks",
+				Thread: &fabricDomain.Thread{
+					CreatedBy: "worker-1",
+					Content:   "Task in progress",
+				},
+			},
+		},
+	}
+	panel.SetWorkflow("wf-123", state)
+
+	// Render the fabric events
+	content, plainLines := panel.renderFabricEventsWithSelection(80, nil, nil)
+
+	// Verify the content contains the worker name
+	require.Contains(t, content, "worker-1", "should show worker name")
+
+	// Verify content structure: timestamp, channel, sender
+	require.Contains(t, content, "11:30", "should show timestamp")
+	require.Contains(t, content, "[#tasks]", "should show channel")
+	require.Contains(t, content, "Task in progress", "should show content")
+
+	// Verify left border uses worker color (verified by having the "│" prefix)
+	require.Contains(t, content, "│", "should have left border for worker")
+
+	// Verify plain lines have correct header format
+	require.NotNil(t, plainLines)
+	require.Contains(t, plainLines[0], "worker-1", "plain header should contain sender")
 }

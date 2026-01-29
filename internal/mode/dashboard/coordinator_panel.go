@@ -17,6 +17,7 @@ import (
 	"github.com/zjrosen/perles/internal/mode/shared"
 	"github.com/zjrosen/perles/internal/orchestration/controlplane"
 	"github.com/zjrosen/perles/internal/orchestration/events"
+	"github.com/zjrosen/perles/internal/orchestration/fabric"
 	"github.com/zjrosen/perles/internal/orchestration/message"
 	"github.com/zjrosen/perles/internal/orchestration/metrics"
 	"github.com/zjrosen/perles/internal/orchestration/v2/command"
@@ -59,8 +60,8 @@ type CoordinatorPanel struct {
 	coordinatorQueue    int
 
 	// Message log state (uses SelectablePane for viewport + selection)
-	messagePane    *selection.SelectablePane
-	messageEntries []message.Entry
+	messagePane  *selection.SelectablePane
+	fabricEvents []fabric.Event // Synced from WorkflowUIState
 
 	// Worker state (dynamic tabs)
 	workerIDs      []string                             // Active worker IDs in display order
@@ -116,15 +117,10 @@ var (
 			Foreground(chatrender.UserColor).
 			Bold(true)
 
-	errorSenderStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.AdaptiveColor{Light: "#FF6B6B", Dark: "#FF8787"}).
-				Bold(true)
-
 	// Border styles for left message border (no bold)
 	coordinatorBorderStyle = lipgloss.NewStyle().Foreground(chatrender.CoordinatorColor)
 	workerBorderStyle      = lipgloss.NewStyle().Foreground(chatrender.WorkerColor)
 	userBorderStyle        = lipgloss.NewStyle().Foreground(chatrender.UserColor)
-	errorBorderStyle       = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#FF6B6B", Dark: "#FF8787"})
 )
 
 // Command log pane styles (matches orchestration mode command_pane.go)
@@ -175,7 +171,7 @@ func NewCoordinatorPanel(debugMode, vimMode bool, clipboard shared.Clipboard) *C
 		clipboard:           clipboard,
 		activeTab:           TabCoordinator,
 		coordinatorMessages: make([]chatrender.Message, 0),
-		messageEntries:      make([]message.Entry, 0),
+		fabricEvents:        make([]fabric.Event, 0),
 		workerIDs:           make([]string, 0),
 		workerPanes:         make(map[string]*selection.SelectablePane),
 		workerMessages:      make(map[string][]chatrender.Message),
@@ -259,7 +255,7 @@ func (p *CoordinatorPanel) SetWorkflow(workflowID controlplane.WorkflowID, state
 		p.coordinatorStatus = events.ProcessStatusPending
 		p.coordinatorQueue = 0
 		p.coordinatorMetrics = nil
-		p.messageEntries = make([]message.Entry, 0)
+		p.fabricEvents = make([]fabric.Event, 0)
 		p.workerIDs = make([]string, 0)
 		clear(p.workerMetrics)
 		return
@@ -273,9 +269,9 @@ func (p *CoordinatorPanel) SetWorkflow(workflowID controlplane.WorkflowID, state
 	p.coordinatorQueue = state.CoordinatorQueueCount
 	p.coordinatorMetrics = state.CoordinatorMetrics
 
-	// Sync message log state
-	if workflowChanged || len(state.MessageEntries) != len(p.messageEntries) {
-		p.messageEntries = state.MessageEntries
+	// Sync fabric events for message log
+	if workflowChanged || len(state.FabricEvents) != len(p.fabricEvents) {
+		p.fabricEvents = state.FabricEvents
 	}
 
 	// Sync worker state
@@ -640,7 +636,7 @@ func (p *CoordinatorPanel) renderMessageLogContent(height int) string {
 	selStart, selEnd := p.messagePane.SelectionBounds()
 
 	// Render content with selection highlighting
-	content, plainLines := p.renderMessageEntriesWithSelection(vpWidth, selStart, selEnd)
+	content, plainLines := p.renderFabricEventsWithSelection(vpWidth, selStart, selEnd)
 
 	// Pad both styled content and plain lines to keep them aligned
 	content, plainLines, topPadding := padContentAndLinesToBottom(content, plainLines, vpHeight)
@@ -804,10 +800,12 @@ func formatCommandDuration(d time.Duration) string {
 	return fmt.Sprintf("%.1fs", d.Seconds())
 }
 
-// renderMessageEntriesWithSelection renders the message log entries with optional selection highlighting.
+// renderFabricEventsWithSelection renders the fabric events with optional selection highlighting.
+// Format: HH:MM [#channelslug] sender followed by word-wrapped content.
+// Reply events show "↳ reply:" prefix. Coordinator/worker color styling applied.
 // Returns: rendered content, plain text lines for selection extraction.
-func (p *CoordinatorPanel) renderMessageEntriesWithSelection(wrapWidth int, selStart, selEnd *selection.Point) (string, []string) {
-	if len(p.messageEntries) == 0 {
+func (p *CoordinatorPanel) renderFabricEventsWithSelection(wrapWidth int, selStart, selEnd *selection.Point) (string, []string) {
+	if len(p.fabricEvents) == 0 {
 		emptyStyle := lipgloss.NewStyle().Foreground(styles.TextMutedColor)
 		return emptyStyle.Render("No inter-agent messages yet."), nil
 	}
@@ -816,20 +814,24 @@ func (p *CoordinatorPanel) renderMessageEntriesWithSelection(wrapWidth int, selS
 	var plainLines []string
 	currentLine := 0
 
-	for _, entry := range p.messageEntries {
+	for _, event := range p.fabricEvents {
+		// Get sender from Thread.CreatedBy
+		sender := event.Thread.CreatedBy
+		if sender == "" {
+			sender = event.AgentID
+		}
+
 		// Check if sender is a worker
-		fromUpper := strings.ToUpper(entry.From)
+		fromUpper := strings.ToUpper(sender)
 		isWorker := strings.HasPrefix(fromUpper, "WORKER")
 
 		// Determine left border style based on sender
 		var borderStyle lipgloss.Style
 		switch {
-		case entry.From == message.ActorCoordinator:
+		case sender == message.ActorCoordinator:
 			borderStyle = coordinatorBorderStyle
-		case entry.From == message.ActorUser:
+		case sender == message.ActorUser:
 			borderStyle = userBorderStyle
-		case entry.Type == message.MessageError:
-			borderStyle = errorBorderStyle
 		case isWorker:
 			borderStyle = workerBorderStyle
 		default:
@@ -839,31 +841,36 @@ func (p *CoordinatorPanel) renderMessageEntriesWithSelection(wrapWidth int, selS
 		leftBorder := borderStyle.Render("│")
 
 		// Format timestamp
-		timestamp := messageTimestampStyle.Render(entry.Timestamp.Format("15:04"))
+		timestamp := messageTimestampStyle.Render(event.Timestamp.Format("15:04"))
 
-		// Build plain header
-		headerPlain := fmt.Sprintf("%s %s → %s", entry.Timestamp.Format("15:04"), entry.From, entry.To)
+		// Build plain header: HH:MM [#channel] sender
+		channelSlug := event.ChannelSlug
+		headerPlain := fmt.Sprintf("%s [#%s] %s", event.Timestamp.Format("15:04"), channelSlug, sender)
 
 		// Style sender based on who sent it
 		var senderStyled string
 		switch {
-		case entry.From == message.ActorCoordinator:
-			senderStyled = coordinatorSenderStyle.Render(entry.From)
-		case entry.From == message.ActorUser:
-			senderStyled = userSenderStyle.Render(entry.From)
-		case entry.Type == message.MessageError:
-			senderStyled = errorSenderStyle.Render(entry.From)
+		case sender == message.ActorCoordinator:
+			senderStyled = coordinatorSenderStyle.Render(sender)
+		case sender == message.ActorUser:
+			senderStyled = userSenderStyle.Render(sender)
 		case isWorker:
-			senderStyled = workerSenderStyle.Render(entry.From)
+			senderStyled = workerSenderStyle.Render(sender)
 		default:
-			senderStyled = entry.From
+			senderStyled = sender
 		}
 
-		// Format styled header: timestamp | SENDER → RECIPIENT
-		headerStyled := fmt.Sprintf("%s %s → %s", timestamp, senderStyled, entry.To)
+		// Format styled header: HH:MM [#channel] sender
+		headerStyled := fmt.Sprintf("%s [#%s] %s", timestamp, channelSlug, senderStyled)
+
+		// Get content from Thread
+		msgContent := event.Thread.Content
+		if event.Type == fabric.EventReplyPosted {
+			msgContent = "↳ reply: " + msgContent
+		}
 
 		// Word wrap content (account for left border + space)
-		wrappedContent := chatrender.WordWrap(entry.Content, wrapWidth-4)
+		wrappedContent := chatrender.WordWrap(msgContent, wrapWidth-4)
 		wrappedLines := strings.Split(wrappedContent, "\n")
 
 		// Build plain lines for this entry

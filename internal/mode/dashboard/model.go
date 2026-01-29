@@ -27,7 +27,7 @@ import (
 	"github.com/zjrosen/perles/internal/mode"
 	"github.com/zjrosen/perles/internal/orchestration/controlplane"
 	"github.com/zjrosen/perles/internal/orchestration/events"
-	"github.com/zjrosen/perles/internal/orchestration/message"
+	"github.com/zjrosen/perles/internal/orchestration/fabric"
 	"github.com/zjrosen/perles/internal/orchestration/metrics"
 	"github.com/zjrosen/perles/internal/orchestration/v2/processor"
 	appreg "github.com/zjrosen/perles/internal/registry/application"
@@ -1436,9 +1436,22 @@ func (m *Model) updateCachedUIState(event controlplane.ControlPlaneEvent) {
 			}
 		}
 
-	case controlplane.EventMessagePosted:
-		if payload, ok := event.Payload.(message.Event); ok {
-			uiState.MessageEntries = append(uiState.MessageEntries, payload.Entry)
+	case controlplane.EventFabricPosted:
+		// Filter to only store message.posted and reply.posted events.
+		// These are the only event types with user-visible content (Thread.Content).
+		// Other fabric events (subscribed, acked, channel.created) are control signals
+		// without content and would clutter the message pane.
+		if fabricEvent, ok := event.Payload.(fabric.Event); ok {
+			if fabricEvent.Type == fabric.EventMessagePosted ||
+				fabricEvent.Type == fabric.EventReplyPosted {
+				uiState.FabricEvents = append(uiState.FabricEvents, fabricEvent)
+				// FIFO eviction to bound memory usage in long-running sessions.
+				// 500 events is chosen to provide sufficient history while limiting
+				// memory growth to approximately 500KB per workflow (assuming ~1KB/event).
+				if len(uiState.FabricEvents) > maxFabricEvents {
+					uiState.FabricEvents = uiState.FabricEvents[1:]
+				}
+			}
 		}
 
 	case controlplane.EventUserNotification:

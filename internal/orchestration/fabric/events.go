@@ -30,6 +30,10 @@ type Event struct {
 	AgentID   string `json:"agent_id,omitempty"`
 	ParentID  string `json:"parent_id,omitempty"` // For reply.posted events
 
+	// ChannelSlug is the human-readable channel name (tasks, planning, general, system).
+	// Populated at emission time to enable direct display without runtime lookups.
+	ChannelSlug string `json:"channel_slug,omitempty"`
+
 	// Payloads (at most one is set)
 	Thread       *domain.Thread       `json:"thread,omitempty"`
 	Subscription *domain.Subscription `json:"subscription,omitempty"`
@@ -40,31 +44,34 @@ type Event struct {
 // NewChannelCreatedEvent creates an event for channel creation.
 func NewChannelCreatedEvent(channel *domain.Thread) Event {
 	return Event{
-		Type:      EventChannelCreated,
-		Timestamp: time.Now(),
-		ChannelID: channel.ID,
-		Thread:    channel,
+		Type:        EventChannelCreated,
+		Timestamp:   time.Now(),
+		ChannelID:   channel.ID,
+		ChannelSlug: channel.Slug,
+		Thread:      channel,
 	}
 }
 
 // NewMessagePostedEvent creates an event for a new message.
-func NewMessagePostedEvent(message *domain.Thread, channelID string) Event {
+func NewMessagePostedEvent(message *domain.Thread, channelID, channelSlug string) Event {
 	return Event{
-		Type:      EventMessagePosted,
-		Timestamp: time.Now(),
-		ChannelID: channelID,
-		Thread:    message,
-		Mentions:  message.Mentions,
+		Type:        EventMessagePosted,
+		Timestamp:   time.Now(),
+		ChannelID:   channelID,
+		ChannelSlug: channelSlug,
+		Thread:      message,
+		Mentions:    message.Mentions,
 	}
 }
 
 // NewReplyPostedEvent creates an event for a reply.
 // parentParticipants are the participants of the parent thread who should be notified.
-func NewReplyPostedEvent(reply *domain.Thread, channelID, parentID string, parentParticipants []string) Event {
+func NewReplyPostedEvent(reply *domain.Thread, channelID, channelSlug, parentID string, parentParticipants []string) Event {
 	return Event{
 		Type:         EventReplyPosted,
 		Timestamp:    time.Now(),
 		ChannelID:    channelID,
+		ChannelSlug:  channelSlug,
 		ParentID:     parentID,
 		Thread:       reply,
 		Mentions:     reply.Mentions,
@@ -83,23 +90,25 @@ func NewArtifactAddedEvent(artifact *domain.Thread, targetID string) Event {
 }
 
 // NewSubscribedEvent creates an event for a subscription.
-func NewSubscribedEvent(sub *domain.Subscription) Event {
+func NewSubscribedEvent(sub *domain.Subscription, channelSlug string) Event {
 	return Event{
 		Type:         EventSubscribed,
 		Timestamp:    time.Now(),
 		ChannelID:    sub.ChannelID,
+		ChannelSlug:  channelSlug,
 		AgentID:      sub.AgentID,
 		Subscription: sub,
 	}
 }
 
 // NewUnsubscribedEvent creates an event for an unsubscription.
-func NewUnsubscribedEvent(channelID, agentID string) Event {
+func NewUnsubscribedEvent(channelID, channelSlug, agentID string) Event {
 	return Event{
-		Type:      EventUnsubscribed,
-		Timestamp: time.Now(),
-		ChannelID: channelID,
-		AgentID:   agentID,
+		Type:        EventUnsubscribed,
+		Timestamp:   time.Now(),
+		ChannelID:   channelID,
+		ChannelSlug: channelSlug,
+		AgentID:     agentID,
 	}
 }
 
@@ -114,10 +123,11 @@ func NewAckedEvent(agentID string, threadIDs []string) Event {
 }
 
 // NewChannelArchivedEvent creates an event for channel archival.
-func NewChannelArchivedEvent(channelID string) Event {
+func NewChannelArchivedEvent(channelID, channelSlug string) Event {
 	return Event{
-		Type:      EventChannelArchived,
-		Timestamp: time.Now(),
-		ChannelID: channelID,
+		Type:        EventChannelArchived,
+		Timestamp:   time.Now(),
+		ChannelID:   channelID,
+		ChannelSlug: channelSlug,
 	}
 }

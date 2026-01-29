@@ -14,7 +14,7 @@ import (
 	"github.com/zjrosen/perles/internal/mode"
 	"github.com/zjrosen/perles/internal/orchestration/controlplane"
 	"github.com/zjrosen/perles/internal/orchestration/events"
-	"github.com/zjrosen/perles/internal/orchestration/message"
+	"github.com/zjrosen/perles/internal/orchestration/fabric"
 	"github.com/zjrosen/perles/internal/ui/shared/chatrender"
 )
 
@@ -94,15 +94,15 @@ func simulateWorkerEvent(workflowID controlplane.WorkflowID, workerID, output st
 	}
 }
 
-// simulateMessageEvent simulates a message posted event.
-func simulateMessageEvent(workflowID controlplane.WorkflowID, content string) controlplane.ControlPlaneEvent {
+// simulateMessageEvent simulates a fabric message posted event.
+func simulateMessageEvent(workflowID controlplane.WorkflowID, _ string) controlplane.ControlPlaneEvent {
 	return controlplane.ControlPlaneEvent{
-		Type:       controlplane.EventMessagePosted,
+		Type:       controlplane.EventFabricPosted,
 		WorkflowID: workflowID,
-		Payload: message.Event{
-			Entry: message.Entry{
-				Content: content,
-			},
+		Payload: fabric.Event{
+			Type:        fabric.EventMessagePosted,
+			ChannelSlug: "tasks",
+			AgentID:     "coordinator",
 		},
 	}
 }
