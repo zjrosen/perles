@@ -472,7 +472,8 @@ func (s *defaultSupervisor) AllocateResources(ctx context.Context, inst *Workflo
 	sess.AttachMCPBroker(workflowCtx, mcpCoordServer.Broker())
 
 	// Create worker server cache for /worker/ routes
-	workerServers := newWorkerServerCache(nil, infra.Core.Adapter, infra.Internal.TurnEnforcer, infra.Core.FabricService, sess, workflowCtx)
+	// Pass sess as AccountabilityWriter so workers can persist their accountability summaries
+	workerServers := newWorkerServerCache(sess, infra.Core.Adapter, infra.Internal.TurnEnforcer, infra.Core.FabricService, sess, workflowCtx)
 
 	// Set up HTTP routes
 	mux := http.NewServeMux()
