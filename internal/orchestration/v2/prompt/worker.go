@@ -492,7 +492,7 @@ Your implementation of task **%s** was **DENIED** during code review.
 
 Please address the feedback above and make the necessary changes.
 
-When you have addressed all feedback, report via fabric_send(channel="general", content="Ready for re-review on task %s").`, taskID, feedback, taskID)
+When you have addressed all feedback, report via fabric_reply(content="Ready for re-review on task %s").`, taskID, feedback, taskID)
 }
 
 // CommitApprovalPrompt generates the prompt sent to an implementer when their code is approved.
@@ -539,7 +539,7 @@ post_accountability_summary(
     }
 )
 
-Then report via fabric_send(channel="general", content="Committed: [hash]").`, taskID)
+Then report via fabric_reply(content="Committed: [hash]").`, taskID)
 
 	return prompt
 }
@@ -597,5 +597,5 @@ You are assigned to aggregate accountability summaries from all workers into a u
 4. Preserve all verification points
 5. Write the aggregated summary in markdown format
 
-When complete, report via fabric_send(channel="general", content="Aggregation complete").`, sessionDir, sessionDir)
+When complete, report via fabric_reply(content="Aggregation complete").`, sessionDir, sessionDir)
 }
