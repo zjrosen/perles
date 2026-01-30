@@ -57,10 +57,10 @@ type WorkflowUIState struct {
 	WorkerMetrics     map[string]*metrics.TokenMetrics
 	WorkerQueueCounts map[string]int
 
-	// Viewport state (scroll positions as percentages)
-	CoordinatorScrollPercent float64
-	MessageScrollPercent     float64
-	WorkerScrollPercents     map[string]float64
+	// Scroll position persistence (integer offsets for VirtualSelectablePane)
+	// These store scroll offsets to preserve scroll positions across workflow switches.
+	CoordinatorScrollOffset int
+	WorkerScrollOffsets     map[string]int
 
 	// Notification state
 	// HasNotification is set to true when a ProcessUserNotification event is received.
@@ -85,19 +85,18 @@ type WorkflowUIState struct {
 // NewWorkflowUIState creates an empty WorkflowUIState with all maps initialized.
 func NewWorkflowUIState() *WorkflowUIState {
 	return &WorkflowUIState{
-		CoordinatorMessages:      make([]chatrender.Message, 0),
-		FabricEvents:             make([]fabric.Event, 0),
-		WorkerIDs:                make([]string, 0),
-		WorkerStatus:             make(map[string]events.ProcessStatus),
-		WorkerPhases:             make(map[string]events.ProcessPhase),
-		WorkerMessages:           make(map[string][]chatrender.Message),
-		WorkerMetrics:            make(map[string]*metrics.TokenMetrics),
-		WorkerQueueCounts:        make(map[string]int),
-		WorkerScrollPercents:     make(map[string]float64),
-		CoordinatorScrollPercent: 0,
-		MessageScrollPercent:     0,
-		CommandLogEntries:        make([]CommandLogEntry, 0),
-		LastUpdated:              time.Time{},
+		CoordinatorMessages:     make([]chatrender.Message, 0),
+		FabricEvents:            make([]fabric.Event, 0),
+		WorkerIDs:               make([]string, 0),
+		WorkerStatus:            make(map[string]events.ProcessStatus),
+		WorkerPhases:            make(map[string]events.ProcessPhase),
+		WorkerMessages:          make(map[string][]chatrender.Message),
+		WorkerMetrics:           make(map[string]*metrics.TokenMetrics),
+		WorkerQueueCounts:       make(map[string]int),
+		CoordinatorScrollOffset: 0,
+		WorkerScrollOffsets:     make(map[string]int),
+		CommandLogEntries:       make([]CommandLogEntry, 0),
+		LastUpdated:             time.Time{},
 	}
 }
 

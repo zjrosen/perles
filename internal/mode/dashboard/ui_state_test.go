@@ -28,8 +28,6 @@ func TestNewWorkflowUIState_CreatesEmptyState(t *testing.T) {
 	require.Nil(t, state.CoordinatorMetrics)
 	require.Equal(t, events.ProcessStatus(""), state.CoordinatorStatus)
 	require.Equal(t, 0, state.CoordinatorQueueCount)
-	require.Equal(t, 0.0, state.CoordinatorScrollPercent)
-	require.Equal(t, 0.0, state.MessageScrollPercent)
 	require.True(t, state.LastUpdated.IsZero())
 }
 
@@ -42,7 +40,6 @@ func TestNewWorkflowUIState_AllMapsInitialized(t *testing.T) {
 	require.NotNil(t, state.WorkerMessages, "WorkerMessages map should be initialized")
 	require.NotNil(t, state.WorkerMetrics, "WorkerMetrics map should be initialized")
 	require.NotNil(t, state.WorkerQueueCounts, "WorkerQueueCounts map should be initialized")
-	require.NotNil(t, state.WorkerScrollPercents, "WorkerScrollPercents map should be initialized")
 
 	// Verify maps are usable without panic
 	state.WorkerStatus["worker-1"] = events.ProcessStatusReady
@@ -50,14 +47,12 @@ func TestNewWorkflowUIState_AllMapsInitialized(t *testing.T) {
 	state.WorkerMessages["worker-1"] = []chatrender.Message{{Role: "assistant", Content: "test"}}
 	state.WorkerMetrics["worker-1"] = &metrics.TokenMetrics{TokensUsed: 100}
 	state.WorkerQueueCounts["worker-1"] = 5
-	state.WorkerScrollPercents["worker-1"] = 0.5
 
 	require.Equal(t, events.ProcessStatusReady, state.WorkerStatus["worker-1"])
 	require.Equal(t, events.ProcessPhaseIdle, state.WorkerPhases["worker-1"])
 	require.Len(t, state.WorkerMessages["worker-1"], 1)
 	require.Equal(t, 100, state.WorkerMetrics["worker-1"].TokensUsed)
 	require.Equal(t, 5, state.WorkerQueueCounts["worker-1"])
-	require.Equal(t, 0.5, state.WorkerScrollPercents["worker-1"])
 }
 
 func TestWorkflowUIState_IsEmpty_ReturnsTrueForNewState(t *testing.T) {
@@ -103,8 +98,6 @@ func TestWorkflowUIState_IsEmpty_WorkerMapsDoNotAffectEmptyCheck(t *testing.T) {
 	state.CoordinatorStatus = events.ProcessStatusReady
 	state.CoordinatorMetrics = &metrics.TokenMetrics{TokensUsed: 1000}
 	state.CoordinatorQueueCount = 3
-	state.CoordinatorScrollPercent = 0.75
-	state.MessageScrollPercent = 0.5
 	state.LastUpdated = time.Now()
 
 	// State should still be empty since there's no content
@@ -144,8 +137,6 @@ func TestModel_StateIsolation_WorkflowAStateDoesNotLeakToWorkflowB(t *testing.T)
 		{Type: fabric.EventMessagePosted, ChannelSlug: "tasks"},
 	}
 	stateA.WorkerIDs = []string{"worker-a-1", "worker-a-2"}
-	stateA.CoordinatorScrollPercent = 0.75
-	stateA.MessageScrollPercent = 0.50
 
 	// Populate state B with different data
 	stateB.CoordinatorMessages = []chatrender.Message{
@@ -155,26 +146,19 @@ func TestModel_StateIsolation_WorkflowAStateDoesNotLeakToWorkflowB(t *testing.T)
 		{Type: fabric.EventReplyPosted, ChannelSlug: "planning"},
 	}
 	stateB.WorkerIDs = []string{"worker-b-1"}
-	stateB.CoordinatorScrollPercent = 0.25
-	stateB.MessageScrollPercent = 0.10
 
 	// Verify states are completely independent
 	require.NotEqual(t, stateA.CoordinatorMessages[0].Content, stateB.CoordinatorMessages[0].Content)
 	require.NotEqual(t, stateA.FabricEvents[0].ChannelSlug, stateB.FabricEvents[0].ChannelSlug)
 	require.NotEqual(t, len(stateA.WorkerIDs), len(stateB.WorkerIDs))
-	require.NotEqual(t, stateA.CoordinatorScrollPercent, stateB.CoordinatorScrollPercent)
-	require.NotEqual(t, stateA.MessageScrollPercent, stateB.MessageScrollPercent)
 
 	// Modify state A and verify state B is unaffected
 	stateA.CoordinatorMessages = append(stateA.CoordinatorMessages, chatrender.Message{
 		Role:    "assistant",
 		Content: "Additional message for A",
 	})
-	stateA.CoordinatorScrollPercent = 0.99
-
 	require.Len(t, stateA.CoordinatorMessages, 2)
-	require.Len(t, stateB.CoordinatorMessages, 1)           // B unchanged
-	require.Equal(t, 0.25, stateB.CoordinatorScrollPercent) // B unchanged
+	require.Len(t, stateB.CoordinatorMessages, 1) // B unchanged
 }
 
 func TestModel_StateIsolation_MapIndependence(t *testing.T) {
@@ -187,14 +171,12 @@ func TestModel_StateIsolation_MapIndependence(t *testing.T) {
 	stateA.WorkerPhases["worker-1"] = events.ProcessPhaseImplementing
 	stateA.WorkerMessages["worker-1"] = []chatrender.Message{{Role: "assistant", Content: "A's worker output"}}
 	stateA.WorkerQueueCounts["worker-1"] = 5
-	stateA.WorkerScrollPercents["worker-1"] = 0.8
 
 	// Populate state B worker maps with different data
 	stateB.WorkerStatus["worker-2"] = events.ProcessStatusReady
 	stateB.WorkerPhases["worker-2"] = events.ProcessPhaseIdle
 	stateB.WorkerMessages["worker-2"] = []chatrender.Message{{Role: "assistant", Content: "B's worker output"}}
 	stateB.WorkerQueueCounts["worker-2"] = 0
-	stateB.WorkerScrollPercents["worker-2"] = 0.0
 
 	// Verify states don't share worker data
 	require.Contains(t, stateA.WorkerStatus, "worker-1")
@@ -225,14 +207,12 @@ func TestModel_RoundTrip_StatePreservedAfterSaveAndLoad(t *testing.T) {
 	originalState.CoordinatorStatus = events.ProcessStatusWorking
 	originalState.CoordinatorMetrics = &metrics.TokenMetrics{TokensUsed: 5000}
 	originalState.CoordinatorQueueCount = 3
-	originalState.CoordinatorScrollPercent = 0.75
 
 	// Populate fabric events data
 	originalState.FabricEvents = []fabric.Event{
 		{Type: fabric.EventMessagePosted, ChannelSlug: "tasks"},
 		{Type: fabric.EventReplyPosted, ChannelSlug: "tasks"},
 	}
-	originalState.MessageScrollPercent = 0.50
 
 	// Populate worker data
 	originalState.WorkerIDs = []string{"worker-1", "worker-2"}
@@ -246,8 +226,6 @@ func TestModel_RoundTrip_StatePreservedAfterSaveAndLoad(t *testing.T) {
 	originalState.WorkerMessages["worker-2"] = []chatrender.Message{}
 	originalState.WorkerMetrics["worker-1"] = &metrics.TokenMetrics{TokensUsed: 1000}
 	originalState.WorkerQueueCounts["worker-1"] = 2
-	originalState.WorkerScrollPercents["worker-1"] = 0.33
-	originalState.WorkerScrollPercents["worker-2"] = 0.0
 
 	// Simulate "round-trip" by creating a new state and copying data
 	// This mimics what loadUIState does
@@ -259,12 +237,10 @@ func TestModel_RoundTrip_StatePreservedAfterSaveAndLoad(t *testing.T) {
 	restoredState.CoordinatorStatus = originalState.CoordinatorStatus
 	restoredState.CoordinatorMetrics = originalState.CoordinatorMetrics
 	restoredState.CoordinatorQueueCount = originalState.CoordinatorQueueCount
-	restoredState.CoordinatorScrollPercent = originalState.CoordinatorScrollPercent
 
 	// Copy fabric events data
 	restoredState.FabricEvents = make([]fabric.Event, len(originalState.FabricEvents))
 	copy(restoredState.FabricEvents, originalState.FabricEvents)
-	restoredState.MessageScrollPercent = originalState.MessageScrollPercent
 
 	// Copy worker data
 	restoredState.WorkerIDs = make([]string, len(originalState.WorkerIDs))
@@ -286,25 +262,19 @@ func TestModel_RoundTrip_StatePreservedAfterSaveAndLoad(t *testing.T) {
 	for k, v := range originalState.WorkerQueueCounts {
 		restoredState.WorkerQueueCounts[k] = v
 	}
-	for k, v := range originalState.WorkerScrollPercents {
-		restoredState.WorkerScrollPercents[k] = v
-	}
 
 	// Verify all data was preserved
 	require.Equal(t, len(originalState.CoordinatorMessages), len(restoredState.CoordinatorMessages))
 	require.Equal(t, originalState.CoordinatorMessages[0].Content, restoredState.CoordinatorMessages[0].Content)
 	require.Equal(t, originalState.CoordinatorStatus, restoredState.CoordinatorStatus)
 	require.Equal(t, originalState.CoordinatorQueueCount, restoredState.CoordinatorQueueCount)
-	require.Equal(t, originalState.CoordinatorScrollPercent, restoredState.CoordinatorScrollPercent)
 
 	require.Equal(t, len(originalState.FabricEvents), len(restoredState.FabricEvents))
 	require.Equal(t, originalState.FabricEvents[0].ChannelSlug, restoredState.FabricEvents[0].ChannelSlug)
-	require.Equal(t, originalState.MessageScrollPercent, restoredState.MessageScrollPercent)
 
 	require.Equal(t, originalState.WorkerIDs, restoredState.WorkerIDs)
 	require.Equal(t, originalState.WorkerStatus["worker-1"], restoredState.WorkerStatus["worker-1"])
 	require.Equal(t, originalState.WorkerPhases["worker-1"], restoredState.WorkerPhases["worker-1"])
-	require.Equal(t, originalState.WorkerScrollPercents["worker-1"], restoredState.WorkerScrollPercents["worker-1"])
 }
 
 // === Unit Tests: New Workflow Initialization ===
@@ -317,9 +287,6 @@ func TestModel_NewWorkflowState_InitializesEmpty(t *testing.T) {
 	require.Empty(t, state.CoordinatorMessages)
 	require.Empty(t, state.FabricEvents)
 	require.Empty(t, state.WorkerIDs)
-	require.Equal(t, 0.0, state.CoordinatorScrollPercent)
-	require.Equal(t, 0.0, state.MessageScrollPercent)
-	require.Empty(t, state.WorkerScrollPercents)
 }
 
 func TestModel_NewWorkflowState_AllMapsUsableWithoutInitialization(t *testing.T) {
@@ -332,7 +299,7 @@ func TestModel_NewWorkflowState_AllMapsUsableWithoutInitialization(t *testing.T)
 		state.WorkerMessages["new-worker"] = []chatrender.Message{{Role: "test"}}
 		state.WorkerMetrics["new-worker"] = &metrics.TokenMetrics{TokensUsed: 0}
 		state.WorkerQueueCounts["new-worker"] = 0
-		state.WorkerScrollPercents["new-worker"] = 0.0
+		state.WorkerScrollOffsets["new-worker"] = 0
 	})
 }
 
@@ -345,97 +312,7 @@ func TestModel_NewWorkflowState_ReadFromEmptyMapsReturnsZeroValues(t *testing.T)
 	require.Nil(t, state.WorkerMessages["nonexistent"])
 	require.Nil(t, state.WorkerMetrics["nonexistent"])
 	require.Equal(t, 0, state.WorkerQueueCounts["nonexistent"])
-	require.Equal(t, 0.0, state.WorkerScrollPercents["nonexistent"])
-}
-
-// === Unit Tests: Scroll Position Capture ===
-
-func TestWorkflowUIState_ScrollPositions_InitiallyZero(t *testing.T) {
-	state := NewWorkflowUIState()
-
-	require.Equal(t, 0.0, state.CoordinatorScrollPercent)
-	require.Equal(t, 0.0, state.MessageScrollPercent)
-	require.Empty(t, state.WorkerScrollPercents)
-}
-
-func TestWorkflowUIState_ScrollPositions_CanBeSetAndRetrieved(t *testing.T) {
-	state := NewWorkflowUIState()
-
-	// Set scroll positions
-	state.CoordinatorScrollPercent = 0.75
-	state.MessageScrollPercent = 0.50
-	state.WorkerScrollPercents["worker-1"] = 0.33
-	state.WorkerScrollPercents["worker-2"] = 0.99
-
-	// Verify retrieval
-	require.Equal(t, 0.75, state.CoordinatorScrollPercent)
-	require.Equal(t, 0.50, state.MessageScrollPercent)
-	require.Equal(t, 0.33, state.WorkerScrollPercents["worker-1"])
-	require.Equal(t, 0.99, state.WorkerScrollPercents["worker-2"])
-}
-
-func TestWorkflowUIState_ScrollPositions_BoundaryValues(t *testing.T) {
-	state := NewWorkflowUIState()
-
-	// Test boundary values: 0.0 (top) and 1.0 (bottom)
-	state.CoordinatorScrollPercent = 0.0
-	require.Equal(t, 0.0, state.CoordinatorScrollPercent)
-
-	state.CoordinatorScrollPercent = 1.0
-	require.Equal(t, 1.0, state.CoordinatorScrollPercent)
-
-	// Test values just inside boundaries
-	state.MessageScrollPercent = 0.001
-	require.InDelta(t, 0.001, state.MessageScrollPercent, 0.0001)
-
-	state.MessageScrollPercent = 0.999
-	require.InDelta(t, 0.999, state.MessageScrollPercent, 0.0001)
-}
-
-func TestWorkflowUIState_ScrollPositions_MultipleWorkersIndependent(t *testing.T) {
-	state := NewWorkflowUIState()
-
-	// Set different scroll positions for multiple workers
-	state.WorkerScrollPercents["worker-1"] = 0.1
-	state.WorkerScrollPercents["worker-2"] = 0.5
-	state.WorkerScrollPercents["worker-3"] = 0.9
-
-	// Modify one worker's position
-	state.WorkerScrollPercents["worker-2"] = 0.75
-
-	// Verify other workers are unaffected
-	require.Equal(t, 0.1, state.WorkerScrollPercents["worker-1"])
-	require.Equal(t, 0.75, state.WorkerScrollPercents["worker-2"])
-	require.Equal(t, 0.9, state.WorkerScrollPercents["worker-3"])
-}
-
-func TestWorkflowUIState_ScrollPositions_PreservedOnCopy(t *testing.T) {
-	// Create original state with scroll positions
-	original := NewWorkflowUIState()
-	original.CoordinatorScrollPercent = 0.42
-	original.MessageScrollPercent = 0.73
-	original.WorkerScrollPercents["worker-1"] = 0.88
-
-	// Create copy
-	copy := NewWorkflowUIState()
-	copy.CoordinatorScrollPercent = original.CoordinatorScrollPercent
-	copy.MessageScrollPercent = original.MessageScrollPercent
-	for k, v := range original.WorkerScrollPercents {
-		copy.WorkerScrollPercents[k] = v
-	}
-
-	// Verify copy has same values
-	require.Equal(t, original.CoordinatorScrollPercent, copy.CoordinatorScrollPercent)
-	require.Equal(t, original.MessageScrollPercent, copy.MessageScrollPercent)
-	require.Equal(t, original.WorkerScrollPercents["worker-1"], copy.WorkerScrollPercents["worker-1"])
-
-	// Modify original
-	original.CoordinatorScrollPercent = 0.99
-	original.WorkerScrollPercents["worker-1"] = 0.11
-
-	// Verify copy is unaffected
-	require.Equal(t, 0.42, copy.CoordinatorScrollPercent)
-	require.Equal(t, 0.88, copy.WorkerScrollPercents["worker-1"])
+	require.Equal(t, 0, state.WorkerScrollOffsets["nonexistent"])
 }
 
 // === Unit Tests: maxCachedWorkflows Constant ===
@@ -468,6 +345,61 @@ func TestWorkflowUIState_HasFabricEvents(t *testing.T) {
 func TestMaxFabricEvents_Constant(t *testing.T) {
 	// Verify constant is 500 as specified in the task
 	require.Equal(t, 500, maxFabricEvents)
+}
+
+// === Unit Tests: Scroll Position Persistence (Integer Offsets) ===
+
+func TestNewWorkflowUIState_ScrollOffsetsInitialized(t *testing.T) {
+	state := NewWorkflowUIState()
+
+	// CoordinatorScrollOffset should be zero
+	require.Equal(t, 0, state.CoordinatorScrollOffset, "CoordinatorScrollOffset should be initialized to 0")
+
+	// WorkerScrollOffsets should be initialized as empty map (not nil)
+	require.NotNil(t, state.WorkerScrollOffsets, "WorkerScrollOffsets map should be initialized")
+	require.Empty(t, state.WorkerScrollOffsets, "WorkerScrollOffsets should be empty initially")
+
+	// Verify map is usable without panic
+	require.NotPanics(t, func() {
+		state.WorkerScrollOffsets["worker-1"] = 100
+	})
+	require.Equal(t, 100, state.WorkerScrollOffsets["worker-1"])
+}
+
+func TestWorkflowUIState_ScrollOffsets_CanBeSetAndRetrieved(t *testing.T) {
+	state := NewWorkflowUIState()
+
+	// Set scroll offsets
+	state.CoordinatorScrollOffset = 150
+	state.WorkerScrollOffsets["worker-1"] = 200
+	state.WorkerScrollOffsets["worker-2"] = 50
+
+	// Verify retrieval
+	require.Equal(t, 150, state.CoordinatorScrollOffset)
+	require.Equal(t, 200, state.WorkerScrollOffsets["worker-1"])
+	require.Equal(t, 50, state.WorkerScrollOffsets["worker-2"])
+}
+
+func TestWorkflowUIState_ScrollOffsets_Independent(t *testing.T) {
+	stateA := NewWorkflowUIState()
+	stateB := NewWorkflowUIState()
+
+	// Set different scroll offsets
+	stateA.CoordinatorScrollOffset = 100
+	stateA.WorkerScrollOffsets["worker-1"] = 200
+
+	stateB.CoordinatorScrollOffset = 300
+	stateB.WorkerScrollOffsets["worker-1"] = 400
+
+	// Verify independence
+	require.Equal(t, 100, stateA.CoordinatorScrollOffset)
+	require.Equal(t, 200, stateA.WorkerScrollOffsets["worker-1"])
+	require.Equal(t, 300, stateB.CoordinatorScrollOffset)
+	require.Equal(t, 400, stateB.WorkerScrollOffsets["worker-1"])
+
+	// Modify one, verify other unchanged
+	stateA.CoordinatorScrollOffset = 999
+	require.Equal(t, 300, stateB.CoordinatorScrollOffset)
 }
 
 func TestNewWorkflowUIState_InitializesFabricEvents(t *testing.T) {

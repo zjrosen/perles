@@ -53,23 +53,23 @@ type CoordinatorPanel struct {
 	// Tab state
 	activeTab int // Current tab index
 
-	// Coordinator state (uses SelectablePane for viewport + selection)
-	coordinatorPane     *selection.SelectablePane
+	// Coordinator state (uses VirtualSelectablePane for virtual scrolling with selection)
+	coordinatorPane     *selection.VirtualSelectablePane
 	coordinatorMessages []chatrender.Message
 	coordinatorStatus   events.ProcessStatus
 	coordinatorQueue    int
 
-	// Message log state (uses SelectablePane for viewport + selection)
+	// Message log state (uses SelectablePane for viewport + selection - NOT migrated yet)
 	messagePane  *selection.SelectablePane
 	fabricEvents []fabric.Event // Synced from WorkflowUIState
 
 	// Worker state (dynamic tabs)
-	workerIDs      []string                             // Active worker IDs in display order
-	workerPanes    map[string]*selection.SelectablePane // SelectablePane per worker
-	workerMessages map[string][]chatrender.Message      // Messages per worker
-	workerStatus   map[string]events.ProcessStatus      // Status per worker
-	workerPhases   map[string]events.ProcessPhase       // Phase per worker
-	workerQueues   map[string]int                       // Queue count per worker
+	workerIDs      []string                                    // Active worker IDs in display order
+	workerPanes    map[string]*selection.VirtualSelectablePane // VirtualSelectablePane per worker
+	workerMessages map[string][]chatrender.Message             // Messages per worker
+	workerStatus   map[string]events.ProcessStatus             // Status per worker
+	workerPhases   map[string]events.ProcessPhase              // Phase per worker
+	workerQueues   map[string]int                              // Queue count per worker
 
 	// Token metrics for display
 	coordinatorMetrics *metrics.TokenMetrics
@@ -91,6 +91,11 @@ type CoordinatorPanel struct {
 	// Screen position for mouse coordinate mapping
 	screenXOffset int // X offset from left edge of terminal
 	screenYOffset int // Y offset from top (where viewports start, after tab bar)
+
+	// Pending scroll position restoration (applied after first render)
+	// These are set by restoreScrollPositions and cleared after being applied
+	pendingCoordinatorScrollOffset *int            // nil = no pending restore
+	pendingWorkerScrollOffsets     map[string]*int // nil value = no pending restore for that worker
 }
 
 // coordinatorTitleColor is the base color for coordinator title text.
@@ -167,30 +172,29 @@ func NewCoordinatorPanel(debugMode, vimMode bool, clipboard shared.Clipboard) *C
 	input.Blur()
 
 	panel := &CoordinatorPanel{
-		input:               input,
-		clipboard:           clipboard,
-		activeTab:           TabCoordinator,
-		coordinatorMessages: make([]chatrender.Message, 0),
-		fabricEvents:        make([]fabric.Event, 0),
-		workerIDs:           make([]string, 0),
-		workerPanes:         make(map[string]*selection.SelectablePane),
-		workerMessages:      make(map[string][]chatrender.Message),
-		workerStatus:        make(map[string]events.ProcessStatus),
-		workerPhases:        make(map[string]events.ProcessPhase),
-		workerQueues:        make(map[string]int),
-		workerMetrics:       make(map[string]*metrics.TokenMetrics),
-		commandLogViewport:  viewport.New(0, 0),
-		commandLogEntries:   make([]CommandLogEntry, 0),
-		commandLogDirty:     true,
-		debugMode:           debugMode,
-		focused:             false,
+		input:                      input,
+		clipboard:                  clipboard,
+		activeTab:                  TabCoordinator,
+		coordinatorMessages:        make([]chatrender.Message, 0),
+		fabricEvents:               make([]fabric.Event, 0),
+		workerIDs:                  make([]string, 0),
+		workerPanes:                make(map[string]*selection.VirtualSelectablePane),
+		workerMessages:             make(map[string][]chatrender.Message),
+		workerStatus:               make(map[string]events.ProcessStatus),
+		workerPhases:               make(map[string]events.ProcessPhase),
+		workerQueues:               make(map[string]int),
+		workerMetrics:              make(map[string]*metrics.TokenMetrics),
+		commandLogViewport:         viewport.New(0, 0),
+		commandLogEntries:          make([]CommandLogEntry, 0),
+		commandLogDirty:            true,
+		debugMode:                  debugMode,
+		focused:                    false,
+		pendingWorkerScrollOffsets: make(map[string]*int),
 	}
 
-	// Initialize SelectablePanes using the helper method
-	panel.coordinatorPane = selection.NewPane(selection.PaneConfig{
-		Clipboard: clipboard,
-		MakeToast: panel.makeToastFunc(),
-	})
+	// Initialize VirtualSelectablePane for coordinator
+	panel.coordinatorPane = selection.NewVirtualSelectablePane(clipboard, panel.makeToastFunc())
+	// Keep messagePane as SelectablePane for now (Messages tab not migrated in this phase)
 	panel.messagePane = selection.NewPane(selection.PaneConfig{
 		Clipboard: clipboard,
 		MakeToast: panel.makeToastFunc(),
@@ -225,10 +229,12 @@ func (p *CoordinatorPanel) SetSize(width, height int) {
 // SetScreenXOffset sets the panel's X position on screen for mouse coordinate mapping.
 func (p *CoordinatorPanel) SetScreenXOffset(offset int) {
 	p.screenXOffset = offset
-	p.coordinatorPane.SetScreenXOffset(offset)
+	// VirtualSelectablePane uses SetScreenPosition for coordinate mapping
+	p.coordinatorPane.SetScreenPosition(offset, p.screenYOffset)
+	// SelectablePane still uses separate methods
 	p.messagePane.SetScreenXOffset(offset)
 	for _, pane := range p.workerPanes {
-		pane.SetScreenXOffset(offset)
+		pane.SetScreenPosition(offset, p.screenYOffset)
 	}
 }
 
@@ -236,10 +242,12 @@ func (p *CoordinatorPanel) SetScreenXOffset(offset int) {
 func (p *CoordinatorPanel) SetScreenYOffset(offset int) {
 	viewportY := offset
 	p.screenYOffset = viewportY
-	p.coordinatorPane.SetScreenYOffset(viewportY)
+	// VirtualSelectablePane uses SetScreenPosition for coordinate mapping
+	p.coordinatorPane.SetScreenPosition(p.screenXOffset, viewportY)
+	// SelectablePane still uses separate methods
 	p.messagePane.SetScreenYOffset(viewportY)
 	for _, pane := range p.workerPanes {
-		pane.SetScreenYOffset(viewportY)
+		pane.SetScreenPosition(p.screenXOffset, viewportY)
 	}
 }
 
@@ -277,15 +285,11 @@ func (p *CoordinatorPanel) SetWorkflow(workflowID controlplane.WorkflowID, state
 	// Sync worker state
 	if workflowChanged || len(state.WorkerIDs) != len(p.workerIDs) {
 		p.workerIDs = state.WorkerIDs
-		// Initialize SelectablePanes for new workers
+		// Initialize VirtualSelectablePanes for new workers
 		for _, wid := range p.workerIDs {
 			if _, exists := p.workerPanes[wid]; !exists {
-				p.workerPanes[wid] = selection.NewPane(selection.PaneConfig{
-					Clipboard: p.clipboard,
-					MakeToast: p.makeToastFunc(),
-				})
-				p.workerPanes[wid].SetScreenXOffset(p.screenXOffset)
-				p.workerPanes[wid].SetScreenYOffset(p.screenYOffset)
+				p.workerPanes[wid] = selection.NewVirtualSelectablePane(p.clipboard, p.makeToastFunc())
+				p.workerPanes[wid].SetScreenPosition(p.screenXOffset, p.screenYOffset)
 			}
 		}
 	}
@@ -323,6 +327,72 @@ func (p *CoordinatorPanel) SetWorkflow(workflowID controlplane.WorkflowID, state
 		workerIdx := p.activeTab - firstWorker
 		if workerIdx >= len(p.workerIDs) {
 			p.activeTab = TabCoordinator
+		}
+	}
+
+	// Restore scroll positions for the new workflow (only when workflow changes)
+	if workflowChanged && state != nil {
+		p.restoreScrollPositions(state)
+	}
+}
+
+// SaveScrollPositions saves the current scroll positions to the given WorkflowUIState.
+// This should be called before switching to a different workflow to preserve scroll state.
+func (p *CoordinatorPanel) SaveScrollPositions(state *WorkflowUIState) {
+	if state == nil {
+		return
+	}
+
+	// Save coordinator scroll offset
+	state.CoordinatorScrollOffset = p.coordinatorPane.ScrollOffset()
+
+	// Save worker scroll offsets
+	if state.WorkerScrollOffsets == nil {
+		state.WorkerScrollOffsets = make(map[string]int)
+	}
+	for workerID, pane := range p.workerPanes {
+		state.WorkerScrollOffsets[workerID] = pane.ScrollOffset()
+	}
+}
+
+// restoreScrollPositions restores scroll positions from the given WorkflowUIState.
+// If this is the first time viewing a workflow (CoordinatorScrollOffset == 0 and no content),
+// the scroll positions default to bottom, which is handled by VirtualSelectablePane's auto-scroll.
+//
+// IMPORTANT: This method sets "pending" scroll positions that are applied AFTER the next
+// render (after SetMessages is called). This is necessary because SetMessages has its own
+// auto-scroll logic that would override any scroll offset set before content is loaded.
+func (p *CoordinatorPanel) restoreScrollPositions(state *WorkflowUIState) {
+	if state == nil {
+		return
+	}
+
+	// Check if this is a first-time view (never had scroll positions saved)
+	// A workflow that has been viewed before will have either:
+	// 1. Non-zero CoordinatorScrollOffset, OR
+	// 2. Zero offset but content exists (user was at top)
+	// First-time workflows: CoordinatorScrollOffset == 0 with no saved worker offsets
+	isFirstTimeView := state.CoordinatorScrollOffset == 0 && len(state.WorkerScrollOffsets) == 0
+
+	if isFirstTimeView {
+		// First-time workflow view: scroll to bottom
+		// VirtualSelectablePane defaults to bottom for new content via wasAtBottom,
+		// so we don't need to set any pending offsets - let the default behavior work.
+		p.pendingCoordinatorScrollOffset = nil
+		// Clear any pending worker offsets
+		clear(p.pendingWorkerScrollOffsets)
+	} else {
+		// Returning to a previously viewed workflow: set pending scroll positions
+		// These will be applied after the content is set in renderCoordinatorContent/renderWorkerContent
+		offset := state.CoordinatorScrollOffset
+		p.pendingCoordinatorScrollOffset = &offset
+
+		// Set pending worker scroll offsets
+		if state.WorkerScrollOffsets != nil {
+			for workerID, workerOffset := range state.WorkerScrollOffsets {
+				wo := workerOffset // capture loop variable
+				p.pendingWorkerScrollOffsets[workerID] = &wo
+			}
 		}
 	}
 }
@@ -600,29 +670,25 @@ func (p *CoordinatorPanel) getActiveMetricsDisplay() string {
 }
 
 // renderCoordinatorContent renders the coordinator chat content for the viewport.
-// Also tracks line positions of each message for click-to-copy detection.
+// Uses VirtualSelectablePane for O(visible) rendering instead of O(n).
 func (p *CoordinatorPanel) renderCoordinatorContent(height int) string {
 	vpWidth := max(p.width-2, 1)
 	vpHeight := max(height-2, 1)
 
-	// Get selection bounds from pane
-	selStart, selEnd := p.coordinatorPane.SelectionBounds()
-
-	// Render content with selection highlighting
-	content, plainLines := renderChatContentWithSelection(p.coordinatorMessages, vpWidth, chatrender.RenderConfig{
+	// Set messages on the virtual pane (handles content conversion internally)
+	p.coordinatorPane.SetMessages(p.coordinatorMessages, vpWidth, chatrender.RenderConfig{
 		AgentLabel: "Coordinator",
 		AgentColor: coordinatorTitleColor,
 		UserLabel:  "User",
-	}, selStart, selEnd)
-
-	// Pad both styled content and plain lines to keep them aligned
-	content, plainLines, topPadding := padContentAndLinesToBottom(content, plainLines, vpHeight)
-
-	// Update pane with content, plain lines, and padding offset for coordinate mapping
+	})
 	p.coordinatorPane.SetSize(vpWidth, vpHeight)
-	p.coordinatorPane.SetTopPadding(topPadding)
-	p.coordinatorPane.SetContent(content, plainLines, true)
-	p.coordinatorPane.ClearDirty()
+
+	// Apply pending scroll offset if set (from workflow switch)
+	// This must happen AFTER SetMessages since SetMessages has auto-scroll logic
+	if p.pendingCoordinatorScrollOffset != nil {
+		p.coordinatorPane.SetScrollOffset(*p.pendingCoordinatorScrollOffset)
+		p.pendingCoordinatorScrollOffset = nil // Clear after applying
+	}
 
 	return p.coordinatorPane.View()
 }
@@ -651,6 +717,7 @@ func (p *CoordinatorPanel) renderMessageLogContent(height int) string {
 }
 
 // renderWorkerContent renders a worker's chat content for the viewport.
+// Uses VirtualSelectablePane for O(visible) rendering instead of O(n).
 func (p *CoordinatorPanel) renderWorkerContent(workerID string, height int) string {
 	vpWidth := max(p.width-2, 1)
 	vpHeight := max(height-2, 1)
@@ -658,35 +725,27 @@ func (p *CoordinatorPanel) renderWorkerContent(workerID string, height int) stri
 	// Get or create pane for this worker
 	pane, exists := p.workerPanes[workerID]
 	if !exists {
-		pane = selection.NewPane(selection.PaneConfig{
-			Clipboard: p.clipboard,
-			MakeToast: p.makeToastFunc(),
-		})
-		pane.SetScreenXOffset(p.screenXOffset)
-		pane.SetScreenYOffset(p.screenYOffset)
+		pane = selection.NewVirtualSelectablePane(p.clipboard, p.makeToastFunc())
+		pane.SetScreenPosition(p.screenXOffset, p.screenYOffset)
 		p.workerPanes[workerID] = pane
 	}
 
-	// Get selection bounds from pane
-	selStart, selEnd := pane.SelectionBounds()
-
-	// Render content with selection highlighting
+	// Set messages on the virtual pane (handles content conversion internally)
 	messages := p.workerMessages[workerID]
-	content, plainLines := renderChatContentWithSelection(messages, vpWidth, chatrender.RenderConfig{
+	pane.SetMessages(messages, vpWidth, chatrender.RenderConfig{
 		AgentLabel:              "Worker",
 		AgentColor:              workerTitleColor,
 		UserLabel:               "User",
 		ShowCoordinatorInWorker: true,
-	}, selStart, selEnd)
-
-	// Pad both styled content and plain lines to keep them aligned
-	content, plainLines, topPadding := padContentAndLinesToBottom(content, plainLines, vpHeight)
-
-	// Update pane with content, plain lines, and padding offset for coordinate mapping
+	})
 	pane.SetSize(vpWidth, vpHeight)
-	pane.SetTopPadding(topPadding)
-	pane.SetContent(content, plainLines, true)
-	pane.ClearDirty()
+
+	// Apply pending scroll offset if set (from workflow switch)
+	// This must happen AFTER SetMessages since SetMessages has auto-scroll logic
+	if pendingOffset, hasPending := p.pendingWorkerScrollOffsets[workerID]; hasPending && pendingOffset != nil {
+		pane.SetScrollOffset(*pendingOffset)
+		delete(p.pendingWorkerScrollOffsets, workerID) // Clear after applying
+	}
 
 	return pane.View()
 }
@@ -976,124 +1035,6 @@ func (p *CoordinatorPanel) IsInputInNormalMode() bool {
 
 // selectionBgStyle is the background highlight for selected text.
 var selectionBgStyle = lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Light: "#ADD8E6", Dark: "#264F78"})
-
-// renderChatContentWithSelection renders chat messages with optional selection highlighting.
-// If selStart and selEnd are provided, the selected range will be highlighted.
-// Returns: rendered content, plain text lines for selection extraction.
-func renderChatContentWithSelection(messages []chatrender.Message, wrapWidth int, cfg chatrender.RenderConfig, selStart, selEnd *selection.Point) (string, []string) {
-	userLabel := cfg.UserLabel
-	if userLabel == "" {
-		userLabel = "You"
-	}
-
-	// Filter to non-empty messages
-	var filtered []chatrender.Message
-	for _, msg := range messages {
-		if msg.Content != "" {
-			filtered = append(filtered, msg)
-		}
-	}
-
-	if len(filtered) == 0 {
-		emptyStyle := lipgloss.NewStyle().Foreground(styles.TextMutedColor).PaddingLeft(1).PaddingBottom(1)
-		return emptyStyle.Render("Waiting for the coordinator to initialize."), nil
-	}
-
-	var content strings.Builder
-	var plainLines []string
-	currentLine := 0
-
-	for i, msg := range filtered {
-		// Tool call sequence detection
-		isFirstToolInSequence := msg.IsToolCall && (i == 0 || !filtered[i-1].IsToolCall)
-		isLastToolInSequence := msg.IsToolCall && (i == len(filtered)-1 || !filtered[i+1].IsToolCall)
-
-		if msg.IsToolCall {
-			// Tool call rendering with tree-like prefixes
-			if isFirstToolInSequence {
-				// Add role label before first tool in sequence
-				rolePlain := cfg.AgentLabel
-				roleLabel := chatrender.RoleStyle.Foreground(cfg.AgentColor).Render(cfg.AgentLabel)
-				plainLines = append(plainLines, rolePlain)
-				content.WriteString(renderLineWithSelection(roleLabel, rolePlain, currentLine, wrapWidth, selStart, selEnd))
-				content.WriteString("\n")
-				currentLine++
-			}
-
-			prefix := "├╴ "
-			if isLastToolInSequence {
-				prefix = "╰╴ "
-			}
-
-			toolName := strings.TrimPrefix(msg.Content, "🔧 ")
-			toolPlain := prefix + toolName
-			toolStyled := chatrender.ToolCallStyle.Render(toolPlain)
-			plainLines = append(plainLines, toolPlain)
-			content.WriteString(renderLineWithSelection(toolStyled, toolPlain, currentLine, wrapWidth, selStart, selEnd))
-			content.WriteString("\n")
-			currentLine++
-
-			if isLastToolInSequence {
-				// Blank line after tool sequence
-				plainLines = append(plainLines, "")
-				content.WriteString(renderLineWithSelection("", "", currentLine, wrapWidth, selStart, selEnd))
-				content.WriteString("\n")
-				currentLine++
-			}
-		} else {
-			// Regular message rendering
-			var rolePlain string
-			var roleLabel string
-			switch msg.Role {
-			case "user":
-				rolePlain = userLabel
-				roleLabel = chatrender.RoleStyle.Foreground(chatrender.UserMessageStyle.GetForeground()).Render(userLabel)
-			case "system":
-				rolePlain = "System"
-				roleLabel = chatrender.RoleStyle.Foreground(chatrender.SystemColor).Render("System")
-			case "coordinator":
-				if cfg.ShowCoordinatorInWorker {
-					rolePlain = "Coordinator"
-					roleLabel = chatrender.RoleStyle.Foreground(chatrender.CoordinatorColor).Render("Coordinator")
-				} else {
-					rolePlain = cfg.AgentLabel
-					roleLabel = chatrender.RoleStyle.Foreground(cfg.AgentColor).Render(cfg.AgentLabel)
-				}
-			default:
-				rolePlain = cfg.AgentLabel
-				roleLabel = chatrender.RoleStyle.Foreground(cfg.AgentColor).Render(cfg.AgentLabel)
-			}
-
-			// Content lines (word-wrapped)
-			wrapped := chatrender.WordWrap(msg.Content, wrapWidth-4)
-			wrappedLines := strings.Split(wrapped, "\n")
-
-			// Build plain lines for this message
-			plainLines = append(plainLines, rolePlain)
-			plainLines = append(plainLines, wrappedLines...)
-			plainLines = append(plainLines, "") // blank line
-
-			// Role line with optional selection
-			content.WriteString(renderLineWithSelection(roleLabel, rolePlain, currentLine, wrapWidth, selStart, selEnd))
-			content.WriteString("\n")
-			currentLine++
-
-			// Content lines with optional selection
-			for _, line := range wrappedLines {
-				content.WriteString(renderLineWithSelection(line, line, currentLine, wrapWidth, selStart, selEnd))
-				content.WriteString("\n")
-				currentLine++
-			}
-
-			// Blank line
-			content.WriteString(renderLineWithSelection("", "", currentLine, wrapWidth, selStart, selEnd))
-			content.WriteString("\n")
-			currentLine++
-		}
-	}
-
-	return strings.TrimRight(content.String(), "\n"), plainLines
-}
 
 // renderLineWithSelection renders a line with selection highlighting applied.
 func renderLineWithSelection(styledLine, plainLine string, lineNum, width int, selStart, selEnd *selection.Point) string {

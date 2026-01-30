@@ -3,16 +3,16 @@
 │      RUNNING   Workflo... 2        ❤️ 0s    -       ││                                                               │
 │                                                     ││                                                               │
 │                                                     ││                                                               │
-│                                                     ││                                                               │
 │                                                     ││User                                                           │
 │                                                     ││Start working on the authentication feature                    │
-╰─────────────────────────────────────────────────────╯│                                                               │
- No epic associated with this workflow                 │Coordinator                                                    │
-                                                       │I'll begin implementing the authentication feature. First,     │
+│                                                     ││                                                               │
+╰─────────────────────────────────────────────────────╯│Coordinator                                                    │
+ No epic associated with this workflow                 │I'll begin implementing the authentication feature. First,     │
                                                        │let me analyze the codebase.                                   │
                                                        │                                                               │
                                                        │Coordinator                                                    │
                                                        │╰╴ Looking at the middleware...                                │
+                                                       │                                                               │
                                                        ╰───────────────────────────────────────────────────────────────╯
                                                        ╭───────────────────────────────────────────────────────────────╮
                                                        │ Message coordinator...                                        │

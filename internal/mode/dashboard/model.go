@@ -1977,9 +1977,17 @@ func (m *Model) handleWorkflowSelectionChange(newIndex int) tea.Cmd {
 		return nil
 	}
 
-	// Save epic tree state for the current workflow before switching
+	// Save state for the current workflow before switching
 	if currentWf := m.SelectedWorkflow(); currentWf != nil {
+		// Save epic tree state
 		m.saveEpicTreeState(string(currentWf.ID))
+
+		// Save scroll positions if coordinator panel is open
+		if m.showCoordinatorPanel && m.coordinatorPanel != nil {
+			if uiState, exists := m.workflowUIState[currentWf.ID]; exists {
+				m.coordinatorPanel.SaveScrollPositions(uiState)
+			}
+		}
 	}
 
 	// Update selection

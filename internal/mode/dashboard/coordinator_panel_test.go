@@ -103,83 +103,6 @@ func TestCoordinatorPanel_View_EmptyMessages(t *testing.T) {
 	require.Contains(t, view, "Msgs", "should show Messages tab label")
 }
 
-func TestRenderChatContentWithSelection_EmptyMessages(t *testing.T) {
-	cfg := chatrender.RenderConfig{
-		AgentLabel: "Coordinator",
-		AgentColor: chatrender.CoordinatorColor,
-		UserLabel:  "User",
-	}
-	content, plainLines := renderChatContentWithSelection(nil, 80, cfg, nil, nil)
-
-	require.Contains(t, content, "Waiting for the coordinator to initialize.")
-	require.Nil(t, plainLines)
-}
-
-func TestRenderChatContentWithSelection_WithMessages(t *testing.T) {
-	messages := []chatrender.Message{
-		{Role: "user", Content: "Hello world"},
-		{Role: "assistant", Content: "Hi there!"},
-	}
-
-	cfg := chatrender.RenderConfig{
-		AgentLabel: "Coordinator",
-		AgentColor: chatrender.CoordinatorColor,
-		UserLabel:  "User",
-	}
-	content, plainLines := renderChatContentWithSelection(messages, 80, cfg, nil, nil)
-
-	require.Contains(t, content, "User")
-	require.Contains(t, content, "Hello world")
-	require.Contains(t, content, "Coordinator") // Uses "Coordinator" label from RenderConfig
-	require.Contains(t, content, "Hi there!")
-
-	// Verify plain lines are returned for selection
-	require.NotNil(t, plainLines)
-	require.Contains(t, plainLines, "User")
-	require.Contains(t, plainLines, "Hello world")
-}
-
-func TestRenderChatContentWithSelection_RendersToolCalls(t *testing.T) {
-	messages := []chatrender.Message{
-		{Role: "assistant", Content: "🔧 Read: file.go", IsToolCall: true},
-		{Role: "assistant", Content: "🔧 Edit: config.yaml", IsToolCall: true},
-	}
-
-	cfg := chatrender.RenderConfig{
-		AgentLabel: "Coordinator",
-		AgentColor: chatrender.CoordinatorColor,
-		UserLabel:  "User",
-	}
-	content, plainLines := renderChatContentWithSelection(messages, 80, cfg, nil, nil)
-
-	// Tool calls should be rendered with tree-like prefixes
-	require.Contains(t, content, "Coordinator") // Role label before first tool
-	require.Contains(t, content, "├╴ Read: file.go")
-	require.Contains(t, content, "╰╴ Edit: config.yaml") // Last tool uses end prefix
-	require.NotNil(t, plainLines)
-	require.Contains(t, plainLines, "├╴ Read: file.go")
-	require.Contains(t, plainLines, "╰╴ Edit: config.yaml")
-}
-
-func TestRenderChatContentWithSelection_FiltersEmptyMessages(t *testing.T) {
-	messages := []chatrender.Message{
-		{Role: "user", Content: "Hello"},
-		{Role: "assistant", Content: ""},    // Empty - should be filtered
-		{Role: "assistant", Content: "Hi!"}, // Non-empty - should appear
-	}
-
-	cfg := chatrender.RenderConfig{
-		AgentLabel: "Coordinator",
-		AgentColor: chatrender.CoordinatorColor,
-		UserLabel:  "User",
-	}
-	content, _ := renderChatContentWithSelection(messages, 80, cfg, nil, nil)
-
-	require.Contains(t, content, "Hello")
-	require.Contains(t, content, "Hi!")
-	// Should not have empty lines from the filtered message
-}
-
 func TestNewCoordinatorPanel_InputStartsUnfocused(t *testing.T) {
 	panel := NewCoordinatorPanel(false, false, nil)
 
@@ -1096,7 +1019,7 @@ func TestCoordinatorPanel_ScrollAfterSelection(t *testing.T) {
 	panel.Update(scrollUp)
 
 	// Record position after scroll up
-	offsetAfterScrollUp := panel.coordinatorPane.YOffset()
+	offsetAfterScrollUp := panel.coordinatorPane.ScrollOffset()
 
 	// Now scroll down - should still work
 	scrollDown := tea.MouseMsg{
@@ -1106,15 +1029,15 @@ func TestCoordinatorPanel_ScrollAfterSelection(t *testing.T) {
 	panel.Update(scrollDown)
 
 	// Viewport should scroll down
-	require.Greater(t, panel.coordinatorPane.YOffset(), offsetAfterScrollUp,
-		"scroll down should increase YOffset")
+	require.Greater(t, panel.coordinatorPane.ScrollOffset(), offsetAfterScrollUp,
+		"scroll down should increase ScrollOffset")
 
 	// Scroll back up - should still work
 	panel.Update(scrollUp)
 
 	// Viewport should scroll up
-	require.Equal(t, offsetAfterScrollUp, panel.coordinatorPane.YOffset(),
-		"scroll up should decrease YOffset back to previous position")
+	require.Equal(t, offsetAfterScrollUp, panel.coordinatorPane.ScrollOffset(),
+		"scroll up should decrease ScrollOffset back to previous position")
 }
 
 func TestCoordinatorPanel_TabSwitchAfterSelection(t *testing.T) {
@@ -1426,4 +1349,227 @@ func TestRenderFabricEvents_WorkerStyle(t *testing.T) {
 	// Verify plain lines have correct header format
 	require.NotNil(t, plainLines)
 	require.Contains(t, plainLines[0], "worker-1", "plain header should contain sender")
+}
+
+// ============================================================================
+// Scroll Position Persistence Tests (Task .9)
+// ============================================================================
+
+func TestSaveScrollPositions_SavesCoordinatorOffset(t *testing.T) {
+	panel := NewCoordinatorPanel(false, false, nil)
+	panel.SetSize(80, 30)
+
+	// Set up panel with messages to enable scrolling
+	var messages []chatrender.Message
+	for i := 0; i < 50; i++ {
+		messages = append(messages, chatrender.Message{
+			Role:    "assistant",
+			Content: fmt.Sprintf("Message %d", i),
+		})
+	}
+	state := &WorkflowUIState{
+		CoordinatorMessages: messages,
+		WorkerScrollOffsets: make(map[string]int),
+	}
+	panel.SetWorkflow("wf-123", state)
+
+	// Render to initialize panes
+	_ = panel.View()
+
+	// Manually set scroll offset (simulating user scrolling)
+	panel.coordinatorPane.SetScrollOffset(25)
+
+	// Save scroll positions
+	panel.SaveScrollPositions(state)
+
+	// Verify coordinator scroll offset was saved
+	require.Equal(t, 25, state.CoordinatorScrollOffset, "coordinator scroll offset should be saved")
+}
+
+func TestSaveScrollPositions_SavesWorkerOffsets(t *testing.T) {
+	panel := NewCoordinatorPanel(false, false, nil)
+	panel.SetSize(80, 30)
+
+	// Set up panel with workers
+	state := &WorkflowUIState{
+		WorkerIDs:    []string{"worker-1", "worker-2"},
+		WorkerStatus: make(map[string]events.ProcessStatus),
+		WorkerPhases: make(map[string]events.ProcessPhase),
+		WorkerMessages: map[string][]chatrender.Message{
+			"worker-1": createTestMessages(50),
+			"worker-2": createTestMessages(30),
+		},
+		WorkerQueueCounts:   make(map[string]int),
+		WorkerScrollOffsets: make(map[string]int),
+	}
+	panel.SetWorkflow("wf-123", state)
+
+	// Render worker content to initialize panes
+	_ = panel.renderWorkerContent("worker-1", 30)
+	_ = panel.renderWorkerContent("worker-2", 30)
+
+	// Manually set scroll offsets (simulating user scrolling)
+	panel.workerPanes["worker-1"].SetScrollOffset(15)
+	panel.workerPanes["worker-2"].SetScrollOffset(10)
+
+	// Save scroll positions
+	panel.SaveScrollPositions(state)
+
+	// Verify worker scroll offsets were saved
+	require.Equal(t, 15, state.WorkerScrollOffsets["worker-1"], "worker-1 scroll offset should be saved")
+	require.Equal(t, 10, state.WorkerScrollOffsets["worker-2"], "worker-2 scroll offset should be saved")
+}
+
+func TestSaveScrollPositions_NilState(t *testing.T) {
+	panel := NewCoordinatorPanel(false, false, nil)
+	panel.SetSize(80, 30)
+
+	// Should not panic with nil state
+	require.NotPanics(t, func() {
+		panel.SaveScrollPositions(nil)
+	})
+}
+
+func TestSetWorkflow_RestoresScrollPositions(t *testing.T) {
+	panel := NewCoordinatorPanel(false, false, nil)
+	panel.SetSize(80, 30)
+
+	// Create state with saved scroll positions
+	state := &WorkflowUIState{
+		CoordinatorMessages:     createTestMessages(50),
+		CoordinatorScrollOffset: 20, // Previously saved scroll position
+		WorkerIDs:               []string{"worker-1"},
+		WorkerStatus:            make(map[string]events.ProcessStatus),
+		WorkerPhases:            make(map[string]events.ProcessPhase),
+		WorkerMessages: map[string][]chatrender.Message{
+			"worker-1": createTestMessages(40),
+		},
+		WorkerQueueCounts: make(map[string]int),
+		WorkerScrollOffsets: map[string]int{
+			"worker-1": 15, // Previously saved scroll position
+		},
+	}
+
+	// First, set to a different workflow to simulate switching
+	panel.SetWorkflow("wf-OLD", NewWorkflowUIState())
+
+	// Now set to the new workflow - should restore scroll positions
+	panel.SetWorkflow("wf-123", state)
+
+	// Render to apply the content
+	_ = panel.View()
+	_ = panel.renderWorkerContent("worker-1", 30)
+
+	// Verify scroll positions were restored
+	require.Equal(t, 20, panel.coordinatorPane.ScrollOffset(), "coordinator scroll offset should be restored")
+	require.Equal(t, 15, panel.workerPanes["worker-1"].ScrollOffset(), "worker-1 scroll offset should be restored")
+}
+
+func TestSetWorkflow_FirstTimeViewScrollsToBottom(t *testing.T) {
+	panel := NewCoordinatorPanel(false, false, nil)
+	panel.SetSize(80, 30)
+
+	// Create state with NO saved scroll positions (first time view)
+	state := &WorkflowUIState{
+		CoordinatorMessages:     createTestMessages(50),
+		CoordinatorScrollOffset: 0,                    // Zero = no saved position
+		WorkerScrollOffsets:     make(map[string]int), // Empty map = first time
+	}
+
+	// First, set to a different workflow to simulate switching
+	panel.SetWorkflow("wf-OLD", NewWorkflowUIState())
+
+	// Set to the new workflow - should scroll to bottom (first time view)
+	panel.SetWorkflow("wf-123", state)
+
+	// Render to apply content and scroll positions
+	_ = panel.View()
+
+	// For first-time view, scroll should be at bottom (max scroll offset)
+	// The pane should be at the bottom (AtBottom() returns true)
+	require.True(t, panel.coordinatorPane.AtBottom(), "first-time view should scroll to bottom")
+}
+
+func TestSetWorkflow_SameWorkflowDoesNotRestore(t *testing.T) {
+	panel := NewCoordinatorPanel(false, false, nil)
+	panel.SetSize(80, 30)
+
+	// Set up initial state
+	state := &WorkflowUIState{
+		CoordinatorMessages:     createTestMessages(50),
+		CoordinatorScrollOffset: 25,
+		WorkerScrollOffsets:     make(map[string]int),
+	}
+
+	// Set workflow first time
+	panel.SetWorkflow("wf-123", state)
+	_ = panel.View()
+
+	// Manually change scroll offset (simulating user scrolling)
+	panel.coordinatorPane.SetScrollOffset(10)
+
+	// Update same workflow with new state (shouldn't restore, workflow didn't change)
+	state.CoordinatorMessages = append(state.CoordinatorMessages, chatrender.Message{Role: "user", Content: "New message"})
+	panel.SetWorkflow("wf-123", state)
+	_ = panel.View()
+
+	// Scroll offset should NOT be restored (same workflow)
+	require.Equal(t, 10, panel.coordinatorPane.ScrollOffset(), "scroll offset should not be restored for same workflow")
+}
+
+func TestWorkflowSwitch_PreservesScrollPosition(t *testing.T) {
+	panel := NewCoordinatorPanel(false, false, nil)
+	panel.SetSize(80, 30)
+
+	// Create two workflow states
+	state1 := &WorkflowUIState{
+		CoordinatorMessages:     createTestMessages(50),
+		CoordinatorScrollOffset: 0,
+		WorkerScrollOffsets:     make(map[string]int),
+	}
+	state2 := &WorkflowUIState{
+		CoordinatorMessages:     createTestMessages(30),
+		CoordinatorScrollOffset: 0,
+		WorkerScrollOffsets:     make(map[string]int),
+	}
+
+	// Set workflow 1
+	panel.SetWorkflow("wf-1", state1)
+	_ = panel.View()
+
+	// Scroll to a specific position in wf-1
+	panel.coordinatorPane.SetScrollOffset(20)
+
+	// Save scroll positions before switching
+	panel.SaveScrollPositions(state1)
+
+	// Verify state1 has scroll position saved
+	require.Equal(t, 20, state1.CoordinatorScrollOffset, "wf-1 scroll position should be saved")
+
+	// Switch to workflow 2
+	panel.SetWorkflow("wf-2", state2)
+	_ = panel.View()
+
+	// Scroll to a different position in wf-2
+	panel.coordinatorPane.SetScrollOffset(5)
+	panel.SaveScrollPositions(state2)
+
+	// Switch back to workflow 1
+	panel.SetWorkflow("wf-1", state1)
+	_ = panel.View()
+
+	// Verify wf-1's scroll position is restored
+	require.Equal(t, 20, panel.coordinatorPane.ScrollOffset(), "wf-1 scroll position should be restored after switch")
+}
+
+// createTestMessages is a helper to create test messages.
+func createTestMessages(count int) []chatrender.Message {
+	var messages []chatrender.Message
+	for i := 0; i < count; i++ {
+		messages = append(messages, chatrender.Message{
+			Role:    "assistant",
+			Content: fmt.Sprintf("Test message number %d with some content", i),
+		})
+	}
+	return messages
 }
