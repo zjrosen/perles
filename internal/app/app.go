@@ -1118,7 +1118,8 @@ func (m Model) View() string {
 		mainContentWidth := m.width - panelWidth
 		m.chatPanel = m.chatPanel.SetSize(panelWidth, m.chatPanelHeight())
 		m.chatPanel = m.chatPanel.SetScreenPosition(mainContentWidth, 0)
-		view = lipgloss.JoinHorizontal(lipgloss.Top, view, m.chatPanel.View())
+		// Join views, then zone.Scan() to register zones with correct screen coordinates
+		view = zone.Scan(lipgloss.JoinHorizontal(lipgloss.Top, view, m.chatPanel.View()))
 	}
 
 	// Overlay toaster on top of active mode's view

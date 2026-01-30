@@ -86,11 +86,11 @@ func (m Model) View() string {
 		tabContent = m.renderWorkflowsTab(contentHeight)
 	}
 
-	// Build tabs for the top pane
+	// Build tabs for the top pane with zone IDs for click detection
 	tabs := []panes.Tab{
-		{Label: "Chat", Content: tabContent},
-		{Label: "Sessions", Content: tabContent},
-		{Label: "Workflows", Content: tabContent},
+		{Label: "Chat", Content: tabContent, ZoneID: makeTabZoneID(TabChat)},
+		{Label: "Sessions", Content: tabContent, ZoneID: makeTabZoneID(TabSessions)},
+		{Label: "Workflows", Content: tabContent, ZoneID: makeTabZoneID(TabWorkflows)},
 	}
 
 	// Get active session for state-driven UI rendering
@@ -159,6 +159,8 @@ func (m Model) View() string {
 	})
 
 	// Stack message pane and input pane vertically
+	// Note: Do NOT call zone.Scan() here - it must be called at the app level
+	// after the chatpanel is positioned, so zones are registered with correct screen coordinates.
 	return lipgloss.JoinVertical(lipgloss.Left,
 		tabbedPane,
 		inputPane,

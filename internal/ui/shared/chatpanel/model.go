@@ -10,6 +10,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/zjrosen/perles/internal/mode"
 	"github.com/zjrosen/perles/internal/orchestration/events"
@@ -222,11 +223,6 @@ func (m Model) NextTab() Model {
 func (m Model) PrevTab() Model {
 	m.activeTab = (m.activeTab - 1 + tabCount) % tabCount
 	return m
-}
-
-// ActiveTab returns the current active tab index.
-func (m Model) ActiveTab() int {
-	return m.activeTab
 }
 
 // SetSize updates the width and height of the chat panel.
@@ -462,8 +458,24 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 
 	case tea.MouseMsg:
-		// Only handle mouse events if visible and on Chat tab
-		if !m.visible || m.activeTab != TabChat {
+		// Only handle mouse events if visible
+		if !m.visible {
+			return m, nil
+		}
+
+		// Check for tab clicks first (works on any tab)
+		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionRelease {
+			for i := range tabCount {
+				zoneID := makeTabZoneID(i)
+				if z := zone.Get(zoneID); z != nil && z.InBounds(msg) {
+					m.activeTab = i
+					return m, nil
+				}
+			}
+		}
+
+		// Only handle text selection on Chat tab
+		if m.activeTab != TabChat {
 			return m, nil
 		}
 

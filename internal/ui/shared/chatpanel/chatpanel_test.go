@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/exp/teatest"
+	zone "github.com/lrstanley/bubblezone"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
@@ -23,6 +24,12 @@ import (
 	"github.com/zjrosen/perles/internal/ui/shared/chatrender"
 	"github.com/zjrosen/perles/internal/ui/shared/vimtextarea"
 )
+
+// scanView wraps View() with zone.Scan() to strip zone markers for golden tests.
+// This simulates what app.go does when rendering the chatpanel.
+func scanView(m Model) string {
+	return zone.Scan(m.View())
+}
 
 // newTestInfrastructure creates a v2.SimpleInfrastructure with a mock provider for testing.
 // The mock provider doesn't need to spawn processes; we just need the infra to function.
@@ -295,7 +302,7 @@ func TestModel_View_NotVisible(t *testing.T) {
 func TestModel_View_Visible(t *testing.T) {
 	m := New(DefaultConfig()).SetSize(40, 20).Toggle()
 
-	view := m.View()
+	view := scanView(m)
 
 	// Should render a bordered pane
 	require.NotEmpty(t, view)
@@ -316,7 +323,7 @@ func TestModel_View_Basic(t *testing.T) {
 	// Width increased from 30 to 45 to accommodate 3 tabs (Chat|Sessions|Workflows)
 	m := New(DefaultConfig()).SetSize(45, 10).Toggle()
 
-	view := m.View()
+	view := scanView(m)
 
 	// Verify bordered pane structure
 	require.Contains(t, view, "Chat")
@@ -648,7 +655,7 @@ func TestModel_TabNavigation_NextPrev(t *testing.T) {
 func TestModel_View_ShowsTabs(t *testing.T) {
 	m := New(DefaultConfig()).SetSize(40, 20).Toggle()
 
-	view := m.View()
+	view := scanView(m)
 
 	// Should show Chat and Sessions tabs
 	require.Contains(t, view, "Chat")
@@ -669,7 +676,7 @@ func TestModel_View_WithMessages(t *testing.T) {
 	m = m.AddMessage(chatrender.Message{Role: RoleUser, Content: "Hello!"})
 	m = m.AddMessage(chatrender.Message{Role: RoleAssistant, Content: "Hi there!"})
 
-	view := m.View()
+	view := scanView(m)
 
 	// Should contain the role labels
 	require.Contains(t, view, "You")
@@ -683,7 +690,7 @@ func TestModel_View_WithMessages(t *testing.T) {
 func TestModel_View_ContainsDivider(t *testing.T) {
 	m := New(DefaultConfig()).SetSize(40, 20).Toggle()
 
-	view := m.View()
+	view := scanView(m)
 
 	// Should contain a horizontal divider between viewport and input
 	require.Contains(t, view, "─")
@@ -692,7 +699,7 @@ func TestModel_View_ContainsDivider(t *testing.T) {
 func TestModel_View_ContainsInput(t *testing.T) {
 	m := New(DefaultConfig()).SetSize(40, 20).Toggle()
 
-	view := m.View()
+	view := scanView(m)
 
 	// Should contain the input area (bordered box)
 	require.Contains(t, view, "│")
@@ -706,21 +713,21 @@ func TestView_Golden_Hidden(t *testing.T) {
 	m := New(DefaultConfig()).SetSize(50, 20)
 
 	// Not visible - should be empty
-	view := m.View()
+	view := scanView(m)
 	teatest.RequireEqualOutput(t, []byte(view))
 }
 
 func TestView_Golden_Visible_Empty(t *testing.T) {
 	m := New(DefaultConfig()).SetSize(50, 20).Toggle()
 
-	view := m.View()
+	view := scanView(m)
 	teatest.RequireEqualOutput(t, []byte(view))
 }
 
 func TestView_Golden_Visible_Focused(t *testing.T) {
 	m := New(DefaultConfig()).SetSize(50, 20).Toggle().Focus()
 
-	view := m.View()
+	view := scanView(m)
 	teatest.RequireEqualOutput(t, []byte(view))
 }
 
@@ -731,7 +738,7 @@ func TestView_Golden_WithMessages(t *testing.T) {
 	m = m.AddMessage(chatrender.Message{Role: RoleUser, Content: "Hello, how are you?"})
 	m = m.AddMessage(chatrender.Message{Role: RoleAssistant, Content: "I'm doing well, thank you for asking! How can I help you today?"})
 
-	view := m.View()
+	view := scanView(m)
 	teatest.RequireEqualOutput(t, []byte(view))
 }
 
@@ -742,7 +749,7 @@ func TestView_Golden_WithLongMessage(t *testing.T) {
 	longMsg := "This is a very long message that should wrap across multiple lines because it exceeds the width of the viewport area."
 	m = m.AddMessage(chatrender.Message{Role: RoleUser, Content: longMsg})
 
-	view := m.View()
+	view := scanView(m)
 	teatest.RequireEqualOutput(t, []byte(view))
 }
 
@@ -752,7 +759,7 @@ func TestView_Golden_NarrowPanel(t *testing.T) {
 	m = m.AddMessage(chatrender.Message{Role: RoleUser, Content: "Hello!"})
 	m = m.AddMessage(chatrender.Message{Role: RoleAssistant, Content: "Hi there!"})
 
-	view := m.View()
+	view := scanView(m)
 	teatest.RequireEqualOutput(t, []byte(view))
 }
 
@@ -2273,7 +2280,7 @@ func TestRenderChatTabUsesActiveSession(t *testing.T) {
 	m = m.AddMessage(chatrender.Message{Role: RoleAssistant, Content: "Response in session 1"})
 
 	// Verify view contains session 1 content
-	view := m.View()
+	view := scanView(m)
 	require.Contains(t, view, "Hello from session 1")
 	require.Contains(t, view, "Response in session 1")
 
@@ -3016,7 +3023,7 @@ func TestSessionsTabLayout_Golden(t *testing.T) {
 	m.activeTab = TabSessions
 	m.sessionListCursor = 0
 
-	view := m.View()
+	view := scanView(m)
 	teatest.RequireEqualOutput(t, []byte(view))
 }
 
@@ -3032,7 +3039,7 @@ func TestSessionsTabEmpty_Golden(t *testing.T) {
 	// Switch to Sessions tab
 	m.activeTab = TabSessions
 
-	view := m.View()
+	view := scanView(m)
 	teatest.RequireEqualOutput(t, []byte(view))
 }
 
@@ -3061,7 +3068,7 @@ func TestSessionsTabSelected_Golden(t *testing.T) {
 	m.activeTab = TabSessions
 	m.sessionListCursor = 1 // Points to session-2
 
-	view := m.View()
+	view := scanView(m)
 	teatest.RequireEqualOutput(t, []byte(view))
 }
 
@@ -3249,7 +3256,7 @@ func TestSessionsTab_ActivityIndicator(t *testing.T) {
 	// Switch to Sessions tab
 	m.activeTab = TabSessions
 
-	view := m.View()
+	view := scanView(m)
 
 	// Session 1 should show ○ (viewed)
 	require.Contains(t, view, "○", "Session without new content should show ○")
@@ -3272,7 +3279,7 @@ func TestSessionsTab_FailedSessionShowsEnded(t *testing.T) {
 	// Switch to Sessions tab
 	m.activeTab = TabSessions
 
-	view := m.View()
+	view := scanView(m)
 
 	// Should show "Session ended" for terminal statuses
 	require.Contains(t, view, "Session ended", "Failed sessions should show 'Session ended'")
@@ -3784,7 +3791,7 @@ func TestRetireSession_ConfirmationShowsInView(t *testing.T) {
 	m.sessionListCursor = 1 // session-2
 
 	// Before 'd' press - should show status
-	view := m.View()
+	view := scanView(m)
 	require.NotContains(t, view, "Press d to confirm")
 
 	// First 'd' press - should show confirmation prompt
@@ -3985,7 +3992,7 @@ func TestView_Golden_ChatTab_PendingStatus(t *testing.T) {
 	// Use default session with pending status
 	m.sessions[DefaultSessionID].Status = events.ProcessStatusPending
 
-	view := m.View()
+	view := scanView(m)
 	teatest.RequireEqualOutput(t, []byte(view))
 }
 
@@ -3996,7 +4003,7 @@ func TestView_Golden_ChatTab_FailedStatus(t *testing.T) {
 	// Use default session with failed status
 	m.sessions[DefaultSessionID].Status = events.ProcessStatusFailed
 
-	view := m.View()
+	view := scanView(m)
 	teatest.RequireEqualOutput(t, []byte(view))
 }
 
@@ -4009,7 +4016,7 @@ func TestView_Golden_ChatTab_ReadyStatus(t *testing.T) {
 	m = m.AddMessage(chatrender.Message{Role: RoleUser, Content: "Hello"})
 	m = m.AddMessage(chatrender.Message{Role: RoleAssistant, Content: "Hi there!"})
 
-	view := m.View()
+	view := scanView(m)
 	teatest.RequireEqualOutput(t, []byte(view))
 }
 
@@ -4020,7 +4027,7 @@ func TestView_RoutesToLoadingIndicatorForPending(t *testing.T) {
 	// Use default session with pending status
 	m.sessions[DefaultSessionID].Status = events.ProcessStatusPending
 
-	view := m.View()
+	view := scanView(m)
 
 	// Should show loading indicator content
 	require.Contains(t, view, "Starting assistant...", "Pending status should show loading indicator")
@@ -4034,7 +4041,7 @@ func TestView_RoutesToErrorStateForFailed(t *testing.T) {
 	// Use default session with failed status
 	m.sessions[DefaultSessionID].Status = events.ProcessStatusFailed
 
-	view := m.View()
+	view := scanView(m)
 
 	// Should show error state content
 	require.Contains(t, view, "Failed to start assistant", "Failed status should show error state")
@@ -4049,7 +4056,7 @@ func TestView_RoutesToMessagesForReadyStatus(t *testing.T) {
 	m.sessions[DefaultSessionID].Status = events.ProcessStatusReady
 	m = m.AddMessage(chatrender.Message{Role: RoleUser, Content: "Test message"})
 
-	view := m.View()
+	view := scanView(m)
 
 	// Should show messages, not loading or error
 	require.Contains(t, view, "Test message", "Ready status should show messages")
@@ -4065,7 +4072,7 @@ func TestView_RoutesToMessagesForWorkingStatus(t *testing.T) {
 	m.sessions[DefaultSessionID].Status = events.ProcessStatusWorking
 	m = m.AddMessage(chatrender.Message{Role: RoleUser, Content: "Working message"})
 
-	view := m.View()
+	view := scanView(m)
 
 	// Should show messages, not loading or error
 	require.Contains(t, view, "Working message", "Working status should show messages")
@@ -4791,7 +4798,7 @@ func TestWorkflowsTabLayout_Golden(t *testing.T) {
 	m.activeTab = TabWorkflows
 	m.workflowListCursor = 0
 
-	view := m.View()
+	view := scanView(m)
 	teatest.RequireEqualOutput(t, []byte(view))
 }
 
@@ -4835,7 +4842,7 @@ func TestWorkflowsTabMiddleSelected_Golden(t *testing.T) {
 	m.activeTab = TabWorkflows
 	m.workflowListCursor = 1 // Second item
 
-	view := m.View()
+	view := scanView(m)
 	teatest.RequireEqualOutput(t, []byte(view))
 }
 
@@ -4864,7 +4871,7 @@ func TestWorkflowsTabEmpty_Golden(t *testing.T) {
 	// Switch to Workflows tab (should show empty state)
 	m.activeTab = TabWorkflows
 
-	view := m.View()
+	view := scanView(m)
 	teatest.RequireEqualOutput(t, []byte(view))
 }
 
@@ -4883,7 +4890,7 @@ func TestWorkflowsTab_TabBarShowsAllThreeTabs_Golden(t *testing.T) {
 	// Stay on Chat tab, but verify tab bar shows all three
 	m.activeTab = TabChat
 
-	view := m.View()
+	view := scanView(m)
 	teatest.RequireEqualOutput(t, []byte(view))
 }
 
@@ -5285,7 +5292,7 @@ func TestView_Golden_WorkingSessionShowsBlueBorder(t *testing.T) {
 	m = m.AddMessage(chatrender.Message{Role: RoleUser, Content: "Please help me"})
 	m = m.AddMessage(chatrender.Message{Role: RoleAssistant, Content: "Let me think..."})
 
-	view := m.View()
+	view := scanView(m)
 	teatest.RequireEqualOutput(t, []byte(view))
 }
 
@@ -5298,7 +5305,7 @@ func TestView_Golden_ReadySessionShowsDefaultBorder(t *testing.T) {
 	m = m.AddMessage(chatrender.Message{Role: RoleUser, Content: "Hello"})
 	m = m.AddMessage(chatrender.Message{Role: RoleAssistant, Content: "Hi there!"})
 
-	view := m.View()
+	view := scanView(m)
 	teatest.RequireEqualOutput(t, []byte(view))
 }
 
@@ -5312,7 +5319,7 @@ func TestView_Golden_QueuedMessagesShowsCount(t *testing.T) {
 	m = m.AddMessage(chatrender.Message{Role: RoleUser, Content: "First"})
 	m = m.AddMessage(chatrender.Message{Role: RoleAssistant, Content: "Processing..."})
 
-	view := m.View()
+	view := scanView(m)
 	teatest.RequireEqualOutput(t, []byte(view))
 }
 
@@ -5329,7 +5336,7 @@ func TestView_Golden_MetricsShowsTokenUsage(t *testing.T) {
 	m = m.AddMessage(chatrender.Message{Role: RoleUser, Content: "Hello"})
 	m = m.AddMessage(chatrender.Message{Role: RoleAssistant, Content: "Hi! I've used some tokens."})
 
-	view := m.View()
+	view := scanView(m)
 	teatest.RequireEqualOutput(t, []byte(view))
 }
 
@@ -5344,7 +5351,7 @@ func TestView_NilSession_DoesNotPanic(t *testing.T) {
 
 	// Should not panic when rendering with nil active session
 	require.NotPanics(t, func() {
-		view := m.View()
+		view := scanView(m)
 		// View should be rendered (may show empty content but should not crash)
 		require.NotEmpty(t, view, "View should render even with nil session")
 	})
@@ -5387,7 +5394,7 @@ func TestView_SessionStateUsedForQueueCount(t *testing.T) {
 	m.sessions[DefaultSessionID].QueueCount = 5
 	m = m.AddMessage(chatrender.Message{Role: RoleUser, Content: "Test"})
 
-	view := m.View()
+	view := scanView(m)
 
 	// Should show queue count from session
 	require.Contains(t, view, "[5 queued]", "Queue count should be derived from session.QueueCount")
@@ -5405,7 +5412,7 @@ func TestView_SessionStateUsedForMetrics(t *testing.T) {
 	}
 	m = m.AddMessage(chatrender.Message{Role: RoleUser, Content: "Test"})
 
-	view := m.View()
+	view := scanView(m)
 
 	// Should show metrics from session (75k/200k or similar format)
 	require.Contains(t, view, "75", "Metrics should be derived from session.Metrics")
@@ -5723,7 +5730,7 @@ func TestSessionIsolation_SwitchToSessionWithNoProcess(t *testing.T) {
 
 	// View should render without panic
 	require.NotPanics(t, func() {
-		view := m.View()
+		view := scanView(m)
 		require.NotEmpty(t, view, "View should render for session with no process")
 	})
 
