@@ -23,12 +23,33 @@ func TestNewWorkflowUIState_CreatesEmptyState(t *testing.T) {
 
 	require.NotNil(t, state)
 	require.Empty(t, state.CoordinatorMessages)
+	require.Empty(t, state.ObserverMessages)
 	require.Empty(t, state.FabricEvents)
 	require.Empty(t, state.WorkerIDs)
 	require.Nil(t, state.CoordinatorMetrics)
+	require.Nil(t, state.ObserverMetrics)
 	require.Equal(t, events.ProcessStatus(""), state.CoordinatorStatus)
+	require.Equal(t, events.ProcessStatus(""), state.ObserverStatus)
 	require.Equal(t, 0, state.CoordinatorQueueCount)
+	require.Equal(t, 0, state.ObserverQueueCount)
 	require.True(t, state.LastUpdated.IsZero())
+}
+
+func TestWorkflowUIState_ObserverMessagesField_Exists(t *testing.T) {
+	// Verify WorkflowUIState has ObserverMessages []chatrender.Message field
+	state := NewWorkflowUIState()
+
+	// ObserverMessages should exist and be an empty slice
+	require.NotNil(t, state.ObserverMessages, "ObserverMessages field should exist")
+	require.Empty(t, state.ObserverMessages, "ObserverMessages should be empty initially")
+
+	// Should be appendable
+	state.ObserverMessages = append(state.ObserverMessages, chatrender.Message{
+		Role:    "assistant",
+		Content: "Observing workflow activity...",
+	})
+	require.Len(t, state.ObserverMessages, 1)
+	require.Equal(t, "Observing workflow activity...", state.ObserverMessages[0].Content)
 }
 
 func TestNewWorkflowUIState_AllMapsInitialized(t *testing.T) {
@@ -558,6 +579,70 @@ func TestModel_Cleanup_UnsubscribesFromGlobal(t *testing.T) {
 
 	// Verify global subscription was cleaned up
 	require.True(t, globalUnsubscribeCalled, "global unsubscribe should be called on cleanup")
+}
+
+func TestModel_DashboardModel_RoutesObserverEvents(t *testing.T) {
+	// Verify that IsObserver() events route to observer state
+	workflows := []*controlplane.WorkflowInstance{
+		createTestWorkflow("wf-1", "Workflow 1", controlplane.WorkflowRunning),
+	}
+
+	mockCP := newMockControlPlane(t)
+	mockCP.On("List", mock.Anything, mock.Anything).Return(workflows, nil).Maybe()
+
+	globalEventCh := make(chan controlplane.ControlPlaneEvent)
+	close(globalEventCh)
+	mockCP.On("Subscribe", mock.Anything).Return((<-chan controlplane.ControlPlaneEvent)(globalEventCh), func() {}).Maybe()
+
+	cfg := Config{
+		ControlPlane: mockCP,
+		Services:     mode.Services{},
+	}
+
+	m := New(cfg)
+	m.workflows = workflows
+	m.selectedIndex = 0
+	m = m.SetSize(100, 40).(Model)
+
+	// Initial state should have empty observer status and messages
+	state := m.getOrCreateUIState("wf-1")
+	require.Equal(t, events.ProcessStatus(""), state.ObserverStatus, "initial ObserverStatus should be empty")
+	require.Empty(t, state.ObserverMessages, "initial ObserverMessages should be empty")
+
+	// Simulate EventObserverSpawned event
+	spawnedEvent := controlplane.ControlPlaneEvent{
+		Type:       controlplane.EventObserverSpawned,
+		WorkflowID: "wf-1",
+		Payload: events.ProcessEvent{
+			Type:   events.ProcessSpawned,
+			Role:   events.RoleObserver,
+			Status: events.ProcessStatusReady,
+		},
+	}
+	result, _ := m.Update(spawnedEvent)
+	m = result.(Model)
+
+	// Verify ObserverStatus was updated
+	state = m.getOrCreateUIState("wf-1")
+	require.Equal(t, events.ProcessStatusReady, state.ObserverStatus, "ObserverStatus should be Ready after spawn event")
+
+	// Simulate EventObserverOutput event with output
+	outputEvent := controlplane.ControlPlaneEvent{
+		Type:       controlplane.EventObserverOutput,
+		WorkflowID: "wf-1",
+		Payload: events.ProcessEvent{
+			Type:   events.ProcessOutput,
+			Role:   events.RoleObserver,
+			Output: "Observing workflow activity...",
+		},
+	}
+	result, _ = m.Update(outputEvent)
+	m = result.(Model)
+
+	// Verify ObserverMessages was populated
+	state = m.getOrCreateUIState("wf-1")
+	require.Len(t, state.ObserverMessages, 1, "ObserverMessages should have one message")
+	require.Equal(t, "Observing workflow activity...", state.ObserverMessages[0].Content)
 }
 
 func TestModel_GlobalEvent_CoordinatorStatusFromProcessReadyWorking(t *testing.T) {

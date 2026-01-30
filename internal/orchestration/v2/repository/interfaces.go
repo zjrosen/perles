@@ -32,6 +32,9 @@ var ErrProcessNotFound = errors.New("process not found")
 // CoordinatorID is the well-known ID for the coordinator process.
 const CoordinatorID = "coordinator"
 
+// ObserverID is the well-known ID for the observer process.
+const ObserverID = "observer"
+
 // ProcessRole identifies what kind of process this is.
 // This is a type alias to events.ProcessRole to avoid duplicate definitions
 // and eliminate conversion overhead between repository and event layers.
@@ -41,6 +44,7 @@ type ProcessRole = events.ProcessRole
 const (
 	RoleCoordinator = events.RoleCoordinator
 	RoleWorker      = events.RoleWorker
+	RoleObserver    = events.RoleObserver
 )
 
 // ProcessStatus represents the process's current operational state.

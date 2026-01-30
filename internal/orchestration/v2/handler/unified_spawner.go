@@ -41,12 +41,14 @@ type SpawnOptions struct {
 
 // UnifiedProcessSpawnerImpl implements UnifiedProcessSpawner for spawning real AI processes.
 // It creates process.Process instances that manage the AI event loop.
-// Supports different clients for coordinator and workers.
+// Supports different clients for coordinator, workers, and observer.
 type UnifiedProcessSpawnerImpl struct {
 	coordinatorClient     client.HeadlessClient
 	workerClient          client.HeadlessClient
+	observerClient        client.HeadlessClient
 	coordinatorExtensions map[string]any
 	workerExtensions      map[string]any
+	observerExtensions    map[string]any
 	workDir               string
 	port                  int
 	submitter             process.CommandSubmitter
@@ -61,14 +63,19 @@ type UnifiedSpawnerConfig struct {
 	// WorkerClient is the AI client for spawning workers.
 	// If nil, uses CoordinatorClient for workers as well.
 	WorkerClient client.HeadlessClient
+	// ObserverClient is the AI client for spawning the observer.
+	// If nil, uses WorkerClient (or CoordinatorClient) as fallback.
+	ObserverClient client.HeadlessClient
 	// CoordinatorExtensions holds provider-specific config for coordinator.
 	CoordinatorExtensions map[string]any
 	// WorkerExtensions holds provider-specific config for workers.
 	WorkerExtensions map[string]any
-	WorkDir          string
-	Port             int
-	Submitter        process.CommandSubmitter
-	EventBus         *pubsub.Broker[any]
+	// ObserverExtensions holds provider-specific config for observer.
+	ObserverExtensions map[string]any
+	WorkDir            string
+	Port               int
+	Submitter          process.CommandSubmitter
+	EventBus           *pubsub.Broker[any]
 	// BeadsDir is the path to the beads database directory.
 	// When set, spawned processes receive BEADS_DIR environment variable.
 	BeadsDir string
@@ -86,11 +93,23 @@ func NewUnifiedProcessSpawner(cfg UnifiedSpawnerConfig) *UnifiedProcessSpawnerIm
 		workerExtensions = cfg.CoordinatorExtensions
 	}
 
+	// Fall back to worker client if observer client not set
+	observerClient := cfg.ObserverClient
+	if observerClient == nil {
+		observerClient = workerClient
+	}
+	observerExtensions := cfg.ObserverExtensions
+	if observerExtensions == nil {
+		observerExtensions = workerExtensions
+	}
+
 	return &UnifiedProcessSpawnerImpl{
 		coordinatorClient:     cfg.CoordinatorClient,
 		workerClient:          workerClient,
+		observerClient:        observerClient,
 		coordinatorExtensions: cfg.CoordinatorExtensions,
 		workerExtensions:      workerExtensions,
+		observerExtensions:    observerExtensions,
 		workDir:               cfg.WorkDir,
 		port:                  cfg.Port,
 		submitter:             cfg.Submitter,
@@ -102,16 +121,20 @@ func NewUnifiedProcessSpawner(cfg UnifiedSpawnerConfig) *UnifiedProcessSpawnerIm
 // SpawnProcess creates and starts a new AI process.
 // The opts parameter provides optional configuration like AgentType for worker specialization.
 // Returns the created process.Process instance.
-// Uses different clients for coordinator vs workers based on configuration.
+// Uses different clients for coordinator, workers, and observer based on configuration.
 func (s *UnifiedProcessSpawnerImpl) SpawnProcess(ctx context.Context, id string, role repository.ProcessRole, opts SpawnOptions) (*process.Process, error) {
 	// Select client and extensions based on role
 	var aiClient client.HeadlessClient
 	var extensions map[string]any
 
-	if role == repository.RoleCoordinator {
+	switch role {
+	case repository.RoleCoordinator:
 		aiClient = s.coordinatorClient
 		extensions = s.coordinatorExtensions
-	} else {
+	case repository.RoleObserver:
+		aiClient = s.observerClient
+		extensions = s.observerExtensions
+	default:
 		aiClient = s.workerClient
 		extensions = s.workerExtensions
 	}
@@ -122,7 +145,8 @@ func (s *UnifiedProcessSpawnerImpl) SpawnProcess(ctx context.Context, id string,
 
 	// Generate appropriate config based on role
 	var cfg client.Config
-	if role == repository.RoleCoordinator {
+	switch role {
+	case repository.RoleCoordinator:
 		// Coordinator uses coordinator system prompt and MCP config
 		mcpConfig, err := s.generateCoordinatorMCPConfig()
 		if err != nil {
@@ -169,7 +193,28 @@ func (s *UnifiedProcessSpawnerImpl) SpawnProcess(ctx context.Context, id string,
 			DisallowedTools: []string{"AskUserQuestion"},
 			Extensions:      extensions,
 		}
-	} else {
+	case repository.RoleObserver:
+		// Observer uses observer-specific system prompt and MCP config
+		mcpConfig, err := s.generateObserverMCPConfig()
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate observer MCP config: %w", err)
+		}
+
+		// Observer uses fixed prompts - no overrides supported
+		systemPrompt := roles.ObserverSystemPrompt()
+		initialPrompt := roles.ObserverIdlePrompt()
+
+		cfg = client.Config{
+			WorkDir:         s.workDir,
+			BeadsDir:        s.beadsDir,
+			SystemPrompt:    systemPrompt,
+			Prompt:          initialPrompt,
+			MCPConfig:       mcpConfig,
+			SkipPermissions: true,
+			DisallowedTools: []string{"AskUserQuestion"},
+			Extensions:      extensions,
+		}
+	default:
 		// Worker uses role-specific prompts based on AgentType
 		mcpConfig, err := s.generateWorkerMCPConfig(id)
 		if err != nil {
@@ -245,5 +290,24 @@ func (s *UnifiedProcessSpawnerImpl) generateWorkerMCPConfig(processID string) (s
 		return mcp.GenerateWorkerConfigOpenCode(s.port, processID)
 	default:
 		return mcp.GenerateWorkerConfigHTTP(s.port, processID)
+	}
+}
+
+// generateObserverMCPConfig returns the appropriate MCP config format for the observer based on client type.
+func (s *UnifiedProcessSpawnerImpl) generateObserverMCPConfig() (string, error) {
+	if s.observerClient == nil {
+		return mcp.GenerateObserverConfigHTTP(s.port)
+	}
+	switch s.observerClient.Type() {
+	case client.ClientAmp:
+		return mcp.GenerateObserverConfigAmp(s.port)
+	case client.ClientCodex:
+		return mcp.GenerateObserverConfigCodex(s.port), nil
+	case client.ClientGemini:
+		return mcp.GenerateObserverConfigGemini(s.port)
+	case client.ClientOpenCode:
+		return mcp.GenerateObserverConfigOpenCode(s.port)
+	default:
+		return mcp.GenerateObserverConfigHTTP(s.port)
 	}
 }

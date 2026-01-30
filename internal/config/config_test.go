@@ -486,6 +486,25 @@ func TestValidateOrchestration_InvalidWorkerClient(t *testing.T) {
 	require.Contains(t, err.Error(), "invalid")
 }
 
+func TestValidateOrchestration_ValidObserverClient(t *testing.T) {
+	clients := []string{"claude", "amp", "codex", "gemini", "opencode"}
+	for _, c := range clients {
+		t.Run(c, func(t *testing.T) {
+			cfg := OrchestrationConfig{ObserverClient: c}
+			err := ValidateOrchestration(cfg)
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestValidateOrchestration_InvalidObserverClient(t *testing.T) {
+	cfg := OrchestrationConfig{ObserverClient: "invalid"}
+	err := ValidateOrchestration(cfg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "orchestration.observer_client must be one of")
+	require.Contains(t, err.Error(), "invalid")
+}
+
 func TestValidateOrchestration_MixedClientConfigs(t *testing.T) {
 	cfg := OrchestrationConfig{
 		Client:            "claude",
@@ -2665,4 +2684,182 @@ func TestValidateActions_MissingCommand(t *testing.T) {
 	err := ValidateActions(actions)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "command is required")
+}
+
+// ============================================================================
+// ObserverClientType Tests
+// ============================================================================
+
+func TestObserverClientType_Default(t *testing.T) {
+	// Empty config should default to claude
+	cfg := OrchestrationConfig{}
+	require.Equal(t, client.ClientClaude, cfg.ObserverClientType(), "empty config should default to claude")
+}
+
+func TestObserverClientType_Override(t *testing.T) {
+	// observer_client should override the default
+	cfg := OrchestrationConfig{ObserverClient: "amp"}
+	require.Equal(t, client.ClientType("amp"), cfg.ObserverClientType(), "should use configured observer_client")
+}
+
+func TestObserverClientType_AllClients(t *testing.T) {
+	clients := []string{"claude", "amp", "codex", "gemini", "opencode"}
+	for _, c := range clients {
+		t.Run(c, func(t *testing.T) {
+			cfg := OrchestrationConfig{ObserverClient: c}
+			require.Equal(t, client.ClientType(c), cfg.ObserverClientType())
+		})
+	}
+}
+
+func TestObserverClientType_IndependentFromOthers(t *testing.T) {
+	// Observer should not be affected by Client, CoordinatorClient, or WorkerClient
+	cfg := OrchestrationConfig{
+		Client:            "amp",
+		CoordinatorClient: "codex",
+		WorkerClient:      "gemini",
+	}
+	require.Equal(t, client.ClientClaude, cfg.ObserverClientType(), "observer should default to claude regardless of other settings")
+}
+
+// ============================================================================
+// IsObserverEnabled Tests
+// ============================================================================
+
+func TestObserverEnabled_Default(t *testing.T) {
+	// ObserverEnabled should default to false
+	cfg := OrchestrationConfig{}
+	require.False(t, cfg.IsObserverEnabled(), "ObserverEnabled should default to false")
+}
+
+func TestObserverEnabled_ExplicitTrue(t *testing.T) {
+	cfg := OrchestrationConfig{ObserverEnabled: true}
+	require.True(t, cfg.IsObserverEnabled(), "explicit true should return true")
+}
+
+func TestObserverEnabled_ExplicitFalse(t *testing.T) {
+	cfg := OrchestrationConfig{ObserverEnabled: false}
+	require.False(t, cfg.IsObserverEnabled(), "explicit false should return false")
+}
+
+// ============================================================================
+// AgentProviders Observer Tests
+// ============================================================================
+
+func TestAgentProviders_IncludesObserver(t *testing.T) {
+	// Observer included when explicitly enabled
+	cfg := OrchestrationConfig{ObserverEnabled: true}
+	providers := cfg.AgentProviders()
+
+	require.NotNil(t, providers[client.RoleCoordinator])
+	require.NotNil(t, providers[client.RoleWorker])
+	require.NotNil(t, providers[client.RoleObserver], "observer should be included when enabled")
+	require.Equal(t, client.ClientClaude, providers[client.RoleObserver].Type())
+}
+
+func TestAgentProviders_ExcludesObserver(t *testing.T) {
+	// Default config should not include observer
+	cfg := OrchestrationConfig{}
+	providers := cfg.AgentProviders()
+
+	require.NotNil(t, providers[client.RoleCoordinator])
+	require.NotNil(t, providers[client.RoleWorker])
+	require.Nil(t, providers[client.RoleObserver], "observer should not be included by default")
+}
+
+func TestAgentProviders_ObserverUsesClaudeModel(t *testing.T) {
+	// Observer should use claude.model by default
+	cfg := OrchestrationConfig{
+		ObserverEnabled: true,
+		Claude:          ClaudeClientConfig{Model: "sonnet"},
+	}
+	providers := cfg.AgentProviders()
+
+	observerExt := providers[client.RoleObserver].Extensions()
+	require.Equal(t, "sonnet", observerExt[client.ExtClaudeModel], "observer should use claude.model")
+}
+
+func TestAgentProviders_ObserverConfiguredClient(t *testing.T) {
+	// Observer can be configured to use a different client
+	cfg := OrchestrationConfig{
+		ObserverEnabled: true,
+		ObserverClient:  "amp",
+		Amp:             AmpClientConfig{Model: "sonnet", Mode: "smart"},
+	}
+	providers := cfg.AgentProviders()
+
+	require.Equal(t, client.ClientType("amp"), providers[client.RoleObserver].Type())
+	observerExt := providers[client.RoleObserver].Extensions()
+	require.Equal(t, "sonnet", observerExt["amp.model"])
+	require.Equal(t, "smart", observerExt["amp.mode"])
+}
+
+// ============================================================================
+// extensionsForObserver Tests
+// ============================================================================
+
+func TestExtensionsForObserver_Claude_Default(t *testing.T) {
+	// No model configured - extension not set, let claude pick
+	cfg := OrchestrationConfig{}
+	ext := cfg.extensionsForObserver(client.ClientClaude)
+	_, hasModel := ext[client.ExtClaudeModel]
+	require.False(t, hasModel, "observer should not set model if none configured")
+}
+
+func TestExtensionsForObserver_Claude_WithClaudeObserverOverride(t *testing.T) {
+	// ClaudeObserver config takes precedence
+	cfg := OrchestrationConfig{
+		Claude:         ClaudeClientConfig{Model: "opus"},
+		ClaudeObserver: ClaudeClientConfig{Model: "sonnet"},
+	}
+	ext := cfg.extensionsForObserver(client.ClientClaude)
+	require.Equal(t, "sonnet", ext[client.ExtClaudeModel], "observer should use ClaudeObserver model")
+}
+
+func TestExtensionsForObserver_Claude_FallsBackToClaude(t *testing.T) {
+	// If ClaudeObserver not set, falls back to Claude config
+	cfg := OrchestrationConfig{
+		Claude: ClaudeClientConfig{Model: "opus"},
+	}
+	ext := cfg.extensionsForObserver(client.ClientClaude)
+	require.Equal(t, "opus", ext[client.ExtClaudeModel], "observer should fall back to Claude model")
+}
+
+func TestExtensionsForObserver_Amp(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Amp: AmpClientConfig{Model: "sonnet", Mode: "smart"},
+	}
+	ext := cfg.extensionsForObserver(client.ClientType("amp"))
+	require.Equal(t, "sonnet", ext["amp.model"])
+	require.Equal(t, "smart", ext["amp.mode"])
+}
+
+func TestExtensionsForObserver_Codex(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Codex: CodexClientConfig{Model: "gpt-5.2-codex"},
+	}
+	ext := cfg.extensionsForObserver(client.ClientType("codex"))
+	require.Equal(t, "gpt-5.2-codex", ext[client.ExtCodexModel])
+}
+
+func TestExtensionsForObserver_Gemini(t *testing.T) {
+	cfg := OrchestrationConfig{
+		Gemini: GeminiClientConfig{Model: "gemini-3-pro-preview"},
+	}
+	ext := cfg.extensionsForObserver(client.ClientType("gemini"))
+	require.Equal(t, "gemini-3-pro-preview", ext[client.ExtGeminiModel])
+}
+
+func TestExtensionsForObserver_OpenCode(t *testing.T) {
+	cfg := OrchestrationConfig{
+		OpenCode: OpenCodeClientConfig{Model: "anthropic/claude-opus-4-5"},
+	}
+	ext := cfg.extensionsForObserver(client.ClientType("opencode"))
+	require.Equal(t, "anthropic/claude-opus-4-5", ext[client.ExtOpenCodeModel])
+}
+
+func TestExtensionsForObserver_Unknown(t *testing.T) {
+	cfg := OrchestrationConfig{}
+	ext := cfg.extensionsForObserver(client.ClientType("unknown"))
+	require.Empty(t, ext, "unknown client should return empty extensions")
 }

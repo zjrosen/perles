@@ -1418,6 +1418,45 @@ func (m *Model) updateCachedUIState(event controlplane.ControlPlaneEvent) {
 			}
 		}
 
+	case controlplane.EventObserverSpawned:
+		// Observer started - set initial status to Ready
+		if payload, ok := event.Payload.(events.ProcessEvent); ok {
+			uiState.ObserverStatus = payload.Status
+			uiState.ObserverQueueCount = payload.QueueCount
+		}
+
+	case controlplane.EventObserverOutput:
+		if payload, ok := event.Payload.(events.ProcessEvent); ok {
+			// Handle Ready/Working state transitions
+			switch payload.Type {
+			case events.ProcessReady:
+				uiState.ObserverStatus = events.ProcessStatusReady
+			case events.ProcessWorking:
+				uiState.ObserverStatus = events.ProcessStatusWorking
+			case events.ProcessOutput:
+				// Output events - append message to chat
+				m.appendObserverMessageToCache(uiState, payload)
+			case events.ProcessTokenUsage:
+				// Token usage events - update metrics only if token data is present.
+				// Skip cost-only events (TokensUsed=0) to avoid wiping token display.
+				if payload.Metrics != nil && payload.Metrics.TokensUsed > 0 {
+					uiState.ObserverMetrics = payload.Metrics
+				}
+			case events.ProcessQueueChanged:
+				// Queue changed events - update queue count
+				uiState.ObserverQueueCount = payload.QueueCount
+			default:
+				// For other event types, use the Status field if present
+				if payload.Status != "" {
+					uiState.ObserverStatus = payload.Status
+				}
+				// Still append output if present
+				if payload.Output != "" {
+					m.appendObserverMessageToCache(uiState, payload)
+				}
+			}
+		}
+
 	case controlplane.EventWorkerOutput:
 		if payload, ok := event.Payload.(events.ProcessEvent); ok {
 			workerID := payload.ProcessID
@@ -1564,6 +1603,32 @@ func (m *Model) appendCoordinatorMessageToCache(state *WorkflowUIState, payload 
 	}
 
 	state.CoordinatorMessages = append(state.CoordinatorMessages, chatrender.Message{
+		Role:       "assistant",
+		Content:    payload.Output,
+		IsToolCall: isToolCall,
+	})
+}
+
+// appendObserverMessageToCache appends an observer message to the cached UI state.
+func (m *Model) appendObserverMessageToCache(state *WorkflowUIState, payload events.ProcessEvent) {
+	// Skip empty output (status change signals without actual content)
+	if payload.Output == "" {
+		return
+	}
+
+	isToolCall := strings.HasPrefix(payload.Output, "🔧")
+
+	// Handle streaming deltas by appending to the last message if same role
+	if payload.Delta && len(state.ObserverMessages) > 0 {
+		lastIdx := len(state.ObserverMessages) - 1
+		lastMsg := &state.ObserverMessages[lastIdx]
+		if lastMsg.Role == "assistant" && !lastMsg.IsToolCall {
+			lastMsg.Content += payload.Output
+			return
+		}
+	}
+
+	state.ObserverMessages = append(state.ObserverMessages, chatrender.Message{
 		Role:       "assistant",
 		Content:    payload.Output,
 		IsToolCall: isToolCall,

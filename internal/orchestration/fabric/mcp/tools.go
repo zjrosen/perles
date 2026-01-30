@@ -105,8 +105,8 @@ var ToolFabricSend = Tool{
 		Properties: map[string]*PropertySchema{
 			"channel": {
 				Type:        "string",
-				Description: "Channel slug: 'tasks', 'planning', 'general', or 'system'",
-				Enum:        []string{"tasks", "planning", "general", "system"},
+				Description: "Channel slug: 'tasks', 'planning', 'general', 'system', or 'observer'",
+				Enum:        []string{"tasks", "planning", "general", "system", "observer"},
 			},
 			"content": {
 				Type:        "string",
@@ -203,7 +203,7 @@ var ToolFabricSubscribe = Tool{
 			"channel": {
 				Type:        "string",
 				Description: "Channel slug to subscribe to",
-				Enum:        []string{"tasks", "planning", "general", "system"},
+				Enum:        []string{"tasks", "planning", "general", "system", "observer"},
 			},
 			"mode": {
 				Type:        "string",
@@ -233,7 +233,7 @@ var ToolFabricUnsubscribe = Tool{
 			"channel": {
 				Type:        "string",
 				Description: "Channel slug to unsubscribe from",
-				Enum:        []string{"tasks", "planning", "general", "system"},
+				Enum:        []string{"tasks", "planning", "general", "system", "observer"},
 			},
 		},
 		Required: []string{"channel"},
@@ -290,7 +290,7 @@ var ToolFabricHistory = Tool{
 			"channel": {
 				Type:        "string",
 				Description: "Channel slug to get history for",
-				Enum:        []string{"tasks", "planning", "general", "system"},
+				Enum:        []string{"tasks", "planning", "general", "system", "observer"},
 			},
 			"limit": {
 				Type:        "number",

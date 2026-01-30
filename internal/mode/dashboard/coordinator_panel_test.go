@@ -123,11 +123,15 @@ func TestCoordinatorPanel_TabNavigation(t *testing.T) {
 	// Initially on TabCoordinator
 	require.Equal(t, TabCoordinator, panel.ActiveTab())
 
-	// Tab forward
+	// Tab forward: Coordinator -> Observer -> Messages
+	panel.NextTab()
+	require.Equal(t, TabObserver, panel.ActiveTab())
 	panel.NextTab()
 	require.Equal(t, TabMessages, panel.ActiveTab())
 
 	// Tab backward
+	panel.PrevTab()
+	require.Equal(t, TabObserver, panel.ActiveTab())
 	panel.PrevTab()
 	require.Equal(t, TabCoordinator, panel.ActiveTab())
 
@@ -142,11 +146,13 @@ func TestCoordinatorPanel_TabNavigationDebugMode(t *testing.T) {
 	// Initially on TabCoordinator
 	require.Equal(t, TabCoordinator, panel.ActiveTab())
 
-	// Tab forward through: Coordinator -> Messages -> CmdLog
+	// Tab forward through: Coordinator -> Observer -> Messages -> CmdLog
+	panel.NextTab()
+	require.Equal(t, TabObserver, panel.ActiveTab())
 	panel.NextTab()
 	require.Equal(t, TabMessages, panel.ActiveTab())
 	panel.NextTab()
-	require.Equal(t, 2, panel.ActiveTab(), "should be on command log tab")
+	require.Equal(t, 3, panel.ActiveTab(), "should be on command log tab")
 
 	// Tab wraps back to coordinator
 	panel.NextTab()
@@ -154,7 +160,7 @@ func TestCoordinatorPanel_TabNavigationDebugMode(t *testing.T) {
 
 	// Tab backward from coordinator wraps to command log
 	panel.PrevTab()
-	require.Equal(t, 2, panel.ActiveTab(), "should wrap to command log tab")
+	require.Equal(t, 3, panel.ActiveTab(), "should wrap to command log tab")
 }
 
 func TestCoordinatorPanel_TabNavigationWithWorkers(t *testing.T) {
@@ -170,11 +176,13 @@ func TestCoordinatorPanel_TabNavigationWithWorkers(t *testing.T) {
 	}
 	panel.SetWorkflow("wf-123", state)
 
-	// Should now have 4 tabs: Coord, Msgs, W1, W2
-	require.Equal(t, 4, panel.tabCount())
+	// Should now have 5 tabs: Coord, Obs, Msgs, W1, W2
+	require.Equal(t, 5, panel.tabCount())
 
 	// Navigate through all tabs
 	require.Equal(t, TabCoordinator, panel.ActiveTab())
+	panel.NextTab()
+	require.Equal(t, TabObserver, panel.ActiveTab())
 	panel.NextTab()
 	require.Equal(t, TabMessages, panel.ActiveTab())
 	panel.NextTab()
@@ -183,6 +191,61 @@ func TestCoordinatorPanel_TabNavigationWithWorkers(t *testing.T) {
 	require.Equal(t, TabFirstWorker+1, panel.ActiveTab()) // worker-2
 	panel.NextTab()
 	require.Equal(t, TabCoordinator, panel.ActiveTab(), "should wrap back to coordinator")
+}
+
+func TestCoordinatorPanel_HasObserverTab(t *testing.T) {
+	// Verify Observer tab exists in CoordinatorPanel at index 1
+	panel := NewCoordinatorPanel(false, false, nil)
+
+	// Verify tab constants
+	require.Equal(t, 0, TabCoordinator, "TabCoordinator should be 0")
+	require.Equal(t, 1, TabObserver, "TabObserver should be 1")
+	require.Equal(t, 2, TabMessages, "TabMessages should be 2")
+	require.Equal(t, 3, TabFirstWorker, "TabFirstWorker should be 3")
+
+	// Navigate to observer tab
+	panel.NextTab()
+	require.Equal(t, TabObserver, panel.ActiveTab(), "should be on Observer tab")
+}
+
+func TestCoordinatorPanel_SetWorkflow_SyncsObserverData(t *testing.T) {
+	panel := NewCoordinatorPanel(false, false, nil)
+
+	state := &WorkflowUIState{
+		ObserverMessages:   []chatrender.Message{{Role: "assistant", Content: "Observing workflow..."}},
+		ObserverStatus:     events.ProcessStatusReady,
+		ObserverQueueCount: 5,
+	}
+	panel.SetWorkflow("wf-123", state)
+
+	require.Len(t, panel.observerMessages, 1)
+	require.Equal(t, "Observing workflow...", panel.observerMessages[0].Content)
+	require.Equal(t, events.ProcessStatusReady, panel.observerStatus)
+	require.Equal(t, 5, panel.observerQueue)
+}
+
+func TestCoordinatorPanel_ObserverTab_DisplaysOutput(t *testing.T) {
+	panel := NewCoordinatorPanel(false, false, nil)
+	panel.SetSize(80, 30)
+
+	state := &WorkflowUIState{
+		ObserverMessages: []chatrender.Message{
+			{Role: "assistant", Content: "Starting observation..."},
+			{Role: "assistant", Content: "Monitoring #tasks channel"},
+		},
+		ObserverStatus: events.ProcessStatusWorking,
+	}
+	panel.SetWorkflow("wf-123", state)
+
+	// Switch to observer tab
+	panel.NextTab()
+	require.Equal(t, TabObserver, panel.ActiveTab())
+
+	// Render and verify content is present
+	view := panel.View()
+	require.NotEmpty(t, view)
+	// The view should contain "Obs" label (short for Observer)
+	require.Contains(t, view, "Obs")
 }
 
 func TestCoordinatorPanel_SetWorkflow_SyncsWorkerData(t *testing.T) {
@@ -1063,8 +1126,8 @@ func TestCoordinatorPanel_TabSwitchAfterSelection(t *testing.T) {
 	tabNext := tea.KeyMsg{Type: tea.KeyCtrlJ}
 	panel.Update(tabNext)
 
-	// Tab should switch to messages
-	require.Equal(t, TabMessages, panel.ActiveTab(),
+	// Tab should switch to observer
+	require.Equal(t, TabObserver, panel.ActiveTab(),
 		"tab should switch")
 
 	// Switch back using ctrl+k key
@@ -1733,13 +1796,20 @@ func TestCoordinatorPanel_ManualTabSwitch_IndependentOfChannel(t *testing.T) {
 	require.Equal(t, "dm", panel.ActiveChannel())
 	require.Equal(t, TabCoordinator, panel.activeTab)
 
-	// Manually switch to Messages tab
+	// Manually switch to Observer tab
+	panel.NextTab()
+	require.Equal(t, TabObserver, panel.activeTab)
+	// Channel should remain DM
+	require.Equal(t, "dm", panel.ActiveChannel())
+
+	// Switch to Messages tab
 	panel.NextTab()
 	require.Equal(t, TabMessages, panel.activeTab)
 	// Channel should remain DM
 	require.Equal(t, "dm", panel.ActiveChannel())
 
 	// Switch back to Coordinator tab
+	panel.PrevTab()
 	panel.PrevTab()
 	require.Equal(t, TabCoordinator, panel.activeTab)
 	require.Equal(t, "dm", panel.ActiveChannel())

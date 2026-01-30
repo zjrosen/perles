@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/zjrosen/perles/internal/log"
 	"github.com/zjrosen/perles/internal/orchestration/events"
 	"github.com/zjrosen/perles/internal/orchestration/v2/command"
 	"github.com/zjrosen/perles/internal/orchestration/v2/process"
@@ -18,14 +19,33 @@ import (
 // before escalating to forceful termination.
 const GracefulStopTimeout = 5 * time.Second
 
+// FabricUnsubscriber defines the interface for unsubscribing agents from channels.
+// This is used to clean up Observer subscriptions when stopped.
+type FabricUnsubscriber interface {
+	// UnsubscribeAll removes all subscriptions for the given agent.
+	UnsubscribeAll(agentID string) error
+}
+
 // StopWorkerHandler handles CmdStopProcess commands.
 // It implements tiered termination: graceful (Cancel + timeout) then forceful.
 // Follows the RetireProcessHandler pattern for lifecycle management.
 type StopWorkerHandler struct {
-	processRepo repository.ProcessRepository
-	taskRepo    repository.TaskRepository
-	queueRepo   repository.QueueRepository
-	registry    *process.ProcessRegistry
+	processRepo        repository.ProcessRepository
+	taskRepo           repository.TaskRepository
+	queueRepo          repository.QueueRepository
+	registry           *process.ProcessRegistry
+	fabricUnsubscriber FabricUnsubscriber
+}
+
+// StopWorkerHandlerOption configures StopWorkerHandler.
+type StopWorkerHandlerOption func(*StopWorkerHandler)
+
+// WithFabricUnsubscriber sets the fabric unsubscriber for observer cleanup.
+// When set, the handler will unsubscribe observers from all channels when stopped.
+func WithFabricUnsubscriber(unsubscriber FabricUnsubscriber) StopWorkerHandlerOption {
+	return func(h *StopWorkerHandler) {
+		h.fabricUnsubscriber = unsubscriber
+	}
 }
 
 // NewStopWorkerHandler creates a new StopWorkerHandler.
@@ -34,13 +54,18 @@ func NewStopWorkerHandler(
 	taskRepo repository.TaskRepository,
 	queueRepo repository.QueueRepository,
 	registry *process.ProcessRegistry,
+	opts ...StopWorkerHandlerOption,
 ) *StopWorkerHandler {
-	return &StopWorkerHandler{
+	h := &StopWorkerHandler{
 		processRepo: processRepo,
 		taskRepo:    taskRepo,
 		queueRepo:   queueRepo,
 		registry:    registry,
 	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 // Handle processes a StopProcessCommand.
@@ -155,6 +180,15 @@ func (h *StopWorkerHandler) updateRepositoryAndCleanup(proc *repository.Process)
 
 // updateRepositoryAndCleanupWithResult updates repository and task state, then returns result.
 func (h *StopWorkerHandler) updateRepositoryAndCleanupWithResult(proc *repository.Process, graceful bool) (*command.CommandResult, error) {
+	// Unsubscribe observer from all channels to prevent orphaned subscriptions
+	if proc.Role == repository.RoleObserver && h.fabricUnsubscriber != nil {
+		if err := h.fabricUnsubscriber.UnsubscribeAll(proc.ID); err != nil {
+			// Log but don't fail - best effort cleanup
+			log.Warn(log.CatOrch, "Failed to unsubscribe observer from channels",
+				"processID", proc.ID, "error", err)
+		}
+	}
+
 	// Clean up task assignment if worker had a task
 	if proc.TaskID != "" && h.taskRepo != nil {
 		task, err := h.taskRepo.Get(proc.TaskID)

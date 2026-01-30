@@ -365,3 +365,17 @@ func TestProcessStatus_StatusPaused_IsValidValue(t *testing.T) {
 	assert.NotEqual(t, StatusPaused, StatusRetired)
 	assert.NotEqual(t, StatusPaused, StatusFailed)
 }
+
+// ===========================================================================
+// ObserverID Constant Tests
+// ===========================================================================
+
+func TestObserverID_Constant(t *testing.T) {
+	// Verify ObserverID constant equals "observer"
+	assert.Equal(t, "observer", ObserverID)
+}
+
+func TestRoleObserver_Alias(t *testing.T) {
+	// Verify RoleObserver alias works correctly
+	assert.Equal(t, "observer", string(RoleObserver))
+}

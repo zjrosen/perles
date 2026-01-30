@@ -90,7 +90,7 @@ func TestThread_HasMention(t *testing.T) {
 func TestFixedChannels(t *testing.T) {
 	channels := domain.FixedChannels()
 
-	require.Len(t, channels, 5)
+	require.Len(t, channels, 6)
 
 	slugs := make([]string, len(channels))
 	for i, ch := range channels {
@@ -105,4 +105,5 @@ func TestFixedChannels(t *testing.T) {
 	require.Contains(t, slugs, domain.SlugTasks)
 	require.Contains(t, slugs, domain.SlugPlanning)
 	require.Contains(t, slugs, domain.SlugGeneral)
+	require.Contains(t, slugs, domain.SlugObserver)
 }

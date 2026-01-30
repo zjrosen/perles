@@ -59,10 +59,10 @@ func NewSpawnProcessCommand(source CommandSource, role repository.ProcessRole, o
 	return cmd
 }
 
-// Validate checks that Role is coordinator or worker.
+// Validate checks that Role is coordinator, worker, or observer.
 func (c *SpawnProcessCommand) Validate() error {
-	if c.Role != repository.RoleCoordinator && c.Role != repository.RoleWorker {
-		return fmt.Errorf("role must be coordinator or worker, got: %s", c.Role)
+	if c.Role != repository.RoleCoordinator && c.Role != repository.RoleWorker && c.Role != repository.RoleObserver {
+		return fmt.Errorf("role must be coordinator, worker, or observer, got: %s", c.Role)
 	}
 	return nil
 }

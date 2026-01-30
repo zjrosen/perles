@@ -29,8 +29,8 @@ func TestService_InitSession(t *testing.T) {
 	err := svc.InitSession("coordinator")
 	require.NoError(t, err)
 
-	// Should have created 5 channels
-	require.Len(t, events, 5)
+	// Should have created 6 channels (root, system, tasks, planning, general, observer)
+	require.Len(t, events, 6)
 	for _, e := range events {
 		require.Equal(t, EventChannelCreated, e.Type)
 	}
@@ -41,6 +41,7 @@ func TestService_InitSession(t *testing.T) {
 	require.NotEmpty(t, svc.GetChannelID(domain.SlugTasks))
 	require.NotEmpty(t, svc.GetChannelID(domain.SlugPlanning))
 	require.NotEmpty(t, svc.GetChannelID(domain.SlugGeneral))
+	require.NotEmpty(t, svc.GetChannelID(domain.SlugObserver))
 
 	// Verify coordinator is auto-subscribed to #system with mode=all
 	subs, err := svc.GetSubscriptions("coordinator")
@@ -279,6 +280,46 @@ func TestService_Subscriptions(t *testing.T) {
 	subs, err = svc.GetSubscriptions("WORKER.1")
 	require.NoError(t, err)
 	require.Len(t, subs, 0)
+}
+
+func TestService_UnsubscribeAll(t *testing.T) {
+	svc := newTestService()
+	err := svc.InitSession("system")
+	require.NoError(t, err)
+
+	// Subscribe observer to multiple channels
+	_, err = svc.Subscribe(domain.SlugSystem, "OBSERVER", domain.ModeAll)
+	require.NoError(t, err)
+	_, err = svc.Subscribe(domain.SlugTasks, "OBSERVER", domain.ModeAll)
+	require.NoError(t, err)
+	_, err = svc.Subscribe(domain.SlugPlanning, "OBSERVER", domain.ModeAll)
+	require.NoError(t, err)
+	_, err = svc.Subscribe(domain.SlugGeneral, "OBSERVER", domain.ModeAll)
+	require.NoError(t, err)
+
+	// Verify subscriptions exist
+	subs, err := svc.GetSubscriptions("OBSERVER")
+	require.NoError(t, err)
+	require.Len(t, subs, 4)
+
+	// Unsubscribe from all
+	err = svc.UnsubscribeAll("OBSERVER")
+	require.NoError(t, err)
+
+	// Verify all subscriptions removed
+	subs, err = svc.GetSubscriptions("OBSERVER")
+	require.NoError(t, err)
+	require.Len(t, subs, 0)
+}
+
+func TestService_UnsubscribeAll_NoSubscriptions(t *testing.T) {
+	svc := newTestService()
+	err := svc.InitSession("system")
+	require.NoError(t, err)
+
+	// UnsubscribeAll on agent with no subscriptions should be no-op
+	err = svc.UnsubscribeAll("NONEXISTENT")
+	require.NoError(t, err)
 }
 
 func TestParseMentions(t *testing.T) {

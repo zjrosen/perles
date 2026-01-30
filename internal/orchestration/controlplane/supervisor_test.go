@@ -1734,3 +1734,263 @@ func TestExistingHandlers_StillCalled(t *testing.T) {
 	require.Equal(t, fabric.EventReplyPosted, brokerEvents[1].Type)
 	require.Equal(t, fabric.EventSubscribed, forwarderEvents[2].Type)
 }
+
+// === Unit Tests: SpawnObserver ===
+
+func TestSupervisor_SpawnCoordinator_SpawnsObserverWhenEnabled(t *testing.T) {
+	mockObserverProvider := mocks.NewMockAgentProvider(t)
+	mockCoordinatorProvider := mocks.NewMockAgentProvider(t)
+	mockFactory := &mockInfrastructureFactory{}
+
+	cfg := SupervisorConfig{
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: mockCoordinatorProvider,
+			client.RoleObserver:    mockObserverProvider, // Observer enabled
+		},
+		InfrastructureFactory: mockFactory,
+		ListenerFactory:       &mockListenerFactory{},
+		SessionFactory:        session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()}),
+	}
+
+	// Verify observer provider is set
+	require.NotNil(t, cfg.AgentProviders[client.RoleObserver], "Observer provider should be set")
+
+	supervisor, err := NewSupervisor(cfg)
+	require.NoError(t, err)
+
+	// Verify supervisor has observer provider
+	ds := supervisor.(*defaultSupervisor)
+	_, hasObserver := ds.agentProviders[client.RoleObserver]
+	require.True(t, hasObserver, "Supervisor should have observer provider")
+
+	inst := newTestInstance(t, "observer-test")
+	cleanupSessionOnTestEnd(t, inst)
+
+	// Setup mock infrastructure
+	infra := createMinimalInfrastructure(t)
+	mockFactory.On("Create", mock.AnythingOfType("v2.InfrastructureConfig")).Return(infra, nil)
+	setupAgentProviderMock(t, mockCoordinatorProvider)
+	setupAgentProviderMock(t, mockObserverProvider)
+
+	// Track spawn commands with role logging
+	spawnCalls := 0
+	var spawnRoles []string
+	infra.Core.Processor.RegisterHandler(command.CmdSpawnProcess, &roleBasedSpawnHandler{
+		onCoordinator: func() (*command.CommandResult, error) {
+			spawnCalls++
+			spawnRoles = append(spawnRoles, "coordinator")
+			return &command.CommandResult{Success: true, Data: &mockSpawnResult{processID: "coordinator"}}, nil
+		},
+		onObserver: func() (*command.CommandResult, error) {
+			spawnCalls++
+			spawnRoles = append(spawnRoles, "observer")
+			return &command.CommandResult{Success: true, Data: &mockSpawnResult{processID: "observer"}}, nil
+		},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go infra.Core.Processor.Run(ctx)
+	require.NoError(t, infra.Core.Processor.WaitForReady(ctx))
+
+	// Execute full start
+	err = startWorkflow(ctx, supervisor, inst)
+
+	require.NoError(t, err)
+	require.Equal(t, WorkflowRunning, inst.State)
+
+	// Debug output
+	t.Logf("Spawn calls: %d", spawnCalls)
+	t.Logf("Spawn roles: %v", spawnRoles)
+	t.Logf("inst.Infrastructure nil: %v", inst.Infrastructure == nil)
+	if inst.Infrastructure != nil {
+		t.Logf("inst.Infrastructure.Core.Processor nil: %v", inst.Infrastructure.Core.Processor == nil)
+	}
+
+	// Should have spawned both coordinator and observer
+	require.Equal(t, 2, spawnCalls, "Should spawn both coordinator and observer")
+}
+
+func TestSupervisor_SpawnCoordinator_SkipsObserverWhenDisabled(t *testing.T) {
+	mockCoordinatorProvider := mocks.NewMockAgentProvider(t)
+	mockFactory := &mockInfrastructureFactory{}
+
+	cfg := SupervisorConfig{
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: mockCoordinatorProvider,
+			// No RoleObserver - observer disabled
+		},
+		InfrastructureFactory: mockFactory,
+		ListenerFactory:       &mockListenerFactory{},
+		SessionFactory:        session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()}),
+	}
+
+	supervisor, err := NewSupervisor(cfg)
+	require.NoError(t, err)
+
+	inst := newTestInstance(t, "no-observer-test")
+	cleanupSessionOnTestEnd(t, inst)
+
+	// Setup mock infrastructure
+	infra := createMinimalInfrastructure(t)
+	mockFactory.On("Create", mock.AnythingOfType("v2.InfrastructureConfig")).Return(infra, nil)
+	setupAgentProviderMock(t, mockCoordinatorProvider)
+
+	// Track spawn commands
+	spawnCalls := 0
+	infra.Core.Processor.RegisterHandler(command.CmdSpawnProcess, &spawnTracker{onHandle: func() {
+		spawnCalls++
+	}})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go infra.Core.Processor.Run(ctx)
+	require.NoError(t, infra.Core.Processor.WaitForReady(ctx))
+
+	// Execute full start
+	err = startWorkflow(ctx, supervisor, inst)
+
+	require.NoError(t, err)
+	require.Equal(t, WorkflowRunning, inst.State)
+	// Should only spawn coordinator (no observer)
+	require.Equal(t, 1, spawnCalls, "Should only spawn coordinator when observer disabled")
+}
+
+func TestSupervisor_SpawnObserver_FailOpenOnError(t *testing.T) {
+	mockObserverProvider := mocks.NewMockAgentProvider(t)
+	mockCoordinatorProvider := mocks.NewMockAgentProvider(t)
+	mockFactory := &mockInfrastructureFactory{}
+
+	cfg := SupervisorConfig{
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: mockCoordinatorProvider,
+			client.RoleObserver:    mockObserverProvider,
+		},
+		InfrastructureFactory: mockFactory,
+		ListenerFactory:       &mockListenerFactory{},
+		SessionFactory:        session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()}),
+	}
+
+	supervisor, err := NewSupervisor(cfg)
+	require.NoError(t, err)
+
+	inst := newTestInstance(t, "failopen-test")
+	cleanupSessionOnTestEnd(t, inst)
+
+	// Setup mock infrastructure
+	infra := createMinimalInfrastructure(t)
+	mockFactory.On("Create", mock.AnythingOfType("v2.InfrastructureConfig")).Return(infra, nil)
+	setupAgentProviderMock(t, mockCoordinatorProvider)
+	setupAgentProviderMock(t, mockObserverProvider)
+
+	// Track spawn commands and fail observer spawn
+	spawnCallCount := 0
+	infra.Core.Processor.RegisterHandler(command.CmdSpawnProcess, &roleBasedSpawnHandler{
+		onCoordinator: func() (*command.CommandResult, error) {
+			spawnCallCount++
+			return &command.CommandResult{Success: true, Data: &mockSpawnResult{processID: "coordinator"}}, nil
+		},
+		onObserver: func() (*command.CommandResult, error) {
+			spawnCallCount++
+			// Return error for observer spawn
+			return &command.CommandResult{Success: false, Error: errors.New("observer spawn failed")}, nil
+		},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go infra.Core.Processor.Run(ctx)
+	require.NoError(t, infra.Core.Processor.WaitForReady(ctx))
+
+	// Execute full start - should succeed even though observer failed
+	err = startWorkflow(ctx, supervisor, inst)
+
+	// Workflow should still succeed (fail-open behavior)
+	require.NoError(t, err, "Workflow should succeed even when observer fails to spawn")
+	require.Equal(t, WorkflowRunning, inst.State)
+	require.Equal(t, 2, spawnCallCount, "Both coordinator and observer spawn should be attempted")
+}
+
+func TestSupervisor_SpawnObserver_AfterCoordinator(t *testing.T) {
+	mockObserverProvider := mocks.NewMockAgentProvider(t)
+	mockCoordinatorProvider := mocks.NewMockAgentProvider(t)
+	mockFactory := &mockInfrastructureFactory{}
+
+	cfg := SupervisorConfig{
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: mockCoordinatorProvider,
+			client.RoleObserver:    mockObserverProvider,
+		},
+		InfrastructureFactory: mockFactory,
+		ListenerFactory:       &mockListenerFactory{},
+		SessionFactory:        session.NewFactory(session.FactoryConfig{BaseDir: t.TempDir()}),
+	}
+
+	supervisor, err := NewSupervisor(cfg)
+	require.NoError(t, err)
+
+	inst := newTestInstance(t, "spawn-order-test")
+	cleanupSessionOnTestEnd(t, inst)
+
+	// Setup mock infrastructure
+	infra := createMinimalInfrastructure(t)
+	mockFactory.On("Create", mock.AnythingOfType("v2.InfrastructureConfig")).Return(infra, nil)
+	setupAgentProviderMock(t, mockCoordinatorProvider)
+	setupAgentProviderMock(t, mockObserverProvider)
+
+	// Track spawn order
+	var spawnOrder []string
+	infra.Core.Processor.RegisterHandler(command.CmdSpawnProcess, &roleBasedSpawnHandler{
+		onCoordinator: func() (*command.CommandResult, error) {
+			spawnOrder = append(spawnOrder, "coordinator")
+			return &command.CommandResult{Success: true, Data: &mockSpawnResult{processID: "coordinator"}}, nil
+		},
+		onObserver: func() (*command.CommandResult, error) {
+			spawnOrder = append(spawnOrder, "observer")
+			return &command.CommandResult{Success: true, Data: &mockSpawnResult{processID: "observer"}}, nil
+		},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go infra.Core.Processor.Run(ctx)
+	require.NoError(t, infra.Core.Processor.WaitForReady(ctx))
+
+	// Execute full start
+	err = startWorkflow(ctx, supervisor, inst)
+
+	require.NoError(t, err)
+	require.Equal(t, WorkflowRunning, inst.State)
+	// Observer should spawn after coordinator (sequential, not parallel)
+	require.Equal(t, []string{"coordinator", "observer"}, spawnOrder, "Observer should spawn after coordinator")
+}
+
+// roleBasedSpawnHandler handles spawn commands differently based on the role.
+type roleBasedSpawnHandler struct {
+	onCoordinator func() (*command.CommandResult, error)
+	onObserver    func() (*command.CommandResult, error)
+	onWorker      func() (*command.CommandResult, error)
+}
+
+func (h *roleBasedSpawnHandler) Handle(_ context.Context, cmd command.Command) (*command.CommandResult, error) {
+	spawnCmd := cmd.(*command.SpawnProcessCommand)
+	switch spawnCmd.Role {
+	case repository.RoleCoordinator:
+		if h.onCoordinator != nil {
+			return h.onCoordinator()
+		}
+	case repository.RoleObserver:
+		if h.onObserver != nil {
+			return h.onObserver()
+		}
+	case repository.RoleWorker:
+		if h.onWorker != nil {
+			return h.onWorker()
+		}
+	}
+	// Default success
+	return &command.CommandResult{
+		Success: true,
+		Data:    &mockSpawnResult{processID: string(spawnCmd.Role)},
+	}, nil
+}

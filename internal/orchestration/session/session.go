@@ -57,13 +57,14 @@ type Session struct {
 	Status Status
 
 	// BufferedWriters for log files.
-	coordRaw       *BufferedWriter            // coordinator/raw.jsonl
-	coordMessages  *BufferedWriter            // coordinator/messages.jsonl (structured chat)
-	workerRaws     map[string]*BufferedWriter // workerID -> workers/{id}/raw.jsonl
-	workerMessages map[string]*BufferedWriter // workerID -> workers/{id}/messages.jsonl
-	messageLog     *BufferedWriter            // messages.jsonl (inter-agent messages)
-	mcpLog         *BufferedWriter            // mcp_requests.jsonl
-	commandLog     *BufferedWriter            // commands.jsonl (V2 command processor events)
+	coordRaw         *BufferedWriter            // coordinator/raw.jsonl
+	coordMessages    *BufferedWriter            // coordinator/messages.jsonl (structured chat)
+	observerMessages *BufferedWriter            // observer/messages.jsonl (structured chat)
+	workerRaws       map[string]*BufferedWriter // workerID -> workers/{id}/raw.jsonl
+	workerMessages   map[string]*BufferedWriter // workerID -> workers/{id}/messages.jsonl
+	messageLog       *BufferedWriter            // messages.jsonl (inter-agent messages)
+	mcpLog           *BufferedWriter            // mcp_requests.jsonl
+	commandLog       *BufferedWriter            // commands.jsonl (V2 command processor events)
 
 	// Metadata for tracking workers and token usage.
 	workers               []WorkerMetadata
@@ -139,6 +140,7 @@ func WithPathBuilder(pb *SessionPathBuilder) SessionOption {
 const (
 	// Directory names.
 	coordinatorDir = "coordinator"
+	observerDir    = "observer"
 	workersDir     = "workers"
 
 	// File names.
@@ -193,6 +195,12 @@ func New(id, dir string, opts ...SessionOption) (*Session, error) {
 		return nil, fmt.Errorf("creating workers directory: %w", err)
 	}
 
+	// Create observer directory
+	observerPath := filepath.Join(dir, observerDir)
+	if err := os.MkdirAll(observerPath, 0750); err != nil {
+		return nil, fmt.Errorf("creating observer directory: %w", err)
+	}
+
 	// Create coordinator raw.jsonl with BufferedWriter
 	coordRawPath := filepath.Join(coordPath, rawJSONLFile)
 	coordRawFile, err := os.OpenFile(coordRawPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600) //nolint:gosec // G304: path is constructed from trusted dir parameter
@@ -210,12 +218,23 @@ func New(id, dir string, opts ...SessionOption) (*Session, error) {
 	}
 	coordMessages := NewBufferedWriter(coordMsgsFile)
 
+	// Create observer messages.jsonl with BufferedWriter (structured chat messages)
+	observerMsgsPath := filepath.Join(observerPath, chatMessagesFile)
+	observerMsgsFile, err := os.OpenFile(observerMsgsPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600) //nolint:gosec // G304: path is constructed from trusted dir parameter
+	if err != nil {
+		_ = coordRaw.Close()
+		_ = coordMessages.Close()
+		return nil, fmt.Errorf("creating observer messages.jsonl: %w", err)
+	}
+	observerMessages := NewBufferedWriter(observerMsgsFile)
+
 	// Create messages.jsonl with BufferedWriter (inter-agent messages)
 	messagesPath := filepath.Join(dir, messagesJSONLFile)
 	messageLogFile, err := os.OpenFile(messagesPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600) //nolint:gosec // G304: path is constructed from trusted dir parameter
 	if err != nil {
 		_ = coordRaw.Close()
 		_ = coordMessages.Close()
+		_ = observerMessages.Close()
 		return nil, fmt.Errorf("creating messages.jsonl: %w", err)
 	}
 	messageLog := NewBufferedWriter(messageLogFile)
@@ -226,6 +245,7 @@ func New(id, dir string, opts ...SessionOption) (*Session, error) {
 	if err != nil {
 		_ = coordRaw.Close()
 		_ = coordMessages.Close()
+		_ = observerMessages.Close()
 		_ = messageLog.Close()
 		return nil, fmt.Errorf("creating mcp_requests.jsonl: %w", err)
 	}
@@ -237,6 +257,7 @@ func New(id, dir string, opts ...SessionOption) (*Session, error) {
 	if err != nil {
 		_ = coordRaw.Close()
 		_ = coordMessages.Close()
+		_ = observerMessages.Close()
 		_ = messageLog.Close()
 		_ = mcpLog.Close()
 		return nil, fmt.Errorf("creating commands.jsonl: %w", err)
@@ -253,20 +274,21 @@ func New(id, dir string, opts ...SessionOption) (*Session, error) {
 	// double-counting on resume - see setMetrics() in process.go for the turn-cost
 	// publishing semantics that make this safe.
 	sess := &Session{
-		ID:             id,
-		Dir:            dir,
-		StartTime:      startTime,
-		Status:         StatusRunning,
-		coordRaw:       coordRaw,
-		coordMessages:  coordMessages,
-		workerRaws:     make(map[string]*BufferedWriter),
-		workerMessages: make(map[string]*BufferedWriter),
-		messageLog:     messageLog,
-		mcpLog:         mcpLog,
-		commandLog:     commandLog,
-		workers:        []WorkerMetadata{},
-		tokenUsage:     TokenUsageSummary{},
-		closed:         false,
+		ID:               id,
+		Dir:              dir,
+		StartTime:        startTime,
+		Status:           StatusRunning,
+		coordRaw:         coordRaw,
+		coordMessages:    coordMessages,
+		observerMessages: observerMessages,
+		workerRaws:       make(map[string]*BufferedWriter),
+		workerMessages:   make(map[string]*BufferedWriter),
+		messageLog:       messageLog,
+		mcpLog:           mcpLog,
+		commandLog:       commandLog,
+		workers:          []WorkerMetadata{},
+		tokenUsage:       TokenUsageSummary{},
+		closed:           false,
 	}
 
 	// Apply any provided options to set application context fields
@@ -350,12 +372,31 @@ func Reopen(sessionID, sessionDir string, opts ...SessionOption) (*Session, erro
 	}
 	coordMessages := NewBufferedWriter(coordMsgsFile)
 
+	// Create observer directory if it doesn't exist (for sessions created before observer support)
+	observerPath := filepath.Join(sessionDir, observerDir)
+	if err := os.MkdirAll(observerPath, 0750); err != nil {
+		_ = coordRaw.Close()
+		_ = coordMessages.Close()
+		return nil, fmt.Errorf("creating observer directory: %w", err)
+	}
+
+	// Open observer/messages.jsonl in append mode
+	observerMsgsPath := filepath.Join(observerPath, chatMessagesFile)
+	observerMsgsFile, err := os.OpenFile(observerMsgsPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600) //nolint:gosec // G304: path is constructed from trusted sessionDir parameter
+	if err != nil {
+		_ = coordRaw.Close()
+		_ = coordMessages.Close()
+		return nil, fmt.Errorf("reopening observer messages.jsonl: %w", err)
+	}
+	observerMessages := NewBufferedWriter(observerMsgsFile)
+
 	// Open messages.jsonl (inter-agent messages) in append mode
 	messagesPath := filepath.Join(sessionDir, messagesJSONLFile)
 	messageLogFile, err := os.OpenFile(messagesPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600) //nolint:gosec // G304: path is constructed from trusted sessionDir parameter
 	if err != nil {
 		_ = coordRaw.Close()
 		_ = coordMessages.Close()
+		_ = observerMessages.Close()
 		return nil, fmt.Errorf("reopening messages.jsonl: %w", err)
 	}
 	messageLog := NewBufferedWriter(messageLogFile)
@@ -366,6 +407,7 @@ func Reopen(sessionID, sessionDir string, opts ...SessionOption) (*Session, erro
 	if err != nil {
 		_ = coordRaw.Close()
 		_ = coordMessages.Close()
+		_ = observerMessages.Close()
 		_ = messageLog.Close()
 		return nil, fmt.Errorf("reopening mcp_requests.jsonl: %w", err)
 	}
@@ -377,6 +419,7 @@ func Reopen(sessionID, sessionDir string, opts ...SessionOption) (*Session, erro
 	if err != nil {
 		_ = coordRaw.Close()
 		_ = coordMessages.Close()
+		_ = observerMessages.Close()
 		_ = messageLog.Close()
 		_ = mcpLog.Close()
 		return nil, fmt.Errorf("reopening commands.jsonl: %w", err)
@@ -393,17 +436,18 @@ func Reopen(sessionID, sessionDir string, opts ...SessionOption) (*Session, erro
 	// Example: Prior session had $1.50 cost. Resumed session receives turn costs of
 	// $0.10, $0.20. Final total = $1.50 + $0.10 + $0.20 = $1.80 (correct).
 	sess := &Session{
-		ID:             sessionID,
-		Dir:            sessionDir,
-		StartTime:      time.Now(),
-		Status:         StatusRunning,
-		coordRaw:       coordRaw,
-		coordMessages:  coordMessages,
-		workerRaws:     make(map[string]*BufferedWriter),
-		workerMessages: make(map[string]*BufferedWriter),
-		messageLog:     messageLog,
-		mcpLog:         mcpLog,
-		commandLog:     commandLog,
+		ID:               sessionID,
+		Dir:              sessionDir,
+		StartTime:        time.Now(),
+		Status:           StatusRunning,
+		coordRaw:         coordRaw,
+		coordMessages:    coordMessages,
+		observerMessages: observerMessages,
+		workerRaws:       make(map[string]*BufferedWriter),
+		workerMessages:   make(map[string]*BufferedWriter),
+		messageLog:       messageLog,
+		mcpLog:           mcpLog,
+		commandLog:       commandLog,
 		// Restore workers from metadata to preserve existing worker list
 		workers:               meta.Workers,
 		tokenUsage:            meta.TokenUsage,            // Load prior aggregate - see comment above for why this is safe
@@ -443,6 +487,26 @@ func (s *Session) WriteCoordinatorMessage(msg chatrender.Message) error {
 	// Append newline for JSONL format
 	data = append(data, '\n')
 	return s.coordMessages.Write(data)
+}
+
+// WriteObserverMessage writes a structured chat message to observer/messages.jsonl.
+// The message is serialized to JSON and appended as a single JSONL line.
+func (s *Session) WriteObserverMessage(msg chatrender.Message) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed {
+		return os.ErrClosed
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("marshaling observer message: %w", err)
+	}
+
+	// Append newline for JSONL format
+	data = append(data, '\n')
+	return s.observerMessages.Write(data)
 }
 
 // WriteWorkerMessage writes a structured chat message to workers/{workerID}/messages.jsonl.
@@ -611,6 +675,13 @@ func (s *Session) Close(status Status) error {
 	}
 	if err := s.coordMessages.Close(); err != nil && firstErr == nil {
 		firstErr = err
+	}
+
+	// Close observer writer
+	if s.observerMessages != nil {
+		if err := s.observerMessages.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
 	}
 
 	// Close message, MCP, and command logs
@@ -978,6 +1049,61 @@ func (s *Session) handleCoordinatorProcessEvent(event events.ProcessEvent) {
 	}
 }
 
+// handleObserverProcessEvent processes an observer ProcessEvent and writes to appropriate logs.
+func (s *Session) handleObserverProcessEvent(event events.ProcessEvent) {
+	now := time.Now().UTC()
+
+	switch event.Type {
+	case events.ProcessOutput:
+		// Detect tool calls by 🔧 prefix
+		isToolCall := strings.HasPrefix(event.Output, "🔧")
+		msg := chatrender.Message{
+			Role:       string(event.Role),
+			Content:    event.Output,
+			IsToolCall: isToolCall,
+			Timestamp:  &now,
+		}
+		if err := s.WriteObserverMessage(msg); err != nil {
+			log.Warn(log.CatOrch, "Session: failed to write observer message", "error", err)
+		}
+
+	case events.ProcessIncoming:
+		// Incoming message to observer
+		msg := chatrender.Message{
+			Role:      event.Sender,
+			Content:   event.Message,
+			Timestamp: &now,
+		}
+		if err := s.WriteObserverMessage(msg); err != nil {
+			log.Warn(log.CatOrch, "Session: failed to write observer incoming message", "error", err)
+		}
+
+	case events.ProcessTokenUsage:
+		// Update observer token usage in metadata
+		if event.Metrics != nil {
+			s.updateTokenUsage("observer", event.Metrics.TokensUsed, event.Metrics.OutputTokens, event.Metrics.TotalCostUSD)
+		}
+
+	case events.ProcessError:
+		// Write error as system message
+		errMsg := "unknown error"
+		if event.Error != nil {
+			errMsg = event.Error.Error()
+		}
+		msg := chatrender.Message{
+			Role:      "system",
+			Content:   "Error: " + errMsg,
+			Timestamp: &now,
+		}
+		if err := s.WriteObserverMessage(msg); err != nil {
+			log.Warn(log.CatOrch, "Session: failed to write observer error message", "error", err)
+		}
+
+	case events.ProcessStatusChange, events.ProcessReady, events.ProcessWorking:
+		// Status changes are not user-visible chat - skip writing to messages.jsonl
+	}
+}
+
 // attachProcessBroker subscribes to the process event broker for worker events.
 //
 // The subscriber goroutine handles:
@@ -1010,10 +1136,11 @@ func (s *Session) attachProcessBroker(ctx context.Context, broker *pubsub.Broker
 }
 
 // AttachV2EventBus subscribes to the unified v2EventBus for all process events.
-// This handles both coordinator and worker events via the unified ProcessEvent type.
+// This handles coordinator, observer, and worker events via the unified ProcessEvent type.
 //
 // The subscriber goroutine type-asserts to ProcessEvent and routes events based on Role:
 // - RoleCoordinator: routes to handleCoordinatorProcessEvent
+// - RoleObserver: routes to handleObserverProcessEvent
 // - RoleWorker: routes to handleProcessEvent
 //
 // This replaces the legacy AttachCoordinatorBroker method that used CoordinatorEvent type.
@@ -1033,6 +1160,8 @@ func (s *Session) AttachV2EventBus(ctx context.Context, broker *pubsub.Broker[an
 				if processEvent, isProcess := ev.Payload.(events.ProcessEvent); isProcess {
 					if processEvent.IsCoordinator() {
 						s.handleCoordinatorProcessEvent(processEvent)
+					} else if processEvent.IsObserver() {
+						s.handleObserverProcessEvent(processEvent)
 					} else if processEvent.IsWorker() {
 						s.handleProcessEvent(processEvent)
 					}

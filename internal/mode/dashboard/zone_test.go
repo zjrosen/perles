@@ -59,9 +59,10 @@ func TestMakeTabZoneID(t *testing.T) {
 		expected string
 	}{
 		{name: "coordinator tab", index: TabCoordinator, expected: "tab:0"},
-		{name: "messages tab", index: TabMessages, expected: "tab:1"},
-		{name: "first worker tab", index: TabFirstWorker, expected: "tab:2"},
-		{name: "second worker tab", index: TabFirstWorker + 1, expected: "tab:3"},
+		{name: "observer tab", index: TabObserver, expected: "tab:1"},
+		{name: "messages tab", index: TabMessages, expected: "tab:2"},
+		{name: "first worker tab", index: TabFirstWorker, expected: "tab:3"},
+		{name: "second worker tab", index: TabFirstWorker + 1, expected: "tab:4"},
 	}
 
 	for _, tt := range tests {

@@ -476,14 +476,24 @@ func (s *defaultSupervisor) AllocateResources(ctx context.Context, inst *Workflo
 	// Pass sess as AccountabilityWriter so workers can persist their accountability summaries
 	workerServers := newWorkerServerCache(sess, infra.Core.Adapter, infra.Internal.TurnEnforcer, infra.Core.FabricService, sess, workflowCtx)
 
+	// Create observer MCP server (singleton - one observer per workflow)
+	observerServer := mcp.NewObserverServer(repository.ObserverID)
+	if infra.Core.FabricService != nil {
+		observerServer.SetFabricService(infra.Core.FabricService)
+	}
+
+	// Attach observer MCP broker to session for mcp_requests.jsonl logging
+	sess.AttachMCPBroker(workflowCtx, observerServer.Broker())
+
 	// Set up HTTP routes
 	// IMPORTANT: Route registration order matters!
-	// 1. MCP routes first (/mcp, /worker/)
+	// 1. MCP routes first (/mcp, /worker/, /observer)
 	// 2. API routes second (/api/*)
 	// 3. SPA catch-all LAST (/) - serves index.html for client-side routing
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", mcpCoordServer.ServeHTTP())
 	mux.HandleFunc("/worker/", workerServers.ServeHTTP)
+	mux.Handle("/observer", observerServer.ServeHTTP())
 
 	httpServer = &http.Server{
 		Handler:           mux,
@@ -525,6 +535,7 @@ func (s *defaultSupervisor) AllocateResources(ctx context.Context, inst *Workflo
 
 // SpawnCoordinator spawns the coordinator process for a workflow.
 // Must be called after AllocateResources. Transitions the workflow to Running state.
+// If observer is enabled, also spawns the observer sequentially after coordinator.
 func (s *defaultSupervisor) SpawnCoordinator(ctx context.Context, inst *WorkflowInstance) error {
 	// Validate resources have been allocated
 	if inst.Infrastructure == nil {
@@ -553,12 +564,50 @@ func (s *defaultSupervisor) SpawnCoordinator(ctx context.Context, inst *Workflow
 		return fmt.Errorf("spawn coordinator failed: %w", result.Error)
 	}
 
+	// Spawn observer after coordinator (sequential, not parallel)
+	// Uses fail-open error handling: log warnings but don't fail workflow
+	s.spawnObserver(ctx, inst)
+
 	// Transition to Running state
 	if err := inst.TransitionTo(WorkflowRunning); err != nil {
 		return fmt.Errorf("transitioning to Running: %w", err)
 	}
 
 	return nil
+}
+
+// spawnObserver spawns the observer process for a workflow if enabled.
+// Uses fail-open error handling: logs warnings but returns nil on error
+// to avoid blocking the workflow if observer fails to spawn.
+func (s *defaultSupervisor) spawnObserver(_ context.Context, inst *WorkflowInstance) {
+	// Check if observer is enabled (RoleObserver present in agentProviders)
+	if _, ok := s.agentProviders[client.RoleObserver]; !ok {
+		log.Debug(log.CatOrch, "Observer disabled, skipping spawn", "subsystem", "supervisor", "workflowID", inst.ID)
+		return
+	}
+
+	// Validate infrastructure is available
+	if inst.Infrastructure == nil || inst.Infrastructure.Core.Processor == nil {
+		log.Warn(log.CatOrch, "Cannot spawn observer: infrastructure not available",
+			"subsystem", "supervisor", "workflowID", inst.ID)
+		return
+	}
+
+	// Spawn observer
+	spawnCmd := command.NewSpawnProcessCommand(command.SourceInternal, repository.RoleObserver)
+	result, err := inst.Infrastructure.Core.Processor.SubmitAndWait(inst.Ctx, spawnCmd)
+	if err != nil {
+		log.Warn(log.CatOrch, "Failed to spawn observer (fail-open)",
+			"subsystem", "supervisor", "workflowID", inst.ID, "error", err)
+		return
+	}
+	if !result.Success {
+		log.Warn(log.CatOrch, "Observer spawn command failed (fail-open)",
+			"subsystem", "supervisor", "workflowID", inst.ID, "error", result.Error)
+		return
+	}
+
+	log.Debug(log.CatOrch, "Observer spawned successfully", "subsystem", "supervisor", "workflowID", inst.ID)
 }
 
 // Pause suspends a running workflow, stopping all processes and clearing queues.

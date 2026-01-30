@@ -34,6 +34,10 @@ const (
 	EventWorkerOutput   EventType = "worker.output"
 	EventWorkerIncoming EventType = "worker.incoming"
 
+	// Observer events
+	EventObserverSpawned EventType = "observer.spawned"
+	EventObserverOutput  EventType = "observer.output"
+
 	// Task events
 	EventTaskAssigned  EventType = "task.assigned"
 	EventTaskCompleted EventType = "task.completed"
@@ -141,16 +145,24 @@ func ClassifyEvent(v2Event any) EventType {
 	// Classify based on event type and role
 	switch processEvent.Type {
 	case events.ProcessSpawned:
-		if processEvent.Role == events.RoleCoordinator {
+		switch processEvent.Role {
+		case events.RoleCoordinator:
 			return EventCoordinatorSpawned
+		case events.RoleObserver:
+			return EventObserverSpawned
+		default:
+			return EventWorkerSpawned
 		}
-		return EventWorkerSpawned
 
 	case events.ProcessOutput:
-		if processEvent.Role == events.RoleCoordinator {
+		switch processEvent.Role {
+		case events.RoleCoordinator:
 			return EventCoordinatorOutput
+		case events.RoleObserver:
+			return EventObserverOutput
+		default:
+			return EventWorkerOutput
 		}
-		return EventWorkerOutput
 
 	case events.ProcessStatusChange:
 		// Map status changes to more specific events
@@ -161,17 +173,25 @@ func ClassifyEvent(v2Event any) EventType {
 			return EventWorkerRetired
 		}
 		// Generic status change - classify by role
-		if processEvent.Role == events.RoleCoordinator {
+		switch processEvent.Role {
+		case events.RoleCoordinator:
 			return EventCoordinatorOutput
+		case events.RoleObserver:
+			return EventObserverOutput
+		default:
+			return EventWorkerOutput
 		}
-		return EventWorkerOutput
 
 	case events.ProcessReady, events.ProcessWorking, events.ProcessTokenUsage, events.ProcessQueueChanged:
 		// Ready/Working/TokenUsage/QueueChanged state transitions - classify by role
-		if processEvent.Role == events.RoleCoordinator {
+		switch processEvent.Role {
+		case events.RoleCoordinator:
 			return EventCoordinatorOutput
+		case events.RoleObserver:
+			return EventObserverOutput
+		default:
+			return EventWorkerOutput
 		}
-		return EventWorkerOutput
 
 	case events.ProcessWorkflowComplete:
 		return EventWorkflowCompleted
@@ -188,10 +208,14 @@ func ClassifyEvent(v2Event any) EventType {
 		return EventUserNotification
 
 	case events.ProcessIncoming:
-		if processEvent.Role == events.RoleCoordinator {
+		switch processEvent.Role {
+		case events.RoleCoordinator:
 			return EventCoordinatorIncoming
+		case events.RoleObserver:
+			return EventObserverOutput // Observer incoming treated as output event
+		default:
+			return EventWorkerIncoming
 		}
-		return EventWorkerIncoming
 
 	default:
 		return EventUnknown
@@ -233,6 +257,17 @@ func (t EventType) IsWorkerEvent() bool {
 		EventWorkerRetired,
 		EventWorkerOutput,
 		EventWorkerIncoming:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsObserverEvent returns true if the event type is an observer event.
+func (t EventType) IsObserverEvent() bool {
+	switch t {
+	case EventObserverSpawned,
+		EventObserverOutput:
 		return true
 	default:
 		return false

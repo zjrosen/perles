@@ -1090,7 +1090,8 @@ func (h *SpawnProcessHandler) Handle(ctx context.Context, cmd command.Command) (
 func (h *SpawnProcessHandler) handleSpawn(ctx context.Context, spawnCmd *command.SpawnProcessCommand, span trace.Span) (*command.CommandResult, error) {
 	var processID string
 
-	if spawnCmd.Role == repository.RoleCoordinator {
+	switch spawnCmd.Role {
+	case repository.RoleCoordinator:
 		// Coordinator-specific logic
 		processID = repository.CoordinatorID
 
@@ -1098,7 +1099,15 @@ func (h *SpawnProcessHandler) handleSpawn(ctx context.Context, spawnCmd *command
 		if _, err := h.processRepo.GetCoordinator(); err == nil {
 			return nil, ErrCoordinatorExists
 		}
-	} else {
+	case repository.RoleObserver:
+		// Observer-specific logic
+		processID = repository.ObserverID
+
+		// Enforce singleton constraint (only one observer at a time)
+		if _, err := h.processRepo.Get(repository.ObserverID); err == nil {
+			return nil, ErrObserverExists
+		}
+	default:
 		// Worker-specific logic
 		processID = h.generateWorkerID()
 	}

@@ -204,9 +204,12 @@ type OrchestrationConfig struct {
 	Client            string               `mapstructure:"client"`             // "claude" (default), "amp", "codex", or "gemini" - backward compat
 	CoordinatorClient string               `mapstructure:"coordinator_client"` // Client for coordinator (overrides Client)
 	WorkerClient      string               `mapstructure:"worker_client"`      // Client for workers (overrides Client)
+	ObserverClient    string               `mapstructure:"observer_client"`    // Client for observer (default: "claude" with haiku model)
+	ObserverEnabled   bool                 `mapstructure:"observer_enabled"`   // Enable observer agent (default: false)
 	APIPort           int                  `mapstructure:"api_port"`           // HTTP API port (0 = auto-assign, default: 0)
 	Claude            ClaudeClientConfig   `mapstructure:"claude"`
-	ClaudeWorker      ClaudeClientConfig   `mapstructure:"claude_worker"` // Worker-specific Claude config (uses claude config if empty)
+	ClaudeWorker      ClaudeClientConfig   `mapstructure:"claude_worker"`   // Worker-specific Claude config (uses claude config if empty)
+	ClaudeObserver    ClaudeClientConfig   `mapstructure:"claude_observer"` // Observer-specific Claude config (uses claude config if empty)
 	Codex             CodexClientConfig    `mapstructure:"codex"`
 	Amp               AmpClientConfig      `mapstructure:"amp"`
 	Gemini            GeminiClientConfig   `mapstructure:"gemini"`
@@ -269,16 +272,78 @@ func (o OrchestrationConfig) WorkerClientType() client.ClientType {
 	return client.ClientClaude
 }
 
-// AgentProviders returns the AgentProviders map for coordinator and worker roles.
+// ObserverClientType returns the client type for the observer.
+// Resolution priority: observer_client > "claude"
+// Note: Observer defaults to claude with haiku model for cost efficiency.
+func (o OrchestrationConfig) ObserverClientType() client.ClientType {
+	if o.ObserverClient != "" {
+		return client.ClientType(o.ObserverClient)
+	}
+	return client.ClientClaude
+}
+
+// IsObserverEnabled returns whether the observer agent is enabled.
+// Defaults to false.
+func (o OrchestrationConfig) IsObserverEnabled() bool {
+	return o.ObserverEnabled
+}
+
+// AgentProviders returns the AgentProviders map for coordinator, worker, and observer roles.
 // This is the preferred way to get AI clients for orchestration.
+// Observer is only included when ObserverEnabled is explicitly set to true.
 func (o OrchestrationConfig) AgentProviders() client.AgentProviders {
 	coordType := o.CoordinatorClientType()
 	workerType := o.WorkerClientType()
 
-	return client.AgentProviders{
+	providers := client.AgentProviders{
 		client.RoleCoordinator: client.NewAgentProvider(coordType, o.extensionsForClient(coordType, false)),
 		client.RoleWorker:      client.NewAgentProvider(workerType, o.extensionsForClient(workerType, true)),
 	}
+
+	if o.IsObserverEnabled() {
+		observerType := o.ObserverClientType()
+		providers[client.RoleObserver] = client.NewAgentProvider(observerType, o.extensionsForObserver(observerType))
+	}
+
+	return providers
+}
+
+// extensionsForObserver builds extensions for the observer client.
+// Observer defaults to claude.model, with claude_observer.model as override.
+func (o OrchestrationConfig) extensionsForObserver(clientType client.ClientType) map[string]any {
+	extensions := make(map[string]any)
+
+	switch clientType {
+	case client.ClientClaude:
+		// Priority: claude_observer.model > claude.model > (no default, let claude pick)
+		if o.ClaudeObserver.Model != "" {
+			extensions[client.ExtClaudeModel] = o.ClaudeObserver.Model
+		} else if o.Claude.Model != "" {
+			extensions[client.ExtClaudeModel] = o.Claude.Model
+		}
+		// Observer doesn't need custom env vars
+	case client.ClientCodex:
+		if o.Codex.Model != "" {
+			extensions[client.ExtCodexModel] = o.Codex.Model
+		}
+	case client.ClientAmp:
+		if o.Amp.Model != "" {
+			extensions[client.ExtAmpModel] = o.Amp.Model
+		}
+		if o.Amp.Mode != "" {
+			extensions["amp.mode"] = o.Amp.Mode
+		}
+	case client.ClientGemini:
+		if o.Gemini.Model != "" {
+			extensions[client.ExtGeminiModel] = o.Gemini.Model
+		}
+	case client.ClientOpenCode:
+		if o.OpenCode.Model != "" {
+			extensions[client.ExtOpenCodeModel] = o.OpenCode.Model
+		}
+	}
+
+	return extensions
 }
 
 // extensionsForClient builds extensions for the given client type.
@@ -532,6 +597,11 @@ func ValidateOrchestration(orch OrchestrationConfig) error {
 	// Validate worker_client
 	if orch.WorkerClient != "" && !isAllowedClient(orch.WorkerClient) {
 		return fmt.Errorf("orchestration.worker_client must be one of %v, got %q", allowedClients, orch.WorkerClient)
+	}
+
+	// Validate observer_client
+	if orch.ObserverClient != "" && !isAllowedClient(orch.ObserverClient) {
+		return fmt.Errorf("orchestration.observer_client must be one of %v, got %q", allowedClients, orch.ObserverClient)
 	}
 
 	// Validate Amp mode

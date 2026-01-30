@@ -220,6 +220,94 @@ func GenerateWorkerConfig(workerID, workDir string) (string, error) {
 	return GenerateWorkerConfigHTTP(8765, workerID)
 }
 
+// GenerateObserverConfigHTTP creates an MCP config for the observer that connects to an HTTP server.
+// The observer uses a dedicated endpoint: /observer
+// This format is used by Claude CLI which expects {"type": "http", "url": "..."}.
+func GenerateObserverConfigHTTP(port int) (string, error) {
+	config := MCPConfig{
+		MCPServers: map[string]MCPServerConfig{
+			"perles-observer": {
+				Type: "http",
+				URL:  fmt.Sprintf("http://localhost:%d/observer", port),
+			},
+		},
+	}
+
+	data, err := json.Marshal(config)
+	if err != nil {
+		return "", fmt.Errorf("marshaling config: %w", err)
+	}
+
+	return string(data), nil
+}
+
+// GenerateObserverConfigGemini creates an MCP config for the observer using Gemini CLI format.
+// Gemini CLI uses "httpUrl" for streamable HTTP transport.
+func GenerateObserverConfigGemini(port int) (string, error) {
+	config := MCPConfig{
+		MCPServers: map[string]MCPServerConfig{
+			"perles-observer": {
+				HTTPUrl: fmt.Sprintf("http://localhost:%d/observer", port),
+			},
+		},
+	}
+
+	data, err := json.Marshal(config)
+	if err != nil {
+		return "", fmt.Errorf("marshaling config: %w", err)
+	}
+
+	return string(data), nil
+}
+
+// GenerateObserverConfigAmp creates an MCP config for the observer using Amp CLI format.
+func GenerateObserverConfigAmp(port int) (string, error) {
+	config := AmpMCPConfig{
+		"perles-observer": {
+			URL: fmt.Sprintf("http://localhost:%d/observer", port),
+		},
+	}
+
+	data, err := json.Marshal(config)
+	if err != nil {
+		return "", fmt.Errorf("marshaling config: %w", err)
+	}
+
+	return string(data), nil
+}
+
+// GenerateObserverConfigCodex creates an MCP config for the observer using Codex CLI format.
+// Codex expects TOML syntax for the -c flag: mcp_servers.perles-observer={url="http://localhost:PORT/observer"}
+func GenerateObserverConfigCodex(port int) string {
+	return fmt.Sprintf(`mcp_servers.perles-observer={url="http://localhost:%d/observer"}`, port)
+}
+
+// GenerateObserverConfigOpenCode creates an MCP config for the observer using OpenCode format.
+// OpenCode expects {"mcp": {"serverName": {"type": "remote", "url": "..."}}} in opencode.jsonc.
+// Includes permission overrides to auto-approve in headless mode.
+func GenerateObserverConfigOpenCode(port int) (string, error) {
+	config := map[string]any{
+		"permission": map[string]any{
+			"*": map[string]any{
+				"*": "allow",
+			},
+		},
+		"mcp": map[string]any{
+			"perles-observer": map[string]any{
+				"type": "remote",
+				"url":  fmt.Sprintf("http://localhost:%d/observer", port),
+			},
+		},
+	}
+
+	data, err := json.Marshal(config)
+	if err != nil {
+		return "", fmt.Errorf("marshaling config: %w", err)
+	}
+
+	return string(data), nil
+}
+
 // ConfigToFlag formats the config as a command line flag value.
 // Returns the string suitable for: claude --mcp-config '<result>'
 func ConfigToFlag(configJSON string) string {

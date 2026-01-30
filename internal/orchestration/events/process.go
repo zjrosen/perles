@@ -46,6 +46,8 @@ const (
 	RoleCoordinator ProcessRole = "coordinator"
 	// RoleWorker is a task-executing process.
 	RoleWorker ProcessRole = "worker"
+	// RoleObserver is a passive monitoring process that subscribes to all channels.
+	RoleObserver ProcessRole = "observer"
 )
 
 // ProcessStatus represents the process's current operational state.
@@ -125,6 +127,11 @@ func (e ProcessEvent) IsCoordinator() bool {
 // IsWorker returns true if this event is from a worker.
 func (e ProcessEvent) IsWorker() bool {
 	return e.Role == RoleWorker
+}
+
+// IsObserver returns true if this event is from the observer.
+func (e ProcessEvent) IsObserver() bool {
+	return e.Role == RoleObserver
 }
 
 // ProcessPhase represents what workflow step a worker process is in.

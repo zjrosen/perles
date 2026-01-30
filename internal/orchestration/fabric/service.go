@@ -27,6 +27,7 @@ type Service struct {
 	tasksID    string
 	planningID string
 	generalID  string
+	observerID string
 
 	// Event handler (optional)
 	onEvent func(Event)
@@ -87,6 +88,7 @@ func (s *Service) InitSession(createdBy string) error {
 	s.tasksID = channelIDs[domain.SlugTasks]
 	s.planningID = channelIDs[domain.SlugPlanning]
 	s.generalID = channelIDs[domain.SlugGeneral]
+	s.observerID = channelIDs[domain.SlugObserver]
 
 	// Create child_of dependencies for non-root channels
 	for slug, id := range channelIDs {
@@ -126,6 +128,8 @@ func (s *Service) GetChannelID(slug string) string {
 		return s.planningID
 	case domain.SlugGeneral:
 		return s.generalID
+	case domain.SlugObserver:
+		return s.observerID
 	default:
 		return ""
 	}
@@ -144,6 +148,8 @@ func (s *Service) GetChannelSlug(channelID string) string {
 		return domain.SlugPlanning
 	case s.generalID:
 		return domain.SlugGeneral
+	case s.observerID:
+		return domain.SlugObserver
 	default:
 		return ""
 	}
@@ -594,6 +600,26 @@ func (s *Service) Unsubscribe(channelSlug, agentID string) error {
 // GetSubscriptions returns all subscriptions for an agent.
 func (s *Service) GetSubscriptions(agentID string) ([]domain.Subscription, error) {
 	return s.subscriptions.ListForAgent(agentID)
+}
+
+// UnsubscribeAll removes all subscriptions for an agent.
+// This is used to clean up when an agent (e.g., Observer) is stopped.
+func (s *Service) UnsubscribeAll(agentID string) error {
+	subs, err := s.subscriptions.ListForAgent(agentID)
+	if err != nil {
+		return fmt.Errorf("listing subscriptions for %s: %w", agentID, err)
+	}
+
+	for _, sub := range subs {
+		if err := s.subscriptions.Unsubscribe(sub.ChannelID, agentID); err != nil {
+			// Log but continue - best effort cleanup
+			continue
+		}
+		channelSlug := s.GetChannelSlug(sub.ChannelID)
+		s.emit(NewUnsubscribedEvent(sub.ChannelID, channelSlug, agentID))
+	}
+
+	return nil
 }
 
 // findChannelForMessage traverses child_of to find the channel.

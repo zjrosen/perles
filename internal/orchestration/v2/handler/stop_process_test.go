@@ -2,6 +2,7 @@ package handler_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -676,4 +677,127 @@ func TestStopWorkerHandler_DrainsQueuedMessages(t *testing.T) {
 	queueEvent := result.Events[1].(events.ProcessEvent)
 	assert.Equal(t, events.ProcessQueueChanged, queueEvent.Type)
 	assert.Equal(t, 0, queueEvent.QueueCount)
+}
+
+// mockFabricUnsubscriber implements FabricUnsubscriber for testing.
+type mockFabricUnsubscriber struct {
+	unsubscribeCalls []string
+	err              error
+}
+
+func (m *mockFabricUnsubscriber) UnsubscribeAll(agentID string) error {
+	m.unsubscribeCalls = append(m.unsubscribeCalls, agentID)
+	return m.err
+}
+
+func TestStopWorkerHandler_Observer_UnsubscribesFromAllChannels(t *testing.T) {
+	processRepo, taskRepo, queueRepo := setupStopWorkerRepos()
+	registry := process.NewProcessRegistry()
+
+	// Create observer process
+	observer := &repository.Process{
+		ID:     "observer",
+		Role:   repository.RoleObserver,
+		Status: repository.StatusWorking,
+	}
+	processRepo.AddProcess(observer)
+
+	// Create mock unsubscriber
+	mockUnsubscriber := &mockFabricUnsubscriber{}
+
+	// Create live process
+	mockProc := newMockHeadlessProcess(6666)
+	liveProcess := process.New("observer", repository.RoleObserver, mockProc, nil, nil)
+	liveProcess.Start()
+	registry.Register(liveProcess)
+
+	h := handler.NewStopWorkerHandler(processRepo, taskRepo, queueRepo, registry,
+		handler.WithFabricUnsubscriber(mockUnsubscriber))
+
+	cmd := command.NewStopProcessCommand(command.SourceUser, "observer", false, "")
+	result, err := h.Handle(context.Background(), cmd)
+
+	require.NoError(t, err)
+	assert.True(t, result.Success)
+
+	// Verify UnsubscribeAll was called for observer
+	require.Len(t, mockUnsubscriber.unsubscribeCalls, 1)
+	assert.Equal(t, "observer", mockUnsubscriber.unsubscribeCalls[0])
+
+	// Verify observer is stopped
+	updated, _ := processRepo.Get("observer")
+	assert.Equal(t, repository.StatusStopped, updated.Status)
+}
+
+func TestStopWorkerHandler_Worker_DoesNotCallUnsubscribe(t *testing.T) {
+	processRepo, taskRepo, queueRepo := setupStopWorkerRepos()
+	registry := process.NewProcessRegistry()
+
+	// Create worker process (not observer)
+	worker := &repository.Process{
+		ID:     "worker-1",
+		Role:   repository.RoleWorker,
+		Status: repository.StatusWorking,
+		Phase:  phasePtr(events.ProcessPhaseImplementing),
+	}
+	processRepo.AddProcess(worker)
+
+	// Create mock unsubscriber
+	mockUnsubscriber := &mockFabricUnsubscriber{}
+
+	// Create live process
+	mockProc := newMockHeadlessProcess(7777)
+	liveProcess := process.New("worker-1", repository.RoleWorker, mockProc, nil, nil)
+	liveProcess.Start()
+	registry.Register(liveProcess)
+
+	h := handler.NewStopWorkerHandler(processRepo, taskRepo, queueRepo, registry,
+		handler.WithFabricUnsubscriber(mockUnsubscriber))
+
+	cmd := command.NewStopProcessCommand(command.SourceUser, "worker-1", false, "")
+	result, err := h.Handle(context.Background(), cmd)
+
+	require.NoError(t, err)
+	assert.True(t, result.Success)
+
+	// Verify UnsubscribeAll was NOT called for worker
+	assert.Empty(t, mockUnsubscriber.unsubscribeCalls)
+}
+
+func TestStopWorkerHandler_Observer_UnsubscribeError_DoesNotBlockStop(t *testing.T) {
+	processRepo, taskRepo, queueRepo := setupStopWorkerRepos()
+	registry := process.NewProcessRegistry()
+
+	// Create observer process
+	observer := &repository.Process{
+		ID:     "observer",
+		Role:   repository.RoleObserver,
+		Status: repository.StatusWorking,
+	}
+	processRepo.AddProcess(observer)
+
+	// Create mock unsubscriber that returns an error
+	mockUnsubscriber := &mockFabricUnsubscriber{
+		err: errors.New("unsubscribe failed"),
+	}
+
+	// Create live process
+	mockProc := newMockHeadlessProcess(8888)
+	liveProcess := process.New("observer", repository.RoleObserver, mockProc, nil, nil)
+	liveProcess.Start()
+	registry.Register(liveProcess)
+
+	h := handler.NewStopWorkerHandler(processRepo, taskRepo, queueRepo, registry,
+		handler.WithFabricUnsubscriber(mockUnsubscriber))
+
+	cmd := command.NewStopProcessCommand(command.SourceUser, "observer", false, "")
+	result, err := h.Handle(context.Background(), cmd)
+
+	// Stop should still succeed despite unsubscribe error (fail-open)
+	require.NoError(t, err)
+	assert.True(t, result.Success)
+
+	// Verify observer is stopped
+	updated, _ := processRepo.Get("observer")
+	assert.Equal(t, repository.StatusStopped, updated.Status)
 }

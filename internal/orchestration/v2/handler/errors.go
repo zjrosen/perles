@@ -12,6 +12,7 @@ var (
 	ErrProcessNotFound     = repository.ErrProcessNotFound // From repository (can't be in types due to import cycle)
 	ErrProcessRetired      = types.ErrProcessRetired
 	ErrCoordinatorExists   = types.ErrCoordinatorExists
+	ErrObserverExists      = types.ErrObserverExists
 	ErrMaxProcessesReached = types.ErrMaxProcessesReached
 	ErrNotSpawning         = types.ErrNotSpawning
 	ErrAlreadyRetired      = types.ErrAlreadyRetired

@@ -29,18 +29,23 @@ func TestSpawnProcessCommand_Validate_RoleWorker(t *testing.T) {
 	require.NoError(t, cmd.Validate())
 }
 
+func TestSpawnProcessCommand_Validate_RoleObserver(t *testing.T) {
+	cmd := NewSpawnProcessCommand(SourceMCPTool, repository.RoleObserver)
+	require.NoError(t, cmd.Validate())
+}
+
 func TestSpawnProcessCommand_Validate_InvalidRole(t *testing.T) {
 	cmd := NewSpawnProcessCommand(SourceMCPTool, "invalid_role")
 	err := cmd.Validate()
 	require.Error(t, err)
-	require.Equal(t, "role must be coordinator or worker, got: invalid_role", err.Error())
+	require.Equal(t, "role must be coordinator, worker, or observer, got: invalid_role", err.Error())
 }
 
 func TestSpawnProcessCommand_Validate_EmptyRole(t *testing.T) {
 	cmd := NewSpawnProcessCommand(SourceMCPTool, "")
 	err := cmd.Validate()
 	require.Error(t, err)
-	require.Equal(t, "role must be coordinator or worker, got: ", err.Error())
+	require.Equal(t, "role must be coordinator, worker, or observer, got: ", err.Error())
 }
 
 func TestSpawnProcessCommand_PreservesProcessID(t *testing.T) {

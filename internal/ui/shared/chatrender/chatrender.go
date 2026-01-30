@@ -13,6 +13,7 @@ import (
 var (
 	CoordinatorColor = lipgloss.AdaptiveColor{Light: "#179299", Dark: "#179299"}
 	WorkerColor      = lipgloss.AdaptiveColor{Light: "#43BF6D", Dark: "#43BF6D"}
+	ObserverColor    = lipgloss.AdaptiveColor{Light: "#A066D3", Dark: "#A066D3"} // Purple for observer
 	UserColor        = lipgloss.AdaptiveColor{Light: "#FB923C", Dark: "#FB923C"}
 	SystemColor      = lipgloss.AdaptiveColor{Light: "#FF6B6B", Dark: "#FF8787"}
 	// AssistantColor is an alias for CoordinatorColor, used by the chat panel.

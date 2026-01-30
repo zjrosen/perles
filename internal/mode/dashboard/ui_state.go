@@ -46,6 +46,12 @@ type WorkflowUIState struct {
 	CoordinatorStatus     events.ProcessStatus
 	CoordinatorQueueCount int
 
+	// Observer pane state
+	ObserverMessages   []chatrender.Message
+	ObserverMetrics    *metrics.TokenMetrics
+	ObserverStatus     events.ProcessStatus
+	ObserverQueueCount int
+
 	// Message pane state (filtered to message.posted and reply.posted events only)
 	FabricEvents []fabric.Event
 
@@ -60,6 +66,7 @@ type WorkflowUIState struct {
 	// Scroll position persistence (integer offsets for VirtualSelectablePane)
 	// These store scroll offsets to preserve scroll positions across workflow switches.
 	CoordinatorScrollOffset int
+	ObserverScrollOffset    int
 	WorkerScrollOffsets     map[string]int
 
 	// Notification state
@@ -86,6 +93,7 @@ type WorkflowUIState struct {
 func NewWorkflowUIState() *WorkflowUIState {
 	return &WorkflowUIState{
 		CoordinatorMessages:     make([]chatrender.Message, 0),
+		ObserverMessages:        make([]chatrender.Message, 0),
 		FabricEvents:            make([]fabric.Event, 0),
 		WorkerIDs:               make([]string, 0),
 		WorkerStatus:            make(map[string]events.ProcessStatus),
@@ -103,6 +111,7 @@ func NewWorkflowUIState() *WorkflowUIState {
 // IsEmpty returns true if the state has no content.
 func (s *WorkflowUIState) IsEmpty() bool {
 	return len(s.CoordinatorMessages) == 0 &&
+		len(s.ObserverMessages) == 0 &&
 		len(s.FabricEvents) == 0 &&
 		len(s.WorkerIDs) == 0
 }

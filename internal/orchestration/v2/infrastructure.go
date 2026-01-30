@@ -239,6 +239,7 @@ func NewInfrastructure(cfg InfrastructureConfig) (*Infrastructure, error) {
 		cfg.SoundService,
 		cfg.SessionMetadataProvider,
 		cfg.WorkflowStateProvider,
+		fabricService,
 	)
 
 	// Create command submitter adapter
@@ -350,6 +351,7 @@ func registerHandlers(
 	soundService sound.SoundService,
 	sessionMetadataProvider handler.SessionMetadataProvider,
 	workflowStateProvider handler.WorkflowStateProvider,
+	fabricService *fabric.Service,
 ) {
 	// Create shared infrastructure components
 	cmdSubmitter := handler.NewProcessorSubmitterAdapter(cmdProcessor)
@@ -450,7 +452,8 @@ func registerHandlers(
 		handler.NewRetireProcessHandler(processRepo, processRegistry,
 			handler.WithRetireTurnEnforcer(turnEnforcer)))
 	cmdProcessor.RegisterHandler(command.CmdStopProcess,
-		handler.NewStopWorkerHandler(processRepo, taskRepo, queueRepo, processRegistry))
+		handler.NewStopWorkerHandler(processRepo, taskRepo, queueRepo, processRegistry,
+			handler.WithFabricUnsubscriber(fabricService)))
 	cmdProcessor.RegisterHandler(command.CmdReplaceProcess,
 		handler.NewReplaceProcessHandler(processRepo, processRegistry,
 			handler.WithReplaceSpawner(processSpawner),

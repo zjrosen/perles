@@ -12,6 +12,8 @@ const (
 	RoleCoordinator = AgentProviderRole("COORDINATOR")
 	// RoleWorker is the worker role.
 	RoleWorker = AgentProviderRole("WORKER")
+	// RoleObserver is the observer role.
+	RoleObserver = AgentProviderRole("OBSERVER")
 )
 
 // AgentProviders maps roles to their providers.

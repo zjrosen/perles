@@ -39,8 +39,9 @@ import (
 // Dynamic worker tabs start at TabFirstWorker and increment by worker order.
 const (
 	TabCoordinator = 0 // Coordinator chat
-	TabMessages    = 1 // Message log
-	TabFirstWorker = 2 // First dynamic worker tab (if any)
+	TabObserver    = 1 // Observer chat
+	TabMessages    = 2 // Message log
+	TabFirstWorker = 3 // First dynamic worker tab (if any)
 )
 
 // CoordinatorPanel manages the coordinator chat panel for a workflow.
@@ -63,6 +64,12 @@ type CoordinatorPanel struct {
 	coordinatorStatus   events.ProcessStatus
 	coordinatorQueue    int
 
+	// Observer state (uses VirtualSelectablePane for virtual scrolling with selection)
+	observerPane     *selection.VirtualSelectablePane
+	observerMessages []chatrender.Message
+	observerStatus   events.ProcessStatus
+	observerQueue    int
+
 	// Message log state (uses SelectablePane for viewport + selection - NOT migrated yet)
 	messagePane  *selection.SelectablePane
 	fabricEvents []fabric.Event // Synced from WorkflowUIState
@@ -77,6 +84,7 @@ type CoordinatorPanel struct {
 
 	// Token metrics for display
 	coordinatorMetrics *metrics.TokenMetrics
+	observerMetrics    *metrics.TokenMetrics
 	workerMetrics      map[string]*metrics.TokenMetrics
 
 	// Command log state (for debug mode)
@@ -99,6 +107,7 @@ type CoordinatorPanel struct {
 	// Pending scroll position restoration (applied after first render)
 	// These are set by restoreScrollPositions and cleared after being applied
 	pendingCoordinatorScrollOffset *int            // nil = no pending restore
+	pendingObserverScrollOffset    *int            // nil = no pending restore
 	pendingWorkerScrollOffsets     map[string]*int // nil value = no pending restore for that worker
 
 	// Channel state for fabric messaging
@@ -120,6 +129,9 @@ type CoordinatorPanel struct {
 // coordinatorTitleColor is the base color for coordinator title text.
 // Uses the shared CoordinatorColor from chatrender for consistency across all chat UIs.
 var coordinatorTitleColor = chatrender.CoordinatorColor
+
+// observerTitleColor is the base color for observer title text.
+var observerTitleColor = chatrender.ObserverColor
 
 // workerTitleColor is the base color for worker title text.
 var workerTitleColor = chatrender.WorkerColor
@@ -195,6 +207,7 @@ func NewCoordinatorPanel(debugMode, vimMode bool, clipboard shared.Clipboard) *C
 		clipboard:                  clipboard,
 		activeTab:                  TabCoordinator,
 		coordinatorMessages:        make([]chatrender.Message, 0),
+		observerMessages:           make([]chatrender.Message, 0),
 		fabricEvents:               make([]fabric.Event, 0),
 		workerIDs:                  make([]string, 0),
 		workerPanes:                make(map[string]*selection.VirtualSelectablePane),
@@ -223,6 +236,8 @@ func NewCoordinatorPanel(debugMode, vimMode bool, clipboard shared.Clipboard) *C
 
 	// Initialize VirtualSelectablePane for coordinator
 	panel.coordinatorPane = selection.NewVirtualSelectablePane(clipboard, panel.makeToastFunc())
+	// Initialize VirtualSelectablePane for observer
+	panel.observerPane = selection.NewVirtualSelectablePane(clipboard, panel.makeToastFunc())
 	// Keep messagePane as SelectablePane for now (Messages tab not migrated in this phase)
 	panel.messagePane = selection.NewPane(selection.PaneConfig{
 		Clipboard: clipboard,
@@ -263,6 +278,7 @@ func (p *CoordinatorPanel) SetScreenXOffset(offset int) {
 	p.screenXOffset = offset
 	// VirtualSelectablePane uses SetScreenPosition for coordinate mapping
 	p.coordinatorPane.SetScreenPosition(offset, p.screenYOffset)
+	p.observerPane.SetScreenPosition(offset, p.screenYOffset)
 	// SelectablePane still uses separate methods
 	p.messagePane.SetScreenXOffset(offset)
 	for _, pane := range p.workerPanes {
@@ -276,6 +292,7 @@ func (p *CoordinatorPanel) SetScreenYOffset(offset int) {
 	p.screenYOffset = viewportY
 	// VirtualSelectablePane uses SetScreenPosition for coordinate mapping
 	p.coordinatorPane.SetScreenPosition(p.screenXOffset, viewportY)
+	p.observerPane.SetScreenPosition(p.screenXOffset, viewportY)
 	// SelectablePane still uses separate methods
 	p.messagePane.SetScreenYOffset(viewportY)
 	for _, pane := range p.workerPanes {
@@ -295,6 +312,10 @@ func (p *CoordinatorPanel) SetWorkflow(workflowID controlplane.WorkflowID, state
 		p.coordinatorStatus = events.ProcessStatusPending
 		p.coordinatorQueue = 0
 		p.coordinatorMetrics = nil
+		p.observerMessages = make([]chatrender.Message, 0)
+		p.observerStatus = events.ProcessStatusPending
+		p.observerQueue = 0
+		p.observerMetrics = nil
 		p.fabricEvents = make([]fabric.Event, 0)
 		p.workerIDs = make([]string, 0)
 		clear(p.workerMetrics)
@@ -308,6 +329,14 @@ func (p *CoordinatorPanel) SetWorkflow(workflowID controlplane.WorkflowID, state
 	p.coordinatorStatus = state.CoordinatorStatus
 	p.coordinatorQueue = state.CoordinatorQueueCount
 	p.coordinatorMetrics = state.CoordinatorMetrics
+
+	// Sync observer state
+	if workflowChanged || len(state.ObserverMessages) != len(p.observerMessages) {
+		p.observerMessages = state.ObserverMessages
+	}
+	p.observerStatus = state.ObserverStatus
+	p.observerQueue = state.ObserverQueueCount
+	p.observerMetrics = state.ObserverMetrics
 
 	// Sync fabric events for message log
 	if workflowChanged || len(state.FabricEvents) != len(p.fabricEvents) {
@@ -380,6 +409,9 @@ func (p *CoordinatorPanel) SaveScrollPositions(state *WorkflowUIState) {
 	// Save coordinator scroll offset
 	state.CoordinatorScrollOffset = p.coordinatorPane.ScrollOffset()
 
+	// Save observer scroll offset
+	state.ObserverScrollOffset = p.observerPane.ScrollOffset()
+
 	// Save worker scroll offsets
 	if state.WorkerScrollOffsets == nil {
 		state.WorkerScrollOffsets = make(map[string]int)
@@ -413,6 +445,7 @@ func (p *CoordinatorPanel) restoreScrollPositions(state *WorkflowUIState) {
 		// VirtualSelectablePane defaults to bottom for new content via wasAtBottom,
 		// so we don't need to set any pending offsets - let the default behavior work.
 		p.pendingCoordinatorScrollOffset = nil
+		p.pendingObserverScrollOffset = nil
 		// Clear any pending worker offsets
 		clear(p.pendingWorkerScrollOffsets)
 	} else {
@@ -420,6 +453,10 @@ func (p *CoordinatorPanel) restoreScrollPositions(state *WorkflowUIState) {
 		// These will be applied after the content is set in renderCoordinatorContent/renderWorkerContent
 		offset := state.CoordinatorScrollOffset
 		p.pendingCoordinatorScrollOffset = &offset
+
+		// Set pending observer scroll offset
+		obsOffset := state.ObserverScrollOffset
+		p.pendingObserverScrollOffset = &obsOffset
 
 		// Set pending worker scroll offsets
 		if state.WorkerScrollOffsets != nil {
@@ -440,9 +477,9 @@ func (p *CoordinatorPanel) tabCount() int {
 // This accounts for the optional command log tab in debug mode.
 func (p *CoordinatorPanel) firstWorkerTabIndex() int {
 	if p.debugMode {
-		return 3 // Coordinator(0), Messages(1), CommandLog(2), Workers(3+)
+		return 4 // Coordinator(0), Observer(1), Messages(2), CommandLog(3), Workers(4+)
 	}
-	return TabFirstWorker // Coordinator(0), Messages(1), Workers(2+)
+	return TabFirstWorker // Coordinator(0), Observer(1), Messages(2), Workers(3+)
 }
 
 // NextTab switches to the next tab.
@@ -667,6 +704,10 @@ func (p *CoordinatorPanel) Update(msg tea.Msg) (*CoordinatorPanel, tea.Cmd) {
 			if cmd := p.coordinatorPane.HandleMouse(msg); cmd != nil {
 				return p, cmd
 			}
+		case TabObserver:
+			if cmd := p.observerPane.HandleMouse(msg); cmd != nil {
+				return p, cmd
+			}
 		case TabMessages:
 			if cmd := p.messagePane.HandleMouse(msg); cmd != nil {
 				return p, cmd
@@ -855,7 +896,17 @@ func (p *CoordinatorPanel) buildTabs(contentHeight int) []panes.Tab {
 		ZoneID:  makeTabZoneID(TabCoordinator),
 	})
 
-	// Tab 1: Messages (no status indicator)
+	// Tab 1: Observer with status indicator
+	obsIndicator, obsIndicatorStyle := chatrender.StatusIndicator(p.observerStatus)
+	obsLabel := p.formatTabLabel(obsIndicator, obsIndicatorStyle, "Obs", p.activeTab == TabObserver, mutedStyle)
+	tabs = append(tabs, panes.Tab{
+		Label:   obsLabel,
+		Content: p.renderObserverContent(contentHeight),
+		Color:   observerTitleColor,
+		ZoneID:  makeTabZoneID(TabObserver),
+	})
+
+	// Tab 2: Messages (no status indicator)
 	msgsLabel := "Msgs"
 	if p.activeTab != TabMessages {
 		msgsLabel = mutedStyle.Render(msgsLabel)
@@ -866,16 +917,16 @@ func (p *CoordinatorPanel) buildTabs(contentHeight int) []panes.Tab {
 		ZoneID:  makeTabZoneID(TabMessages),
 	})
 
-	// Tab 2 (debug mode only): Command Log
+	// Tab 3 (debug mode only): Command Log
 	if p.debugMode {
 		cmdLogLabel := "CmdLog"
-		if p.activeTab != 2 {
+		if p.activeTab != 3 {
 			cmdLogLabel = mutedStyle.Render(cmdLogLabel)
 		}
 		tabs = append(tabs, panes.Tab{
 			Label:   cmdLogLabel,
 			Content: p.renderCommandLogContent(contentHeight),
-			ZoneID:  makeTabZoneID(2),
+			ZoneID:  makeTabZoneID(3),
 		})
 	}
 
@@ -926,6 +977,8 @@ func (p *CoordinatorPanel) getActiveBorderColor() lipgloss.AdaptiveColor {
 	switch p.activeTab {
 	case TabCoordinator:
 		return chatrender.StatusBorderColor(p.coordinatorStatus)
+	case TabObserver:
+		return chatrender.StatusBorderColor(p.observerStatus)
 	case TabMessages:
 		return styles.BorderDefaultColor
 	default:
@@ -946,6 +999,8 @@ func (p *CoordinatorPanel) getActiveBottomIndicators() string {
 	switch p.activeTab {
 	case TabCoordinator:
 		return chatrender.FormatQueueCount(p.coordinatorQueue)
+	case TabObserver:
+		return chatrender.FormatQueueCount(p.observerQueue)
 	case TabMessages:
 		return ""
 	default:
@@ -967,6 +1022,8 @@ func (p *CoordinatorPanel) getActiveMetricsDisplay() string {
 	switch p.activeTab {
 	case TabCoordinator:
 		return chatrender.FormatMetricsDisplay(p.coordinatorMetrics)
+	case TabObserver:
+		return chatrender.FormatMetricsDisplay(p.observerMetrics)
 	case TabMessages:
 		return "" // No metrics for message log
 	default:
@@ -1002,6 +1059,30 @@ func (p *CoordinatorPanel) renderCoordinatorContent(height int) string {
 	}
 
 	return p.coordinatorPane.View()
+}
+
+// renderObserverContent renders the observer chat content for the viewport.
+// Uses VirtualSelectablePane for O(visible) rendering instead of O(n).
+func (p *CoordinatorPanel) renderObserverContent(height int) string {
+	vpWidth := max(p.width-2, 1)
+	vpHeight := max(height-2, 1)
+
+	// Set messages on the virtual pane (handles content conversion internally)
+	p.observerPane.SetMessages(p.observerMessages, vpWidth, chatrender.RenderConfig{
+		AgentLabel: "Observer",
+		AgentColor: observerTitleColor,
+		UserLabel:  "User",
+	})
+	p.observerPane.SetSize(vpWidth, vpHeight)
+
+	// Apply pending scroll offset if set (from workflow switch)
+	// This must happen AFTER SetMessages since SetMessages has auto-scroll logic
+	if p.pendingObserverScrollOffset != nil {
+		p.observerPane.SetScrollOffset(*p.pendingObserverScrollOffset)
+		p.pendingObserverScrollOffset = nil // Clear after applying
+	}
+
+	return p.observerPane.View()
 }
 
 // renderMessageLogContent renders the message log content for the viewport.

@@ -19,6 +19,9 @@ var ErrProcessRetired = errors.New("process is retired")
 // ErrCoordinatorExists is returned when trying to spawn a coordinator that already exists.
 var ErrCoordinatorExists = errors.New("coordinator already exists")
 
+// ErrObserverExists is returned when trying to spawn an observer that already exists.
+var ErrObserverExists = errors.New("observer already exists")
+
 // ErrMaxProcessesReached is returned when trying to spawn at max capacity.
 var ErrMaxProcessesReached = errors.New("maximum processes reached")
 

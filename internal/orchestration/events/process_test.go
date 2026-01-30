@@ -117,3 +117,43 @@ func TestProcessStatus_IsTerminal(t *testing.T) {
 		})
 	}
 }
+
+func TestRoleObserver_Constant(t *testing.T) {
+	// Verify RoleObserver constant exists with value "observer"
+	require.Equal(t, "observer", string(RoleObserver))
+}
+
+func TestIsObserver_True(t *testing.T) {
+	// Verify IsObserver() returns true when Role == RoleObserver
+	event := ProcessEvent{
+		Type:      ProcessOutput,
+		ProcessID: "observer",
+		Role:      RoleObserver,
+	}
+
+	require.True(t, event.IsObserver())
+	require.False(t, event.IsCoordinator())
+	require.False(t, event.IsWorker())
+}
+
+func TestIsObserver_False(t *testing.T) {
+	// Verify IsObserver() returns false for Coordinator/Worker roles
+	tests := []struct {
+		name string
+		role ProcessRole
+	}{
+		{"coordinator", RoleCoordinator},
+		{"worker", RoleWorker},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			event := ProcessEvent{
+				Type:      ProcessOutput,
+				ProcessID: tt.name,
+				Role:      tt.role,
+			}
+			require.False(t, event.IsObserver(), "IsObserver() should return false for %s role", tt.name)
+		})
+	}
+}

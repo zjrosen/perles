@@ -51,6 +51,7 @@ const (
 	SlugTasks    = "tasks"
 	SlugPlanning = "planning"
 	SlugGeneral  = "general"
+	SlugObserver = "observer"
 )
 
 // Thread is the universal node in the Fabric graph.
@@ -166,5 +167,6 @@ func FixedChannels() []Thread {
 		{Type: ThreadChannel, Slug: SlugTasks, Title: "Tasks", Purpose: "Task assignments (each task = a message thread)"},
 		{Type: ThreadChannel, Slug: SlugPlanning, Title: "Planning", Purpose: "Strategy, architecture discussions"},
 		{Type: ThreadChannel, Slug: SlugGeneral, Title: "General", Purpose: "General coordination chat"},
+		{Type: ThreadChannel, Slug: SlugObserver, Title: "Observer", Purpose: "User-to-observer communication"},
 	}
 }
