@@ -67,6 +67,49 @@ func TestHandlers_Inbox(t *testing.T) {
 	require.Len(t, response.Channels, 2)
 }
 
+func TestHandlers_Inbox_IncludesObserverChannel(t *testing.T) {
+	// Create observer-specific handlers
+	threadRepo := repository.NewMemoryThreadRepository()
+	depRepo := repository.NewMemoryDependencyRepository()
+	subRepo := repository.NewMemorySubscriptionRepository()
+	ackRepo := repository.NewMemoryAckRepository(depRepo, threadRepo, subRepo)
+
+	svc := fabric.NewService(threadRepo, depRepo, subRepo, ackRepo)
+	err := svc.InitSession("system")
+	require.NoError(t, err)
+
+	// Create handlers for OBSERVER agent
+	h := NewHandlers(svc, "OBSERVER")
+
+	// Subscribe OBSERVER to observer channel (as it would during boot)
+	_, err = svc.Subscribe(domain.SlugObserver, "OBSERVER", domain.ModeAll)
+	require.NoError(t, err)
+
+	// Send a message to observer channel from user/system
+	_, err = svc.SendMessage(fabric.SendMessageInput{
+		ChannelSlug: domain.SlugObserver,
+		Content:     "Hello observer!",
+		CreatedBy:   "USER",
+	})
+	require.NoError(t, err)
+
+	// Check inbox - should include observer channel
+	result, err := h.HandleInbox(context.Background(), nil)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+
+	var response InboxResponse
+	responseBytes, _ := json.Marshal(result.StructuredContent)
+	err = json.Unmarshal(responseBytes, &response)
+	require.NoError(t, err)
+
+	require.Equal(t, 1, response.TotalUnacked, "Should have 1 unread message")
+	require.Len(t, response.Channels, 1, "Should have 1 channel with messages")
+	require.Equal(t, domain.SlugObserver, response.Channels[0].ChannelSlug, "Channel should be observer")
+	require.Equal(t, "Hello observer!", response.Channels[0].Messages[0].Content)
+}
+
 func TestHandlers_Send(t *testing.T) {
 	h, _ := newTestHandlers(t)
 

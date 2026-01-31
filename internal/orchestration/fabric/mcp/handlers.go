@@ -67,6 +67,7 @@ func (h *Handlers) HandleInbox(_ context.Context, rawArgs json.RawMessage) (*Too
 		h.service.GetChannelID(domain.SlugTasks):    domain.SlugTasks,
 		h.service.GetChannelID(domain.SlugPlanning): domain.SlugPlanning,
 		h.service.GetChannelID(domain.SlugGeneral):  domain.SlugGeneral,
+		h.service.GetChannelID(domain.SlugObserver): domain.SlugObserver,
 	}
 
 	for channelID, summary := range unacked {
