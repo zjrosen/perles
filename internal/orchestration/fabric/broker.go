@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zjrosen/perles/internal/log"
 	"github.com/zjrosen/perles/internal/orchestration/fabric/domain"
 	"github.com/zjrosen/perles/internal/orchestration/fabric/repository"
 	"github.com/zjrosen/perles/internal/orchestration/v2/command"
@@ -221,6 +222,12 @@ func (b *Broker) handleEvent(event Event) {
 	// Get channel slug for notification message
 	channelSlug := b.channelSlugForID(channelID)
 
+	// Skip all notifications for suppressed channels (e.g., #observer)
+	if isNotificationSuppressedChannel(channelSlug) {
+		log.Debug(log.CatOrch, "notifications suppressed for channel", "channel", channelSlug)
+		return
+	}
+
 	// Get subscribers to this channel
 	subscribers, err := b.subscriptions.ListForChannel(channelID)
 	if err != nil {
@@ -351,4 +358,12 @@ func containsMention(mentions []string, agentID string) bool {
 		}
 	}
 	return false
+}
+
+// isNotificationSuppressedChannel returns true if the channel suppresses all notifications.
+// The #observer channel is a dedicated private channel between Observer and User.
+// If more channels need this behavior, consider adding a SuppressNotifications property
+// to the Thread/Channel domain type instead of extending this function.
+func isNotificationSuppressedChannel(channelSlug string) bool {
+	return channelSlug == domain.SlugObserver
 }

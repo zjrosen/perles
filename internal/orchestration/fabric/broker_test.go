@@ -478,3 +478,230 @@ func TestBroker_ParticipantNotification(t *testing.T) {
 	assert.True(t, notified["WORKER.3"], "WORKER.3 should be notified")
 	assert.False(t, notified["WORKER.1"], "WORKER.1 (sender) should NOT be notified")
 }
+
+func TestIsNotificationSuppressedChannel(t *testing.T) {
+	tests := []struct {
+		name     string
+		slug     string
+		expected bool
+	}{
+		{
+			name:     "observer channel is suppressed",
+			slug:     domain.SlugObserver,
+			expected: true,
+		},
+		{
+			name:     "tasks channel is not suppressed",
+			slug:     domain.SlugTasks,
+			expected: false,
+		},
+		{
+			name:     "planning channel is not suppressed",
+			slug:     domain.SlugPlanning,
+			expected: false,
+		},
+		{
+			name:     "general channel is not suppressed",
+			slug:     domain.SlugGeneral,
+			expected: false,
+		},
+		{
+			name:     "system channel is not suppressed",
+			slug:     domain.SlugSystem,
+			expected: false,
+		},
+		{
+			name:     "empty string is not suppressed",
+			slug:     "",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isNotificationSuppressedChannel(tt.slug)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestBroker_ObserverChannel_SuppressesMentionNotifications(t *testing.T) {
+	// Test that explicit @mentions in #observer do NOT trigger notifications
+	subs := repository.NewMemorySubscriptionRepository()
+	submitter := &mockCommandSubmitter{}
+	slugLookup := &mockSlugLookup{
+		slugs: map[string]string{"channel-observer": domain.SlugObserver},
+	}
+
+	broker := NewBroker(BrokerConfig{
+		CmdSubmitter:  submitter,
+		Subscriptions: subs,
+		SlugLookup:    slugLookup,
+		Debounce:      10 * time.Millisecond,
+	})
+
+	broker.Start()
+	defer broker.Stop()
+
+	// Observer sends message with @worker-1 mention in #observer channel
+	event := Event{
+		Type:      EventMessagePosted,
+		ChannelID: "channel-observer",
+		Thread: &domain.Thread{
+			ID:        "msg-1",
+			Type:      domain.ThreadMessage,
+			CreatedBy: "observer",
+			Content:   "@worker-1 appears to be struggling with the task",
+			Mentions:  []string{"worker-1"},
+		},
+		Mentions: []string{"worker-1"},
+	}
+
+	broker.HandleEvent(event)
+
+	// Wait for debounce to flush
+	time.Sleep(50 * time.Millisecond)
+
+	// worker-1 should NOT be notified - observer channel suppresses all notifications
+	cmds := submitter.getCommands()
+	assert.Len(t, cmds, 0, "observer channel should suppress all mention notifications")
+}
+
+func TestBroker_ObserverChannel_SuppressesSubscriptionNotifications(t *testing.T) {
+	// Test that ModeAll subscribers to #observer are NOT notified
+	subs := repository.NewMemorySubscriptionRepository()
+	submitter := &mockCommandSubmitter{}
+	slugLookup := &mockSlugLookup{
+		slugs: map[string]string{"channel-observer": domain.SlugObserver},
+	}
+
+	broker := NewBroker(BrokerConfig{
+		CmdSubmitter:  submitter,
+		Subscriptions: subs,
+		SlugLookup:    slugLookup,
+		Debounce:      10 * time.Millisecond,
+	})
+
+	// Subscribe worker-1 to #observer with ModeAll
+	channelID := "channel-observer"
+	_, err := subs.Subscribe(channelID, "worker-1", domain.ModeAll)
+	require.NoError(t, err)
+
+	broker.Start()
+	defer broker.Stop()
+
+	// Observer sends a message (no mentions)
+	event := Event{
+		Type:      EventMessagePosted,
+		ChannelID: channelID,
+		Thread: &domain.Thread{
+			ID:        "msg-1",
+			Type:      domain.ThreadMessage,
+			CreatedBy: "observer",
+			Content:   "I've noticed some interesting patterns",
+		},
+		Mentions: []string{},
+	}
+
+	broker.HandleEvent(event)
+
+	// Wait for debounce to flush
+	time.Sleep(50 * time.Millisecond)
+
+	// worker-1 should NOT be notified - observer channel suppresses all notifications
+	cmds := submitter.getCommands()
+	assert.Len(t, cmds, 0, "observer channel should suppress all subscription notifications")
+}
+
+func TestBroker_ObserverChannel_SuppressesThreadParticipantNotifications(t *testing.T) {
+	// Test that reply events in #observer do NOT notify thread participants
+	subs := repository.NewMemorySubscriptionRepository()
+	submitter := &mockCommandSubmitter{}
+	slugLookup := &mockSlugLookup{
+		slugs: map[string]string{"channel-observer": domain.SlugObserver},
+	}
+
+	broker := NewBroker(BrokerConfig{
+		CmdSubmitter:  submitter,
+		Subscriptions: subs,
+		SlugLookup:    slugLookup,
+		Debounce:      10 * time.Millisecond,
+	})
+
+	broker.Start()
+	defer broker.Stop()
+
+	// Observer sends a reply to a thread in #observer
+	// The parent thread has participants: user, observer, worker-1 (who observer was discussing)
+	event := Event{
+		Type:      EventReplyPosted,
+		ChannelID: "channel-observer",
+		ParentID:  "parent-thread-1",
+		Thread: &domain.Thread{
+			ID:        "reply-1",
+			Type:      domain.ThreadMessage,
+			CreatedBy: "observer",
+			Content:   "worker-1 seems to be making progress now",
+		},
+		Mentions:     []string{},
+		Participants: []string{"user", "observer", "worker-1"},
+	}
+
+	broker.HandleEvent(event)
+
+	// Wait for debounce to flush
+	time.Sleep(50 * time.Millisecond)
+
+	// NO participants should be notified - observer channel suppresses all notifications
+	cmds := submitter.getCommands()
+	assert.Len(t, cmds, 0, "observer channel should suppress all thread participant notifications")
+}
+
+func TestBroker_OtherChannels_NotificationsWork(t *testing.T) {
+	// Regression test: ensure #tasks, #planning, #general still send notifications normally
+	subs := repository.NewMemorySubscriptionRepository()
+	submitter := &mockCommandSubmitter{}
+	slugLookup := &mockSlugLookup{
+		slugs: map[string]string{
+			"channel-tasks":    domain.SlugTasks,
+			"channel-planning": domain.SlugPlanning,
+			"channel-general":  domain.SlugGeneral,
+		},
+	}
+
+	broker := NewBroker(BrokerConfig{
+		CmdSubmitter:  submitter,
+		Subscriptions: subs,
+		SlugLookup:    slugLookup,
+		Debounce:      10 * time.Millisecond,
+	})
+
+	broker.Start()
+	defer broker.Stop()
+
+	// Test 1: @mention in #tasks should notify
+	event1 := Event{
+		Type:      EventMessagePosted,
+		ChannelID: "channel-tasks",
+		Thread: &domain.Thread{
+			ID:        "msg-1",
+			Type:      domain.ThreadMessage,
+			CreatedBy: "COORDINATOR",
+			Content:   "@worker-1 please handle this task",
+			Mentions:  []string{"worker-1"},
+		},
+		Mentions: []string{"worker-1"},
+	}
+	broker.HandleEvent(event1)
+
+	// Wait for debounce to flush
+	time.Sleep(50 * time.Millisecond)
+
+	cmds := submitter.getCommands()
+	require.Len(t, cmds, 1, "#tasks should still send mention notifications")
+
+	sendCmd, ok := cmds[0].(*command.SendToProcessCommand)
+	require.True(t, ok)
+	assert.Equal(t, "worker-1", sendCmd.ProcessID)
+	assert.Contains(t, sendCmd.Content, "#tasks")
+}
