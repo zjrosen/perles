@@ -718,6 +718,19 @@ func (s *Session) Close(status Status) error {
 	meta.Status = status
 	meta.Workers = s.workers
 	meta.TokenUsage = s.tokenUsage
+	meta.CoordinatorSessionRef = s.coordinatorSessionRef
+	meta.CoordinatorTokenUsage = s.coordinatorTokenUsage
+
+	// Update observer metadata if observer was spawned
+	if s.observerSessionRef != "" || !s.observerSpawnedAt.IsZero() || s.observerTokenUsage != (TokenUsageSummary{}) {
+		meta.Observer = &ObserverMetadata{
+			HeadlessSessionRef: s.observerSessionRef,
+			TokenUsage:         s.observerTokenUsage,
+		}
+		if !s.observerSpawnedAt.IsZero() {
+			meta.Observer.SpawnedAt = s.observerSpawnedAt.Format(time.RFC3339)
+		}
+	}
 
 	if err := meta.Save(s.Dir); err != nil && firstErr == nil {
 		firstErr = err

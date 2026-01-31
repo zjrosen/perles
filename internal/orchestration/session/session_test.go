@@ -3536,6 +3536,55 @@ func TestClose_IndexEntryContainsAllMetadataFields(t *testing.T) {
 	require.False(t, entry.EndTime.IsZero())
 }
 
+func TestClose_PreservesObserverSessionRef(t *testing.T) {
+	sessionDir := t.TempDir()
+	sessionID := "observer-ref-test"
+
+	sess, err := New(sessionID, sessionDir)
+	require.NoError(t, err)
+
+	// Set observer session ref (simulating observer's first successful turn)
+	expectedObserverRef := "observer-session-abc123"
+	err = sess.SetObserverSessionRef(expectedObserverRef)
+	require.NoError(t, err)
+
+	// Close the session (simulating TUI exit)
+	err = sess.Close(StatusCompleted)
+	require.NoError(t, err)
+
+	// Reload metadata and verify observer ref is preserved
+	meta, err := Load(sessionDir)
+	require.NoError(t, err)
+
+	require.NotNil(t, meta.Observer, "Observer metadata should be present after close")
+	require.Equal(t, expectedObserverRef, meta.Observer.HeadlessSessionRef,
+		"Observer HeadlessSessionRef must be preserved on close for --resume to work")
+}
+
+func TestClose_PreservesCoordinatorSessionRef(t *testing.T) {
+	sessionDir := t.TempDir()
+	sessionID := "coordinator-ref-test"
+
+	sess, err := New(sessionID, sessionDir)
+	require.NoError(t, err)
+
+	// Set coordinator session ref
+	expectedCoordRef := "coordinator-session-xyz789"
+	err = sess.SetCoordinatorSessionRef(expectedCoordRef)
+	require.NoError(t, err)
+
+	// Close the session
+	err = sess.Close(StatusCompleted)
+	require.NoError(t, err)
+
+	// Reload metadata and verify coordinator ref is preserved
+	meta, err := Load(sessionDir)
+	require.NoError(t, err)
+
+	require.Equal(t, expectedCoordRef, meta.CoordinatorSessionRef,
+		"CoordinatorSessionRef must be preserved on close for --resume to work")
+}
+
 func TestWithPathBuilder_Option(t *testing.T) {
 	baseDir := t.TempDir()
 	appName := "option-test-app"
