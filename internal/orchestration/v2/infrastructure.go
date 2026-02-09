@@ -5,6 +5,7 @@ package v2
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -12,8 +13,10 @@ import (
 
 	appbeads "github.com/zjrosen/perles/internal/beads/application"
 	infrabeads "github.com/zjrosen/perles/internal/beads/infrastructure"
+	fabricsqlite "github.com/zjrosen/perles/internal/infrastructure/sqlite"
 	"github.com/zjrosen/perles/internal/orchestration/client"
 	"github.com/zjrosen/perles/internal/orchestration/fabric"
+	domain "github.com/zjrosen/perles/internal/orchestration/fabric/domain"
 	fabricrepo "github.com/zjrosen/perles/internal/orchestration/fabric/repository"
 	"github.com/zjrosen/perles/internal/orchestration/tracing"
 	"github.com/zjrosen/perles/internal/orchestration/v2/adapter"
@@ -48,6 +51,24 @@ type sessionDirProvider struct {
 // GetSessionDir returns the session directory path.
 func (p *sessionDirProvider) GetSessionDir() string {
 	return p.sessionDir
+}
+
+// FabricBackendConfig controls which backing store is used for Fabric thread
+// and dependency repositories. When nil (or DB is nil), repositories use the
+// default in-memory implementation. When DB is non-nil, SQLite-backed
+// repositories are available, controlled by the feature flags.
+type FabricBackendConfig struct {
+	// DB is the SQLite database connection. Nil means use memory backend only.
+	DB *sql.DB
+	// SessionID scopes SQLite repositories to a single orchestration session.
+	// Required when DB is non-nil.
+	SessionID string
+	// DualWriteEnabled causes writes to propagate to both memory and SQLite
+	// backends simultaneously. Reads come from whichever backend SQLiteReadEnabled selects.
+	DualWriteEnabled bool
+	// SQLiteReadEnabled selects SQLite as the read path for thread and dependency
+	// queries. When false (even with DualWriteEnabled), reads come from memory.
+	SQLiteReadEnabled bool
 }
 
 // InfrastructureConfig holds configuration for creating V2 infrastructure.
@@ -86,6 +107,9 @@ type InfrastructureConfig struct {
 	// CommandPersistenceProvider returns the current CommandWriter for persisting commands.
 	// Optional - if nil, commands are not persisted to commands.jsonl.
 	CommandPersistenceProvider func() processor.CommandWriter
+	// FabricBackend controls the backing store for Fabric thread and dependency repositories.
+	// Optional - if nil, uses in-memory repositories (current default behavior).
+	FabricBackend *FabricBackendConfig
 }
 
 // Validate checks that all required configuration is provided.
@@ -193,8 +217,7 @@ func NewInfrastructure(cfg InfrastructureConfig) (*Infrastructure, error) {
 
 	// Create Fabric messaging layer repositories and service
 	// Fabric provides graph-based messaging ("Slack for Agents") with channels, threads, and artifacts.
-	fabricThreads := fabricrepo.NewMemoryThreadRepository()
-	fabricDeps := fabricrepo.NewMemoryDependencyRepository()
+	fabricThreads, fabricDeps := createFabricRepositories(cfg.FabricBackend)
 	fabricSubs := fabricrepo.NewMemorySubscriptionRepository()
 	fabricAcks := fabricrepo.NewMemoryAckRepository(fabricDeps, fabricThreads, fabricSubs)
 	fabricParticipants := fabricrepo.NewMemoryParticipantRepository()
@@ -516,4 +539,147 @@ func registerHandlers(
 	cmdProcessor.RegisterHandler(command.CmdNotifyUser,
 		handler.NewNotifyUserHandler(
 			handler.WithNotifyUserSoundService(soundService)))
+}
+
+// createFabricRepositories constructs thread and dependency repositories based
+// on the backend configuration. When cfg is nil or cfg.DB is nil, in-memory
+// repositories are returned (preserving current default behavior). When a DB
+// is provided, SQLite-backed repositories are available, gated by feature flags.
+//
+// Subscriptions, acks, and participants always remain in-memory (Phase 1 scope).
+func createFabricRepositories(cfg *FabricBackendConfig) (fabricrepo.ThreadRepository, fabricrepo.DependencyRepository) {
+	// Default: memory-only (backward compatible, zero behavior change)
+	if cfg == nil || cfg.DB == nil {
+		return fabricrepo.NewMemoryThreadRepository(), fabricrepo.NewMemoryDependencyRepository()
+	}
+
+	memThreads := fabricrepo.NewMemoryThreadRepository()
+	memDeps := fabricrepo.NewMemoryDependencyRepository()
+
+	sqliteThreads := fabricsqlite.NewSQLiteThreadRepository(cfg.DB, cfg.SessionID)
+	sqliteDeps := fabricsqlite.NewSQLiteDependencyRepository(cfg.DB, cfg.SessionID)
+
+	if cfg.DualWriteEnabled {
+		// Dual-write: writes go to both backends, reads from selected backend
+		var readThreads fabricrepo.ThreadRepository = memThreads
+		var readDeps fabricrepo.DependencyRepository = memDeps
+		if cfg.SQLiteReadEnabled {
+			readThreads = sqliteThreads
+			readDeps = sqliteDeps
+		}
+		return &dualWriteThreadRepository{
+				primary:   readThreads,
+				secondary: secondaryThreadRepo(readThreads, memThreads, sqliteThreads),
+			}, &dualWriteDependencyRepository{
+				primary:   readDeps,
+				secondary: secondaryDepRepo(readDeps, memDeps, sqliteDeps),
+			}
+	}
+
+	// Non-dual-write: use the selected backend directly
+	if cfg.SQLiteReadEnabled {
+		return sqliteThreads, sqliteDeps
+	}
+	return memThreads, memDeps
+}
+
+// secondaryThreadRepo returns the backend that is NOT the primary read source.
+func secondaryThreadRepo(primary fabricrepo.ThreadRepository, mem, sqlite fabricrepo.ThreadRepository) fabricrepo.ThreadRepository {
+	if primary == mem {
+		return sqlite
+	}
+	return mem
+}
+
+// secondaryDepRepo returns the backend that is NOT the primary read source.
+func secondaryDepRepo(primary fabricrepo.DependencyRepository, mem, sqlite fabricrepo.DependencyRepository) fabricrepo.DependencyRepository {
+	if primary == mem {
+		return sqlite
+	}
+	return mem
+}
+
+// dualWriteThreadRepository writes to both primary and secondary backends.
+// Reads are served exclusively from the primary backend.
+type dualWriteThreadRepository struct {
+	primary   fabricrepo.ThreadRepository
+	secondary fabricrepo.ThreadRepository
+}
+
+func (d *dualWriteThreadRepository) Create(thread domain.Thread) (*domain.Thread, error) {
+	result, err := d.primary.Create(thread)
+	if err != nil {
+		return nil, err
+	}
+	// Best-effort write to secondary with the primary's auto-generated ID/Seq
+	// so both backends store the same thread identity.
+	_, _ = d.secondary.Create(*result)
+	return result, nil
+}
+
+func (d *dualWriteThreadRepository) Get(id string) (*domain.Thread, error) {
+	return d.primary.Get(id)
+}
+
+func (d *dualWriteThreadRepository) GetBySlug(slug string) (*domain.Thread, error) {
+	return d.primary.GetBySlug(slug)
+}
+
+func (d *dualWriteThreadRepository) List(opts fabricrepo.ListOptions) ([]domain.Thread, error) {
+	return d.primary.List(opts)
+}
+
+func (d *dualWriteThreadRepository) Update(thread domain.Thread) (*domain.Thread, error) {
+	result, err := d.primary.Update(thread)
+	if err != nil {
+		return nil, err
+	}
+	_, _ = d.secondary.Update(*result)
+	return result, nil
+}
+
+func (d *dualWriteThreadRepository) Archive(id string) error {
+	err := d.primary.Archive(id)
+	if err != nil {
+		return err
+	}
+	_ = d.secondary.Archive(id)
+	return nil
+}
+
+// dualWriteDependencyRepository writes to both primary and secondary backends.
+// Reads are served exclusively from the primary backend.
+type dualWriteDependencyRepository struct {
+	primary   fabricrepo.DependencyRepository
+	secondary fabricrepo.DependencyRepository
+}
+
+func (d *dualWriteDependencyRepository) Add(dep domain.Dependency) error {
+	err := d.primary.Add(dep)
+	if err != nil {
+		return err
+	}
+	_ = d.secondary.Add(dep)
+	return nil
+}
+
+func (d *dualWriteDependencyRepository) Remove(threadID, dependsOnID string) error {
+	err := d.primary.Remove(threadID, dependsOnID)
+	if err != nil {
+		return err
+	}
+	_ = d.secondary.Remove(threadID, dependsOnID)
+	return nil
+}
+
+func (d *dualWriteDependencyRepository) GetParents(threadID string, relation *domain.RelationType) ([]domain.Dependency, error) {
+	return d.primary.GetParents(threadID, relation)
+}
+
+func (d *dualWriteDependencyRepository) GetChildren(threadID string, relation *domain.RelationType) ([]domain.Dependency, error) {
+	return d.primary.GetChildren(threadID, relation)
+}
+
+func (d *dualWriteDependencyRepository) GetRoots() ([]string, error) {
+	return d.primary.GetRoots()
 }
