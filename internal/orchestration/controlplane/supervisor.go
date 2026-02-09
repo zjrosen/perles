@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -471,6 +472,28 @@ func (s *defaultSupervisor) AllocateResources(ctx context.Context, inst *Workflo
 		return fmt.Errorf("creating infrastructure: %w", err)
 	}
 
+	// Step 5.1: Run reconciliation when SQLite backend is configured.
+	// This detects JSONL/SQLite state, performs backfill or repair, and decides
+	// whether to fall back to memory-only backend.
+	if infraCfg.FabricBackend != nil {
+		outcome := s.runReconciliation(infra, sess.Dir)
+		if outcome.NeedsFallback {
+			// Recreate infrastructure with memory-only backend
+			log.Warn(log.CatOrch, "Recreating infrastructure with memory-only Fabric backend after reconciliation fallback",
+				"subsystem", "supervisor", "workflowID", inst.ID)
+			infra.Shutdown()
+			infraCfg.FabricBackend = nil
+			infra, err = s.infrastructureFactory.Create(infraCfg)
+			if err != nil {
+				cleanup()
+				return fmt.Errorf("creating fallback infrastructure: %w", err)
+			}
+		} else {
+			// Reconciliation passed — mark graph as ready
+			inst.FabricReadiness = FabricGraphReady
+		}
+	}
+
 	// Step 5.5: Attach session to event brokers for logging
 	sess.AttachV2EventBus(workflowCtx, infra.Core.EventBus)
 
@@ -515,15 +538,29 @@ func (s *defaultSupervisor) AllocateResources(ctx context.Context, inst *Workflo
 	// Step 6: Start infrastructure (command processor)
 	// For cold resume, restore Fabric state FIRST so InitSession finds existing channels.
 	if coldResume && inst.SessionDir != "" {
-		if err := s.restoreFabricState(&WorkflowInstance{
-			SessionDir:     inst.SessionDir,
-			Infrastructure: infra,
-			ID:             inst.ID,
-		}); err != nil {
-			// Log but don't fail - fabric state is non-critical for resume
-			log.Debug(log.CatOrch, "Failed to restore Fabric state (continuing anyway)",
-				"subsystem", "supervisor", "workflowID", inst.ID, "error", err)
+		if inst.FabricReadiness == FabricGraphReady && infra.Core.FabricService != nil {
+			// SQLite has graph data — only replay volatile state (acks, subscriptions,
+			// participants, reactions) from JSONL. Thread/dep data is already in SQLite.
+			if err := s.restoreVolatileFabricState(inst.SessionDir, infra); err != nil {
+				log.Debug(log.CatOrch, "Failed to restore volatile Fabric state (continuing anyway)",
+					"subsystem", "supervisor", "workflowID", inst.ID, "error", err)
+			}
+		} else {
+			// No SQLite graph — full JSONL replay (current behavior)
+			if err := s.restoreFabricState(&WorkflowInstance{
+				SessionDir:     inst.SessionDir,
+				Infrastructure: infra,
+				ID:             inst.ID,
+			}); err != nil {
+				log.Debug(log.CatOrch, "Failed to restore Fabric state (continuing anyway)",
+					"subsystem", "supervisor", "workflowID", inst.ID, "error", err)
+			}
 		}
+	}
+
+	// Volatile state rebuilt (or not applicable) — mark fully ready
+	if inst.FabricReadiness == FabricGraphReady {
+		inst.FabricReadiness = FabricFullyReady
 	}
 
 	// Start infrastructure - InitSession is idempotent, reuses restored channels if present
@@ -895,6 +932,42 @@ func (s *defaultSupervisor) restoreFabricState(inst *WorkflowInstance) error {
 	return nil
 }
 
+// restoreVolatileFabricState loads persisted Fabric events and replays only volatile state
+// (subscriptions, acks, participants, reactions). Thread and dependency data is skipped
+// because it is already available in SQLite. This is used during cold-resume when the
+// SQLite read path is enabled.
+func (s *defaultSupervisor) restoreVolatileFabricState(sessionDir string, infra *v2.Infrastructure) error {
+	if !fabricpersist.HasPersistedFabricState(sessionDir) {
+		return nil
+	}
+
+	events, err := fabricpersist.LoadPersistedEvents(sessionDir)
+	if err != nil {
+		return fmt.Errorf("loading fabric events: %w", err)
+	}
+
+	if len(events) == 0 {
+		return nil
+	}
+
+	_, _, subs, acks, participants := infra.Core.FabricService.Repositories()
+	reactions := infra.Core.FabricService.ReactionRepository()
+
+	if err := fabricpersist.RestoreVolatileState(events, subs, acks, participants, reactions); err != nil {
+		return fmt.Errorf("restoring volatile fabric state: %w", err)
+	}
+
+	// Restore cached channel IDs in FabricService (needed for channel slug lookups)
+	if err := infra.Core.FabricService.RestoreChannelIDs(); err != nil {
+		return fmt.Errorf("restoring channel IDs: %w", err)
+	}
+
+	log.Debug(log.CatOrch, "Restored volatile Fabric state from session (SQLite has graph data)",
+		"subsystem", "supervisor", "eventCount", len(events))
+
+	return nil
+}
+
 // sendResumeContextMessage sends a system message to the coordinator explaining the pause context.
 // This triggers the delivery flow which spawns a new AI session and attaches it to the coordinator.
 func (s *defaultSupervisor) sendResumeContextMessage(inst *WorkflowInstance) error {
@@ -1055,6 +1128,103 @@ func (s *defaultSupervisor) buildFabricBackendConfig(sessionID string) *v2.Fabri
 		DualWriteEnabled:  dualWrite,
 		SQLiteReadEnabled: sqliteRead,
 	}
+}
+
+// reconciliationOutcome captures the decision made by runReconciliation.
+type reconciliationOutcome struct {
+	// NeedsFallback is true when reconciliation thresholds were exceeded
+	// and infrastructure should be recreated with memory-only backend.
+	NeedsFallback bool
+	// Result is the reconciliation diagnostics, nil when no SQLite backend is configured.
+	Result *fabricpersist.ReconciliationResult
+}
+
+// runReconciliation performs startup reconciliation between JSONL and SQLite
+// Fabric state. It detects the current state, performs backfill or repair as
+// needed, and returns whether the caller should fall back to memory-only backend.
+//
+// The reconciliation handles four states:
+//   - jsonl_only:     JSONL has content, SQLite empty → Backfill, then check thresholds
+//   - sqlite_only:    SQLite has rows, no JSONL → Serve with warning
+//   - both_match:     Counts equal → Normal operation
+//   - both_mismatch:  Counts differ → Reconcile (idempotent fill), then check thresholds
+func (s *defaultSupervisor) runReconciliation(
+	infra *v2.Infrastructure,
+	sessionDir string,
+) reconciliationOutcome {
+	// Nothing to reconcile if no FabricService or no SQLite backend
+	if infra.Core.FabricService == nil {
+		return reconciliationOutcome{}
+	}
+
+	threads, deps, _, _, _ := infra.Core.FabricService.Repositories()
+
+	jsonlPath := filepath.Join(sessionDir, fabricpersist.FabricEventsFile)
+
+	// Step 1: Detect state
+	result, err := fabricpersist.DetectState(threads, deps, jsonlPath)
+	if err != nil {
+		log.Warn(log.CatOrch, "Reconciliation state detection failed — proceeding without reconciliation",
+			"subsystem", "supervisor", "error", err)
+		return reconciliationOutcome{}
+	}
+
+	// Step 2: Act on detected state
+	switch result.State {
+	case fabricpersist.StateJSONLOnly:
+		// Backfill SQLite from JSONL
+		if err := fabricpersist.Backfill(result, threads, deps, jsonlPath); err != nil {
+			log.Warn(log.CatOrch, "Backfill failed — falling back to memory backend",
+				"subsystem", "supervisor", "error", err)
+			return reconciliationOutcome{NeedsFallback: true, Result: result}
+		}
+
+	case fabricpersist.StateBothMismatch:
+		// Reconcile: idempotent fill of missing rows
+		result, err = fabricpersist.Reconcile(result, threads, deps, jsonlPath)
+		if err != nil {
+			log.Warn(log.CatOrch, "Reconciliation repair failed — falling back to memory backend",
+				"subsystem", "supervisor", "error", err)
+			return reconciliationOutcome{NeedsFallback: true, Result: result}
+		}
+
+	case fabricpersist.StateSQLiteOnly:
+		log.Warn(log.CatOrch, "SQLite has data but JSONL is missing — serving from SQLite with warning",
+			"subsystem", "supervisor",
+			"sqlite_threads", result.ThreadCountSQLite,
+			"sqlite_deps", result.DepCountSQLite)
+
+	case fabricpersist.StateBothMatch:
+		// Normal operation — nothing to do
+	}
+
+	// Step 3: Check thresholds (for states that ran backfill/reconcile)
+	cfg := fabricpersist.DefaultReconciliationConfig()
+	if fabricpersist.ShouldFallback(result, cfg) {
+		log.Warn(log.CatOrch, "Reconciliation thresholds exceeded — falling back to memory backend",
+			"subsystem", "supervisor",
+			"orphan_edges", result.OrphanEdges,
+			"unresolved_parents", result.UnresolvedParents,
+			"backfill_duration", result.BackfillDuration,
+		)
+		return reconciliationOutcome{NeedsFallback: true, Result: result}
+	}
+
+	// Emit structured diagnostics
+	log.Info(log.CatOrch, "Reconciliation completed",
+		"subsystem", "supervisor",
+		"state", string(result.State),
+		"jsonl_threads", result.ThreadCountJSONL,
+		"jsonl_deps", result.DepCountJSONL,
+		"sqlite_threads", result.ThreadCountSQLite,
+		"sqlite_deps", result.DepCountSQLite,
+		"orphan_edges", result.OrphanEdges,
+		"unresolved_parents", result.UnresolvedParents,
+		"backfill_duration", result.BackfillDuration,
+		"diagnostics", result.Diagnostics,
+	)
+
+	return reconciliationOutcome{NeedsFallback: false, Result: result}
 }
 
 // getWorkDir returns the effective working directory for a workflow.

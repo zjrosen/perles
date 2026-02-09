@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -2943,4 +2944,522 @@ func createMinimalInfrastructureWithFabric(t *testing.T) *v2.Infrastructure {
 	infra.Core.FabricService = fabric.NewService(threadRepo, depRepo, subRepo, ackRepo, participantRepo)
 
 	return infra
+}
+
+// === Unit Tests: runReconciliation ===
+
+// makeTestChannelEvent creates a PersistedEvent for a channel creation (used in reconciliation tests).
+func makeTestChannelEvent(id, slug string, ts time.Time) fabricpersist.PersistedEvent {
+	return fabricpersist.PersistedEvent{
+		Version:   1,
+		Timestamp: ts,
+		Event: fabric.Event{
+			Type:      fabric.EventChannelCreated,
+			Timestamp: ts,
+			ChannelID: id,
+			Thread: &domain.Thread{
+				ID:        id,
+				Type:      domain.ThreadChannel,
+				Slug:      slug,
+				Title:     slug,
+				CreatedAt: ts,
+				CreatedBy: "SYSTEM",
+			},
+		},
+	}
+}
+
+// makeTestMessageEvent creates a PersistedEvent for a message post (used in reconciliation tests).
+func makeTestMessageEvent(id, channelID string, ts time.Time) fabricpersist.PersistedEvent {
+	return fabricpersist.PersistedEvent{
+		Version:   1,
+		Timestamp: ts,
+		Event: fabric.Event{
+			Type:      fabric.EventMessagePosted,
+			Timestamp: ts,
+			ChannelID: channelID,
+			Thread: &domain.Thread{
+				ID:        id,
+				Type:      domain.ThreadMessage,
+				Content:   "message " + id,
+				Kind:      string(domain.KindInfo),
+				CreatedAt: ts,
+				CreatedBy: "worker-1",
+			},
+		},
+	}
+}
+
+// writeTestJSONL writes persisted events to a fabric.jsonl file in the given directory.
+func writeTestJSONL(t *testing.T, dir string, events []fabricpersist.PersistedEvent) string {
+	t.Helper()
+	filePath := filepath.Join(dir, fabricpersist.FabricEventsFile)
+	f, err := os.Create(filePath)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	enc := json.NewEncoder(f)
+	for _, pe := range events {
+		require.NoError(t, enc.Encode(pe))
+	}
+	return filePath
+}
+
+// createInfraWithFabricRepos creates minimal infrastructure with specific thread/dep repos.
+func createInfraWithFabricRepos(t *testing.T, threads fabricrepo.ThreadRepository, deps fabricrepo.DependencyRepository) *v2.Infrastructure {
+	t.Helper()
+	infra := createMinimalInfrastructure(t)
+	subRepo := fabricrepo.NewMemorySubscriptionRepository()
+	ackRepo := fabricrepo.NewMemoryAckRepository(deps, threads, subRepo)
+	participantRepo := fabricrepo.NewMemoryParticipantRepository()
+	infra.Core.FabricService = fabric.NewService(threads, deps, subRepo, ackRepo, participantRepo)
+	return infra
+}
+
+func TestRunReconciliation_NoFabricService(t *testing.T) {
+	s := &defaultSupervisor{}
+	infra := createMinimalInfrastructure(t)
+	// infra.Core.FabricService is nil
+
+	outcome := s.runReconciliation(infra, t.TempDir())
+
+	require.False(t, outcome.NeedsFallback)
+	require.Nil(t, outcome.Result)
+}
+
+func TestRunReconciliation_CleanSlate_BothEmpty(t *testing.T) {
+	s := &defaultSupervisor{}
+	threads := fabricrepo.NewMemoryThreadRepository()
+	deps := fabricrepo.NewMemoryDependencyRepository()
+	infra := createInfraWithFabricRepos(t, threads, deps)
+	sessionDir := t.TempDir()
+	// No JSONL file, no SQLite data — clean slate
+
+	outcome := s.runReconciliation(infra, sessionDir)
+
+	require.False(t, outcome.NeedsFallback)
+	require.NotNil(t, outcome.Result)
+	require.Equal(t, fabricpersist.StateBothMatch, outcome.Result.State)
+}
+
+func TestRunReconciliation_JSONLOnly_BackfillSucceeds(t *testing.T) {
+	s := &defaultSupervisor{}
+	threads := fabricrepo.NewMemoryThreadRepository()
+	deps := fabricrepo.NewMemoryDependencyRepository()
+	infra := createInfraWithFabricRepos(t, threads, deps)
+	sessionDir := t.TempDir()
+
+	// Write JSONL with some data
+	now := time.Now()
+	events := []fabricpersist.PersistedEvent{
+		makeTestChannelEvent("ch-1", "general", now),
+		makeTestMessageEvent("msg-1", "ch-1", now.Add(time.Second)),
+	}
+	writeTestJSONL(t, sessionDir, events)
+
+	outcome := s.runReconciliation(infra, sessionDir)
+
+	require.False(t, outcome.NeedsFallback, "backfill should succeed without fallback")
+	require.NotNil(t, outcome.Result)
+	// After backfill, SQLite counts should match JSONL
+	require.Greater(t, outcome.Result.ThreadCountSQLite, 0)
+	require.Len(t, outcome.Result.Diagnostics, 3) // detection + backfill + marker
+}
+
+func TestRunReconciliation_SQLiteOnly_ProceedsWithWarning(t *testing.T) {
+	s := &defaultSupervisor{}
+	threads := fabricrepo.NewMemoryThreadRepository()
+	deps := fabricrepo.NewMemoryDependencyRepository()
+	infra := createInfraWithFabricRepos(t, threads, deps)
+	sessionDir := t.TempDir()
+
+	// Populate SQLite (memory repos) with data directly
+	now := time.Now()
+	_, err := threads.Create(domain.Thread{
+		ID: "ch-1", Type: domain.ThreadChannel, Slug: "general",
+		Title: "general", CreatedAt: now, CreatedBy: "SYSTEM",
+	})
+	require.NoError(t, err)
+
+	// No JSONL file — should detect SQLiteOnly
+	outcome := s.runReconciliation(infra, sessionDir)
+
+	require.False(t, outcome.NeedsFallback)
+	require.NotNil(t, outcome.Result)
+	require.Equal(t, fabricpersist.StateSQLiteOnly, outcome.Result.State)
+}
+
+func TestRunReconciliation_BothMatch_NoAction(t *testing.T) {
+	s := &defaultSupervisor{}
+	threads := fabricrepo.NewMemoryThreadRepository()
+	deps := fabricrepo.NewMemoryDependencyRepository()
+	infra := createInfraWithFabricRepos(t, threads, deps)
+	sessionDir := t.TempDir()
+
+	// Populate both JSONL and SQLite with matching data
+	now := time.Now()
+	events := []fabricpersist.PersistedEvent{
+		makeTestChannelEvent("ch-1", "general", now),
+	}
+	writeTestJSONL(t, sessionDir, events)
+
+	// Also create in repos
+	_, err := threads.Create(domain.Thread{
+		ID: "ch-1", Type: domain.ThreadChannel, Slug: "general",
+		Title: "general", CreatedAt: now, CreatedBy: "SYSTEM",
+	})
+	require.NoError(t, err)
+
+	outcome := s.runReconciliation(infra, sessionDir)
+
+	require.False(t, outcome.NeedsFallback)
+	require.NotNil(t, outcome.Result)
+	require.Equal(t, fabricpersist.StateBothMatch, outcome.Result.State)
+}
+
+func TestRunReconciliation_StructuredDiagnosticsEmitted(t *testing.T) {
+	s := &defaultSupervisor{}
+	threads := fabricrepo.NewMemoryThreadRepository()
+	deps := fabricrepo.NewMemoryDependencyRepository()
+	infra := createInfraWithFabricRepos(t, threads, deps)
+	sessionDir := t.TempDir()
+
+	// Write JSONL data
+	now := time.Now()
+	events := []fabricpersist.PersistedEvent{
+		makeTestChannelEvent("ch-1", "tasks", now),
+		makeTestMessageEvent("msg-1", "ch-1", now.Add(time.Second)),
+	}
+	writeTestJSONL(t, sessionDir, events)
+
+	outcome := s.runReconciliation(infra, sessionDir)
+
+	require.NotNil(t, outcome.Result)
+	require.Greater(t, len(outcome.Result.Diagnostics), 0, "should emit diagnostics")
+
+	// Verify diagnostics contain meaningful content
+	found := false
+	for _, d := range outcome.Result.Diagnostics {
+		if len(d) > 0 {
+			found = true
+			break
+		}
+	}
+	require.True(t, found, "diagnostics should contain non-empty strings")
+}
+
+// === Integration Tests: AllocateResources with Reconciliation ===
+
+func TestAllocateResources_RunsReconciliationWhenSQLiteConfigured(t *testing.T) {
+	cfg, mockProvider, _ := newTestSupervisorConfig(t)
+
+	// Set up DB and enable fabric flags
+	dbPath := filepath.Join(t.TempDir(), "fabric.db")
+	db, err := sqlite.NewDB(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	cfg.FabricDB = db.Connection()
+	cfg.Flags = flags.New(map[string]bool{
+		flags.FlagFabricDualWrite:  true,
+		flags.FlagFabricSQLiteRead: true,
+	})
+
+	// Use a custom factory that creates real infrastructure with FabricService
+	realFactory := &DefaultInfrastructureFactory{}
+	cfg.InfrastructureFactory = realFactory
+	cfg.ListenerFactory = &mockListenerFactory{}
+
+	supervisor, err := NewSupervisor(cfg)
+	require.NoError(t, err)
+
+	inst := newTestInstance(t, "reconciliation-workflow")
+	cleanupSessionOnTestEnd(t, inst)
+	setupAgentProviderMock(t, mockProvider)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	err = supervisor.AllocateResources(ctx, inst)
+	require.NoError(t, err)
+
+	// Verify reconciliation ran and readiness was set
+	require.Equal(t, FabricFullyReady, inst.FabricReadiness,
+		"FabricReadiness should be FullyReady after successful reconciliation")
+}
+
+func TestAllocateResources_NoReconciliationWhenNoSQLiteBackend(t *testing.T) {
+	cfg, mockProvider, mockFactory := newTestSupervisorConfig(t)
+	// No FabricDB configured (default)
+
+	supervisor, err := NewSupervisor(cfg)
+	require.NoError(t, err)
+
+	inst := newTestInstance(t, "no-sqlite-workflow")
+	cleanupSessionOnTestEnd(t, inst)
+
+	infra := createMinimalInfrastructure(t)
+	mockFactory.On("Create", mock.AnythingOfType("v2.InfrastructureConfig")).Return(infra, nil)
+	setupAgentProviderMock(t, mockProvider)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go infra.Core.Processor.Run(ctx)
+	require.NoError(t, infra.Core.Processor.WaitForReady(ctx))
+
+	err = supervisor.AllocateResources(ctx, inst)
+	require.NoError(t, err)
+
+	// FabricReadiness should remain NotReady (no SQLite configured)
+	require.Equal(t, FabricNotReady, inst.FabricReadiness,
+		"FabricReadiness should be NotReady when no SQLite backend is configured")
+}
+
+// makeTestReplyEvent creates a PersistedEvent for a reply to a message.
+func makeTestReplyEvent(id, channelID, parentID string, ts time.Time) fabricpersist.PersistedEvent {
+	return fabricpersist.PersistedEvent{
+		Version:   1,
+		Timestamp: ts,
+		Event: fabric.Event{
+			Type:      fabric.EventReplyPosted,
+			Timestamp: ts,
+			ChannelID: channelID,
+			ParentID:  parentID,
+			Thread: &domain.Thread{
+				ID:        id,
+				Type:      domain.ThreadMessage,
+				Content:   "reply " + id,
+				Kind:      string(domain.KindResponse),
+				CreatedAt: ts,
+				CreatedBy: "worker-1",
+			},
+		},
+	}
+}
+
+func TestRunReconciliation_FallbackWhenOrphanEdgesExceedThreshold(t *testing.T) {
+	s := &defaultSupervisor{}
+	threads := fabricrepo.NewMemoryThreadRepository()
+	deps := fabricrepo.NewMemoryDependencyRepository()
+	infra := createInfraWithFabricRepos(t, threads, deps)
+	sessionDir := t.TempDir()
+
+	// Write JSONL with a reply that references a non-existent parent.
+	// This creates an orphan edge after backfill: the reply thread exists
+	// but its parent ("non-existent-parent") does not.
+	now := time.Now()
+	events := []fabricpersist.PersistedEvent{
+		makeTestChannelEvent("ch-1", "general", now),
+		makeTestMessageEvent("msg-1", "ch-1", now.Add(time.Second)),
+		makeTestReplyEvent("reply-1", "ch-1", "non-existent-parent", now.Add(2*time.Second)),
+	}
+	writeTestJSONL(t, sessionDir, events)
+
+	outcome := s.runReconciliation(infra, sessionDir)
+
+	require.True(t, outcome.NeedsFallback,
+		"should require fallback when orphan edges exceed threshold (MaxOrphanEdges=0)")
+	require.NotNil(t, outcome.Result)
+	require.Greater(t, outcome.Result.OrphanEdges, 0)
+}
+
+func TestAllocateResources_ReadinessGating_FullyReadyAfterReconciliation(t *testing.T) {
+	cfg, mockProvider, _ := newTestSupervisorConfig(t)
+
+	// Set up DB and enable flags
+	dbPath := filepath.Join(t.TempDir(), "fabric.db")
+	db, err := sqlite.NewDB(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	cfg.FabricDB = db.Connection()
+	cfg.Flags = flags.New(map[string]bool{
+		flags.FlagFabricDualWrite:  true,
+		flags.FlagFabricSQLiteRead: true,
+	})
+
+	cfg.InfrastructureFactory = &DefaultInfrastructureFactory{}
+	cfg.ListenerFactory = &mockListenerFactory{}
+
+	supervisor, err := NewSupervisor(cfg)
+	require.NoError(t, err)
+
+	inst := newTestInstance(t, "readiness-workflow")
+	cleanupSessionOnTestEnd(t, inst)
+	setupAgentProviderMock(t, mockProvider)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Verify initial state
+	require.Equal(t, FabricNotReady, inst.FabricReadiness)
+
+	err = supervisor.AllocateResources(ctx, inst)
+	require.NoError(t, err)
+
+	// After AllocateResources with SQLite backend, readiness should be FullyReady
+	// (graph reconciliation passed, volatile state rebuilt from JSONL/events)
+	require.Equal(t, FabricFullyReady, inst.FabricReadiness,
+		"FabricReadiness should progress to FullyReady after reconciliation + volatile rebuild")
+}
+
+// === Cold-Resume Tests ===
+
+func TestAllocateResources_ColdResume_WithSQLiteGraphSkipsThreadDepReplay(t *testing.T) {
+	cfg, mockProvider, _ := newTestSupervisorConfig(t)
+
+	// Set up DB and enable fabric flags
+	dbPath := filepath.Join(t.TempDir(), "fabric.db")
+	db, err := sqlite.NewDB(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	cfg.FabricDB = db.Connection()
+	cfg.Flags = flags.New(map[string]bool{
+		flags.FlagFabricDualWrite:  true,
+		flags.FlagFabricSQLiteRead: true,
+	})
+
+	cfg.InfrastructureFactory = &DefaultInfrastructureFactory{}
+	cfg.ListenerFactory = &mockListenerFactory{}
+
+	supervisor, err := NewSupervisor(cfg)
+	require.NoError(t, err)
+
+	// Create a new workflow first to get a session directory
+	firstInst := newTestInstance(t, "cold-resume-sqlite-workflow")
+	cleanupSessionOnTestEnd(t, firstInst)
+	setupAgentProviderMock(t, mockProvider)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// AllocateResources for new workflow to create session dir
+	err = supervisor.AllocateResources(ctx, firstInst)
+	require.NoError(t, err)
+
+	// Write JSONL with both graph events and volatile events to the session dir
+	now := time.Now()
+	events := []fabricpersist.PersistedEvent{
+		makeTestChannelEvent("ch-1", "general", now),
+		makeTestMessageEvent("msg-1", "ch-1", now.Add(time.Second)),
+	}
+	writeTestJSONL(t, firstInst.SessionDir, events)
+
+	// Now simulate cold-resume: create a new instance in Paused state with same session dir
+	coldInst := newTestInstance(t, "cold-resume-sqlite-workflow")
+	coldInst.State = WorkflowPaused
+	coldInst.SessionDir = firstInst.SessionDir
+	cleanupSessionOnTestEnd(t, coldInst)
+
+	// Cold-resume AllocateResources — should use SQLite for graph, volatile-only JSONL replay
+	err = supervisor.AllocateResources(ctx, coldInst)
+	require.NoError(t, err)
+
+	// Should still reach FullyReady (reconciliation passed, volatile rebuild done)
+	require.Equal(t, FabricFullyReady, coldInst.FabricReadiness,
+		"Cold-resume with SQLite should reach FullyReady")
+}
+
+func TestAllocateResources_ColdResume_WithoutSQLiteUsesFullReplay(t *testing.T) {
+	cfg, mockProvider, mockFactory := newTestSupervisorConfig(t)
+	// No FabricDB — memory only
+
+	supervisor, err := NewSupervisor(cfg)
+	require.NoError(t, err)
+
+	// Create infrastructure with FabricService
+	infra := createMinimalInfrastructureWithFabric(t)
+	mockFactory.On("Create", mock.AnythingOfType("v2.InfrastructureConfig")).Return(infra, nil)
+	setupAgentProviderMock(t, mockProvider)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go infra.Core.Processor.Run(ctx)
+	require.NoError(t, infra.Core.Processor.WaitForReady(ctx))
+
+	// First, allocate for a new workflow to get a session dir
+	firstInst := newTestInstance(t, "full-replay-workflow")
+	cleanupSessionOnTestEnd(t, firstInst)
+	err = supervisor.AllocateResources(ctx, firstInst)
+	require.NoError(t, err)
+
+	// Write JSONL with data to the session dir
+	now := time.Now()
+	events := []fabricpersist.PersistedEvent{
+		makeTestChannelEvent("ch-1", "tasks", now),
+	}
+	writeTestJSONL(t, firstInst.SessionDir, events)
+
+	// Simulate cold-resume (Paused state with session dir, no SQLite)
+	infra2 := createMinimalInfrastructureWithFabric(t)
+	mockFactory.ExpectedCalls = nil
+	mockFactory.On("Create", mock.AnythingOfType("v2.InfrastructureConfig")).Return(infra2, nil)
+
+	go infra2.Core.Processor.Run(ctx)
+	require.NoError(t, infra2.Core.Processor.WaitForReady(ctx))
+
+	coldInst := newTestInstance(t, "full-replay-workflow-resume")
+	coldInst.State = WorkflowPaused
+	coldInst.SessionDir = firstInst.SessionDir
+	cleanupSessionOnTestEnd(t, coldInst)
+
+	err = supervisor.AllocateResources(ctx, coldInst)
+	require.NoError(t, err)
+
+	// Without SQLite, FabricReadiness should be NotReady (no reconciliation ran)
+	require.Equal(t, FabricNotReady, coldInst.FabricReadiness,
+		"Cold-resume without SQLite should use full JSONL replay (FabricReadiness stays NotReady)")
+
+	// Verify that threads were restored via full replay
+	threads, _, _, _, _ := infra2.Core.FabricService.Repositories()
+	ch, err := threads.GetBySlug("tasks")
+	require.NoError(t, err)
+	require.Equal(t, "ch-1", ch.ID, "Full JSONL replay should restore channel threads")
+}
+
+// === Integration Test: Full Pipeline ===
+
+func TestAllocateResources_FullPipeline_JSONLOnlyState(t *testing.T) {
+	cfg, mockProvider, _ := newTestSupervisorConfig(t)
+
+	// Set up DB and enable fabric flags
+	dbPath := filepath.Join(t.TempDir(), "fabric.db")
+	db, err := sqlite.NewDB(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	cfg.FabricDB = db.Connection()
+	cfg.Flags = flags.New(map[string]bool{
+		flags.FlagFabricDualWrite:  true,
+		flags.FlagFabricSQLiteRead: true,
+	})
+
+	cfg.InfrastructureFactory = &DefaultInfrastructureFactory{}
+	cfg.ListenerFactory = &mockListenerFactory{}
+
+	supervisor, err := NewSupervisor(cfg)
+	require.NoError(t, err)
+
+	inst := newTestInstance(t, "jsonl-pipeline-workflow")
+	cleanupSessionOnTestEnd(t, inst)
+	setupAgentProviderMock(t, mockProvider)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// AllocateResources — infrastructure will be created, then reconciliation runs
+	// on empty state (clean slate), then infrastructure starts.
+	err = supervisor.AllocateResources(ctx, inst)
+	require.NoError(t, err)
+
+	// Verify the full pipeline completed:
+	// 1. Infrastructure allocated
+	require.NotNil(t, inst.Infrastructure)
+	// 2. Reconciliation passed (no data = both_match = clean slate)
+	require.Equal(t, FabricFullyReady, inst.FabricReadiness)
+	// 3. MCP port assigned
+	require.Greater(t, inst.MCPPort, 0)
+	// 4. Session created
+	require.NotNil(t, inst.Session)
 }

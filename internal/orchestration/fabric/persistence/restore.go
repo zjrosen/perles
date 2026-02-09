@@ -100,6 +100,58 @@ func RestoreFabricState(
 	return nil
 }
 
+// RestoreVolatileState replays only volatile Fabric events (subscriptions, acks,
+// participants, reactions) from persisted events. Thread and dependency events are
+// skipped because the graph data is already available in SQLite.
+//
+// This is used during cold-resume when the SQLite read path is enabled: graph data
+// is served from SQLite directly, and only volatile state needs to be rebuilt from JSONL.
+func RestoreVolatileState(
+	events []PersistedEvent,
+	subs repository.SubscriptionRepository,
+	acks repository.AckRepository,
+	participants repository.ParticipantRepository,
+	reactions repository.ReactionRepository,
+) error {
+	for _, pe := range events {
+		if err := replayVolatileEvent(pe, subs, acks, participants, reactions); err != nil {
+			continue
+		}
+	}
+	return nil
+}
+
+// replayVolatileEvent processes only volatile events (subscriptions, acks, participants, reactions).
+// Thread and dependency events are intentionally skipped.
+func replayVolatileEvent(
+	pe PersistedEvent,
+	subs repository.SubscriptionRepository,
+	acks repository.AckRepository,
+	participants repository.ParticipantRepository,
+	reactions repository.ReactionRepository,
+) error {
+	event := pe.Event
+	switch event.Type {
+	case fabric.EventSubscribed:
+		return replaySubscribed(event, subs)
+	case fabric.EventUnsubscribed:
+		return replayUnsubscribed(event, subs)
+	case fabric.EventAcked:
+		return replayAcked(event, acks)
+	case fabric.EventParticipantJoined:
+		return replayParticipantJoined(event, participants)
+	case fabric.EventParticipantLeft:
+		return replayParticipantLeft(event, participants)
+	case fabric.EventReactionAdded:
+		return replayReactionAdded(event, reactions)
+	case fabric.EventReactionRemoved:
+		return replayReactionRemoved(event, reactions)
+	default:
+		// Skip thread/dep events and unknown events
+		return nil
+	}
+}
+
 // replayEvent processes a single persisted event and updates repositories accordingly.
 func replayEvent(
 	pe PersistedEvent,

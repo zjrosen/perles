@@ -842,3 +842,100 @@ func TestChainHandler_NilHandlers(t *testing.T) {
 
 	require.Equal(t, []string{"h1"}, calls)
 }
+
+// === RestoreVolatileState tests ===
+
+func TestRestoreVolatileState_SkipsThreadsAndDeps(t *testing.T) {
+	// Create repositories for volatile state
+	threads := repository.NewMemoryThreadRepository()
+	deps := repository.NewMemoryDependencyRepository()
+	subs := repository.NewMemorySubscriptionRepository()
+	acks := repository.NewMemoryAckRepository(deps, threads, subs)
+	participants := repository.NewMemoryParticipantRepository()
+	reactions := repository.NewInMemoryReactionRepository()
+
+	// Create events with both graph and volatile data
+	now := time.Now()
+	events := []PersistedEvent{
+		// Graph events (should be skipped)
+		{
+			Version:   currentVersion,
+			Timestamp: now,
+			Event: fabric.Event{
+				Type:      fabric.EventChannelCreated,
+				Timestamp: now,
+				ChannelID: "ch-general",
+				Thread: &domain.Thread{
+					ID: "ch-general", Type: domain.ThreadChannel, Slug: "general",
+					Title: "General", CreatedAt: now, CreatedBy: "SYSTEM",
+				},
+			},
+		},
+		{
+			Version:   currentVersion,
+			Timestamp: now,
+			Event: fabric.Event{
+				Type:      fabric.EventMessagePosted,
+				Timestamp: now,
+				ChannelID: "ch-general",
+				Thread: &domain.Thread{
+					ID: "msg-1", Type: domain.ThreadMessage, Content: "Hello",
+					Kind: string(domain.KindInfo), CreatedAt: now, CreatedBy: "worker-1",
+				},
+			},
+		},
+		// Volatile events (should be restored)
+		{
+			Version:   currentVersion,
+			Timestamp: now,
+			Event: fabric.Event{
+				Type:      fabric.EventSubscribed,
+				Timestamp: now,
+				ChannelID: "ch-general",
+				AgentID:   "worker-1",
+				Subscription: &domain.Subscription{
+					ChannelID: "ch-general",
+					AgentID:   "worker-1",
+					Mode:      domain.ModeAll,
+					CreatedAt: now,
+				},
+			},
+		},
+		{
+			Version:   currentVersion,
+			Timestamp: now,
+			Event: fabric.Event{
+				Type:      fabric.EventParticipantJoined,
+				Timestamp: now,
+				ChannelID: "ch-general",
+				AgentID:   "worker-1",
+				Participant: &domain.Participant{
+					AgentID:  "worker-1",
+					Role:     domain.RoleWorker,
+					JoinedAt: now,
+				},
+			},
+		},
+	}
+
+	// Restore only volatile state
+	err := RestoreVolatileState(events, subs, acks, participants, reactions)
+	require.NoError(t, err)
+
+	// Verify threads were NOT created (skipped)
+	allThreads, err := threads.List(repository.ListOptions{})
+	require.NoError(t, err)
+	require.Len(t, allThreads, 0, "threads should not be restored by RestoreVolatileState")
+
+	// Verify subscription WAS restored
+	agentSubs, err := subs.ListForAgent("worker-1")
+	require.NoError(t, err)
+	require.Len(t, agentSubs, 1, "subscriptions should be restored")
+	require.Equal(t, "ch-general", agentSubs[0].ChannelID)
+
+	// Verify participant WAS restored
+	participant, err := participants.Get("worker-1")
+	require.NoError(t, err)
+	require.NotNil(t, participant, "participants should be restored")
+	require.Equal(t, "worker-1", participant.AgentID)
+}

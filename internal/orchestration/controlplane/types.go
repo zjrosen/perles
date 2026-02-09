@@ -267,10 +267,29 @@ type WorkflowInstance struct {
 	// Locked workflows cannot be started, stopped, or resumed by this process.
 	IsLocked bool
 
+	// Fabric readiness gating
+	FabricReadiness FabricReadiness
+
 	// Lifecycle context (for cancellation)
 	Ctx    context.Context
 	Cancel context.CancelFunc
 }
+
+// FabricReadiness tracks the readiness state of the Fabric messaging layer
+// during startup. Graph data (threads, dependencies) must be reconciled before
+// serving, and volatile state (acks, subscriptions, participants, reactions)
+// must be rebuilt from events before the system is fully operational.
+type FabricReadiness int
+
+const (
+	// FabricNotReady indicates Fabric has not yet been reconciled.
+	FabricNotReady FabricReadiness = iota
+	// FabricGraphReady indicates graph data (threads, deps) is reconciled and
+	// available for serving. Volatile state may still be rebuilding.
+	FabricGraphReady
+	// FabricFullyReady indicates both graph data and volatile state are ready.
+	FabricFullyReady
+)
 
 // NewWorkflowInstance creates a new WorkflowInstance from a WorkflowSpec.
 // The instance is created in Pending state and must be started via the Supervisor.
