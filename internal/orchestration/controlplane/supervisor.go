@@ -3,6 +3,7 @@ package controlplane
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net"
@@ -154,6 +155,11 @@ type SupervisorConfig struct {
 	// BeadsDir is the resolved path to the beads database directory.
 	// When set, spawned processes receive BEADS_DIR environment variable.
 	BeadsDir string
+
+	// FabricDB is the shared SQLite database connection for Fabric backend persistence.
+	// When non-nil and Fabric feature flags are enabled, thread and dependency repositories
+	// use SQLite-backed storage. When nil, Fabric uses in-memory repositories only.
+	FabricDB *sql.DB
 }
 
 // defaultSupervisor is the default implementation of Supervisor.
@@ -168,6 +174,7 @@ type defaultSupervisor struct {
 	sessionFactory        *session.Factory
 	soundService          sound.SoundService
 	beadsDir              string
+	fabricDB              *sql.DB
 }
 
 // NewSupervisor creates a new Supervisor with the given configuration.
@@ -210,6 +217,7 @@ func NewSupervisor(cfg SupervisorConfig) (Supervisor, error) {
 		sessionFactory:        cfg.SessionFactory,
 		soundService:          cfg.SoundService,
 		beadsDir:              cfg.BeadsDir,
+		fabricDB:              cfg.FabricDB,
 	}, nil
 }
 
@@ -453,6 +461,7 @@ func (s *defaultSupervisor) AllocateResources(ctx context.Context, inst *Workflo
 		CommandPersistenceProvider: func() processor.CommandWriter {
 			return sess
 		},
+		FabricBackend: s.buildFabricBackendConfig(inst.ID.String()),
 	}
 
 	// Step 5: Create Infrastructure
@@ -1022,6 +1031,30 @@ func (s *defaultSupervisor) Shutdown(ctx context.Context, inst *WorkflowInstance
 	inst.MCPCoordServer = nil
 
 	return nil
+}
+
+// buildFabricBackendConfig constructs a FabricBackendConfig from the supervisor's
+// shared DB connection and feature flags. Returns nil when no SQLite backend is
+// available or no Fabric feature flags are enabled, preserving the default
+// in-memory behavior.
+func (s *defaultSupervisor) buildFabricBackendConfig(sessionID string) *v2.FabricBackendConfig {
+	if s.fabricDB == nil {
+		return nil
+	}
+
+	dualWrite := s.flags.Enabled(flags.FlagFabricDualWrite)
+	sqliteRead := s.flags.Enabled(flags.FlagFabricSQLiteRead)
+
+	if !dualWrite && !sqliteRead {
+		return nil
+	}
+
+	return &v2.FabricBackendConfig{
+		DB:                s.fabricDB,
+		SessionID:         sessionID,
+		DualWriteEnabled:  dualWrite,
+		SQLiteReadEnabled: sqliteRead,
+	}
 }
 
 // getWorkDir returns the effective working directory for a workflow.

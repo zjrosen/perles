@@ -17,6 +17,7 @@ import (
 	"github.com/zjrosen/perles/internal/flags"
 	appgit "github.com/zjrosen/perles/internal/git/application"
 	domaingit "github.com/zjrosen/perles/internal/git/domain"
+	"github.com/zjrosen/perles/internal/infrastructure/sqlite"
 	"github.com/zjrosen/perles/internal/log"
 	"github.com/zjrosen/perles/internal/mocks"
 	"github.com/zjrosen/perles/internal/orchestration/client"
@@ -2649,6 +2650,282 @@ func TestSupervisor_AllocateResources_CleanupClosure_RemovesNewWorktree(t *testi
 	require.Contains(t, err.Error(), "creating infrastructure")
 	require.Equal(t, WorkflowPending, inst.State)
 	// RemoveWorktree assertion is automatically verified by mockery
+}
+
+// === Unit Tests: buildFabricBackendConfig ===
+
+func TestBuildFabricBackendConfig_NilDB(t *testing.T) {
+	s := &defaultSupervisor{
+		fabricDB: nil,
+		flags:    flags.New(map[string]bool{flags.FlagFabricDualWrite: true}),
+	}
+
+	cfg := s.buildFabricBackendConfig("session-123")
+	require.Nil(t, cfg, "should return nil when fabricDB is nil")
+}
+
+func TestBuildFabricBackendConfig_NilFlags(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := sqlite.NewDB(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	s := &defaultSupervisor{
+		fabricDB: db.Connection(),
+		flags:    nil, // nil flags registry - Enabled() returns false
+	}
+
+	cfg := s.buildFabricBackendConfig("session-123")
+	require.Nil(t, cfg, "should return nil when no flags are enabled")
+}
+
+func TestBuildFabricBackendConfig_NoFlagsEnabled(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := sqlite.NewDB(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	s := &defaultSupervisor{
+		fabricDB: db.Connection(),
+		flags:    flags.New(map[string]bool{}),
+	}
+
+	cfg := s.buildFabricBackendConfig("session-123")
+	require.Nil(t, cfg, "should return nil when neither fabric flag is enabled")
+}
+
+func TestBuildFabricBackendConfig_DualWriteOnly(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := sqlite.NewDB(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	s := &defaultSupervisor{
+		fabricDB: db.Connection(),
+		flags: flags.New(map[string]bool{
+			flags.FlagFabricDualWrite:  true,
+			flags.FlagFabricSQLiteRead: false,
+		}),
+	}
+
+	cfg := s.buildFabricBackendConfig("session-abc")
+	require.NotNil(t, cfg)
+	require.Equal(t, db.Connection(), cfg.DB)
+	require.Equal(t, "session-abc", cfg.SessionID)
+	require.True(t, cfg.DualWriteEnabled)
+	require.False(t, cfg.SQLiteReadEnabled)
+}
+
+func TestBuildFabricBackendConfig_SQLiteReadOnly(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := sqlite.NewDB(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	s := &defaultSupervisor{
+		fabricDB: db.Connection(),
+		flags: flags.New(map[string]bool{
+			flags.FlagFabricDualWrite:  false,
+			flags.FlagFabricSQLiteRead: true,
+		}),
+	}
+
+	cfg := s.buildFabricBackendConfig("session-xyz")
+	require.NotNil(t, cfg)
+	require.Equal(t, db.Connection(), cfg.DB)
+	require.Equal(t, "session-xyz", cfg.SessionID)
+	require.False(t, cfg.DualWriteEnabled)
+	require.True(t, cfg.SQLiteReadEnabled)
+}
+
+func TestBuildFabricBackendConfig_BothFlagsEnabled(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := sqlite.NewDB(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	s := &defaultSupervisor{
+		fabricDB: db.Connection(),
+		flags: flags.New(map[string]bool{
+			flags.FlagFabricDualWrite:  true,
+			flags.FlagFabricSQLiteRead: true,
+		}),
+	}
+
+	cfg := s.buildFabricBackendConfig("session-both")
+	require.NotNil(t, cfg)
+	require.True(t, cfg.DualWriteEnabled)
+	require.True(t, cfg.SQLiteReadEnabled)
+}
+
+func TestBuildFabricBackendConfig_SessionIDPropagated(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := sqlite.NewDB(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	s := &defaultSupervisor{
+		fabricDB: db.Connection(),
+		flags:    flags.New(map[string]bool{flags.FlagFabricDualWrite: true}),
+	}
+
+	cfg := s.buildFabricBackendConfig("workflow-12345")
+	require.NotNil(t, cfg)
+	require.Equal(t, "workflow-12345", cfg.SessionID)
+}
+
+// === Integration Tests: AllocateResources with FabricBackend ===
+
+func TestSupervisor_AllocateResources_NilFabricBackendWhenNoDB(t *testing.T) {
+	cfg, mockProvider, mockFactory := newTestSupervisorConfig(t)
+	// FabricDB is nil by default in the test config
+	supervisor, err := NewSupervisor(cfg)
+	require.NoError(t, err)
+
+	inst := newTestInstance(t, "no-db-workflow")
+	cleanupSessionOnTestEnd(t, inst)
+
+	// Capture the InfrastructureConfig to verify FabricBackend is nil
+	var capturedCfg v2.InfrastructureConfig
+	infra := createMinimalInfrastructure(t)
+	mockFactory.On("Create", mock.MatchedBy(func(c v2.InfrastructureConfig) bool {
+		capturedCfg = c
+		return true
+	})).Return(infra, nil)
+
+	setupAgentProviderMock(t, mockProvider)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go infra.Core.Processor.Run(ctx)
+	require.NoError(t, infra.Core.Processor.WaitForReady(ctx))
+
+	err = supervisor.AllocateResources(ctx, inst)
+	require.NoError(t, err)
+
+	require.Nil(t, capturedCfg.FabricBackend, "FabricBackend should be nil when no DB is available")
+}
+
+func TestSupervisor_AllocateResources_NilFabricBackendWhenNoFlags(t *testing.T) {
+	cfg, mockProvider, mockFactory := newTestSupervisorConfig(t)
+
+	// Set up DB but no feature flags
+	dbPath := filepath.Join(t.TempDir(), "fabric.db")
+	db, err := sqlite.NewDB(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	cfg.FabricDB = db.Connection()
+	cfg.Flags = flags.New(map[string]bool{}) // No fabric flags enabled
+
+	supervisor, err := NewSupervisor(cfg)
+	require.NoError(t, err)
+
+	inst := newTestInstance(t, "no-flags-workflow")
+	cleanupSessionOnTestEnd(t, inst)
+
+	var capturedCfg v2.InfrastructureConfig
+	infra := createMinimalInfrastructure(t)
+	mockFactory.On("Create", mock.MatchedBy(func(c v2.InfrastructureConfig) bool {
+		capturedCfg = c
+		return true
+	})).Return(infra, nil)
+
+	setupAgentProviderMock(t, mockProvider)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go infra.Core.Processor.Run(ctx)
+	require.NoError(t, infra.Core.Processor.WaitForReady(ctx))
+
+	err = supervisor.AllocateResources(ctx, inst)
+	require.NoError(t, err)
+
+	require.Nil(t, capturedCfg.FabricBackend, "FabricBackend should be nil when no flags are enabled")
+}
+
+func TestSupervisor_AllocateResources_PopulatesFabricBackendWhenConfigured(t *testing.T) {
+	cfg, mockProvider, mockFactory := newTestSupervisorConfig(t)
+
+	// Set up DB and enable fabric flags
+	dbPath := filepath.Join(t.TempDir(), "fabric.db")
+	db, err := sqlite.NewDB(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	cfg.FabricDB = db.Connection()
+	cfg.Flags = flags.New(map[string]bool{
+		flags.FlagFabricDualWrite:  true,
+		flags.FlagFabricSQLiteRead: false,
+	})
+
+	supervisor, err := NewSupervisor(cfg)
+	require.NoError(t, err)
+
+	inst := newTestInstance(t, "fabric-wired-workflow")
+	cleanupSessionOnTestEnd(t, inst)
+
+	var capturedCfg v2.InfrastructureConfig
+	infra := createMinimalInfrastructure(t)
+	mockFactory.On("Create", mock.MatchedBy(func(c v2.InfrastructureConfig) bool {
+		capturedCfg = c
+		return true
+	})).Return(infra, nil)
+
+	setupAgentProviderMock(t, mockProvider)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go infra.Core.Processor.Run(ctx)
+	require.NoError(t, infra.Core.Processor.WaitForReady(ctx))
+
+	err = supervisor.AllocateResources(ctx, inst)
+	require.NoError(t, err)
+
+	require.NotNil(t, capturedCfg.FabricBackend, "FabricBackend should be populated")
+	require.Equal(t, db.Connection(), capturedCfg.FabricBackend.DB)
+	require.Equal(t, inst.ID.String(), capturedCfg.FabricBackend.SessionID)
+	require.True(t, capturedCfg.FabricBackend.DualWriteEnabled)
+	require.False(t, capturedCfg.FabricBackend.SQLiteReadEnabled)
+}
+
+func TestSupervisor_AllocateResources_SessionIDMatchesWorkflowID(t *testing.T) {
+	cfg, mockProvider, mockFactory := newTestSupervisorConfig(t)
+
+	dbPath := filepath.Join(t.TempDir(), "fabric.db")
+	db, err := sqlite.NewDB(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	cfg.FabricDB = db.Connection()
+	cfg.Flags = flags.New(map[string]bool{flags.FlagFabricSQLiteRead: true})
+
+	supervisor, err := NewSupervisor(cfg)
+	require.NoError(t, err)
+
+	inst := newTestInstance(t, "session-id-workflow")
+	cleanupSessionOnTestEnd(t, inst)
+
+	var capturedCfg v2.InfrastructureConfig
+	infra := createMinimalInfrastructure(t)
+	mockFactory.On("Create", mock.MatchedBy(func(c v2.InfrastructureConfig) bool {
+		capturedCfg = c
+		return true
+	})).Return(infra, nil)
+
+	setupAgentProviderMock(t, mockProvider)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go infra.Core.Processor.Run(ctx)
+	require.NoError(t, infra.Core.Processor.WaitForReady(ctx))
+
+	err = supervisor.AllocateResources(ctx, inst)
+	require.NoError(t, err)
+
+	require.NotNil(t, capturedCfg.FabricBackend)
+	require.Equal(t, inst.ID.String(), capturedCfg.FabricBackend.SessionID,
+		"FabricBackendConfig.SessionID must match the workflow instance ID")
 }
 
 // createMinimalInfrastructureWithFabric creates infrastructure including FabricService.

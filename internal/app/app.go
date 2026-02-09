@@ -1250,8 +1250,11 @@ func (m *Model) createControlPlane() controlplane.ControlPlane {
 		GitExecutor: m.services.GitExecutorFactory(m.services.WorkDir),
 	})
 
-	// Create supervisor with full configuration
-	supervisor, err := controlplane.NewSupervisor(controlplane.SupervisorConfig{
+	// Build supervisor config with optional Fabric SQLite backend.
+	// When the app-level SQLite DB is available, pass its connection to
+	// the supervisor so that Fabric repositories can use durable storage
+	// when the appropriate feature flags are enabled.
+	supCfg := controlplane.SupervisorConfig{
 		AgentProviders:     orchConfig.AgentProviders(),
 		WorkflowRegistry:   m.workflowRegistry,
 		GitExecutorFactory: m.services.GitExecutorFactory,
@@ -1260,7 +1263,13 @@ func (m *Model) createControlPlane() controlplane.ControlPlane {
 		SessionFactory:     sessionFactory,
 		SoundService:       m.services.Sounds,
 		BeadsDir:           m.services.Config.ResolvedBeadsDir,
-	})
+	}
+	if m.db != nil {
+		supCfg.FabricDB = m.db.Connection()
+	}
+
+	// Create supervisor with full configuration
+	supervisor, err := controlplane.NewSupervisor(supCfg)
 	if err != nil {
 		log.Error(log.CatMode, "Failed to create Supervisor", "error", err)
 		return nil

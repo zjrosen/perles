@@ -16,6 +16,16 @@ const (
 	// FlagSessionPersistence controls whether workflow sessions are persisted to SQLite.
 	// When disabled, falls back to in-memory registry (no persistence across restarts).
 	FlagSessionPersistence = "session-persistence"
+
+	// FlagFabricDualWrite controls whether Fabric thread and dependency writes
+	// are propagated to both in-memory and SQLite backends simultaneously.
+	// Requires a SQLite DB to be available; ignored when DB is nil.
+	FlagFabricDualWrite = "fabric-dual-write"
+
+	// FlagFabricSQLiteRead controls whether Fabric thread and dependency reads
+	// are served from SQLite instead of in-memory repositories.
+	// Requires a SQLite DB to be available; ignored when DB is nil.
+	FlagFabricSQLiteRead = "fabric-sqlite-read"
 )
 
 // Registry holds feature flag state loaded from configuration.
