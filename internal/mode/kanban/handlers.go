@@ -73,7 +73,7 @@ func (m Model) handleBoardKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case key.Matches(msg, keys.Kanban.Refresh):
 		// Save cursor before refresh to restore position after
 		m.pendingCursor = m.saveCursor()
-		m.loading = true
+		m.startReloadCycle()
 		m.manualRefreshed = true
 		m.autoRefreshed = false
 		// Invalidate other views so they reload when switched to
@@ -482,22 +482,26 @@ func (m Model) handleRenameViewModalKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	return m, cmd
 }
 
-// handleColumnLoaded processes column load completion.
+// handleColumnLoaded processes a column load message for an active reload cycle.
+// We may receive column messages out of order, so cursor restoration cannot assume
+// the selected issue appears in the first loaded column.
 func (m Model) handleColumnLoaded(msg tea.Msg) (Model, tea.Cmd) {
 	// Pass message to board for handling
 	m.board, _ = m.board.Update(msg)
 
-	// SQLite queries are instant, so treat every load message as completion
-	m.loading = false
+	reloadDone := m.completeLoadMsg()
 
 	// Restore cursor if we have a pending state
 	if m.pendingCursor != nil {
-		m = m.restoreCursor(m.pendingCursor)
-		m.pendingCursor = nil
+		var restored bool
+		m, restored = m.restoreCursor(m.pendingCursor)
+		if restored || reloadDone {
+			m.pendingCursor = nil
+		}
 	}
 	// Auto sync is silent, manual refresh shows toaster
 	m.autoRefreshed = false
-	if m.manualRefreshed {
+	if m.manualRefreshed && reloadDone {
 		m.manualRefreshed = false
 		return m, func() tea.Msg { return mode.ShowToastMsg{Message: "refreshed issues", Style: toaster.StyleSuccess} }
 	}
@@ -513,6 +517,7 @@ func (m Model) handleIssueSaved(msg issueSavedMsg) (Model, tea.Cmd) {
 	}
 	m.pendingCursor = m.saveCursor()
 	m.board = m.board.InvalidateViews()
+	m.startReloadCycle()
 	return m, m.board.LoadAllColumns()
 }
 
@@ -557,7 +562,7 @@ func (m Model) HandleDBChanged() (Model, tea.Cmd) {
 
 	// Trigger refresh
 	m.pendingCursor = m.saveCursor()
-	m.loading = true
+	m.startReloadCycle()
 	m.autoRefreshed = true
 	m.manualRefreshed = false
 
@@ -594,7 +599,7 @@ func (m Model) handleColEditorSave(msg coleditor.SaveMsg) (Model, tea.Cmd) {
 	m.rebuildBoard()
 
 	m.view = ViewBoard
-	m.loading = true
+	m.startReloadCycle()
 	cmds := []tea.Cmd{
 		func() tea.Msg { return mode.ShowToastMsg{Message: "Column saved", Style: toaster.StyleSuccess} },
 	}
@@ -627,7 +632,7 @@ func (m Model) handleColEditorDelete(msg coleditor.DeleteMsg) (Model, tea.Cmd) {
 	m.rebuildBoard()
 
 	m.view = ViewBoard
-	m.loading = true
+	m.startReloadCycle()
 	cmds := []tea.Cmd{
 		func() tea.Msg { return mode.ShowToastMsg{Message: "Column deleted", Style: toaster.StyleSuccess} },
 	}
@@ -671,7 +676,7 @@ func (m Model) handleColEditorAdd(msg coleditor.AddMsg) (Model, tea.Cmd) {
 	m.rebuildBoardWithFocus(insertPos)
 
 	m.view = ViewBoard
-	m.loading = true
+	m.startReloadCycle()
 	cmds := []tea.Cmd{
 		func() tea.Msg { return mode.ShowToastMsg{Message: "Column added", Style: toaster.StyleSuccess} },
 	}
@@ -769,7 +774,7 @@ func (m Model) handleIssueDeleted(msg issueDeletedMsg) (Model, tea.Cmd) {
 	m.deleteIssueIDs = nil
 	m.selectedIssue = nil
 	m.pendingCursor = nil // Don't try to restore cursor to deleted issue
-	m.loading = true
+	m.startReloadCycle()
 	m.board = m.board.InvalidateViews()
 
 	return m, tea.Batch(

@@ -144,6 +144,39 @@ func createTestModelWithIssue(issueID string, query string) Model {
 	}
 }
 
+// createRefreshTestModel builds a kanban model configured for reload/cursor tests.
+func createRefreshTestModel(t *testing.T, columns []config.ColumnConfig) Model {
+	cfg := config.Defaults()
+	cfg.Views = []config.ViewConfig{{Name: "Test", Columns: columns}}
+	mockExecutor := mocks.NewMockBQLExecutor(t)
+
+	services := mode.Services{
+		Config:   &cfg,
+		Executor: mockExecutor,
+	}
+
+	brd := board.NewFromViews(cfg.GetViews(), mockExecutor, nil).SetSize(100, 40)
+	return Model{
+		services: services,
+		board:    brd,
+		width:    100,
+		height:   40,
+		view:     ViewBoard,
+	}
+}
+
+// seedBoardColumn loads test issues into a board column via a ColumnLoadedMsg.
+func seedBoardColumn(brd board.Model, columnIndex int, columnTitle string, issues []beads.Issue) board.Model {
+	brd, _ = brd.Update(board.ColumnLoadedMsg{
+		ViewIndex:   0,
+		ColumnIndex: columnIndex,
+		ColumnTitle: columnTitle,
+		Issues:      issues,
+		Err:         nil,
+	})
+	return brd
+}
+
 func TestKanban_EnterKey_SendsSubModeTree(t *testing.T) {
 	m := createTestModelWithIssue("test-123", "status = open")
 
@@ -1125,6 +1158,134 @@ func TestKanban_HandleIssueSaved_Success(t *testing.T) {
 
 	require.NotNil(t, m.pendingCursor, "should save cursor for issue following")
 	require.Equal(t, "test-123", m.pendingCursor.issueID, "cursor should track saved issue")
+}
+
+func TestKanban_RefreshFromConfig_PreservesSelectedIssue(t *testing.T) {
+	columns := []config.ColumnConfig{
+		{Name: "In Progress", Query: "status = in_progress", Color: "#888888"},
+	}
+	m := createRefreshTestModel(t, columns)
+
+	issues := []beads.Issue{
+		{ID: "task-1", TitleText: "Task 1", Type: beads.TypeTask},
+		{ID: "task-2", TitleText: "Task 2", Type: beads.TypeTask},
+		{ID: "task-3", TitleText: "Task 3", Type: beads.TypeTask},
+	}
+	m.board = seedBoardColumn(m.board, 0, "In Progress", issues)
+
+	var found bool
+	m.board, found = m.board.SelectByID("task-3")
+	require.True(t, found, "precondition: task-3 should be selectable")
+	require.Equal(t, "task-3", m.board.SelectedIssue().ID, "precondition: task-3 should be selected")
+
+	m, _ = m.RefreshFromConfig()
+	require.NotNil(t, m.pendingCursor, "refresh should capture cursor for restoration")
+	require.Equal(t, "task-3", m.pendingCursor.issueID, "refresh should track selected issue ID")
+
+	// Simulate column reload completion after RefreshFromConfig().
+	m, _ = m.handleColumnLoaded(board.ColumnLoadedMsg{
+		ViewIndex:   0,
+		ColumnIndex: 0,
+		ColumnTitle: "In Progress",
+		Issues:      issues,
+		Err:         nil,
+	})
+
+	selected := m.board.SelectedIssue()
+	require.NotNil(t, selected, "selection should be restored after reload")
+	require.Equal(t, "task-3", selected.ID, "cursor should stay on previously selected issue")
+	require.Nil(t, m.pendingCursor, "pending cursor should clear after restoration")
+}
+
+func TestKanban_RefreshFromConfig_RestoresAfterLaterColumnLoad(t *testing.T) {
+	columns := []config.ColumnConfig{
+		{Name: "Todo", Query: "status = open", Color: "#999999"},
+		{Name: "In Progress", Query: "status = in_progress", Color: "#888888"},
+	}
+	m := createRefreshTestModel(t, columns)
+	col0Issues := []beads.Issue{
+		{ID: "task-1", TitleText: "Task 1", Type: beads.TypeTask},
+	}
+	col1Issues := []beads.Issue{
+		{ID: "task-2", TitleText: "Task 2", Type: beads.TypeTask},
+		{ID: "task-3", TitleText: "Task 3", Type: beads.TypeTask},
+	}
+	m.board = seedBoardColumn(m.board, 0, "Todo", col0Issues)
+	m.board = seedBoardColumn(m.board, 1, "In Progress", col1Issues)
+
+	var found bool
+	m.board, found = m.board.SelectByID("task-3")
+	require.True(t, found, "precondition: task-3 should be selectable")
+	require.Equal(t, "task-3", m.board.SelectedIssue().ID, "precondition: task-3 should be selected")
+
+	m, _ = m.RefreshFromConfig()
+	require.NotNil(t, m.pendingCursor, "refresh should capture cursor for restoration")
+
+	// First loaded column does not contain the selected issue: keep pending cursor.
+	m, _ = m.handleColumnLoaded(board.ColumnLoadedMsg{
+		ViewIndex:   0,
+		ColumnIndex: 0,
+		ColumnTitle: "Todo",
+		Issues:      col0Issues,
+		Err:         nil,
+	})
+	require.NotNil(t, m.pendingCursor, "cursor restore should remain pending until matching issue loads")
+
+	// Later column includes selected issue: restore and clear pending cursor.
+	m, _ = m.handleColumnLoaded(board.ColumnLoadedMsg{
+		ViewIndex:   0,
+		ColumnIndex: 1,
+		ColumnTitle: "In Progress",
+		Issues:      col1Issues,
+		Err:         nil,
+	})
+	selected := m.board.SelectedIssue()
+	require.NotNil(t, selected, "selection should be restored once matching column loads")
+	require.Equal(t, "task-3", selected.ID, "cursor should restore to the original issue")
+	require.Nil(t, m.pendingCursor, "pending cursor should clear after successful restoration")
+}
+
+func TestKanban_RefreshFromConfig_ClearsPendingWhenIssueMissing(t *testing.T) {
+	columns := []config.ColumnConfig{
+		{Name: "Todo", Query: "status = open", Color: "#999999"},
+		{Name: "In Progress", Query: "status = in_progress", Color: "#888888"},
+	}
+	m := createRefreshTestModel(t, columns)
+	initialCol0 := []beads.Issue{{ID: "task-1", TitleText: "Task 1", Type: beads.TypeTask}}
+	initialCol1 := []beads.Issue{
+		{ID: "task-2", TitleText: "Task 2", Type: beads.TypeTask},
+		{ID: "task-3", TitleText: "Task 3", Type: beads.TypeTask},
+	}
+	reloadedCol0 := []beads.Issue{{ID: "task-1", TitleText: "Task 1", Type: beads.TypeTask}}
+	reloadedCol1 := []beads.Issue{{ID: "task-2", TitleText: "Task 2", Type: beads.TypeTask}} // task-3 removed
+
+	m.board = seedBoardColumn(m.board, 0, "Todo", initialCol0)
+	m.board = seedBoardColumn(m.board, 1, "In Progress", initialCol1)
+
+	var found bool
+	m.board, found = m.board.SelectByID("task-3")
+	require.True(t, found, "precondition: task-3 should be selectable")
+
+	m, _ = m.RefreshFromConfig()
+	require.NotNil(t, m.pendingCursor, "refresh should capture cursor for restoration")
+
+	m, _ = m.handleColumnLoaded(board.ColumnLoadedMsg{
+		ViewIndex:   0,
+		ColumnIndex: 0,
+		ColumnTitle: "Todo",
+		Issues:      reloadedCol0,
+		Err:         nil,
+	})
+	require.NotNil(t, m.pendingCursor, "pending cursor should remain before all loads complete")
+
+	m, _ = m.handleColumnLoaded(board.ColumnLoadedMsg{
+		ViewIndex:   0,
+		ColumnIndex: 1,
+		ColumnTitle: "In Progress",
+		Issues:      reloadedCol1,
+		Err:         nil,
+	})
+	require.Nil(t, m.pendingCursor, "pending cursor should clear when issue is missing after full reload")
 }
 
 func TestKanban_HandleIssueSaved_Error(t *testing.T) {

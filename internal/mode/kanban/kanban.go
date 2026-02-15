@@ -74,7 +74,8 @@ type Model struct {
 	editingIssue *beads.Issue // Issue being edited (for title/description comparison on save)
 
 	// Pending cursor restoration after refresh
-	pendingCursor *cursorState
+	pendingCursor    *cursorState
+	pendingLoadCount int // Remaining expected load messages for current reload cycle
 
 	// Refresh state tracking
 	autoRefreshed   bool // Set when refresh triggered by file watcher
@@ -137,8 +138,11 @@ func (m Model) Refresh() tea.Cmd {
 // RefreshFromConfig rebuilds the board from the current config.
 // Use this when columns have been added/removed externally.
 func (m Model) RefreshFromConfig() (Model, tea.Cmd) {
+	// Preserve current selection so returning from another mode (e.g. search)
+	// keeps the cursor on the same issue after the board reloads.
+	m.pendingCursor = m.saveCursor()
 	m.rebuildBoard()
-	m.loading = true
+	m.startReloadCycle()
 	return m, m.loadBoardCmd()
 }
 
@@ -183,7 +187,16 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case board.TreeColumnLoadedMsg:
 		// Delegate tree column load messages to board
 		m.board, _ = m.board.Update(msg)
-		m.loading = false
+		reloadDone := m.completeLoadMsg()
+		if m.pendingCursor != nil && reloadDone {
+			// Tree columns don't support SelectByID restoration; clear pending at end of cycle.
+			m.pendingCursor = nil
+		}
+		m.autoRefreshed = false
+		if m.manualRefreshed && reloadDone {
+			m.manualRefreshed = false
+			return m, func() tea.Msg { return mode.ShowToastMsg{Message: "refreshed issues", Style: toaster.StyleSuccess} }
+		}
 		return m, nil
 
 	case tea.MouseMsg:
@@ -428,20 +441,22 @@ func (m Model) saveCursor() *cursorState {
 }
 
 // restoreCursor attempts to restore selection to the saved issue.
-func (m Model) restoreCursor(state *cursorState) Model {
+// Returns true when the issue was found and selected.
+func (m Model) restoreCursor(state *cursorState) (Model, bool) {
 	if state == nil {
-		return m
+		return m, false
 	}
 
-	// Try to find the issue by ID (may have moved columns)
+	// Keep focus anchored to the previous column while loads are still arriving.
+	m.board = m.board.SetFocus(state.column)
+
+	// Try to find the issue by ID (it may have moved columns).
 	newBoard, found := m.board.SelectByID(state.issueID)
 	if found {
 		m.board = newBoard
-	} else {
-		// Issue not found, stay in same column
-		m.board = m.board.SetFocus(state.column)
+		return m, true
 	}
-	return m
+	return m, false
 }
 
 // boardHeight returns the available height for the board, accounting for status bar.
@@ -479,6 +494,37 @@ func (m Model) loadBoardCmd() tea.Cmd {
 		return m.board.LoadCurrentViewCmd()
 	}
 	return m.board.LoadAllColumns()
+}
+
+// countPendingLoadMsgs returns the number of load messages expected for the current view.
+func (m Model) countPendingLoadMsgs() int {
+	count := 0
+	viewIndex := m.board.CurrentViewIndex()
+	for i := 0; i < m.board.ColCount(); i++ {
+		col := m.board.BoardColumn(i)
+		if col == nil {
+			continue
+		}
+		if cmd := col.LoadCmd(viewIndex, i); cmd != nil {
+			count++
+		}
+	}
+	return count
+}
+
+// startReloadCycle initializes load-tracking state for a board reload operation.
+func (m *Model) startReloadCycle() {
+	m.pendingLoadCount = m.countPendingLoadMsgs()
+	m.loading = m.pendingLoadCount > 0
+}
+
+// completeLoadMsg advances reload tracking by one message and reports whether reload is complete.
+func (m *Model) completeLoadMsg() bool {
+	if m.pendingLoadCount > 0 {
+		m.pendingLoadCount--
+	}
+	m.loading = m.pendingLoadCount > 0
+	return m.pendingLoadCount == 0
 }
 
 // currentViewIndex returns the current view index, or 0 if no views.
