@@ -3,17 +3,20 @@ package bql
 import (
 	"fmt"
 	"strings"
+
+	appbeads "github.com/zjrosen/perles/internal/beads/application"
 )
 
 // SQLBuilder converts a BQL AST to SQL.
 type SQLBuilder struct {
-	query  *Query
-	params []any
+	query   *Query
+	params  []any
+	dialect appbeads.SQLDialect
 }
 
-// NewSQLBuilder creates a builder for the query.
-func NewSQLBuilder(query *Query) *SQLBuilder {
-	return &SQLBuilder{query: query}
+// NewSQLBuilder creates a builder for the query and dialect.
+func NewSQLBuilder(query *Query, dialect appbeads.SQLDialect) *SQLBuilder {
+	return &SQLBuilder{query: query, dialect: dialect}
 }
 
 // Build generates the SQL WHERE clause and ORDER BY.
@@ -111,10 +114,14 @@ func (b *SQLBuilder) buildCompare(e *CompareExpr) string {
 	}
 
 	// Handle date comparisons
-	// Wrap column in datetime() to normalize ISO 8601 timestamps with timezone
-	// to UTC format that matches datetime('now', ...) expressions
 	if e.Value.Type == ValueDate {
 		dateSQL := b.dateToSQL(e.Value.String)
+		if b.dialect == appbeads.DialectMySQL {
+			// MySQL/Dolt handles datetime types natively, no wrapping needed
+			return fmt.Sprintf("%s %s %s", column, b.opToSQL(e.Op), dateSQL)
+		}
+		// SQLite: wrap column in datetime() to normalize ISO 8601 timestamps
+		// with timezone to UTC format that matches datetime('now', ...) expressions
 		return fmt.Sprintf("datetime(%s) %s %s", column, b.opToSQL(e.Op), dateSQL)
 	}
 
@@ -220,8 +227,16 @@ func (b *SQLBuilder) opToSQL(op TokenType) string {
 	}
 }
 
-// dateToSQL converts a date value to SQL expression.
+// dateToSQL converts a date value to a SQL expression based on the dialect.
 func (b *SQLBuilder) dateToSQL(dateStr string) string {
+	if b.dialect == appbeads.DialectMySQL {
+		return b.dateToSQLMySQL(dateStr)
+	}
+	return b.dateToSQLSQLite(dateStr)
+}
+
+// dateToSQLSQLite generates SQLite date expressions.
+func (b *SQLBuilder) dateToSQLSQLite(dateStr string) string {
 	switch dateStr {
 	case "today":
 		return "date('now')"
@@ -241,6 +256,34 @@ func (b *SQLBuilder) dateToSQL(dateStr string) string {
 				return fmt.Sprintf("datetime('now', '-%s hours')", value)
 			case 'm', 'M':
 				return fmt.Sprintf("date('now', '-%s months')", value)
+			}
+		}
+		// Assume ISO date, pass through as string
+		b.params = append(b.params, dateStr)
+		return "?"
+	}
+}
+
+// dateToSQLMySQL generates MySQL/Dolt date expressions.
+func (b *SQLBuilder) dateToSQLMySQL(dateStr string) string {
+	switch dateStr {
+	case "today":
+		return "CURDATE()"
+	case "yesterday":
+		return "DATE_SUB(CURDATE(), INTERVAL 1 DAY)"
+	default:
+		// Handle relative time formats: -Nd (days), -Nh (hours), -Nm (months)
+		if len(dateStr) > 1 && dateStr[0] == '-' {
+			suffix := dateStr[len(dateStr)-1]
+			value := dateStr[1 : len(dateStr)-1] // strip - and suffix
+
+			switch suffix {
+			case 'd', 'D':
+				return fmt.Sprintf("DATE_SUB(CURDATE(), INTERVAL %s DAY)", value)
+			case 'h', 'H':
+				return fmt.Sprintf("DATE_SUB(NOW(), INTERVAL %s HOUR)", value)
+			case 'm', 'M':
+				return fmt.Sprintf("DATE_SUB(CURDATE(), INTERVAL %s MONTH)", value)
 			}
 		}
 		// Assume ISO date, pass through as string

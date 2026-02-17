@@ -1,6 +1,38 @@
 package application
 
-import domain "github.com/zjrosen/perles/internal/beads/domain"
+import (
+	"database/sql"
+
+	domain "github.com/zjrosen/perles/internal/beads/domain"
+)
+
+// SQLDialect identifies the SQL variant for query generation.
+type SQLDialect string
+
+const (
+	// DialectSQLite is the SQLite SQL dialect.
+	DialectSQLite SQLDialect = "sqlite"
+	// DialectMySQL is the MySQL SQL dialect (used by Dolt).
+	DialectMySQL SQLDialect = "mysql"
+)
+
+// DBClient provides database access with backend-agnostic operations.
+type DBClient interface {
+	VersionReader
+	CommentReader
+
+	// DB returns the underlying *sql.DB for query execution.
+	DB() *sql.DB
+
+	// DBPath returns a path suitable for file watching.
+	DBPath() string
+
+	// Dialect returns the SQL dialect for query building.
+	Dialect() SQLDialect
+
+	// Close closes the database connection.
+	Close() error
+}
 
 // VersionReader reads the beads database version.
 type VersionReader interface {

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	appbeads "github.com/zjrosen/perles/internal/beads/application"
 	beads "github.com/zjrosen/perles/internal/beads/domain"
 	"github.com/zjrosen/perles/internal/cachemanager"
 	"github.com/zjrosen/perles/internal/log"
@@ -24,6 +25,7 @@ var _ BQLExecutor = (*Executor)(nil)
 // Executor runs BQL queries against the database.
 type Executor struct {
 	db            *sql.DB
+	dialect       appbeads.SQLDialect
 	cacheManager  cachemanager.CacheManager[string, []beads.Issue]
 	depGraphCache cachemanager.CacheManager[string, *DependencyGraph]
 }
@@ -34,11 +36,13 @@ const depGraphCacheKey = "__dependency_graph__"
 // NewExecutor creates a new query executor.
 func NewExecutor(
 	db *sql.DB,
+	dialect appbeads.SQLDialect,
 	cacheManager cachemanager.CacheManager[string, []beads.Issue],
 	depGraphCache cachemanager.CacheManager[string, *DependencyGraph],
 ) *Executor {
 	return &Executor{
 		db:            db,
+		dialect:       dialect,
 		cacheManager:  cacheManager,
 		depGraphCache: depGraphCache,
 	}
@@ -133,7 +137,7 @@ type IssueDeps struct {
 // 4. Batch load comment counts for all result IDs
 func (e *Executor) executeBaseQuery(query *Query) ([]beads.Issue, error) {
 	// Build SQL
-	builder := NewSQLBuilder(query)
+	builder := NewSQLBuilder(query, e.dialect)
 	whereClause, orderBy, params := builder.Build()
 
 	// Construct main query WITHOUT dependency subqueries

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	appbeads "github.com/zjrosen/perles/internal/beads/application"
 )
 
 func TestSQLBuilder_SimpleComparison(t *testing.T) {
@@ -64,7 +65,7 @@ func TestSQLBuilder_SimpleComparison(t *testing.T) {
 			query, err := parser.Parse()
 			require.NoError(t, err)
 
-			builder := NewSQLBuilder(query)
+			builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 			where, orderBy, params := builder.Build()
 
 			require.Equal(t, tt.wantWhere, where)
@@ -80,7 +81,7 @@ func TestSQLBuilder_SpecialFields(t *testing.T) {
 		query, err := parser.Parse()
 		require.NoError(t, err)
 
-		builder := NewSQLBuilder(query)
+		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 		where, _, params := builder.Build()
 
 		require.Equal(t, "i.id IN (SELECT issue_id FROM blocked_issues_cache)", where)
@@ -92,7 +93,7 @@ func TestSQLBuilder_SpecialFields(t *testing.T) {
 		query, err := parser.Parse()
 		require.NoError(t, err)
 
-		builder := NewSQLBuilder(query)
+		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 		where, _, _ := builder.Build()
 
 		require.Equal(t, "i.id NOT IN (SELECT issue_id FROM blocked_issues_cache)", where)
@@ -103,7 +104,7 @@ func TestSQLBuilder_SpecialFields(t *testing.T) {
 		query, err := parser.Parse()
 		require.NoError(t, err)
 
-		builder := NewSQLBuilder(query)
+		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 		where, _, _ := builder.Build()
 
 		require.Equal(t, "i.id IN (SELECT id FROM ready_issues)", where)
@@ -114,7 +115,7 @@ func TestSQLBuilder_SpecialFields(t *testing.T) {
 		query, err := parser.Parse()
 		require.NoError(t, err)
 
-		builder := NewSQLBuilder(query)
+		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 		where, _, params := builder.Build()
 
 		require.Equal(t, "i.pinned = 1", where)
@@ -126,7 +127,7 @@ func TestSQLBuilder_SpecialFields(t *testing.T) {
 		query, err := parser.Parse()
 		require.NoError(t, err)
 
-		builder := NewSQLBuilder(query)
+		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 		where, _, params := builder.Build()
 
 		require.Equal(t, "i.pinned = 0", where)
@@ -138,7 +139,7 @@ func TestSQLBuilder_SpecialFields(t *testing.T) {
 		query, err := parser.Parse()
 		require.NoError(t, err)
 
-		builder := NewSQLBuilder(query)
+		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 		where, _, params := builder.Build()
 
 		require.Equal(t, "i.is_template = 1", where)
@@ -150,7 +151,7 @@ func TestSQLBuilder_SpecialFields(t *testing.T) {
 		query, err := parser.Parse()
 		require.NoError(t, err)
 
-		builder := NewSQLBuilder(query)
+		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 		where, _, params := builder.Build()
 
 		require.Equal(t, "i.is_template = 0", where)
@@ -162,7 +163,7 @@ func TestSQLBuilder_SpecialFields(t *testing.T) {
 		query, err := parser.Parse()
 		require.NoError(t, err)
 
-		builder := NewSQLBuilder(query)
+		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 		where, _, params := builder.Build()
 
 		require.Equal(t, "COALESCE(i.assignee, '') = ?", where)
@@ -174,7 +175,7 @@ func TestSQLBuilder_SpecialFields(t *testing.T) {
 		query, err := parser.Parse()
 		require.NoError(t, err)
 
-		builder := NewSQLBuilder(query)
+		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 		where, _, params := builder.Build()
 
 		require.Equal(t, "COALESCE(i.assignee, '') = ?", where)
@@ -186,7 +187,7 @@ func TestSQLBuilder_SpecialFields(t *testing.T) {
 		query, err := parser.Parse()
 		require.NoError(t, err)
 
-		builder := NewSQLBuilder(query)
+		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 		where, _, params := builder.Build()
 
 		require.Equal(t, "COALESCE(i.assignee, '') LIKE ?", where)
@@ -198,7 +199,7 @@ func TestSQLBuilder_SpecialFields(t *testing.T) {
 		query, err := parser.Parse()
 		require.NoError(t, err)
 
-		builder := NewSQLBuilder(query)
+		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 		where, _, params := builder.Build()
 
 		require.Equal(t, "i.id IN (SELECT issue_id FROM labels WHERE label = ?)", where)
@@ -210,7 +211,7 @@ func TestSQLBuilder_SpecialFields(t *testing.T) {
 		query, err := parser.Parse()
 		require.NoError(t, err)
 
-		builder := NewSQLBuilder(query)
+		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 		where, _, params := builder.Build()
 
 		require.Equal(t, "i.id NOT IN (SELECT issue_id FROM labels WHERE label = ?)", where)
@@ -222,7 +223,7 @@ func TestSQLBuilder_SpecialFields(t *testing.T) {
 		query, err := parser.Parse()
 		require.NoError(t, err)
 
-		builder := NewSQLBuilder(query)
+		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 		where, _, params := builder.Build()
 
 		require.Equal(t, "i.id IN (SELECT issue_id FROM labels WHERE label LIKE ?)", where)
@@ -234,7 +235,7 @@ func TestSQLBuilder_SpecialFields(t *testing.T) {
 		query, err := parser.Parse()
 		require.NoError(t, err)
 
-		builder := NewSQLBuilder(query)
+		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 		where, _, params := builder.Build()
 
 		require.Equal(t, "i.id NOT IN (SELECT issue_id FROM labels WHERE label LIKE ?)", where)
@@ -248,7 +249,7 @@ func TestSQLBuilder_InExpression(t *testing.T) {
 		query, err := parser.Parse()
 		require.NoError(t, err)
 
-		builder := NewSQLBuilder(query)
+		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 		where, _, params := builder.Build()
 
 		require.Equal(t, "i.issue_type IN (?, ?)", where)
@@ -260,7 +261,7 @@ func TestSQLBuilder_InExpression(t *testing.T) {
 		query, err := parser.Parse()
 		require.NoError(t, err)
 
-		builder := NewSQLBuilder(query)
+		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 		where, _, params := builder.Build()
 
 		require.Equal(t, "i.issue_type NOT IN (?, ?)", where)
@@ -272,7 +273,7 @@ func TestSQLBuilder_InExpression(t *testing.T) {
 		query, err := parser.Parse()
 		require.NoError(t, err)
 
-		builder := NewSQLBuilder(query)
+		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 		where, _, params := builder.Build()
 
 		require.Equal(t, "i.priority IN (?, ?)", where)
@@ -284,7 +285,7 @@ func TestSQLBuilder_InExpression(t *testing.T) {
 		query, err := parser.Parse()
 		require.NoError(t, err)
 
-		builder := NewSQLBuilder(query)
+		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 		where, _, params := builder.Build()
 
 		require.Equal(t, "i.id IN (SELECT issue_id FROM labels WHERE label IN (?, ?))", where)
@@ -298,7 +299,7 @@ func TestSQLBuilder_BinaryExpressions(t *testing.T) {
 		query, err := parser.Parse()
 		require.NoError(t, err)
 
-		builder := NewSQLBuilder(query)
+		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 		where, _, params := builder.Build()
 
 		require.Equal(t, "(i.issue_type = ? AND i.priority = ?)", where)
@@ -310,7 +311,7 @@ func TestSQLBuilder_BinaryExpressions(t *testing.T) {
 		query, err := parser.Parse()
 		require.NoError(t, err)
 
-		builder := NewSQLBuilder(query)
+		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 		where, _, params := builder.Build()
 
 		require.Equal(t, "(i.issue_type = ? OR i.issue_type = ?)", where)
@@ -322,7 +323,7 @@ func TestSQLBuilder_BinaryExpressions(t *testing.T) {
 		query, err := parser.Parse()
 		require.NoError(t, err)
 
-		builder := NewSQLBuilder(query)
+		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 		where, _, params := builder.Build()
 
 		// Should be ((bug AND P0) OR open) due to precedence
@@ -336,7 +337,7 @@ func TestSQLBuilder_NotExpression(t *testing.T) {
 	query, err := parser.Parse()
 	require.NoError(t, err)
 
-	builder := NewSQLBuilder(query)
+	builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 	where, _, _ := builder.Build()
 
 	require.Equal(t, "NOT (i.id IN (SELECT issue_id FROM blocked_issues_cache))", where)
@@ -348,7 +349,7 @@ func TestSQLBuilder_OrderBy(t *testing.T) {
 		query, err := parser.Parse()
 		require.NoError(t, err)
 
-		builder := NewSQLBuilder(query)
+		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 		_, orderBy, _ := builder.Build()
 
 		require.Equal(t, "i.created_at ASC", orderBy)
@@ -359,7 +360,7 @@ func TestSQLBuilder_OrderBy(t *testing.T) {
 		query, err := parser.Parse()
 		require.NoError(t, err)
 
-		builder := NewSQLBuilder(query)
+		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 		_, orderBy, _ := builder.Build()
 
 		require.Equal(t, "i.created_at DESC", orderBy)
@@ -370,7 +371,7 @@ func TestSQLBuilder_OrderBy(t *testing.T) {
 		query, err := parser.Parse()
 		require.NoError(t, err)
 
-		builder := NewSQLBuilder(query)
+		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 		_, orderBy, _ := builder.Build()
 
 		require.Equal(t, "i.priority ASC, i.created_at DESC", orderBy)
@@ -381,7 +382,7 @@ func TestSQLBuilder_OrderBy(t *testing.T) {
 		query, err := parser.Parse()
 		require.NoError(t, err)
 
-		builder := NewSQLBuilder(query)
+		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 		where, orderBy, params := builder.Build()
 
 		require.Empty(t, where)
@@ -414,7 +415,7 @@ func TestSQLBuilder_DateComparisons(t *testing.T) {
 			query, err := parser.Parse()
 			require.NoError(t, err)
 
-			builder := NewSQLBuilder(query)
+			builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 			where, _, _ := builder.Build()
 
 			require.Equal(t, tt.wantWhere, where)
@@ -429,10 +430,95 @@ func TestSQLBuilder_ComplexQuery(t *testing.T) {
 	query, err := parser.Parse()
 	require.NoError(t, err)
 
-	builder := NewSQLBuilder(query)
+	builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 	where, orderBy, params := builder.Build()
 
 	require.Equal(t, "((i.issue_type = ? OR i.issue_type = ?) AND i.id NOT IN (SELECT issue_id FROM blocked_issues_cache))", where)
 	require.Equal(t, "i.priority ASC, i.created_at DESC", orderBy)
 	require.Equal(t, []interface{}{"bug", "task"}, params)
+}
+
+func TestSQLBuilder_MySQLDialect_DateToday(t *testing.T) {
+	parser := NewParser("created > today")
+	query, err := parser.Parse()
+	require.NoError(t, err)
+
+	builder := NewSQLBuilder(query, appbeads.DialectMySQL)
+	where, _, _ := builder.Build()
+
+	// MySQL: no datetime() wrapper, uses CURDATE()
+	require.Equal(t, "i.created_at > CURDATE()", where)
+}
+
+func TestSQLBuilder_MySQLDialect_DateYesterday(t *testing.T) {
+	parser := NewParser("updated >= yesterday")
+	query, err := parser.Parse()
+	require.NoError(t, err)
+
+	builder := NewSQLBuilder(query, appbeads.DialectMySQL)
+	where, _, _ := builder.Build()
+
+	require.Equal(t, "i.updated_at >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)", where)
+}
+
+func TestSQLBuilder_MySQLDialect_RelativeDays(t *testing.T) {
+	parser := NewParser("created > -7d")
+	query, err := parser.Parse()
+	require.NoError(t, err)
+
+	builder := NewSQLBuilder(query, appbeads.DialectMySQL)
+	where, _, _ := builder.Build()
+
+	require.Equal(t, "i.created_at > DATE_SUB(CURDATE(), INTERVAL 7 DAY)", where)
+}
+
+func TestSQLBuilder_MySQLDialect_RelativeHours(t *testing.T) {
+	parser := NewParser("updated > -5h")
+	query, err := parser.Parse()
+	require.NoError(t, err)
+
+	builder := NewSQLBuilder(query, appbeads.DialectMySQL)
+	where, _, _ := builder.Build()
+
+	require.Equal(t, "i.updated_at > DATE_SUB(NOW(), INTERVAL 5 HOUR)", where)
+}
+
+func TestSQLBuilder_MySQLDialect_RelativeMonths(t *testing.T) {
+	parser := NewParser("created > -3m")
+	query, err := parser.Parse()
+	require.NoError(t, err)
+
+	builder := NewSQLBuilder(query, appbeads.DialectMySQL)
+	where, _, _ := builder.Build()
+
+	require.Equal(t, "i.created_at > DATE_SUB(CURDATE(), INTERVAL 3 MONTH)", where)
+}
+
+func TestSQLBuilder_MySQLDialect_ISODate(t *testing.T) {
+	parser := NewParser(`created > "2024-01-15"`)
+	query, err := parser.Parse()
+	require.NoError(t, err)
+
+	builder := NewSQLBuilder(query, appbeads.DialectMySQL)
+	where, _, params := builder.Build()
+
+	// MySQL: no datetime() wrapper, ISO date passed as parameter
+	require.Equal(t, "i.created_at > ?", where)
+	require.Equal(t, []any{"2024-01-15"}, params)
+}
+
+func TestSQLBuilder_MySQLDialect_NonDateQuery(t *testing.T) {
+	// Non-date queries should produce identical SQL regardless of dialect
+	parser := NewParser("type = bug and status = open")
+	query, err := parser.Parse()
+	require.NoError(t, err)
+
+	sqliteBuilder := NewSQLBuilder(query, appbeads.DialectSQLite)
+	sqliteWhere, _, sqliteParams := sqliteBuilder.Build()
+
+	mysqlBuilder := NewSQLBuilder(query, appbeads.DialectMySQL)
+	mysqlWhere, _, mysqlParams := mysqlBuilder.Build()
+
+	require.Equal(t, sqliteWhere, mysqlWhere)
+	require.Equal(t, sqliteParams, mysqlParams)
 }

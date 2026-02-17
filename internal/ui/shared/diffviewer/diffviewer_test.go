@@ -3,6 +3,7 @@ package diffviewer
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -5153,8 +5154,11 @@ func TestWorktreeSelection_FromTab_ValidationError(t *testing.T) {
 	m.focus = focusCommitPicker
 	m.gitExecutor = mockGit
 	m.activeCommitTab = commitsTabWorktrees
+	// Use a subdirectory under a temp dir that doesn't exist.
+	// Avoids hardcoded paths like "/nonexistent" which may actually exist on some systems.
+	invalidPath := filepath.Join(t.TempDir(), "no-such-worktree")
 	m.worktreeList = []domaingit.WorktreeInfo{
-		{Path: "/nonexistent/path", Branch: "main", HEAD: "abc1234"}, // Invalid path
+		{Path: invalidPath, Branch: "main", HEAD: "abc1234"}, // Invalid path
 	}
 	m.selectedWorktree = 0
 	m.worktreeListLoaded = true

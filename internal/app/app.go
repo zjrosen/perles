@@ -12,6 +12,7 @@ import (
 	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/zjrosen/perles/frontend"
+	appbeads "github.com/zjrosen/perles/internal/beads/application"
 	beads "github.com/zjrosen/perles/internal/beads/domain"
 	infrabeads "github.com/zjrosen/perles/internal/beads/infrastructure"
 	"github.com/zjrosen/perles/internal/bql"
@@ -118,7 +119,7 @@ type Model struct {
 //
 // Returns an error if database initialization fails (fail-fast behavior).
 func NewWithConfig(
-	client *infrabeads.SQLiteClient,
+	client appbeads.DBClient,
 	cfg config.Config,
 	bqlCache cachemanager.CacheManager[string, []beads.Issue],
 	depGraphCache cachemanager.CacheManager[string, *bql.DependencyGraph],
@@ -188,7 +189,7 @@ func NewWithConfig(
 	// Create BQL executor only if client is available (nil when beads DB not present)
 	var bqlExec bql.BQLExecutor
 	if client != nil {
-		bqlExec = bql.NewExecutor(client.DB(), bqlCache, depGraphCache)
+		bqlExec = bql.NewExecutor(client.DB(), client.Dialect(), bqlCache, depGraphCache)
 	}
 
 	services := mode.Services{

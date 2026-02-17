@@ -236,11 +236,12 @@ func runApp(cmd *cobra.Command, args []string) error {
 	cfg.ResolvedBeadsDir = paths.ResolveBeadsDir(dbPath)
 	log.Info(log.CatConfig, "resolved beads dir", "path", cfg.ResolvedBeadsDir)
 
-	client, err := infrabeads.NewSQLiteClient(cfg.ResolvedBeadsDir)
+	client, err := infrabeads.NewClient(cfg.ResolvedBeadsDir)
 	if err != nil {
 		// Show friendly TUI empty state instead of CLI error
 		return runNoBeadsMode()
 	}
+	defer func() { _ = client.Close() }()
 
 	// Version check - query bd_version from database metadata table
 	currentVersion, err := client.Version()

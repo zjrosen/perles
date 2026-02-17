@@ -15,6 +15,7 @@ import (
 
 // Compile-time check that SQLiteClient implements required interfaces.
 var (
+	_ appbeads.DBClient      = (*SQLiteClient)(nil)
 	_ appbeads.VersionReader = (*SQLiteClient)(nil)
 	_ appbeads.CommentReader = (*SQLiteClient)(nil)
 )
@@ -57,6 +58,11 @@ func (c *SQLiteClient) DBPath() string {
 // Used by BQL executor to run queries directly.
 func (c *SQLiteClient) DB() *sql.DB {
 	return c.db
+}
+
+// Dialect returns the SQL dialect (SQLite).
+func (c *SQLiteClient) Dialect() appbeads.SQLDialect {
+	return appbeads.DialectSQLite
 }
 
 // Version returns the beads version from the database metadata table.

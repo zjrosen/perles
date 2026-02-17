@@ -91,8 +91,10 @@ func TestLogger_Init(t *testing.T) {
 
 func TestLogger_Init_InvalidPath(t *testing.T) {
 	resetLogger()
-	// Try to create log in non-existent directory
-	_, err := Init("/nonexistent/path/test.log")
+	// Use a subdirectory under a temp dir that doesn't exist.
+	// Avoids hardcoded paths like "/nonexistent" which may actually exist on some systems.
+	invalidPath := filepath.Join(t.TempDir(), "no-such-subdir", "deeper", "test.log")
+	_, err := Init(invalidPath)
 	require.Error(t, err)
 }
 

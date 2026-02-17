@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	appbeads "github.com/zjrosen/perles/internal/beads/application"
 	beads "github.com/zjrosen/perles/internal/beads/domain"
 	"github.com/zjrosen/perles/internal/mocks"
 	"github.com/zjrosen/perles/internal/testutil"
@@ -38,7 +39,7 @@ func newTestExecutor(tb testing.TB, db *sql.DB) *Executor {
 	depGraphCache.On("GetWithRefresh", mock.Anything, mock.Anything, mock.Anything).Return(nil, false).Maybe()
 	depGraphCache.On("Set", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return().Maybe()
 
-	return NewExecutor(db, bqlCache, depGraphCache)
+	return NewExecutor(db, appbeads.DialectSQLite, bqlCache, depGraphCache)
 }
 
 func TestExecutor_TypeFilter(t *testing.T) {
