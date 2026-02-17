@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	appbeads "github.com/zjrosen/perles/internal/beads/application"
 	"github.com/zjrosen/perles/internal/pubsub"
 	"github.com/zjrosen/perles/internal/watcher"
 )
@@ -169,10 +170,20 @@ func TestWatcher_WatchesWALFile(t *testing.T) {
 
 func TestDefaultConfig(t *testing.T) {
 	dbPath := "/test/beads.db"
-	cfg := watcher.DefaultConfig(dbPath)
+	cfg := watcher.DefaultConfig(dbPath, appbeads.DialectSQLite)
 
 	require.Equal(t, dbPath, cfg.DBPath)
 	require.Equal(t, 100*time.Millisecond, cfg.DebounceDur)
+	require.Equal(t, appbeads.DialectSQLite, cfg.Dialect)
+}
+
+func TestDefaultConfig_Dolt(t *testing.T) {
+	dbPath := "/test/.beads/dolt/beads_myproject"
+	cfg := watcher.DefaultConfig(dbPath, appbeads.DialectMySQL)
+
+	require.Equal(t, dbPath, cfg.DBPath)
+	require.Equal(t, 100*time.Millisecond, cfg.DebounceDur)
+	require.Equal(t, appbeads.DialectMySQL, cfg.Dialect)
 }
 
 func TestWatcher_BrokerAccessor(t *testing.T) {
@@ -477,4 +488,225 @@ func TestWatcher_MultipleSubscribers(t *testing.T) {
 	}
 
 	require.Equal(t, 3, receivedCount, "all three subscribers should receive the event")
+}
+
+// =============================================================================
+// Dolt Dialect Tests
+// =============================================================================
+
+func TestDolt_WatchesManifestFile(t *testing.T) {
+	// Simulate Dolt directory structure: dbPath/.dolt/noms/manifest
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "beads_test")
+	nomsDir := filepath.Join(dbPath, ".dolt", "noms")
+	err := os.MkdirAll(nomsDir, 0755)
+	require.NoError(t, err, "failed to create noms directory")
+
+	manifestPath := filepath.Join(nomsDir, "manifest")
+	err = os.WriteFile(manifestPath, []byte("5:__DOLT__:abc123"), 0644)
+	require.NoError(t, err, "failed to create manifest file")
+
+	w, err := watcher.New(watcher.Config{
+		DBPath:      dbPath,
+		DebounceDur: 50 * time.Millisecond,
+		Dialect:     appbeads.DialectMySQL,
+	})
+	require.NoError(t, err, "failed to create watcher")
+	defer func() { _ = w.Stop() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	sub := w.Broker().Subscribe(ctx)
+
+	err = w.Start()
+	require.NoError(t, err, "failed to start watcher")
+
+	// Write to manifest should trigger notification (embedded mode)
+	err = os.WriteFile(manifestPath, []byte("5:__DOLT__:def456"), 0644)
+	require.NoError(t, err, "failed to write manifest file")
+
+	select {
+	case evt := <-sub:
+		require.Equal(t, watcher.DBChanged, evt.Payload.Type, "expected DBChanged event for manifest write")
+	case <-time.After(200 * time.Millisecond):
+		require.Fail(t, "expected notification for manifest file write")
+	}
+}
+
+func TestDolt_WatchesJournalFile(t *testing.T) {
+	// In server mode, Dolt appends to the journal file instead of updating manifest
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "beads_test")
+	nomsDir := filepath.Join(dbPath, ".dolt", "noms")
+	err := os.MkdirAll(nomsDir, 0755)
+	require.NoError(t, err, "failed to create noms directory")
+
+	// Create the journal file (32 'v' chars)
+	journalPath := filepath.Join(nomsDir, "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv")
+	err = os.WriteFile(journalPath, []byte("journal data"), 0644)
+	require.NoError(t, err, "failed to create journal file")
+
+	w, err := watcher.New(watcher.Config{
+		DBPath:      dbPath,
+		DebounceDur: 50 * time.Millisecond,
+		Dialect:     appbeads.DialectMySQL,
+	})
+	require.NoError(t, err, "failed to create watcher")
+	defer func() { _ = w.Stop() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	sub := w.Broker().Subscribe(ctx)
+
+	err = w.Start()
+	require.NoError(t, err, "failed to start watcher")
+
+	// Write to journal should trigger notification (server mode)
+	err = os.WriteFile(journalPath, []byte("journal data appended"), 0644)
+	require.NoError(t, err, "failed to write journal file")
+
+	select {
+	case evt := <-sub:
+		require.Equal(t, watcher.DBChanged, evt.Payload.Type, "expected DBChanged event for journal write")
+	case <-time.After(200 * time.Millisecond):
+		require.Fail(t, "expected notification for journal file write")
+	}
+}
+
+func TestDolt_IgnoresIrrelevantFiles(t *testing.T) {
+	// Dolt watcher should ignore non-manifest files in the noms directory
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "beads_test")
+	nomsDir := filepath.Join(dbPath, ".dolt", "noms")
+	err := os.MkdirAll(nomsDir, 0755)
+	require.NoError(t, err, "failed to create noms directory")
+
+	manifestPath := filepath.Join(nomsDir, "manifest")
+	err = os.WriteFile(manifestPath, []byte("5:__DOLT__:abc123"), 0644)
+	require.NoError(t, err, "failed to create manifest file")
+
+	// Pre-create an irrelevant file
+	otherPath := filepath.Join(nomsDir, "journal.idx")
+	err = os.WriteFile(otherPath, []byte("idx data"), 0644)
+	require.NoError(t, err, "failed to create journal.idx file")
+
+	w, err := watcher.New(watcher.Config{
+		DBPath:      dbPath,
+		DebounceDur: 50 * time.Millisecond,
+		Dialect:     appbeads.DialectMySQL,
+	})
+	require.NoError(t, err, "failed to create watcher")
+	defer func() { _ = w.Stop() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	sub := w.Broker().Subscribe(ctx)
+
+	err = w.Start()
+	require.NoError(t, err, "failed to start watcher")
+
+	// Write to journal.idx (not manifest) should NOT trigger notification
+	err = os.WriteFile(otherPath, []byte("updated idx data"), 0644)
+	require.NoError(t, err, "failed to write journal.idx file")
+
+	select {
+	case <-sub:
+		require.Fail(t, "should not notify for non-manifest files in Dolt mode")
+	case <-time.After(100 * time.Millisecond):
+		// Expected - no notification for irrelevant file
+	}
+}
+
+func TestDolt_IgnoresSQLiteFiles(t *testing.T) {
+	// Dolt watcher should NOT react to beads.db files
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "beads_test")
+	nomsDir := filepath.Join(dbPath, ".dolt", "noms")
+	err := os.MkdirAll(nomsDir, 0755)
+	require.NoError(t, err, "failed to create noms directory")
+
+	manifestPath := filepath.Join(nomsDir, "manifest")
+	err = os.WriteFile(manifestPath, []byte("5:__DOLT__:abc123"), 0644)
+	require.NoError(t, err, "failed to create manifest file")
+
+	// Create a beads.db file in the noms dir (shouldn't match)
+	sqlitePath := filepath.Join(nomsDir, "beads.db")
+	err = os.WriteFile(sqlitePath, []byte("sqlite"), 0644)
+	require.NoError(t, err, "failed to create beads.db file")
+
+	w, err := watcher.New(watcher.Config{
+		DBPath:      dbPath,
+		DebounceDur: 50 * time.Millisecond,
+		Dialect:     appbeads.DialectMySQL,
+	})
+	require.NoError(t, err, "failed to create watcher")
+	defer func() { _ = w.Stop() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	sub := w.Broker().Subscribe(ctx)
+
+	err = w.Start()
+	require.NoError(t, err, "failed to start watcher")
+
+	// Write to beads.db should NOT trigger for Dolt dialect
+	err = os.WriteFile(sqlitePath, []byte("sqlite modified"), 0644)
+	require.NoError(t, err, "failed to write beads.db file")
+
+	select {
+	case <-sub:
+		require.Fail(t, "Dolt watcher should not react to beads.db files")
+	case <-time.After(100 * time.Millisecond):
+		// Expected
+	}
+}
+
+func TestDolt_DebounceManifestWrites(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "beads_test")
+	nomsDir := filepath.Join(dbPath, ".dolt", "noms")
+	err := os.MkdirAll(nomsDir, 0755)
+	require.NoError(t, err, "failed to create noms directory")
+
+	manifestPath := filepath.Join(nomsDir, "manifest")
+	err = os.WriteFile(manifestPath, []byte("5:__DOLT__:initial"), 0644)
+	require.NoError(t, err, "failed to create manifest file")
+
+	w, err := watcher.New(watcher.Config{
+		DBPath:      dbPath,
+		DebounceDur: 150 * time.Millisecond,
+		Dialect:     appbeads.DialectMySQL,
+	})
+	require.NoError(t, err, "failed to create watcher")
+	defer func() { _ = w.Stop() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	sub := w.Broker().Subscribe(ctx)
+
+	err = w.Start()
+	require.NoError(t, err, "failed to start watcher")
+
+	// Rapid manifest writes should coalesce
+	for i := 0; i < 10; i++ {
+		err := os.WriteFile(manifestPath, []byte(fmt.Sprintf("5:__DOLT__:hash%d", i)), 0644)
+		require.NoError(t, err, "failed to write manifest file")
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// Should receive exactly one notification
+	select {
+	case evt := <-sub:
+		require.Equal(t, watcher.DBChanged, evt.Payload.Type, "expected DBChanged event")
+	case <-time.After(400 * time.Millisecond):
+		require.Fail(t, "expected notification but got timeout")
+	}
+
+	// No second notification
+	select {
+	case <-sub:
+		require.Fail(t, "unexpected second notification")
+	case <-time.After(200 * time.Millisecond):
+		// Expected
+	}
 }

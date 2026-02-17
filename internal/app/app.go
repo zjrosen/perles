@@ -154,7 +154,7 @@ func NewWithConfig(
 	)
 
 	if cfg.AutoRefresh && dbPath != "" {
-		w, err := watcher.New(watcher.DefaultConfig(dbPath))
+		w, err := watcher.New(watcher.DefaultConfig(dbPath, client.Dialect()))
 		if err == nil {
 			if err := w.Start(); err == nil {
 				watcherHandle = w

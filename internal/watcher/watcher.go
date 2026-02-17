@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	appbeads "github.com/zjrosen/perles/internal/beads/application"
 	"github.com/zjrosen/perles/internal/log"
 	"github.com/zjrosen/perles/internal/pubsub"
 
@@ -32,6 +33,7 @@ type WatcherEvent struct {
 type Watcher struct {
 	fsWatcher *fsnotify.Watcher
 	dbPath    string
+	dialect   appbeads.SQLDialect
 	debounce  time.Duration
 	done      chan struct{}
 	broker    *pubsub.Broker[WatcherEvent]
@@ -41,13 +43,15 @@ type Watcher struct {
 type Config struct {
 	DBPath      string
 	DebounceDur time.Duration
+	Dialect     appbeads.SQLDialect
 }
 
 // DefaultConfig returns sensible defaults for the watcher.
-func DefaultConfig(dbPath string) Config {
+func DefaultConfig(dbPath string, dialect appbeads.SQLDialect) Config {
 	return Config{
 		DBPath:      dbPath,
 		DebounceDur: 100 * time.Millisecond,
+		Dialect:     dialect,
 	}
 }
 
@@ -63,17 +67,27 @@ func New(cfg Config) (*Watcher, error) {
 	return &Watcher{
 		fsWatcher: fsw,
 		dbPath:    cfg.DBPath,
+		dialect:   cfg.Dialect,
 		debounce:  cfg.DebounceDur,
 		done:      make(chan struct{}),
 		broker:    pubsub.NewBroker[WatcherEvent](),
 	}, nil
 }
 
+// watchDir returns the directory to watch based on the backend dialect.
+// SQLite: parent directory of the .db file (e.g. .beads/)
+// Dolt: the noms directory where manifest lives (e.g. .beads/dolt/beads_foo/.dolt/noms)
+func (w *Watcher) watchDir() string {
+	if w.dialect == appbeads.DialectMySQL {
+		return filepath.Join(w.dbPath, ".dolt", "noms")
+	}
+	return filepath.Dir(w.dbPath)
+}
+
 // Start begins watching the database directory.
 // Subscribe to watcher events using Broker().Subscribe(ctx) instead of the old channel return.
 func (w *Watcher) Start() error {
-	// Watch the directory containing the database
-	dir := filepath.Dir(w.dbPath)
+	dir := w.watchDir()
 	if err := w.fsWatcher.Add(dir); err != nil {
 		log.ErrorErr(log.CatWatcher, "Failed to watch directory", err, "dir", dir)
 		return fmt.Errorf("watching directory %s: %w", dir, err)
@@ -177,12 +191,23 @@ func (w *Watcher) loop() {
 }
 
 // isRelevantEvent checks if the event should trigger a refresh.
+// For SQLite, watches beads.db and beads.db-wal files.
+// For Dolt, watches the journal file and manifest in the noms directory.
+// In embedded mode, Dolt updates the manifest on each write.
+// In server mode, Dolt appends to the journal file (manifest only updates on compaction/shutdown).
 func (w *Watcher) isRelevantEvent(event fsnotify.Event) bool {
-	// Only care about write or create operations (WAL file may be created fresh)
+	// Only care about write or create operations
 	if event.Op&(fsnotify.Write|fsnotify.Create) == 0 {
 		return false
 	}
 
 	base := filepath.Base(event.Name)
+	if w.dialect == appbeads.DialectMySQL {
+		// Dolt noms files:
+		// - "manifest" changes in embedded mode on each write
+		// - journal file (32 'v' chars) changes in server mode on each write
+		return base == "manifest" || base == "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+	}
+	// SQLite: database file and WAL
 	return base == "beads.db" || base == "beads.db-wal"
 }
