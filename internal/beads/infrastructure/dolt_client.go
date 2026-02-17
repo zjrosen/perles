@@ -3,13 +3,16 @@ package infrastructure
 import (
 	"database/sql"
 	"fmt"
+	"net"
+	"os"
 	"path/filepath"
+	"time"
 
 	appbeads "github.com/zjrosen/perles/internal/beads/application"
 	domain "github.com/zjrosen/perles/internal/beads/domain"
 	"github.com/zjrosen/perles/internal/log"
 
-	_ "github.com/dolthub/driver"
+	_ "github.com/go-sql-driver/mysql"
 )
 
 // Compile-time check that DoltClient implements required interfaces.
@@ -25,36 +28,57 @@ type DoltClient struct {
 	doltDir string // Path to .beads/dolt/{database} directory
 }
 
-// NewDoltClient creates a client connected to the embedded Dolt database.
-// beadsDir should be the resolved .beads directory path.
-// databaseName is typically "beads" (from metadata.json).
-func NewDoltClient(beadsDir, databaseName string) (*DoltClient, error) {
-	// The Dolt embedded driver expects the data root directory (.beads/dolt/)
-	// as the path, with the database name specified via the &database= param.
-	// Each subdirectory containing a .dolt/ folder is a separate database.
-	dataDir := filepath.Join(beadsDir, "dolt")
-	doltDir := filepath.Join(dataDir, databaseName)
+// NewDoltServerClient creates a client connected to a running dolt sql-server via MySQL protocol.
+// This allows concurrent access from multiple processes (Perles + bd).
+func NewDoltServerClient(beadsDir, databaseName, host string, port int, user string) (*DoltClient, error) {
+	doltDir := filepath.Join(beadsDir, "dolt", databaseName)
+	addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
 
-	log.Debug(log.CatDB, "Opening Dolt database", "path", doltDir, "database", databaseName)
+	log.Debug(log.CatDB, "Connecting to Dolt server", "addr", addr, "database", databaseName)
 
-	dsn := fmt.Sprintf("file://%s?commitname=perles&commitemail=perles@local&database=%s",
-		filepath.ToSlash(dataDir), databaseName)
-
-	db, err := sql.Open("dolt", dsn)
+	// Fail-fast TCP check before MySQL protocol handshake
+	conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
 	if err != nil {
-		log.ErrorErr(log.CatDB, "Failed to open Dolt database", err, "path", doltDir)
-		return nil, fmt.Errorf("opening dolt database: %w", err)
+		return nil, fmt.Errorf("dolt server unreachable at %s: %w\n\n"+
+			"The Dolt server may not be running. Start it with:\n"+
+			"  dolt sql-server  # Run in .beads/dolt/ directory",
+			addr, err)
 	}
+	_ = conn.Close()
+
+	// Build MySQL DSN
+	password := ""
+	if p := lookupEnv("BEADS_DOLT_PASSWORD"); p != "" {
+		password = ":" + p
+	}
+	dsn := fmt.Sprintf("%s%s@tcp(%s)/%s?parseTime=true",
+		user, password, addr, databaseName)
+
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("opening dolt server connection: %w", err)
+	}
+
+	// Server mode: allow concurrent connections
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(5 * time.Minute)
 
 	if err := db.Ping(); err != nil {
-		log.ErrorErr(log.CatDB, "Failed to ping Dolt database", err, "path", doltDir)
 		_ = db.Close()
-		return nil, fmt.Errorf("pinging dolt database: %w", err)
+		return nil, fmt.Errorf("pinging dolt server at %s: %w", addr, err)
 	}
 
-	log.Info(log.CatDB, "Connected to Dolt database", "path", doltDir, "database", databaseName)
+	log.Info(log.CatDB, "Connected to Dolt server",
+		"addr", addr, "database", databaseName)
 
 	return &DoltClient{db: db, doltDir: doltDir}, nil
+}
+
+// lookupEnv returns the value of an environment variable, or empty string if not set.
+func lookupEnv(key string) string {
+	v, _ := os.LookupEnv(key)
+	return v
 }
 
 // Close closes the database connection.

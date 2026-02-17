@@ -5,15 +5,63 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	appbeads "github.com/zjrosen/perles/internal/beads/application"
 	"github.com/zjrosen/perles/internal/log"
+)
+
+const (
+	defaultDoltServerHost = "127.0.0.1"
+	defaultDoltServerPort = 3307
+	defaultDoltServerUser = "root"
 )
 
 // BeadsMetadata represents the .beads/metadata.json structure.
 type BeadsMetadata struct {
 	Backend      string `json:"backend"`       // "sqlite" or "dolt"
 	DoltDatabase string `json:"dolt_database"` // e.g., "beads"
+
+	// Dolt server connection fields.
+	// Perles always uses server mode for Dolt (embedded takes an exclusive lock).
+	DoltServerHost string `json:"dolt_server_host,omitempty"` // default: 127.0.0.1
+	DoltServerPort int    `json:"dolt_server_port,omitempty"` // default: 3307
+	DoltServerUser string `json:"dolt_server_user,omitempty"` // default: root
+}
+
+// GetDoltServerHost returns the server host, with env var override.
+func (m *BeadsMetadata) GetDoltServerHost() string {
+	if h := os.Getenv("BEADS_DOLT_SERVER_HOST"); h != "" {
+		return h
+	}
+	if m.DoltServerHost != "" {
+		return m.DoltServerHost
+	}
+	return defaultDoltServerHost
+}
+
+// GetDoltServerPort returns the server port, with env var override.
+func (m *BeadsMetadata) GetDoltServerPort() int {
+	if p := os.Getenv("BEADS_DOLT_SERVER_PORT"); p != "" {
+		if port, err := strconv.Atoi(p); err == nil && port > 0 {
+			return port
+		}
+	}
+	if m.DoltServerPort > 0 {
+		return m.DoltServerPort
+	}
+	return defaultDoltServerPort
+}
+
+// GetDoltServerUser returns the server user, with env var override.
+func (m *BeadsMetadata) GetDoltServerUser() string {
+	if u := os.Getenv("BEADS_DOLT_SERVER_USER"); u != "" {
+		return u
+	}
+	if m.DoltServerUser != "" {
+		return m.DoltServerUser
+	}
+	return defaultDoltServerUser
 }
 
 // DetectBackend reads .beads/metadata.json and returns the backend type.
@@ -72,7 +120,21 @@ func NewClient(beadsDir string) (appbeads.DBClient, error) {
 
 	switch meta.Backend {
 	case "dolt":
-		return NewDoltClient(beadsDir, meta.DoltDatabase)
+		// Dolt always uses server mode (MySQL protocol) in Perles.
+		// The embedded Dolt driver takes an exclusive lock that blocks all
+		// other processes (including bd) for the entire Perles session.
+		log.Info(log.CatDB, "Connecting to Dolt server",
+			"host", meta.GetDoltServerHost(),
+			"port", meta.GetDoltServerPort(),
+			"user", meta.GetDoltServerUser(),
+			"database", meta.DoltDatabase)
+		return NewDoltServerClient(
+			beadsDir,
+			meta.DoltDatabase,
+			meta.GetDoltServerHost(),
+			meta.GetDoltServerPort(),
+			meta.GetDoltServerUser(),
+		)
 	default:
 		return NewSQLiteClient(beadsDir)
 	}
