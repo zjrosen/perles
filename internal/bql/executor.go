@@ -72,23 +72,45 @@ type DependencyGraph struct {
 }
 
 // Execute runs a BQL query and returns matching issues.
+// Dolt transient error retry configuration.
+// During rapid writes (e.g., bulk deletes), the Dolt server may return internal
+// errors like "unable to find field with index N in row of 0 columns" as its
+// MVCC state catches up. A brief retry with a fresh transaction resolves these.
+const (
+	doltRetryAttempts   = 6
+	doltRetryBaseDelay  = 250 * time.Millisecond
+	doltRetryMultiplier = 2 // exponential backoff: 250ms, 500ms, 1s, 2s, 4s
+)
+
+// isDoltTransientError returns true if the error is a transient Dolt server
+// inconsistency that is likely to resolve on retry with a fresh snapshot.
+func isDoltTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := strings.ToLower(err.Error())
+	// Dolt internal error during concurrent modifications
+	if strings.Contains(errStr, "unable to find field with index") {
+		return true
+	}
+	// MySQL driver transient errors
+	if strings.Contains(errStr, "driver: bad connection") {
+		return true
+	}
+	if strings.Contains(errStr, "invalid connection") {
+		return true
+	}
+	if strings.Contains(errStr, "broken pipe") {
+		return true
+	}
+	if strings.Contains(errStr, "connection reset") {
+		return true
+	}
+	return false
+}
+
 func (e *Executor) Execute(input string) ([]beads.Issue, error) {
 	start := time.Now()
-
-	// For Dolt (MySQL), wrap all queries in an explicit transaction so each
-	// Execute() gets a fresh MVCC snapshot. Without this, connections to a
-	// dolt sql-server started with --no-auto-commit see stale data from
-	// the snapshot taken when the connection was first used.
-	// The querier is local to this call — safe for concurrent Execute() calls.
-	var q querier = e.db
-	if e.dialect == appbeads.DialectMySQL {
-		tx, err := e.db.Begin()
-		if err != nil {
-			return nil, fmt.Errorf("begin transaction: %w", err)
-		}
-		q = tx
-		defer func() { _ = tx.Rollback() }() // read-only; rollback is a no-op for data
-	}
 
 	// Parse the query
 	parser := NewParser(input)
@@ -104,14 +126,24 @@ func (e *Executor) Execute(input string) ([]beads.Issue, error) {
 		return nil, fmt.Errorf("validation error: %w", err)
 	}
 
-	// Execute query, using cache if available
-	executeQuery := func() ([]beads.Issue, error) {
+	// executeWithSnapshot runs all queries in a single transaction (Dolt) or
+	// directly against the DB (SQLite). Each call gets a fresh MVCC snapshot.
+	executeWithSnapshot := func() ([]beads.Issue, error) {
+		var q querier = e.db
+		if e.dialect == appbeads.DialectMySQL {
+			tx, err := e.db.Begin()
+			if err != nil {
+				return nil, fmt.Errorf("begin transaction: %w", err)
+			}
+			q = tx
+			defer func() { _ = tx.Rollback() }()
+		}
+
 		issues, err := e.executeBaseQuery(query, q)
 		if err != nil {
 			return nil, err
 		}
 
-		// Apply expansion if specified
 		if query.HasExpand() {
 			issues, err = e.expandIssues(issues, query.Expand, q)
 			if err != nil {
@@ -122,10 +154,35 @@ func (e *Executor) Execute(input string) ([]beads.Issue, error) {
 		return issues, nil
 	}
 
+	// Wrap with retry for transient Dolt errors. Each retry opens a fresh
+	// transaction so the snapshot advances past the inconsistency.
+	executeWithRetry := func() ([]beads.Issue, error) {
+		attempts := 1
+		if e.dialect == appbeads.DialectMySQL {
+			attempts = doltRetryAttempts
+		}
+		var lastErr error
+		for i := range attempts {
+			issues, err := executeWithSnapshot()
+			if err == nil {
+				return issues, nil
+			}
+			lastErr = err
+			if !isDoltTransientError(err) || i == attempts-1 {
+				return nil, lastErr
+			}
+			delay := doltRetryBaseDelay * time.Duration(1<<uint(i)) // 250ms, 500ms, 1s, 2s, 4s
+			log.Debug(log.CatBQL, "Transient Dolt error, retrying",
+				"attempt", i+1, "delay", delay, "error", err, "query", input)
+			time.Sleep(delay)
+		}
+		return nil, lastErr
+	}
+
 	cache := cachemanager.NewReadThroughCache(
 		e.cacheManager,
 		func(ctx context.Context, _ *Query) ([]beads.Issue, error) {
-			return executeQuery()
+			return executeWithRetry()
 		},
 		false,
 	)

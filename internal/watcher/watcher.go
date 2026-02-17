@@ -48,9 +48,16 @@ type Config struct {
 
 // DefaultConfig returns sensible defaults for the watcher.
 func DefaultConfig(dbPath string, dialect appbeads.SQLDialect) Config {
+	debounce := 100 * time.Millisecond
+	if dialect == appbeads.DialectMySQL {
+		// Dolt server writes trigger multiple rapid journal file updates.
+		// A longer debounce coalesces bulk operations (e.g., 5 rapid deletes)
+		// into a single refresh, avoiding queries mid-mutation.
+		debounce = 500 * time.Millisecond
+	}
 	return Config{
 		DBPath:      dbPath,
-		DebounceDur: 100 * time.Millisecond,
+		DebounceDur: debounce,
 		Dialect:     dialect,
 	}
 }

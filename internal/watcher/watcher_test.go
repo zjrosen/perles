@@ -182,7 +182,7 @@ func TestDefaultConfig_Dolt(t *testing.T) {
 	cfg := watcher.DefaultConfig(dbPath, appbeads.DialectMySQL)
 
 	require.Equal(t, dbPath, cfg.DBPath)
-	require.Equal(t, 100*time.Millisecond, cfg.DebounceDur)
+	require.Equal(t, 500*time.Millisecond, cfg.DebounceDur, "Dolt debounce should be longer to coalesce rapid writes")
 	require.Equal(t, appbeads.DialectMySQL, cfg.Dialect)
 }
 
