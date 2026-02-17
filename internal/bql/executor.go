@@ -154,6 +154,7 @@ func (e *Executor) executeBaseQuery(query *Query) ([]beads.Issue, error) {
 	whereClause, orderBy, params := builder.Build()
 
 	// Construct main query WITHOUT dependency subqueries
+	//nolint:gosec // G201: softDeleteFilter returns hardcoded SQL fragments with table alias, not user input
 	sqlQuery := fmt.Sprintf(`
 		SELECT
 			i.id,
@@ -719,6 +720,7 @@ func (e *Executor) loadDependencyGraph() (*DependencyGraph, error) {
 func (e *Executor) loadDependencyGraphFromDB() (*DependencyGraph, error) {
 	log.Debug(log.CatBQL, "Loading dependency graph from database")
 
+	//nolint:gosec // G201: softDeleteFilter returns hardcoded SQL fragments with table alias, not user input
 	query := fmt.Sprintf(`
 		SELECT d.issue_id, d.depends_on_id, d.type
 		FROM dependencies d
