@@ -22,6 +22,12 @@ type BQLExecutor interface {
 // Verify Executor implements BQLExecutor at compile time.
 var _ BQLExecutor = (*Executor)(nil)
 
+// querier is the common interface between *sql.DB and *sql.Tx for running queries.
+type querier interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
 // Executor runs BQL queries against the database.
 type Executor struct {
 	db            *sql.DB
@@ -69,6 +75,21 @@ type DependencyGraph struct {
 func (e *Executor) Execute(input string) ([]beads.Issue, error) {
 	start := time.Now()
 
+	// For Dolt (MySQL), wrap all queries in an explicit transaction so each
+	// Execute() gets a fresh MVCC snapshot. Without this, connections to a
+	// dolt sql-server started with --no-auto-commit see stale data from
+	// the snapshot taken when the connection was first used.
+	// The querier is local to this call — safe for concurrent Execute() calls.
+	var q querier = e.db
+	if e.dialect == appbeads.DialectMySQL {
+		tx, err := e.db.Begin()
+		if err != nil {
+			return nil, fmt.Errorf("begin transaction: %w", err)
+		}
+		q = tx
+		defer func() { _ = tx.Rollback() }() // read-only; rollback is a no-op for data
+	}
+
 	// Parse the query
 	parser := NewParser(input)
 	query, err := parser.Parse()
@@ -85,14 +106,14 @@ func (e *Executor) Execute(input string) ([]beads.Issue, error) {
 
 	// Execute query, using cache if available
 	executeQuery := func() ([]beads.Issue, error) {
-		issues, err := e.executeBaseQuery(query)
+		issues, err := e.executeBaseQuery(query, q)
 		if err != nil {
 			return nil, err
 		}
 
 		// Apply expansion if specified
 		if query.HasExpand() {
-			issues, err = e.expandIssues(issues, query.Expand)
+			issues, err = e.expandIssues(issues, query.Expand, q)
 			if err != nil {
 				return nil, err
 			}
@@ -103,7 +124,7 @@ func (e *Executor) Execute(input string) ([]beads.Issue, error) {
 
 	cache := cachemanager.NewReadThroughCache(
 		e.cacheManager,
-		func(ctx context.Context, q *Query) ([]beads.Issue, error) {
+		func(ctx context.Context, _ *Query) ([]beads.Issue, error) {
 			return executeQuery()
 		},
 		false,
@@ -148,7 +169,7 @@ func (e *Executor) softDeleteFilter(alias string) string {
 // 2. Batch load dependencies for all result IDs
 // 3. Batch load labels for all result IDs
 // 4. Batch load comment counts for all result IDs
-func (e *Executor) executeBaseQuery(query *Query) ([]beads.Issue, error) {
+func (e *Executor) executeBaseQuery(query *Query, q querier) ([]beads.Issue, error) {
 	// Build SQL
 	builder := NewSQLBuilder(query, e.dialect)
 	whereClause, orderBy, params := builder.Build()
@@ -198,7 +219,7 @@ func (e *Executor) executeBaseQuery(query *Query) ([]beads.Issue, error) {
 	}
 
 	// Execute main query
-	rows, err := e.db.Query(sqlQuery, params...)
+	rows, err := q.Query(sqlQuery, params...)
 	if err != nil {
 		log.ErrorErr(log.CatDB, "Query failed", err)
 		return nil, fmt.Errorf("query error: %w", err)
@@ -222,19 +243,19 @@ func (e *Executor) executeBaseQuery(query *Query) ([]beads.Issue, error) {
 	}
 
 	// Batch load dependencies (1 query)
-	deps, err := e.loadDependenciesForIssues(ids)
+	deps, err := e.loadDependenciesForIssues(ids, q)
 	if err != nil {
 		return nil, fmt.Errorf("load dependencies: %w", err)
 	}
 
 	// Batch load labels (1 query)
-	labels, err := e.loadLabelsForIssues(ids)
+	labels, err := e.loadLabelsForIssues(ids, q)
 	if err != nil {
 		return nil, fmt.Errorf("load labels: %w", err)
 	}
 
 	// Batch load comment counts (1 query)
-	commentCounts, err := e.loadCommentCountsForIssues(ids)
+	commentCounts, err := e.loadCommentCountsForIssues(ids, q)
 	if err != nil {
 		return nil, fmt.Errorf("load comment counts: %w", err)
 	}
@@ -388,7 +409,7 @@ func (e *Executor) scanIssuesBase(rows *sql.Rows) ([]beads.Issue, error) {
 // loadDependenciesForIssues batch-loads all dependency data for the given issue IDs.
 // Returns a map of issue ID -> IssueDeps with grouped dependencies by type.
 // This replaces 6 correlated subqueries with a single IN-clause query.
-func (e *Executor) loadDependenciesForIssues(ids []string) (map[string]IssueDeps, error) {
+func (e *Executor) loadDependenciesForIssues(ids []string, q querier) (map[string]IssueDeps, error) {
 	if len(ids) == 0 {
 		return make(map[string]IssueDeps), nil
 	}
@@ -425,7 +446,7 @@ func (e *Executor) loadDependenciesForIssues(ids []string) (map[string]IssueDeps
 		  AND %s
 	`, inClause, softDelete, inClause, softDelete)
 
-	rows, err := e.db.Query(query, params...)
+	rows, err := q.Query(query, params...)
 	if err != nil {
 		log.ErrorErr(log.CatDB, "Failed to batch load dependencies", err)
 		return nil, fmt.Errorf("batch load dependencies: %w", err)
@@ -501,7 +522,7 @@ func (e *Executor) loadDependenciesForIssues(ids []string) (map[string]IssueDeps
 
 // loadLabelsForIssues batch-loads all labels for the given issue IDs.
 // Returns a map of issue ID -> label slice.
-func (e *Executor) loadLabelsForIssues(ids []string) (map[string][]string, error) {
+func (e *Executor) loadLabelsForIssues(ids []string, q querier) (map[string][]string, error) {
 	if len(ids) == 0 {
 		return make(map[string][]string), nil
 	}
@@ -522,7 +543,7 @@ func (e *Executor) loadLabelsForIssues(ids []string) (map[string][]string, error
 		WHERE issue_id IN (%s)
 	`, inClause)
 
-	rows, err := e.db.Query(query, params...)
+	rows, err := q.Query(query, params...)
 	if err != nil {
 		log.ErrorErr(log.CatDB, "Failed to batch load labels", err)
 		return nil, fmt.Errorf("batch load labels: %w", err)
@@ -549,7 +570,7 @@ func (e *Executor) loadLabelsForIssues(ids []string) (map[string][]string, error
 
 // loadCommentCountsForIssues batch-loads comment counts for the given issue IDs.
 // Returns a map of issue ID -> comment count.
-func (e *Executor) loadCommentCountsForIssues(ids []string) (map[string]int, error) {
+func (e *Executor) loadCommentCountsForIssues(ids []string, q querier) (map[string]int, error) {
 	if len(ids) == 0 {
 		return make(map[string]int), nil
 	}
@@ -571,7 +592,7 @@ func (e *Executor) loadCommentCountsForIssues(ids []string) (map[string]int, err
 		GROUP BY issue_id
 	`, inClause)
 
-	rows, err := e.db.Query(query, params...)
+	rows, err := q.Query(query, params...)
 	if err != nil {
 		log.ErrorErr(log.CatDB, "Failed to batch load comment counts", err)
 		return nil, fmt.Errorf("batch load comment counts: %w", err)
@@ -601,13 +622,13 @@ func (e *Executor) loadCommentCountsForIssues(ids []string) (map[string]int, err
 // This approach loads the full dependency graph once (1 SQL query) and traverses in-memory,
 // then batch-fetches all discovered issues (1 SQL query). This replaces the previous O(D×N)
 // iterative SQL approach with O(2) queries + O(V+E) in-memory traversal.
-func (e *Executor) expandIssues(baseIssues []beads.Issue, expand *ExpandClause) ([]beads.Issue, error) {
+func (e *Executor) expandIssues(baseIssues []beads.Issue, expand *ExpandClause, q querier) ([]beads.Issue, error) {
 	if len(baseIssues) == 0 {
 		return baseIssues, nil
 	}
 
 	// Step 1: Load the full dependency graph (ONE SQL query)
-	graph, err := e.loadDependencyGraph()
+	graph, err := e.loadDependencyGraph(q)
 	if err != nil {
 		return nil, fmt.Errorf("load dependency graph: %w", err)
 	}
@@ -640,7 +661,7 @@ func (e *Executor) expandIssues(baseIssues []beads.Issue, expand *ExpandClause) 
 	}
 
 	// Step 5: Batch fetch all new issues (ONE SQL query)
-	newIssues, err := e.fetchIssuesByIDs(newIDs)
+	newIssues, err := e.fetchIssuesByIDs(newIDs, q)
 	if err != nil {
 		return nil, fmt.Errorf("fetch expanded issues: %w", err)
 	}
@@ -705,11 +726,11 @@ func IsBQLQuery(input string) bool {
 // loadDependencyGraph returns the cached dependency graph, loading from DB if not cached.
 // Uses read-through cache pattern - invalidated automatically when cache is flushed on DB change.
 // This enables O(1) SQL queries + O(V+E) in-memory traversal instead of O(D×N) iterative queries.
-func (e *Executor) loadDependencyGraph() (*DependencyGraph, error) {
+func (e *Executor) loadDependencyGraph(q querier) (*DependencyGraph, error) {
 	cache := cachemanager.NewReadThroughCache(
 		e.depGraphCache,
 		func(ctx context.Context, _ struct{}) (*DependencyGraph, error) {
-			return e.loadDependencyGraphFromDB()
+			return e.loadDependencyGraphFromDB(q)
 		},
 		false,
 	)
@@ -717,7 +738,7 @@ func (e *Executor) loadDependencyGraph() (*DependencyGraph, error) {
 }
 
 // loadDependencyGraphFromDB loads the full dependency graph from the database in a single query.
-func (e *Executor) loadDependencyGraphFromDB() (*DependencyGraph, error) {
+func (e *Executor) loadDependencyGraphFromDB(q querier) (*DependencyGraph, error) {
 	log.Debug(log.CatBQL, "Loading dependency graph from database")
 
 	//nolint:gosec // G201: softDeleteFilter returns hardcoded SQL fragments with table alias, not user input
@@ -730,7 +751,7 @@ func (e *Executor) loadDependencyGraphFromDB() (*DependencyGraph, error) {
 		  AND %s
 	`, e.softDeleteFilter("i1"), e.softDeleteFilter("i2"))
 
-	rows, err := e.db.Query(query)
+	rows, err := q.Query(query)
 	if err != nil {
 		log.ErrorErr(log.CatDB, "Failed to load dependency graph", err)
 		return nil, fmt.Errorf("load dependency graph: %w", err)
@@ -859,7 +880,7 @@ func (e *Executor) getNeighbors(graph *DependencyGraph, id string, expandType Ex
 }
 
 // fetchIssuesByIDs fetches issues by their IDs by delegating to executeBaseQuery.
-func (e *Executor) fetchIssuesByIDs(ids []string) ([]beads.Issue, error) {
+func (e *Executor) fetchIssuesByIDs(ids []string, q querier) ([]beads.Issue, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -877,5 +898,5 @@ func (e *Executor) fetchIssuesByIDs(ids []string) ([]beads.Issue, error) {
 			Values: values,
 		},
 	}
-	return e.executeBaseQuery(query)
+	return e.executeBaseQuery(query, q)
 }

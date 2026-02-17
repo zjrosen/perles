@@ -2341,7 +2341,7 @@ func TestLoadDependencyGraph_ReturnsCorrectAdjacencyLists(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	executor := newTestExecutor(t, db)
-	graph, err := executor.loadDependencyGraph()
+	graph, err := executor.loadDependencyGraph(executor.db)
 	require.NoError(t, err)
 	require.NotNil(t, graph)
 
@@ -2379,7 +2379,7 @@ func TestLoadDependencyGraph_ExcludesDeletedIssues(t *testing.T) {
 	require.NoError(t, err)
 
 	executor := newTestExecutor(t, db)
-	graph, err := executor.loadDependencyGraph()
+	graph, err := executor.loadDependencyGraph(executor.db)
 	require.NoError(t, err)
 
 	// Verify deleted issue is not in the graph
@@ -2396,7 +2396,7 @@ func TestTraverseGraph_BFSRespectsDepthLimit(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	executor := newTestExecutor(t, db)
-	graph, err := executor.loadDependencyGraph()
+	graph, err := executor.loadDependencyGraph(executor.db)
 	require.NoError(t, err)
 
 	// Traverse down from epic-1 with depth 1 (should only get children, not grandchildren)
@@ -2417,7 +2417,7 @@ func TestTraverseGraph_DFSHandlesUnlimitedDepth(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	executor := newTestExecutor(t, db)
-	graph, err := executor.loadDependencyGraph()
+	graph, err := executor.loadDependencyGraph(executor.db)
 	require.NoError(t, err)
 
 	// Traverse down from epic-1 with unlimited depth (should get all descendants)
@@ -2449,7 +2449,7 @@ func TestTraverseGraph_HandlesCyclesWithoutInfiniteLoop(t *testing.T) {
 	require.NoError(t, err)
 
 	executor := newTestExecutor(t, db)
-	graph, err := executor.loadDependencyGraph()
+	graph, err := executor.loadDependencyGraph(executor.db)
 	require.NoError(t, err)
 
 	// Should complete without infinite loop
@@ -2469,7 +2469,7 @@ func TestFetchIssuesByIDs_ReturnsCorrectIssuesInBatch(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	executor := newTestExecutor(t, db)
-	issues, err := executor.fetchIssuesByIDs([]string{"task-1", "task-2", "subtask-1"})
+	issues, err := executor.fetchIssuesByIDs([]string{"task-1", "task-2", "subtask-1"}, executor.db)
 	require.NoError(t, err)
 
 	require.Len(t, issues, 3)
@@ -2491,7 +2491,7 @@ func TestFetchIssuesByIDs_ExcludesDeletedIssues(t *testing.T) {
 	require.NoError(t, err)
 
 	executor := newTestExecutor(t, db)
-	issues, err := executor.fetchIssuesByIDs([]string{"task-1", "deleted-1"})
+	issues, err := executor.fetchIssuesByIDs([]string{"task-1", "deleted-1"}, executor.db)
 	require.NoError(t, err)
 
 	// Should only return task-1, not the deleted issue
@@ -2504,7 +2504,7 @@ func TestFetchIssuesByIDs_EmptyInput(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	executor := newTestExecutor(t, db)
-	issues, err := executor.fetchIssuesByIDs([]string{})
+	issues, err := executor.fetchIssuesByIDs([]string{}, executor.db)
 	require.NoError(t, err)
 	require.Nil(t, issues)
 }
@@ -2519,7 +2519,7 @@ func TestTraverseGraph_EmptyGraph(t *testing.T) {
 	require.NoError(t, err)
 
 	executor := newTestExecutor(t, db)
-	graph, err := executor.loadDependencyGraph()
+	graph, err := executor.loadDependencyGraph(executor.db)
 	require.NoError(t, err)
 
 	// Graph should be empty
@@ -2537,7 +2537,7 @@ func TestTraverseGraph_SingleNodeWithNoEdges(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	executor := newTestExecutor(t, db)
-	graph, err := executor.loadDependencyGraph()
+	graph, err := executor.loadDependencyGraph(executor.db)
 	require.NoError(t, err)
 
 	// standalone has no dependencies
@@ -2570,7 +2570,7 @@ func TestLoadDependenciesForIssues_GroupsByTypeCorrectly(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	executor := newTestExecutor(t, db)
-	deps, err := executor.loadDependenciesForIssues([]string{"epic-1", "task-1", "blocker", "blocked", "origin", "discovered"})
+	deps, err := executor.loadDependenciesForIssues([]string{"epic-1", "task-1", "blocker", "blocked", "origin", "discovered"}, executor.db)
 	require.NoError(t, err)
 
 	// Check parent-child grouping
@@ -2599,17 +2599,17 @@ func TestLoadDependenciesForIssues_HandlesBothDirections(t *testing.T) {
 	executor := newTestExecutor(t, db)
 
 	// When querying for parent only
-	depsParent, err := executor.loadDependenciesForIssues([]string{"parent"})
+	depsParent, err := executor.loadDependenciesForIssues([]string{"parent"}, executor.db)
 	require.NoError(t, err)
 	require.Contains(t, depsParent["parent"].Children, "child", "parent should see child even when child not in query set")
 
 	// When querying for child only
-	depsChild, err := executor.loadDependenciesForIssues([]string{"child"})
+	depsChild, err := executor.loadDependenciesForIssues([]string{"child"}, executor.db)
 	require.NoError(t, err)
 	require.Equal(t, "parent", depsChild["child"].ParentID, "child should see parent even when parent not in query set")
 
 	// When querying for both
-	depsBoth, err := executor.loadDependenciesForIssues([]string{"parent", "child"})
+	depsBoth, err := executor.loadDependenciesForIssues([]string{"parent", "child"}, executor.db)
 	require.NoError(t, err)
 	require.Contains(t, depsBoth["parent"].Children, "child")
 	require.Equal(t, "parent", depsBoth["child"].ParentID)
@@ -2625,7 +2625,7 @@ func TestLoadLabelsForIssues_ReturnsCorrectLabelSets(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	executor := newTestExecutor(t, db)
-	labels, err := executor.loadLabelsForIssues([]string{"issue-1", "issue-2", "issue-3"})
+	labels, err := executor.loadLabelsForIssues([]string{"issue-1", "issue-2", "issue-3"}, executor.db)
 	require.NoError(t, err)
 
 	// Check issue-1 has all 3 labels
@@ -2658,7 +2658,7 @@ func TestLoadCommentCountsForIssues_ReturnsCorrectCounts(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	executor := newTestExecutor(t, db)
-	counts, err := executor.loadCommentCountsForIssues([]string{"issue-1", "issue-2", "issue-3"})
+	counts, err := executor.loadCommentCountsForIssues([]string{"issue-1", "issue-2", "issue-3"}, executor.db)
 	require.NoError(t, err)
 
 	require.Equal(t, 3, counts["issue-1"], "issue-1 should have 3 comments")
@@ -2673,15 +2673,15 @@ func TestBatchLoading_EmptyIDList(t *testing.T) {
 	executor := newTestExecutor(t, db)
 
 	// All batch loading functions should return empty maps for empty input
-	deps, err := executor.loadDependenciesForIssues([]string{})
+	deps, err := executor.loadDependenciesForIssues([]string{}, executor.db)
 	require.NoError(t, err)
 	require.Empty(t, deps)
 
-	labels, err := executor.loadLabelsForIssues([]string{})
+	labels, err := executor.loadLabelsForIssues([]string{}, executor.db)
 	require.NoError(t, err)
 	require.Empty(t, labels)
 
-	counts, err := executor.loadCommentCountsForIssues([]string{})
+	counts, err := executor.loadCommentCountsForIssues([]string{}, executor.db)
 	require.NoError(t, err)
 	require.Empty(t, counts)
 }
@@ -2693,14 +2693,14 @@ func TestBatchLoading_SingleID(t *testing.T) {
 	executor := newTestExecutor(t, db)
 
 	// test-1 has labels: urgent, auth
-	labels, err := executor.loadLabelsForIssues([]string{"test-1"})
+	labels, err := executor.loadLabelsForIssues([]string{"test-1"}, executor.db)
 	require.NoError(t, err)
 	require.Len(t, labels["test-1"], 2)
 	require.Contains(t, labels["test-1"], "urgent")
 	require.Contains(t, labels["test-1"], "auth")
 
 	// test-1 blocks test-3
-	deps, err := executor.loadDependenciesForIssues([]string{"test-1"})
+	deps, err := executor.loadDependenciesForIssues([]string{"test-1"}, executor.db)
 	require.NoError(t, err)
 	require.Contains(t, deps["test-1"].Blocks, "test-3")
 }
@@ -2715,7 +2715,7 @@ func TestBatchLoading_IssuesWithNoDependencies(t *testing.T) {
 
 	executor := newTestExecutor(t, db)
 
-	deps, err := executor.loadDependenciesForIssues([]string{"standalone-1", "standalone-2"})
+	deps, err := executor.loadDependenciesForIssues([]string{"standalone-1", "standalone-2"}, executor.db)
 	require.NoError(t, err)
 
 	// Both issues should have empty or no dependencies
@@ -2734,7 +2734,7 @@ func TestBatchLoading_IssuesWithNoLabels(t *testing.T) {
 
 	executor := newTestExecutor(t, db)
 
-	labels, err := executor.loadLabelsForIssues([]string{"no-labels"})
+	labels, err := executor.loadLabelsForIssues([]string{"no-labels"}, executor.db)
 	require.NoError(t, err)
 	require.Empty(t, labels["no-labels"])
 }
@@ -2748,7 +2748,7 @@ func TestBatchLoading_IssuesWithNoComments(t *testing.T) {
 
 	executor := newTestExecutor(t, db)
 
-	counts, err := executor.loadCommentCountsForIssues([]string{"no-comments"})
+	counts, err := executor.loadCommentCountsForIssues([]string{"no-comments"}, executor.db)
 	require.NoError(t, err)
 	require.Equal(t, 0, counts["no-comments"])
 }
@@ -2978,7 +2978,7 @@ func TestDoltDialect_DependencyGraphWithoutDeletedAt(t *testing.T) {
 
 	executor := newDoltExecutor(t, db)
 
-	graph, err := executor.loadDependencyGraph()
+	graph, err := executor.loadDependencyGraph(executor.db)
 	require.NoError(t, err)
 
 	// Deleted issue should not appear in graph
@@ -3024,7 +3024,7 @@ func TestDoltDialect_FetchByIDsWithoutDeletedAt(t *testing.T) {
 
 	executor := newDoltExecutor(t, db)
 
-	issues, err := executor.fetchIssuesByIDs([]string{"task-1", "task-2", "deleted-1"})
+	issues, err := executor.fetchIssuesByIDs([]string{"task-1", "task-2", "deleted-1"}, executor.db)
 	require.NoError(t, err)
 	require.Len(t, issues, 2, "deleted issue should be excluded")
 
