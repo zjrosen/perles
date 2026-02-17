@@ -25,6 +25,7 @@ import (
 	"github.com/zjrosen/perles/internal/templates"
 	"github.com/zjrosen/perles/internal/ui/nobeads"
 	"github.com/zjrosen/perles/internal/ui/outdated"
+	"github.com/zjrosen/perles/internal/ui/serverdown"
 )
 
 func init() {
@@ -236,9 +237,17 @@ func runApp(cmd *cobra.Command, args []string) error {
 	cfg.ResolvedBeadsDir = paths.ResolveBeadsDir(dbPath)
 	log.Info(log.CatConfig, "resolved beads dir", "path", cfg.ResolvedBeadsDir)
 
+	// Pre-flight: if backend is Dolt, verify server mode is configured before connecting.
+	if meta, metaErr := infrabeads.LoadMetadata(cfg.ResolvedBeadsDir); metaErr == nil && meta.Backend == "dolt" && !meta.IsDoltServer() {
+		return runServerNotConfiguredMode()
+	}
+
 	client, err := infrabeads.NewClient(cfg.ResolvedBeadsDir)
 	if err != nil {
-		// Show friendly TUI empty state instead of CLI error
+		// If metadata says dolt+server, the failure is a connection issue, not a missing .beads dir.
+		if meta, metaErr := infrabeads.LoadMetadata(cfg.ResolvedBeadsDir); metaErr == nil && meta.IsDoltServer() {
+			return runServerDownMode(meta.GetDoltServerHost(), meta.GetDoltServerPort())
+		}
 		return runNoBeadsMode()
 	}
 	defer func() { _ = client.Close() }()
@@ -342,6 +351,36 @@ func SetVersion(v string) {
 // empty state view when no .beads directory is found.
 func runNoBeadsMode() error {
 	model := nobeads.New()
+	p := tea.NewProgram(
+		&model,
+		tea.WithAltScreen(),
+	)
+
+	_, err := p.Run()
+	if err != nil {
+		return fmt.Errorf("running program: %w", err)
+	}
+	return nil
+}
+
+// runServerNotConfiguredMode launches the TUI showing that dolt_mode must be set to "server".
+func runServerNotConfiguredMode() error {
+	model := serverdown.NewNotConfigured()
+	p := tea.NewProgram(
+		&model,
+		tea.WithAltScreen(),
+	)
+
+	_, err := p.Run()
+	if err != nil {
+		return fmt.Errorf("running program: %w", err)
+	}
+	return nil
+}
+
+// runServerDownMode launches the TUI showing the Dolt server unreachable screen.
+func runServerDownMode(host string, port int) error {
+	model := serverdown.NewUnreachable(host, port)
 	p := tea.NewProgram(
 		&model,
 		tea.WithAltScreen(),
