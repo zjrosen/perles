@@ -62,14 +62,10 @@ func (b *SQLBuilder) buildCompare(e *CompareExpr) string {
 	// Handle special fields
 	switch e.Field {
 	case "blocked":
-		// blocked = true means has entries in blocked_issues_cache
-		if e.Value.Bool {
-			return "i.id IN (SELECT issue_id FROM blocked_issues_cache)"
-		}
-		return "i.id NOT IN (SELECT issue_id FROM blocked_issues_cache)"
+		return b.buildBlockedSQL(e.Value.Bool)
 
 	case "ready":
-		// ready = true means in ready_issues view
+		// ready = true means in ready_issues view (exists in both SQLite and Dolt)
 		if e.Value.Bool {
 			return "i.id IN (SELECT id FROM ready_issues)"
 		}
@@ -290,6 +286,23 @@ func (b *SQLBuilder) dateToSQLMySQL(dateStr string) string {
 		b.params = append(b.params, dateStr)
 		return "?"
 	}
+}
+
+// buildBlockedSQL returns the SQL fragment for the blocked field.
+// SQLite uses the blocked_issues_cache table; Dolt uses the blocked_issues view.
+func (b *SQLBuilder) buildBlockedSQL(isBlocked bool) string {
+	if b.dialect == appbeads.DialectMySQL {
+		// Dolt: blocked_issues is a view that selects i.* (has id column)
+		if isBlocked {
+			return "i.id IN (SELECT id FROM blocked_issues)"
+		}
+		return "i.id NOT IN (SELECT id FROM blocked_issues)"
+	}
+	// SQLite: blocked_issues_cache is a table with issue_id column
+	if isBlocked {
+		return "i.id IN (SELECT issue_id FROM blocked_issues_cache)"
+	}
+	return "i.id NOT IN (SELECT issue_id FROM blocked_issues_cache)"
 }
 
 // buildOrderBy builds the ORDER BY clause.

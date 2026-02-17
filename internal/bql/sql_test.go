@@ -522,3 +522,70 @@ func TestSQLBuilder_MySQLDialect_NonDateQuery(t *testing.T) {
 	require.Equal(t, sqliteWhere, mysqlWhere)
 	require.Equal(t, sqliteParams, mysqlParams)
 }
+
+func TestSQLBuilder_MySQLDialect_BlockedTrue(t *testing.T) {
+	parser := NewParser("blocked = true")
+	query, err := parser.Parse()
+	require.NoError(t, err)
+
+	builder := NewSQLBuilder(query, appbeads.DialectMySQL)
+	where, _, params := builder.Build()
+
+	// Dolt uses blocked_issues view (has id column), not blocked_issues_cache
+	require.Equal(t, "i.id IN (SELECT id FROM blocked_issues)", where)
+	require.Empty(t, params)
+}
+
+func TestSQLBuilder_MySQLDialect_BlockedFalse(t *testing.T) {
+	parser := NewParser("blocked = false")
+	query, err := parser.Parse()
+	require.NoError(t, err)
+
+	builder := NewSQLBuilder(query, appbeads.DialectMySQL)
+	where, _, _ := builder.Build()
+
+	require.Equal(t, "i.id NOT IN (SELECT id FROM blocked_issues)", where)
+}
+
+func TestSQLBuilder_MySQLDialect_NotBlocked(t *testing.T) {
+	parser := NewParser("not blocked = true")
+	query, err := parser.Parse()
+	require.NoError(t, err)
+
+	builder := NewSQLBuilder(query, appbeads.DialectMySQL)
+	where, _, _ := builder.Build()
+
+	require.Equal(t, "NOT (i.id IN (SELECT id FROM blocked_issues))", where)
+}
+
+func TestSQLBuilder_MySQLDialect_ComplexWithBlocked(t *testing.T) {
+	input := "(type = bug or type = task) and blocked = false order by priority asc, created desc"
+
+	parser := NewParser(input)
+	query, err := parser.Parse()
+	require.NoError(t, err)
+
+	builder := NewSQLBuilder(query, appbeads.DialectMySQL)
+	where, orderBy, params := builder.Build()
+
+	require.Equal(t, "((i.issue_type = ? OR i.issue_type = ?) AND i.id NOT IN (SELECT id FROM blocked_issues))", where)
+	require.Equal(t, "i.priority ASC, i.created_at DESC", orderBy)
+	require.Equal(t, []interface{}{"bug", "task"}, params)
+}
+
+func TestSQLBuilder_MySQLDialect_ReadyField(t *testing.T) {
+	// ready = true should produce identical SQL for both dialects
+	// (both use ready_issues view with id column)
+	parser := NewParser("ready = true")
+	query, err := parser.Parse()
+	require.NoError(t, err)
+
+	sqliteBuilder := NewSQLBuilder(query, appbeads.DialectSQLite)
+	sqliteWhere, _, _ := sqliteBuilder.Build()
+
+	mysqlBuilder := NewSQLBuilder(query, appbeads.DialectMySQL)
+	mysqlWhere, _, _ := mysqlBuilder.Build()
+
+	require.Equal(t, sqliteWhere, mysqlWhere)
+	require.Equal(t, "i.id IN (SELECT id FROM ready_issues)", mysqlWhere)
+}

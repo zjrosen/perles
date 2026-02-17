@@ -2822,11 +2822,26 @@ CREATE TABLE blocked_issues_cache (
 	issue_id TEXT PRIMARY KEY
 );
 
+CREATE VIEW blocked_issues AS
+SELECT i.id
+FROM issues i
+WHERE i.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked')
+  AND EXISTS (
+    SELECT 1 FROM dependencies d
+    WHERE d.issue_id = i.id
+      AND d.type = 'blocks'
+      AND EXISTS (
+        SELECT 1 FROM issues blocker
+        WHERE blocker.id = d.depends_on_id
+          AND blocker.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked')
+      )
+  );
+
 CREATE VIEW ready_issues AS
 SELECT i.id
 FROM issues i
-WHERE i.status IN ('open', 'in_progress')
-  AND i.id NOT IN (SELECT issue_id FROM blocked_issues_cache);
+WHERE i.status = 'open'
+  AND i.id NOT IN (SELECT id FROM blocked_issues);
 `
 
 // setupDoltDB creates an in-memory SQLite database with the Dolt schema (no deleted_at).
@@ -3076,6 +3091,55 @@ func TestDoltDialect_BQLFiltersWork(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, issues, 1)
 	require.Equal(t, "task-1", issues[0].ID)
+}
+
+func TestDoltDialect_BlockedQuery(t *testing.T) {
+	db := setupDoltDB(t)
+	defer func() { _ = db.Close() }()
+
+	insertDoltIssue(t, db, "blocker-1", "Blocker", "open", "task", 1)
+	insertDoltIssue(t, db, "blocked-1", "Blocked Task", "open", "task", 2)
+	insertDoltIssue(t, db, "free-1", "Free Task", "open", "task", 2)
+	insertDoltDep(t, db, "blocked-1", "blocker-1", "blocks")
+
+	executor := newDoltExecutor(t, db)
+
+	// blocked = true should use blocked_issues view
+	issues, err := executor.Execute("blocked = true")
+	require.NoError(t, err)
+	require.Len(t, issues, 1)
+	require.Equal(t, "blocked-1", issues[0].ID)
+
+	// blocked = false should exclude blocked issues
+	issues, err = executor.Execute("blocked = false")
+	require.NoError(t, err)
+	ids := collectIDs(issues)
+	require.True(t, ids["blocker-1"])
+	require.True(t, ids["free-1"])
+	require.False(t, ids["blocked-1"])
+}
+
+func TestDoltDialect_ReadyQuery(t *testing.T) {
+	db := setupDoltDB(t)
+	defer func() { _ = db.Close() }()
+
+	insertDoltIssue(t, db, "blocker-1", "Blocker", "open", "task", 1)
+	insertDoltIssue(t, db, "blocked-1", "Blocked Task", "open", "task", 2)
+	insertDoltIssue(t, db, "ready-1", "Ready Task", "open", "task", 2)
+	insertDoltIssue(t, db, "closed-1", "Closed Task", "closed", "task", 2)
+	insertDoltDep(t, db, "blocked-1", "blocker-1", "blocks")
+
+	executor := newDoltExecutor(t, db)
+
+	// ready = true should return open issues that are not blocked
+	issues, err := executor.Execute("ready = true")
+	require.NoError(t, err)
+
+	ids := collectIDs(issues)
+	require.True(t, ids["blocker-1"], "blocker is open and not blocked, so it's ready")
+	require.True(t, ids["ready-1"], "ready task is open and not blocked")
+	require.False(t, ids["blocked-1"], "blocked task should not be ready")
+	require.False(t, ids["closed-1"], "closed task should not be ready")
 }
 
 func TestBatchLoading_IntegrationFullQueryEquivalence(t *testing.T) {
