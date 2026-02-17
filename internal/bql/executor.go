@@ -129,6 +129,19 @@ type IssueDeps struct {
 	Discovered     []string // Issues discovered from this one
 }
 
+// softDeleteFilter returns the SQL WHERE clause fragment that excludes soft-deleted issues.
+// For SQLite, this includes both status and deleted_at checks (tombstone support).
+// For Dolt/MySQL, deleted_at column does not exist; hard deletes remove rows entirely.
+func (e *Executor) softDeleteFilter(alias string) string {
+	if e.dialect == appbeads.DialectMySQL {
+		// Dolt uses hard deletes; no tombstone columns exist.
+		// Status filter kept as defense-in-depth.
+		return alias + ".status NOT IN ('deleted', 'tombstone')"
+	}
+	// SQLite: belt-and-suspenders with both status and deleted_at checks.
+	return alias + ".status NOT IN ('deleted', 'tombstone') AND " + alias + ".deleted_at IS NULL"
+}
+
 // executeBaseQuery runs the main BQL filter query with batch-loaded dependencies.
 // This uses 3 total queries instead of 8N correlated subqueries:
 // 1. Main query (no dependency subqueries)
@@ -141,7 +154,7 @@ func (e *Executor) executeBaseQuery(query *Query) ([]beads.Issue, error) {
 	whereClause, orderBy, params := builder.Build()
 
 	// Construct main query WITHOUT dependency subqueries
-	sqlQuery := `
+	sqlQuery := fmt.Sprintf(`
 		SELECT
 			i.id,
 			i.title,
@@ -170,9 +183,8 @@ func (e *Executor) executeBaseQuery(query *Query) ([]beads.Issue, error) {
 			i.rig,
 			i.mol_type
 		FROM issues i
-		WHERE i.status not in ('deleted', 'tombstone')
-	  AND i.deleted_at is null
-	`
+		WHERE %s
+	`, e.softDeleteFilter("i"))
 
 	if whereClause != "" {
 		sqlQuery += " AND " + whereClause //nolint:gosec // whereClause is built from validated BQL fields, not raw user input
@@ -396,22 +408,21 @@ func (e *Executor) loadDependenciesForIssues(ids []string) (map[string]IssueDeps
 
 	// Single query to get all dependencies for all issues (both directions)
 	// Filter out deleted issues on the related side
+	softDelete := e.softDeleteFilter("i")
 	//nolint:gosec // G201: inClause contains only "?" placeholders, not user input
 	query := fmt.Sprintf(`
 		SELECT d.issue_id, d.depends_on_id, d.type
 		FROM dependencies d
 		JOIN issues i ON d.depends_on_id = i.id
 		WHERE d.issue_id IN (%s)
-		  AND i.status NOT IN ('deleted', 'tombstone')
-		  AND i.deleted_at IS NULL
+		  AND %s
 		UNION
 		SELECT d.issue_id, d.depends_on_id, d.type
 		FROM dependencies d
 		JOIN issues i ON d.issue_id = i.id
 		WHERE d.depends_on_id IN (%s)
-		  AND i.status NOT IN ('deleted', 'tombstone')
-		  AND i.deleted_at IS NULL
-	`, inClause, inClause)
+		  AND %s
+	`, inClause, softDelete, inClause, softDelete)
 
 	rows, err := e.db.Query(query, params...)
 	if err != nil {
@@ -708,16 +719,14 @@ func (e *Executor) loadDependencyGraph() (*DependencyGraph, error) {
 func (e *Executor) loadDependencyGraphFromDB() (*DependencyGraph, error) {
 	log.Debug(log.CatBQL, "Loading dependency graph from database")
 
-	query := `
+	query := fmt.Sprintf(`
 		SELECT d.issue_id, d.depends_on_id, d.type
 		FROM dependencies d
 		JOIN issues i1 ON d.issue_id = i1.id
 		JOIN issues i2 ON d.depends_on_id = i2.id
-		WHERE i1.status NOT IN ('deleted', 'tombstone')
-		  AND i2.status NOT IN ('deleted', 'tombstone')
-		  AND i1.deleted_at IS NULL
-		  AND i2.deleted_at IS NULL
-	`
+		WHERE %s
+		  AND %s
+	`, e.softDeleteFilter("i1"), e.softDeleteFilter("i2"))
 
 	rows, err := e.db.Query(query)
 	if err != nil {

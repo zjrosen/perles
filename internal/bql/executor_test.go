@@ -2753,6 +2753,331 @@ func TestBatchLoading_IssuesWithNoComments(t *testing.T) {
 	require.Equal(t, 0, counts["no-comments"])
 }
 
+// =============================================================================
+// Dolt Dialect Tests
+// =============================================================================
+// These tests verify that the MySQL/Dolt dialect path produces valid SQL
+// against a schema without the deleted_at column (removed in beads v0.52.0).
+// We use SQLite as the test engine but with a Dolt-like schema and DialectMySQL
+// on the executor. If any query still references deleted_at, it will error.
+
+// doltTestSchema mirrors the Dolt beads schema (post-tombstone removal).
+// It is identical to testutil.Schema but without the deleted_at column.
+const doltTestSchema = `
+CREATE TABLE issues (
+	id TEXT PRIMARY KEY,
+	title TEXT NOT NULL,
+	description TEXT,
+	design TEXT NOT NULL DEFAULT '',
+	acceptance_criteria TEXT NOT NULL DEFAULT '',
+	notes TEXT NOT NULL DEFAULT '',
+	status TEXT NOT NULL DEFAULT 'open',
+	priority INTEGER NOT NULL DEFAULT 2,
+	issue_type TEXT NOT NULL DEFAULT 'task',
+	assignee TEXT,
+	sender TEXT,
+	ephemeral INTEGER,
+	pinned INTEGER,
+	is_template INTEGER,
+	created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	created_by TEXT DEFAULT '',
+	updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	closed_at DATETIME,
+	close_reason TEXT DEFAULT '',
+	hook_bead TEXT DEFAULT '',
+	role_bead TEXT DEFAULT '',
+	agent_state TEXT DEFAULT '',
+	last_activity DATETIME,
+	role_type TEXT DEFAULT '',
+	rig TEXT DEFAULT '',
+	mol_type TEXT DEFAULT ''
+);
+
+CREATE TABLE labels (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	issue_id TEXT NOT NULL,
+	label TEXT NOT NULL,
+	FOREIGN KEY (issue_id) REFERENCES issues(id)
+);
+
+CREATE TABLE dependencies (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	issue_id TEXT NOT NULL,
+	depends_on_id TEXT NOT NULL,
+	type TEXT NOT NULL DEFAULT 'blocks',
+	FOREIGN KEY (issue_id) REFERENCES issues(id),
+	FOREIGN KEY (depends_on_id) REFERENCES issues(id)
+);
+
+CREATE TABLE comments (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	issue_id TEXT NOT NULL,
+	author TEXT NOT NULL,
+	text TEXT NOT NULL,
+	created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	FOREIGN KEY (issue_id) REFERENCES issues(id)
+);
+
+CREATE TABLE blocked_issues_cache (
+	issue_id TEXT PRIMARY KEY
+);
+
+CREATE VIEW ready_issues AS
+SELECT i.id
+FROM issues i
+WHERE i.status IN ('open', 'in_progress')
+  AND i.id NOT IN (SELECT issue_id FROM blocked_issues_cache);
+`
+
+// setupDoltDB creates an in-memory SQLite database with the Dolt schema (no deleted_at).
+func setupDoltDB(t *testing.T) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite3", ":memory:")
+	require.NoError(t, err)
+	_, err = db.Exec(doltTestSchema)
+	require.NoError(t, err)
+	return db
+}
+
+// insertDoltIssue inserts an issue into a Dolt-schema DB (no deleted_at column).
+func insertDoltIssue(t *testing.T, db *sql.DB, id, title, status, issueType string, priority int) {
+	t.Helper()
+	now := time.Now()
+	var closedAt *time.Time
+	if status == "closed" {
+		closedAt = &now
+	}
+	_, err := db.Exec(
+		`INSERT INTO issues (id, title, status, priority, issue_type, created_at, updated_at, closed_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, title, status, priority, issueType, now, now, closedAt,
+	)
+	require.NoError(t, err)
+}
+
+// insertDoltDep inserts a dependency into a Dolt-schema DB.
+func insertDoltDep(t *testing.T, db *sql.DB, issueID, dependsOnID, depType string) {
+	t.Helper()
+	_, err := db.Exec(
+		`INSERT INTO dependencies (issue_id, depends_on_id, type) VALUES (?, ?, ?)`,
+		issueID, dependsOnID, depType,
+	)
+	require.NoError(t, err)
+}
+
+// newDoltExecutor creates an executor with DialectMySQL (Dolt) for testing.
+func newDoltExecutor(t *testing.T, db *sql.DB) *Executor {
+	t.Helper()
+	bqlCache := mocks.NewMockCacheManager[string, []beads.Issue](t)
+	bqlCache.On("Get", mock.Anything, mock.Anything).Return(nil, false).Maybe()
+	bqlCache.On("GetWithRefresh", mock.Anything, mock.Anything, mock.Anything).Return(nil, false).Maybe()
+	bqlCache.On("Set", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return().Maybe()
+
+	depGraphCache := mocks.NewMockCacheManager[string, *DependencyGraph](t)
+	depGraphCache.On("Get", mock.Anything, mock.Anything).Return(nil, false).Maybe()
+	depGraphCache.On("GetWithRefresh", mock.Anything, mock.Anything, mock.Anything).Return(nil, false).Maybe()
+	depGraphCache.On("Set", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return().Maybe()
+
+	return NewExecutor(db, appbeads.DialectMySQL, bqlCache, depGraphCache)
+}
+
+func TestDoltDialect_BaseQueryWithoutDeletedAt(t *testing.T) {
+	db := setupDoltDB(t)
+	defer func() { _ = db.Close() }()
+
+	insertDoltIssue(t, db, "open-1", "Open Issue", "open", "task", 2)
+	insertDoltIssue(t, db, "closed-1", "Closed Issue", "closed", "bug", 1)
+
+	executor := newDoltExecutor(t, db)
+
+	issues, err := executor.Execute("order by id asc")
+	require.NoError(t, err)
+	require.Len(t, issues, 2)
+	require.Equal(t, "closed-1", issues[0].ID)
+	require.Equal(t, "open-1", issues[1].ID)
+}
+
+func TestDoltDialect_ExcludesDeletedStatus(t *testing.T) {
+	db := setupDoltDB(t)
+	defer func() { _ = db.Close() }()
+
+	insertDoltIssue(t, db, "open-1", "Open Issue", "open", "task", 2)
+	insertDoltIssue(t, db, "deleted-1", "Deleted Issue", "deleted", "task", 2)
+	insertDoltIssue(t, db, "tombstone-1", "Tombstone Issue", "tombstone", "task", 2)
+
+	executor := newDoltExecutor(t, db)
+
+	issues, err := executor.Execute("order by id asc")
+	require.NoError(t, err)
+	require.Len(t, issues, 1, "deleted and tombstone statuses should be excluded")
+	require.Equal(t, "open-1", issues[0].ID)
+}
+
+func TestDoltDialect_DependenciesLoadWithoutDeletedAt(t *testing.T) {
+	db := setupDoltDB(t)
+	defer func() { _ = db.Close() }()
+
+	insertDoltIssue(t, db, "epic-1", "Epic", "open", "epic", 1)
+	insertDoltIssue(t, db, "task-1", "Task 1", "open", "task", 2)
+	insertDoltIssue(t, db, "task-2", "Task 2", "open", "task", 2)
+	insertDoltDep(t, db, "task-1", "epic-1", "parent-child")
+	insertDoltDep(t, db, "task-2", "epic-1", "parent-child")
+
+	executor := newDoltExecutor(t, db)
+
+	// Query the epic and check children are loaded
+	issues, err := executor.Execute("id = epic-1")
+	require.NoError(t, err)
+	require.Len(t, issues, 1)
+	require.ElementsMatch(t, []string{"task-1", "task-2"}, issues[0].Children)
+}
+
+func TestDoltDialect_DependenciesExcludeDeletedStatus(t *testing.T) {
+	db := setupDoltDB(t)
+	defer func() { _ = db.Close() }()
+
+	insertDoltIssue(t, db, "epic-1", "Epic", "open", "epic", 1)
+	insertDoltIssue(t, db, "task-1", "Task 1", "open", "task", 2)
+	insertDoltIssue(t, db, "deleted-task", "Deleted Task", "deleted", "task", 2)
+	insertDoltDep(t, db, "task-1", "epic-1", "parent-child")
+	insertDoltDep(t, db, "deleted-task", "epic-1", "parent-child")
+
+	executor := newDoltExecutor(t, db)
+
+	// Deleted task should not appear in children
+	issues, err := executor.Execute("id = epic-1")
+	require.NoError(t, err)
+	require.Len(t, issues, 1)
+	require.Equal(t, []string{"task-1"}, issues[0].Children)
+}
+
+func TestDoltDialect_DependencyGraphWithoutDeletedAt(t *testing.T) {
+	db := setupDoltDB(t)
+	defer func() { _ = db.Close() }()
+
+	insertDoltIssue(t, db, "epic-1", "Epic", "open", "epic", 1)
+	insertDoltIssue(t, db, "task-1", "Task 1", "open", "task", 2)
+	insertDoltIssue(t, db, "deleted-1", "Deleted", "deleted", "task", 2)
+	insertDoltDep(t, db, "task-1", "epic-1", "parent-child")
+	insertDoltDep(t, db, "deleted-1", "epic-1", "parent-child")
+
+	executor := newDoltExecutor(t, db)
+
+	graph, err := executor.loadDependencyGraph()
+	require.NoError(t, err)
+
+	// Deleted issue should not appear in graph
+	require.Empty(t, graph.Forward["deleted-1"], "deleted issue should not have forward edges")
+	for _, edge := range graph.Reverse["epic-1"] {
+		require.NotEqual(t, "deleted-1", edge.TargetID, "deleted issue should not be in reverse edges")
+	}
+}
+
+func TestDoltDialect_ExpandWithoutDeletedAt(t *testing.T) {
+	db := setupDoltDB(t)
+	defer func() { _ = db.Close() }()
+
+	insertDoltIssue(t, db, "epic-1", "Epic", "open", "epic", 1)
+	insertDoltIssue(t, db, "task-1", "Task 1", "open", "task", 2)
+	insertDoltIssue(t, db, "subtask-1", "Subtask 1", "open", "task", 2)
+	insertDoltIssue(t, db, "deleted-task", "Deleted Task", "deleted", "task", 2)
+	insertDoltDep(t, db, "task-1", "epic-1", "parent-child")
+	insertDoltDep(t, db, "subtask-1", "task-1", "parent-child")
+	insertDoltDep(t, db, "deleted-task", "epic-1", "parent-child")
+
+	executor := newDoltExecutor(t, db)
+
+	// Expand down from epic with unlimited depth should traverse full hierarchy
+	issues, err := executor.Execute("id = epic-1 expand down depth *")
+	require.NoError(t, err)
+
+	ids := collectIDs(issues)
+	require.True(t, ids["epic-1"])
+	require.True(t, ids["task-1"])
+	require.True(t, ids["subtask-1"])
+	require.False(t, ids["deleted-task"], "deleted task should be excluded from expand")
+	require.Len(t, ids, 3)
+}
+
+func TestDoltDialect_FetchByIDsWithoutDeletedAt(t *testing.T) {
+	db := setupDoltDB(t)
+	defer func() { _ = db.Close() }()
+
+	insertDoltIssue(t, db, "task-1", "Task 1", "open", "task", 2)
+	insertDoltIssue(t, db, "task-2", "Task 2", "open", "task", 2)
+	insertDoltIssue(t, db, "deleted-1", "Deleted", "deleted", "task", 2)
+
+	executor := newDoltExecutor(t, db)
+
+	issues, err := executor.fetchIssuesByIDs([]string{"task-1", "task-2", "deleted-1"})
+	require.NoError(t, err)
+	require.Len(t, issues, 2, "deleted issue should be excluded")
+
+	ids := collectIDs(issues)
+	require.True(t, ids["task-1"])
+	require.True(t, ids["task-2"])
+	require.False(t, ids["deleted-1"])
+}
+
+func TestDoltDialect_MixedStatusFiltering(t *testing.T) {
+	db := setupDoltDB(t)
+	defer func() { _ = db.Close() }()
+
+	insertDoltIssue(t, db, "open-1", "Open", "open", "task", 2)
+	insertDoltIssue(t, db, "closed-1", "Closed", "closed", "task", 2)
+	insertDoltIssue(t, db, "in-progress-1", "In Progress", "in_progress", "task", 1)
+	insertDoltIssue(t, db, "deleted-1", "Deleted", "deleted", "task", 2)
+	insertDoltIssue(t, db, "tombstone-1", "Tombstone", "tombstone", "task", 2)
+
+	executor := newDoltExecutor(t, db)
+
+	issues, err := executor.Execute("order by id asc")
+	require.NoError(t, err)
+	require.Len(t, issues, 3, "should return open, closed, and in_progress only")
+
+	ids := collectIDs(issues)
+	require.True(t, ids["open-1"])
+	require.True(t, ids["closed-1"])
+	require.True(t, ids["in-progress-1"])
+	require.False(t, ids["deleted-1"])
+	require.False(t, ids["tombstone-1"])
+}
+
+func TestDoltDialect_BQLFiltersWork(t *testing.T) {
+	db := setupDoltDB(t)
+	defer func() { _ = db.Close() }()
+
+	insertDoltIssue(t, db, "bug-1", "Login Bug", "open", "bug", 0)
+	insertDoltIssue(t, db, "task-1", "Refactor", "open", "task", 2)
+	insertDoltIssue(t, db, "feature-1", "New Feature", "closed", "feature", 1)
+
+	executor := newDoltExecutor(t, db)
+
+	// Type filter
+	issues, err := executor.Execute("type = bug")
+	require.NoError(t, err)
+	require.Len(t, issues, 1)
+	require.Equal(t, "bug-1", issues[0].ID)
+
+	// Status filter
+	issues, err = executor.Execute("status = closed")
+	require.NoError(t, err)
+	require.Len(t, issues, 1)
+	require.Equal(t, "feature-1", issues[0].ID)
+
+	// Priority filter
+	issues, err = executor.Execute("priority = P0")
+	require.NoError(t, err)
+	require.Len(t, issues, 1)
+	require.Equal(t, "bug-1", issues[0].ID)
+
+	// Compound filter
+	issues, err = executor.Execute("status = open and type = task")
+	require.NoError(t, err)
+	require.Len(t, issues, 1)
+	require.Equal(t, "task-1", issues[0].ID)
+}
+
 func TestBatchLoading_IntegrationFullQueryEquivalence(t *testing.T) {
 	// This test verifies that batch loading produces identical results to
 	// what was expected from the old correlated subquery approach
