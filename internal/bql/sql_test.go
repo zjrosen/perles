@@ -531,8 +531,9 @@ func TestSQLBuilder_MySQLDialect_BlockedTrue(t *testing.T) {
 	builder := NewSQLBuilder(query, appbeads.DialectMySQL)
 	where, _, params := builder.Build()
 
-	// Dolt uses blocked_issues view (has id column), not blocked_issues_cache
-	require.Equal(t, "i.id IN (SELECT id FROM blocked_issues)", where)
+	// Dolt inlines the blocked_issues view SQL to bypass a Dolt server bug with views
+	require.Contains(t, where, "i.id IN (SELECT bi.id FROM issues bi")
+	require.Contains(t, where, "d.type = 'blocks'")
 	require.Empty(t, params)
 }
 
@@ -544,7 +545,7 @@ func TestSQLBuilder_MySQLDialect_BlockedFalse(t *testing.T) {
 	builder := NewSQLBuilder(query, appbeads.DialectMySQL)
 	where, _, _ := builder.Build()
 
-	require.Equal(t, "i.id NOT IN (SELECT id FROM blocked_issues)", where)
+	require.Contains(t, where, "i.id NOT IN (SELECT bi.id FROM issues bi")
 }
 
 func TestSQLBuilder_MySQLDialect_NotBlocked(t *testing.T) {
@@ -555,7 +556,7 @@ func TestSQLBuilder_MySQLDialect_NotBlocked(t *testing.T) {
 	builder := NewSQLBuilder(query, appbeads.DialectMySQL)
 	where, _, _ := builder.Build()
 
-	require.Equal(t, "NOT (i.id IN (SELECT id FROM blocked_issues))", where)
+	require.Contains(t, where, "NOT (i.id IN (SELECT bi.id FROM issues bi")
 }
 
 func TestSQLBuilder_MySQLDialect_ComplexWithBlocked(t *testing.T) {
@@ -568,24 +569,26 @@ func TestSQLBuilder_MySQLDialect_ComplexWithBlocked(t *testing.T) {
 	builder := NewSQLBuilder(query, appbeads.DialectMySQL)
 	where, orderBy, params := builder.Build()
 
-	require.Equal(t, "((i.issue_type = ? OR i.issue_type = ?) AND i.id NOT IN (SELECT id FROM blocked_issues))", where)
+	require.Contains(t, where, "i.id NOT IN (SELECT bi.id FROM issues bi")
+	require.Contains(t, where, "(i.issue_type = ? OR i.issue_type = ?)")
 	require.Equal(t, "i.priority ASC, i.created_at DESC", orderBy)
 	require.Equal(t, []interface{}{"bug", "task"}, params)
 }
 
 func TestSQLBuilder_MySQLDialect_ReadyField(t *testing.T) {
-	// ready = true should produce identical SQL for both dialects
-	// (both use ready_issues view with id column)
 	parser := NewParser("ready = true")
 	query, err := parser.Parse()
 	require.NoError(t, err)
 
+	// SQLite uses the ready_issues view
 	sqliteBuilder := NewSQLBuilder(query, appbeads.DialectSQLite)
 	sqliteWhere, _, _ := sqliteBuilder.Build()
+	require.Equal(t, "i.id IN (SELECT id FROM ready_issues)", sqliteWhere)
 
+	// Dolt inlines the SQL to bypass a server bug with views
 	mysqlBuilder := NewSQLBuilder(query, appbeads.DialectMySQL)
 	mysqlWhere, _, _ := mysqlBuilder.Build()
-
-	require.Equal(t, sqliteWhere, mysqlWhere)
-	require.Equal(t, "i.id IN (SELECT id FROM ready_issues)", mysqlWhere)
+	require.Contains(t, mysqlWhere, "i.id IN (SELECT ri.id FROM issues ri")
+	require.Contains(t, mysqlWhere, "ri.status = 'open'")
+	require.Contains(t, mysqlWhere, "NOT IN (SELECT bi.id FROM issues bi")
 }

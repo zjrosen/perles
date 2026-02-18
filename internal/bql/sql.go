@@ -65,11 +65,7 @@ func (b *SQLBuilder) buildCompare(e *CompareExpr) string {
 		return b.buildBlockedSQL(e.Value.Bool)
 
 	case "ready":
-		// ready = true means in ready_issues view (exists in both SQLite and Dolt)
-		if e.Value.Bool {
-			return "i.id IN (SELECT id FROM ready_issues)"
-		}
-		return "i.id NOT IN (SELECT id FROM ready_issues)"
+		return b.buildReadySQL(e.Value.Bool)
 
 	case "pinned", "is_template":
 		// Nullable boolean columns (INTEGER in SQLite)
@@ -288,21 +284,54 @@ func (b *SQLBuilder) dateToSQLMySQL(dateStr string) string {
 	}
 }
 
+// doltBlockedSubquery is the inlined SQL for finding blocked issues in Dolt.
+// This bypasses the blocked_issues view to work around a Dolt server bug where
+// views return stale field index errors after client reconnection.
+const doltBlockedSubquery = `SELECT bi.id FROM issues bi
+WHERE bi.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked')
+AND EXISTS (
+  SELECT 1 FROM dependencies d
+  WHERE d.issue_id = bi.id AND d.type = 'blocks'
+  AND EXISTS (
+    SELECT 1 FROM issues blocker
+    WHERE blocker.id = d.depends_on_id
+    AND blocker.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked')
+  )
+)`
+
 // buildBlockedSQL returns the SQL fragment for the blocked field.
-// SQLite uses the blocked_issues_cache table; Dolt uses the blocked_issues view.
+// SQLite uses the blocked_issues_cache table; Dolt inlines the view SQL directly.
 func (b *SQLBuilder) buildBlockedSQL(isBlocked bool) string {
 	if b.dialect == appbeads.DialectMySQL {
-		// Dolt: blocked_issues is a view that selects i.* (has id column)
 		if isBlocked {
-			return "i.id IN (SELECT id FROM blocked_issues)"
+			return "i.id IN (" + doltBlockedSubquery + ")"
 		}
-		return "i.id NOT IN (SELECT id FROM blocked_issues)"
+		return "i.id NOT IN (" + doltBlockedSubquery + ")"
 	}
 	// SQLite: blocked_issues_cache is a table with issue_id column
 	if isBlocked {
 		return "i.id IN (SELECT issue_id FROM blocked_issues_cache)"
 	}
 	return "i.id NOT IN (SELECT issue_id FROM blocked_issues_cache)"
+}
+
+// buildReadySQL returns the SQL fragment for the ready field.
+// SQLite uses the ready_issues view; Dolt inlines the SQL to bypass views.
+func (b *SQLBuilder) buildReadySQL(isReady bool) string {
+	if b.dialect == appbeads.DialectMySQL {
+		readySubquery := `SELECT ri.id FROM issues ri
+WHERE ri.status = 'open'
+AND ri.id NOT IN (` + doltBlockedSubquery + `)`
+		if isReady {
+			return "i.id IN (" + readySubquery + ")"
+		}
+		return "i.id NOT IN (" + readySubquery + ")"
+	}
+	// SQLite: ready_issues view works fine
+	if isReady {
+		return "i.id IN (SELECT id FROM ready_issues)"
+	}
+	return "i.id NOT IN (SELECT id FROM ready_issues)"
 }
 
 // buildOrderBy builds the ORDER BY clause.
