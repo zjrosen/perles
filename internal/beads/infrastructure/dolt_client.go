@@ -8,12 +8,27 @@ import (
 	"path/filepath"
 	"time"
 
-	appbeads "github.com/zjrosen/perles/internal/beads/application"
-	domain "github.com/zjrosen/perles/internal/beads/domain"
-	"github.com/zjrosen/perles/internal/log"
+	"github.com/go-sql-driver/mysql"
 
-	_ "github.com/go-sql-driver/mysql"
+	appbeads "github.com/zjrosen/perles/internal/beads/application"
+	"github.com/zjrosen/perles/internal/beads/domain"
+	"github.com/zjrosen/perles/internal/log"
 )
+
+// mysqlLogger routes the MySQL driver's internal log output through the
+// perles debug logger instead of writing directly to stderr.
+type mysqlLogger struct{}
+
+func (mysqlLogger) Print(v ...any) {
+	log.Debug(log.CatDB, fmt.Sprint(v...))
+}
+
+func init() {
+	// Redirect the MySQL driver's built-in logger through our debug logger
+	// to prevent connection pool messages (e.g. "closing bad idle connection: EOF")
+	// from writing to stderr and corrupting the TUI.
+	_ = mysql.SetLogger(mysqlLogger{})
+}
 
 // Compile-time check that DoltClient implements required interfaces.
 var (
