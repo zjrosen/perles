@@ -22,8 +22,6 @@ const (
 type BeadsMetadata struct {
 	Backend      string `json:"backend"`       // "sqlite" or "dolt"
 	DoltDatabase string `json:"dolt_database"` // e.g., "beads"
-	DoltMode     string `json:"dolt_mode"`     // "server" — set by bd in metadata.json
-
 	// Dolt server connection fields.
 	// Perles always uses server mode for Dolt (embedded takes an exclusive lock).
 	DoltServerHost string `json:"dolt_server_host,omitempty"` // default: 127.0.0.1
@@ -31,9 +29,10 @@ type BeadsMetadata struct {
 	DoltServerUser string `json:"dolt_server_user,omitempty"` // default: root
 }
 
-// IsDoltServer returns true if the backend is Dolt with server mode configured.
+// IsDoltServer returns true if the backend is Dolt.
+// Server mode is always used for Dolt (embedded takes an exclusive lock).
 func (m *BeadsMetadata) IsDoltServer() bool {
-	return m.Backend == "dolt" && m.DoltMode == "server"
+	return m.Backend == "dolt"
 }
 
 // GetDoltServerHost returns the server host, with env var override.

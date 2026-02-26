@@ -1,4 +1,4 @@
-// Package serverdown provides views shown when the Dolt backend is misconfigured or unreachable.
+// Package serverdown provides a view shown when the Dolt server is unreachable.
 package serverdown
 
 import (
@@ -13,25 +13,18 @@ import (
 
 // Model holds the server-down view state.
 type Model struct {
-	width      int
-	height     int
-	host       string
-	port       int
-	configured bool // true = server mode configured but unreachable; false = not configured
+	width  int
+	height int
+	host   string
+	port   int
 }
 
-// NewUnreachable creates a view for when the server is configured but not running.
+// NewUnreachable creates a view for when the Dolt server is not running.
 func NewUnreachable(host string, port int) Model {
 	return Model{
-		host:       host,
-		port:       port,
-		configured: true,
+		host: host,
+		port: port,
 	}
-}
-
-// NewNotConfigured creates a view for when dolt_mode is not set to "server".
-func NewNotConfigured() Model {
-	return Model{configured: false}
 }
 
 // Init returns the initial command.
@@ -78,36 +71,18 @@ func (m Model) View() string {
 		Foreground(styles.TextMutedColor).
 		Italic(true)
 
-	var content string
-	if m.configured {
-		content = lipgloss.JoinVertical(
-			lipgloss.Center,
-			art,
-			"\n",
-			titleStyle.Render("Oh no! Looks like there's a break in the chain!"),
-			"",
-			messageStyle.Render("Could not connect to the Dolt server. Run the following command to start the Dolt server:"),
-			"",
-			"  "+cmdStyle.Render("bd dolt start"),
-			"\n",
-			hintStyle.Render("Press q to quit"),
-		)
-	} else {
-		content = lipgloss.JoinVertical(
-			lipgloss.Center,
-			art,
-			"\n",
-			titleStyle.Render("Oh no! Looks like there's a break in the chain!"),
-			"",
-			messageStyle.Render("The Dolt backend requires server mode, but it is not configured."),
-			"",
-			messageStyle.Render("Update your .beads/metadata.json to include:"),
-			"",
-			"  "+cmdStyle.Render(`"dolt_mode": "server"`),
-			"\n",
-			hintStyle.Render("Press q to quit"),
-		)
-	}
+	content := lipgloss.JoinVertical(
+		lipgloss.Center,
+		art,
+		"\n",
+		titleStyle.Render("Oh no! Looks like there's a break in the chain!"),
+		"",
+		messageStyle.Render("Could not connect to the Dolt server. Run the following command to start the Dolt server:"),
+		"",
+		"  "+cmdStyle.Render("bd dolt start"),
+		"\n",
+		hintStyle.Render("Press q to quit"),
+	)
 
 	containerStyle := lipgloss.NewStyle().
 		Width(m.width).

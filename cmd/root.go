@@ -237,11 +237,6 @@ func runApp(cmd *cobra.Command, args []string) error {
 	cfg.ResolvedBeadsDir = paths.ResolveBeadsDir(dbPath)
 	log.Info(log.CatConfig, "resolved beads dir", "path", cfg.ResolvedBeadsDir)
 
-	// Pre-flight: if backend is Dolt, verify server mode is configured before connecting.
-	if meta, metaErr := infrabeads.LoadMetadata(cfg.ResolvedBeadsDir); metaErr == nil && meta.Backend == "dolt" && !meta.IsDoltServer() {
-		return runServerNotConfiguredMode()
-	}
-
 	client, err := infrabeads.NewClient(cfg.ResolvedBeadsDir)
 	if err != nil {
 		// If metadata says dolt+server, the failure is a connection issue, not a missing .beads dir.
@@ -351,21 +346,6 @@ func SetVersion(v string) {
 // empty state view when no .beads directory is found.
 func runNoBeadsMode() error {
 	model := nobeads.New()
-	p := tea.NewProgram(
-		&model,
-		tea.WithAltScreen(),
-	)
-
-	_, err := p.Run()
-	if err != nil {
-		return fmt.Errorf("running program: %w", err)
-	}
-	return nil
-}
-
-// runServerNotConfiguredMode launches the TUI showing that dolt_mode must be set to "server".
-func runServerNotConfiguredMode() error {
-	model := serverdown.NewNotConfigured()
 	p := tea.NewProgram(
 		&model,
 		tea.WithAltScreen(),
