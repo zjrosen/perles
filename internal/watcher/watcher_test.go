@@ -178,11 +178,11 @@ func TestDefaultConfig(t *testing.T) {
 }
 
 func TestDefaultConfig_Dolt(t *testing.T) {
-	dbPath := "/test/.beads/dolt/beads_myproject"
+	dbPath := "/test/.beads/dolt"
 	cfg := watcher.DefaultConfig(dbPath, appbeads.DialectMySQL)
 
 	require.Equal(t, dbPath, cfg.DBPath)
-	require.Equal(t, 500*time.Millisecond, cfg.DebounceDur, "Dolt debounce should be longer to coalesce rapid writes")
+	require.Equal(t, 500*time.Millisecond, cfg.DebounceDur, "Dolt debounce should be longer to coalesce rapid bd commands")
 	require.Equal(t, appbeads.DialectMySQL, cfg.Dialect)
 }
 
@@ -492,19 +492,28 @@ func TestWatcher_MultipleSubscribers(t *testing.T) {
 
 // =============================================================================
 // Dolt Dialect Tests
+//
+// In Dolt server mode, the watcher monitors the .beads/ directory for changes
+// to the "last-touched" sentinel file, which bd writes on every operation.
+// This is more reliable than watching noms files because the Dolt server's
+// data directory may reside in a different project (shared multi-database server).
+//
+// Test directory layout mirrors production:
+//   dir/           (= .beads/)
+//   dir/dolt/      (= .beads/dolt, used as dbPath)
+//   dir/last-touched
 // =============================================================================
 
-func TestDolt_WatchesManifestFile(t *testing.T) {
-	// Simulate Dolt directory structure: dbPath/.dolt/noms/manifest
+func TestDolt_WatchesLastTouchedFile(t *testing.T) {
+	// Simulate .beads/ directory with dolt subdirectory
 	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "beads_test")
-	nomsDir := filepath.Join(dbPath, ".dolt", "noms")
-	err := os.MkdirAll(nomsDir, 0755)
-	require.NoError(t, err, "failed to create noms directory")
+	dbPath := filepath.Join(dir, "dolt")
+	err := os.MkdirAll(dbPath, 0755)
+	require.NoError(t, err, "failed to create dolt directory")
 
-	manifestPath := filepath.Join(nomsDir, "manifest")
-	err = os.WriteFile(manifestPath, []byte("5:__DOLT__:abc123"), 0644)
-	require.NoError(t, err, "failed to create manifest file")
+	lastTouchedPath := filepath.Join(dir, "last-touched")
+	err = os.WriteFile(lastTouchedPath, []byte("2024-01-01"), 0644)
+	require.NoError(t, err, "failed to create last-touched file")
 
 	w, err := watcher.New(watcher.Config{
 		DBPath:      dbPath,
@@ -521,74 +530,33 @@ func TestDolt_WatchesManifestFile(t *testing.T) {
 	err = w.Start()
 	require.NoError(t, err, "failed to start watcher")
 
-	// Write to manifest should trigger notification (embedded mode)
-	err = os.WriteFile(manifestPath, []byte("5:__DOLT__:def456"), 0644)
-	require.NoError(t, err, "failed to write manifest file")
+	// Write to last-touched should trigger notification
+	err = os.WriteFile(lastTouchedPath, []byte("2024-01-02"), 0644)
+	require.NoError(t, err, "failed to write last-touched file")
 
 	select {
 	case evt := <-sub:
-		require.Equal(t, watcher.DBChanged, evt.Payload.Type, "expected DBChanged event for manifest write")
+		require.Equal(t, watcher.DBChanged, evt.Payload.Type, "expected DBChanged event for last-touched write")
 	case <-time.After(200 * time.Millisecond):
-		require.Fail(t, "expected notification for manifest file write")
-	}
-}
-
-func TestDolt_WatchesJournalFile(t *testing.T) {
-	// In server mode, Dolt appends to the journal file instead of updating manifest
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "beads_test")
-	nomsDir := filepath.Join(dbPath, ".dolt", "noms")
-	err := os.MkdirAll(nomsDir, 0755)
-	require.NoError(t, err, "failed to create noms directory")
-
-	// Create the journal file (32 'v' chars)
-	journalPath := filepath.Join(nomsDir, "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv")
-	err = os.WriteFile(journalPath, []byte("journal data"), 0644)
-	require.NoError(t, err, "failed to create journal file")
-
-	w, err := watcher.New(watcher.Config{
-		DBPath:      dbPath,
-		DebounceDur: 50 * time.Millisecond,
-		Dialect:     appbeads.DialectMySQL,
-	})
-	require.NoError(t, err, "failed to create watcher")
-	defer func() { _ = w.Stop() }()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	sub := w.Broker().Subscribe(ctx)
-
-	err = w.Start()
-	require.NoError(t, err, "failed to start watcher")
-
-	// Write to journal should trigger notification (server mode)
-	err = os.WriteFile(journalPath, []byte("journal data appended"), 0644)
-	require.NoError(t, err, "failed to write journal file")
-
-	select {
-	case evt := <-sub:
-		require.Equal(t, watcher.DBChanged, evt.Payload.Type, "expected DBChanged event for journal write")
-	case <-time.After(200 * time.Millisecond):
-		require.Fail(t, "expected notification for journal file write")
+		require.Fail(t, "expected notification for last-touched file write")
 	}
 }
 
 func TestDolt_IgnoresIrrelevantFiles(t *testing.T) {
-	// Dolt watcher should ignore non-manifest files in the noms directory
+	// Dolt watcher should ignore non-last-touched files in .beads/
 	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "beads_test")
-	nomsDir := filepath.Join(dbPath, ".dolt", "noms")
-	err := os.MkdirAll(nomsDir, 0755)
-	require.NoError(t, err, "failed to create noms directory")
+	dbPath := filepath.Join(dir, "dolt")
+	err := os.MkdirAll(dbPath, 0755)
+	require.NoError(t, err, "failed to create dolt directory")
 
-	manifestPath := filepath.Join(nomsDir, "manifest")
-	err = os.WriteFile(manifestPath, []byte("5:__DOLT__:abc123"), 0644)
-	require.NoError(t, err, "failed to create manifest file")
+	lastTouchedPath := filepath.Join(dir, "last-touched")
+	err = os.WriteFile(lastTouchedPath, []byte("2024-01-01"), 0644)
+	require.NoError(t, err, "failed to create last-touched file")
 
-	// Pre-create an irrelevant file
-	otherPath := filepath.Join(nomsDir, "journal.idx")
-	err = os.WriteFile(otherPath, []byte("idx data"), 0644)
-	require.NoError(t, err, "failed to create journal.idx file")
+	// Pre-create irrelevant files that exist in .beads/
+	serverLogPath := filepath.Join(dir, "dolt-server.log")
+	err = os.WriteFile(serverLogPath, []byte("log data"), 0644)
+	require.NoError(t, err, "failed to create server log file")
 
 	w, err := watcher.New(watcher.Config{
 		DBPath:      dbPath,
@@ -605,13 +573,13 @@ func TestDolt_IgnoresIrrelevantFiles(t *testing.T) {
 	err = w.Start()
 	require.NoError(t, err, "failed to start watcher")
 
-	// Write to journal.idx (not manifest) should NOT trigger notification
-	err = os.WriteFile(otherPath, []byte("updated idx data"), 0644)
-	require.NoError(t, err, "failed to write journal.idx file")
+	// Write to server log should NOT trigger notification
+	err = os.WriteFile(serverLogPath, []byte("more log data"), 0644)
+	require.NoError(t, err, "failed to write server log file")
 
 	select {
 	case <-sub:
-		require.Fail(t, "should not notify for non-manifest files in Dolt mode")
+		require.Fail(t, "should not notify for non-last-touched files in Dolt mode")
 	case <-time.After(100 * time.Millisecond):
 		// Expected - no notification for irrelevant file
 	}
@@ -620,17 +588,16 @@ func TestDolt_IgnoresIrrelevantFiles(t *testing.T) {
 func TestDolt_IgnoresSQLiteFiles(t *testing.T) {
 	// Dolt watcher should NOT react to beads.db files
 	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "beads_test")
-	nomsDir := filepath.Join(dbPath, ".dolt", "noms")
-	err := os.MkdirAll(nomsDir, 0755)
-	require.NoError(t, err, "failed to create noms directory")
+	dbPath := filepath.Join(dir, "dolt")
+	err := os.MkdirAll(dbPath, 0755)
+	require.NoError(t, err, "failed to create dolt directory")
 
-	manifestPath := filepath.Join(nomsDir, "manifest")
-	err = os.WriteFile(manifestPath, []byte("5:__DOLT__:abc123"), 0644)
-	require.NoError(t, err, "failed to create manifest file")
+	lastTouchedPath := filepath.Join(dir, "last-touched")
+	err = os.WriteFile(lastTouchedPath, []byte("2024-01-01"), 0644)
+	require.NoError(t, err, "failed to create last-touched file")
 
-	// Create a beads.db file in the noms dir (shouldn't match)
-	sqlitePath := filepath.Join(nomsDir, "beads.db")
+	// Create a beads.db file in the watched dir (shouldn't match for Dolt)
+	sqlitePath := filepath.Join(dir, "beads.db")
 	err = os.WriteFile(sqlitePath, []byte("sqlite"), 0644)
 	require.NoError(t, err, "failed to create beads.db file")
 
@@ -661,16 +628,15 @@ func TestDolt_IgnoresSQLiteFiles(t *testing.T) {
 	}
 }
 
-func TestDolt_DebounceManifestWrites(t *testing.T) {
+func TestDolt_DebounceLastTouchedWrites(t *testing.T) {
 	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "beads_test")
-	nomsDir := filepath.Join(dbPath, ".dolt", "noms")
-	err := os.MkdirAll(nomsDir, 0755)
-	require.NoError(t, err, "failed to create noms directory")
+	dbPath := filepath.Join(dir, "dolt")
+	err := os.MkdirAll(dbPath, 0755)
+	require.NoError(t, err, "failed to create dolt directory")
 
-	manifestPath := filepath.Join(nomsDir, "manifest")
-	err = os.WriteFile(manifestPath, []byte("5:__DOLT__:initial"), 0644)
-	require.NoError(t, err, "failed to create manifest file")
+	lastTouchedPath := filepath.Join(dir, "last-touched")
+	err = os.WriteFile(lastTouchedPath, []byte("initial"), 0644)
+	require.NoError(t, err, "failed to create last-touched file")
 
 	w, err := watcher.New(watcher.Config{
 		DBPath:      dbPath,
@@ -687,10 +653,10 @@ func TestDolt_DebounceManifestWrites(t *testing.T) {
 	err = w.Start()
 	require.NoError(t, err, "failed to start watcher")
 
-	// Rapid manifest writes should coalesce
+	// Rapid last-touched writes (simulating rapid bd commands) should coalesce
 	for i := 0; i < 10; i++ {
-		err := os.WriteFile(manifestPath, []byte(fmt.Sprintf("5:__DOLT__:hash%d", i)), 0644)
-		require.NoError(t, err, "failed to write manifest file")
+		err := os.WriteFile(lastTouchedPath, []byte(fmt.Sprintf("touch%d", i)), 0644)
+		require.NoError(t, err, "failed to write last-touched file")
 		time.Sleep(5 * time.Millisecond)
 	}
 

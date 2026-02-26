@@ -50,9 +50,8 @@ type Config struct {
 func DefaultConfig(dbPath string, dialect appbeads.SQLDialect) Config {
 	debounce := 100 * time.Millisecond
 	if dialect == appbeads.DialectMySQL {
-		// Dolt server writes trigger multiple rapid journal file updates.
-		// A longer debounce coalesces bulk operations (e.g., 5 rapid deletes)
-		// into a single refresh, avoiding queries mid-mutation.
+		// Dolt mode uses a longer debounce to coalesce rapid bd commands
+		// (e.g., bulk creates/deletes in a loop) into a single refresh.
 		debounce = 500 * time.Millisecond
 	}
 	return Config{
@@ -82,12 +81,15 @@ func New(cfg Config) (*Watcher, error) {
 }
 
 // watchDir returns the directory to watch based on the backend dialect.
-// SQLite: parent directory of the .db file (e.g. .beads/)
-// Dolt: the noms directory where manifest lives (e.g. .beads/dolt/beads_foo/.dolt/noms)
+// Both backends watch the .beads/ directory (parent of dbPath):
+//   - SQLite: dbPath is .beads/beads.db → watches .beads/ for db/wal changes
+//   - Dolt server: dbPath is .beads/dolt → watches .beads/ for last-touched changes
+//
+// For Dolt, we watch the last-touched sentinel file rather than the noms directory
+// because the Dolt SQL server's data directory may reside in a different project
+// (e.g., a shared multi-database server). bd writes last-touched on every operation,
+// making it a reliable cross-topology change signal.
 func (w *Watcher) watchDir() string {
-	if w.dialect == appbeads.DialectMySQL {
-		return filepath.Join(w.dbPath, ".dolt", "noms")
-	}
 	return filepath.Dir(w.dbPath)
 }
 
@@ -198,10 +200,10 @@ func (w *Watcher) loop() {
 }
 
 // isRelevantEvent checks if the event should trigger a refresh.
-// For SQLite, watches beads.db and beads.db-wal files.
-// For Dolt, watches the journal file and manifest in the noms directory.
-// In embedded mode, Dolt updates the manifest on each write.
-// In server mode, Dolt appends to the journal file (manifest only updates on compaction/shutdown).
+// For SQLite, watches beads.db and beads.db-wal files in .beads/.
+// For Dolt server mode, watches the last-touched sentinel file in .beads/.
+// bd writes last-touched on every write operation, providing a reliable
+// change signal regardless of where the Dolt server's data directory resides.
 func (w *Watcher) isRelevantEvent(event fsnotify.Event) bool {
 	// Only care about write or create operations
 	if event.Op&(fsnotify.Write|fsnotify.Create) == 0 {
@@ -210,10 +212,11 @@ func (w *Watcher) isRelevantEvent(event fsnotify.Event) bool {
 
 	base := filepath.Base(event.Name)
 	if w.dialect == appbeads.DialectMySQL {
-		// Dolt noms files:
-		// - "manifest" changes in embedded mode on each write
-		// - journal file (32 'v' chars) changes in server mode on each write
-		return base == "manifest" || base == "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+		// bd writes .beads/last-touched on every write operation.
+		// This is more reliable than watching noms files because the Dolt
+		// server's data directory may reside in a different project
+		// (e.g., a shared multi-database server on a different port).
+		return base == "last-touched"
 	}
 	// SQLite: database file and WAL
 	return base == "beads.db" || base == "beads.db-wal"
