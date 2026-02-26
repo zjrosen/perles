@@ -15,6 +15,7 @@ import (
 
 	beadsapp "github.com/zjrosen/perles/internal/beads/application"
 	beadsdomain "github.com/zjrosen/perles/internal/beads/domain"
+	"github.com/zjrosen/perles/internal/bql"
 	"github.com/zjrosen/perles/internal/config"
 	"github.com/zjrosen/perles/internal/flags"
 	"github.com/zjrosen/perles/internal/mocks"
@@ -81,6 +82,12 @@ func createTestModel(t *testing.T) Model {
 		Clipboard: clipboard,
 	}
 
+	// Create cache mocks that accept Flush calls during mode transitions.
+	bqlCacheMock := mocks.NewMockCacheManager[string, []beadsdomain.Issue](t)
+	bqlCacheMock.EXPECT().Flush(mock.Anything).Return(nil).Maybe()
+	depGraphCacheMock := mocks.NewMockCacheManager[string, *bql.DependencyGraph](t)
+	depGraphCacheMock.EXPECT().Flush(mock.Anything).Return(nil).Maybe()
+
 	// Create chat panel with config from services (same pattern as NewWithConfig)
 	chatPanelCfg := chatpanel.Config{
 		ClientType:     cfg.Orchestration.Client,
@@ -89,13 +96,15 @@ func createTestModel(t *testing.T) Model {
 	}
 
 	return Model{
-		currentMode: mode.ModeKanban,
-		kanban:      kanban.New(services),
-		search:      search.New(services),
-		services:    services,
-		chatPanel:   chatpanel.New(chatPanelCfg),
-		width:       100,
-		height:      40,
+		currentMode:   mode.ModeKanban,
+		kanban:        kanban.New(services),
+		search:        search.New(services),
+		services:      services,
+		bqlCache:      bqlCacheMock,
+		depGraphCache: depGraphCacheMock,
+		chatPanel:     chatpanel.New(chatPanelCfg),
+		width:         100,
+		height:        40,
 	}
 }
 

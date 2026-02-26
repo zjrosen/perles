@@ -472,6 +472,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		log.Info(log.CatMode, "Switching mode", "from", "search", "to", "kanban")
 		m.currentMode = mode.ModeKanban
 
+		// Flush caches so kanban picks up any changes made while in search mode.
+		m.flushQueryCaches("search to kanban")
+
 		// Calculate main content width based on chatpanel state and set size
 		// BEFORE RefreshFromConfig() so kanban has correct dimensions before layout recalculation
 		mainWidth := m.width
@@ -532,9 +535,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Reuse existing dashboard if initialized (preserves cached state), otherwise create new
 		if m.dashboard.IsInitialized() {
+			// Flush caches so the epic tree picks up any changes made while in kanban/search.
+			m.flushQueryCaches("kanban to dashboard")
 			m.dashboard = m.dashboard.SetSize(m.width, m.height).(dashboard.Model)
-			// Just refresh the workflow list - event subscription is still active
-			return m, m.dashboard.RefreshWorkflows()
+			// Refresh both the workflow list and the epic tree (if one is loaded).
+			var dbCmd tea.Cmd
+			m.dashboard, dbCmd = m.dashboard.HandleDBChanged()
+			return m, tea.Batch(m.dashboard.RefreshWorkflows(), dbCmd)
 		}
 
 		// First time: create dashboard model
@@ -558,6 +565,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Don't cleanup dashboard - keep event subscription alive so cache stays updated
 		m.currentMode = mode.ModeKanban
+
+		// Flush caches so kanban picks up any changes made while in dashboard mode.
+		m.flushQueryCaches("dashboard to kanban")
 
 		// Calculate main content width based on chatpanel state
 		mainWidth := m.width
