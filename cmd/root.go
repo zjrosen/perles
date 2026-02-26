@@ -241,7 +241,7 @@ func runApp(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		// If metadata says dolt+server, the failure is a connection issue, not a missing .beads dir.
 		if meta, metaErr := infrabeads.LoadMetadata(cfg.ResolvedBeadsDir); metaErr == nil && meta.IsDoltServer() {
-			return runServerDownMode(meta.GetDoltServerHost(), meta.GetDoltServerPortWithDir(cfg.ResolvedBeadsDir))
+			return serverNotStarted(meta.GetDoltServerHost(), meta.GetDoltServerPortWithDir(cfg.ResolvedBeadsDir))
 		}
 		return runNoBeadsMode()
 	}
@@ -358,8 +358,8 @@ func runNoBeadsMode() error {
 	return nil
 }
 
-// runServerDownMode launches the TUI showing the Dolt server unreachable screen.
-func runServerDownMode(host string, port int) error {
+// serverNotStarted launches the TUI showing the Dolt server unreachable screen.
+func serverNotStarted(host string, port int) error {
 	model := serverdown.NewUnreachable(host, port)
 	p := tea.NewProgram(
 		&model,
