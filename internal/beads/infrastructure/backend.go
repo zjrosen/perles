@@ -81,16 +81,6 @@ func (m *BeadsMetadata) GetDoltServerUser() string {
 	return defaultDoltServerUser
 }
 
-// DetectBackend reads .beads/metadata.json and returns the backend type.
-// Returns "sqlite" as default if the file doesn't exist (backward compatibility).
-func DetectBackend(beadsDir string) (string, error) {
-	meta, err := LoadMetadata(beadsDir)
-	if err != nil {
-		return "", err
-	}
-	return meta.Backend, nil
-}
-
 // LoadMetadata parses the .beads/metadata.json file.
 // Returns default SQLite metadata when the file doesn't exist.
 func LoadMetadata(beadsDir string) (*BeadsMetadata, error) {

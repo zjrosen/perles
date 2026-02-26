@@ -8,55 +8,46 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDetectBackend_NoMetadataJSON(t *testing.T) {
+func TestLoadMetadata_NoMetadataJSON(t *testing.T) {
 	beadsDir := t.TempDir()
 
-	backend, err := DetectBackend(beadsDir)
+	meta, err := LoadMetadata(beadsDir)
 	require.NoError(t, err)
-	require.Equal(t, "sqlite", backend)
+	require.Equal(t, "sqlite", meta.Backend)
 }
 
-func TestDetectBackend_SQLiteExplicit(t *testing.T) {
+func TestLoadMetadata_SQLiteExplicit(t *testing.T) {
 	beadsDir := t.TempDir()
 	writeMetadata(t, beadsDir, `{"backend": "sqlite"}`)
 
-	backend, err := DetectBackend(beadsDir)
+	meta, err := LoadMetadata(beadsDir)
 	require.NoError(t, err)
-	require.Equal(t, "sqlite", backend)
+	require.Equal(t, "sqlite", meta.Backend)
 }
 
-func TestDetectBackend_EmptyBackend(t *testing.T) {
+func TestLoadMetadata_EmptyBackend(t *testing.T) {
 	beadsDir := t.TempDir()
 	writeMetadata(t, beadsDir, `{}`)
 
-	backend, err := DetectBackend(beadsDir)
+	meta, err := LoadMetadata(beadsDir)
 	require.NoError(t, err)
-	require.Equal(t, "sqlite", backend)
+	require.Equal(t, "sqlite", meta.Backend)
 }
 
-func TestDetectBackend_Dolt(t *testing.T) {
-	beadsDir := t.TempDir()
-	writeMetadata(t, beadsDir, `{"backend": "dolt", "dolt_database": "beads"}`)
-
-	backend, err := DetectBackend(beadsDir)
-	require.NoError(t, err)
-	require.Equal(t, "dolt", backend)
-}
-
-func TestDetectBackend_UnsupportedBackend(t *testing.T) {
+func TestLoadMetadata_UnsupportedBackend(t *testing.T) {
 	beadsDir := t.TempDir()
 	writeMetadata(t, beadsDir, `{"backend": "postgres"}`)
 
-	_, err := DetectBackend(beadsDir)
+	_, err := LoadMetadata(beadsDir)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unsupported backend type")
 }
 
-func TestDetectBackend_InvalidJSON(t *testing.T) {
+func TestLoadMetadata_InvalidJSON(t *testing.T) {
 	beadsDir := t.TempDir()
 	writeMetadata(t, beadsDir, `not valid json`)
 
-	_, err := DetectBackend(beadsDir)
+	_, err := LoadMetadata(beadsDir)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "parsing metadata.json")
 }
