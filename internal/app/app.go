@@ -456,15 +456,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case kanban.RequestRefreshMsg:
-		// Manual "r" refresh: flush caches before re-querying so stale data isn't served.
-		if err := m.bqlCache.Flush(context.Background()); err != nil {
-			log.Warn(log.CatCache, "Failed to flush BQL cache on manual refresh", "error", err)
-		}
-		if err := m.depGraphCache.Flush(context.Background()); err != nil {
-			log.Warn(log.CatCache, "Failed to flush dep graph cache on manual refresh", "error", err)
-		}
+		m.flushQueryCaches("manual refresh")
 		var cmd tea.Cmd
 		m.kanban, cmd = m.kanban.HandleManualRefresh()
+		return m, cmd
+
+	case kanban.PostDeleteRefreshMsg:
+		m.flushQueryCaches("post-delete kanban")
+		var cmd tea.Cmd
+		m.kanban, cmd = m.kanban.HandlePostDeleteRefresh()
 		return m, cmd
 
 	case search.ExitToKanbanMsg:
@@ -570,6 +570,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.kanban, cmd = m.kanban.RefreshFromConfig()
 		return m, cmd
 
+	case search.PostDeleteRefreshMsg:
+		m.flushQueryCaches("post-delete search")
+		var cmd tea.Cmd
+		m.search, cmd = m.search.HandlePostDeleteRefresh(msg.ParentID, msg.WasTreeRoot)
+		return m, cmd
+
 	case search.SaveSearchAsColumnMsg:
 		return m.handleSaveSearchAsColumn(msg)
 
@@ -585,13 +591,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pubsub.Event[watcher.WatcherEvent]:
 		switch msg.Payload.Type {
 		case watcher.DBChanged:
-			if err := m.bqlCache.Flush(context.Background()); err != nil {
-				log.Warn(log.CatCache, "Failed to flush BQL cache on DB change", "error", err)
-			}
-			if err := m.depGraphCache.Flush(context.Background()); err != nil {
-				log.Warn(log.CatCache, "Failed to flush dep graph cache on DB change", "error", err)
-			}
-
+			m.flushQueryCaches("db change")
 			log.Debug(log.CatMode, "DB changed, refreshing active mode", "mode", m.currentMode)
 			var modeCmd tea.Cmd
 			switch m.currentMode {
@@ -828,6 +828,17 @@ func (m Model) switchMode() (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	return m, nil
+}
+
+// flushQueryCaches flushes the BQL and dependency-graph caches so that
+// subsequent queries hit the database instead of returning stale results.
+func (m Model) flushQueryCaches(reason string) {
+	if err := m.bqlCache.Flush(context.Background()); err != nil {
+		log.Warn(log.CatCache, "Failed to flush BQL cache", "reason", reason, "error", err)
+	}
+	if err := m.depGraphCache.Flush(context.Background()); err != nil {
+		log.Warn(log.CatCache, "Failed to flush dep graph cache", "reason", reason, "error", err)
+	}
 }
 
 // handleSaveSearchAsColumn processes a save-search-as-column request.

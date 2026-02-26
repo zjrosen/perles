@@ -2086,6 +2086,14 @@ type SaveTreeAsColumnMsg struct {
 // This is sent when the user presses ESC in the main search view (not in an overlay).
 type ExitToKanbanMsg struct{}
 
+// PostDeleteRefreshMsg requests the app flush BQL/dep-graph caches after an
+// issue deletion in search mode, then call back into HandlePostDeleteRefresh
+// so the search results are re-queried with fresh data.
+type PostDeleteRefreshMsg struct {
+	ParentID    string // Parent of deleted issue (for tree re-rooting)
+	WasTreeRoot bool   // True if the deleted issue was the tree root
+}
+
 // EnterMsg requests entering search mode with the given configuration.
 // This is sent by app.go when switching to search mode.
 type EnterMsg struct {
@@ -2402,6 +2410,8 @@ func (m Model) handleModalCancel() (Model, tea.Cmd) {
 }
 
 // handleIssueDeleted processes issue deletion results.
+// On success, emits PostDeleteRefreshMsg so the app can flush BQL/dep-graph
+// caches before the search results are re-queried.
 func (m Model) handleIssueDeleted(msg issueDeletedMsg) (Model, tea.Cmd) {
 	if msg.err != nil {
 		m.view = ViewSearch
@@ -2414,13 +2424,25 @@ func (m Model) handleIssueDeleted(msg issueDeletedMsg) (Model, tea.Cmd) {
 	m.view = ViewSearch
 	m.selectedIssue = nil
 
+	// Emit PostDeleteRefreshMsg so the app flushes caches before we re-query.
+	return m, func() tea.Msg {
+		return PostDeleteRefreshMsg{
+			ParentID:    msg.parentID,
+			WasTreeRoot: msg.wasTreeRoot,
+		}
+	}
+}
+
+// HandlePostDeleteRefresh re-queries search results after the app has flushed
+// BQL/dep-graph caches following an issue deletion.
+func (m Model) HandlePostDeleteRefresh(parentID string, wasTreeRoot bool) (Model, tea.Cmd) {
 	// Tree sub-mode: refresh tree or exit to kanban
 	if m.subMode == mode.SubModeTree {
-		if msg.wasTreeRoot {
-			if msg.parentID != "" {
+		if wasTreeRoot {
+			if parentID != "" {
 				// Re-root tree to parent
 				return m, tea.Batch(
-					m.loadTree(msg.parentID),
+					m.loadTree(parentID),
 					func() tea.Msg { return mode.ShowToastMsg{Message: "Issue deleted", Style: toaster.StyleSuccess} },
 				)
 			}
@@ -2437,7 +2459,7 @@ func (m Model) handleIssueDeleted(msg issueDeletedMsg) (Model, tea.Cmd) {
 		)
 	}
 
-	// List sub-mode: existing behavior
+	// List sub-mode: re-execute search
 	return m, tea.Batch(
 		m.executeSearch(),
 		func() tea.Msg { return mode.ShowToastMsg{Message: "Issue deleted", Style: toaster.StyleSuccess} },
