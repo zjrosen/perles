@@ -455,6 +455,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return search.EnterMsg{SubMode: msg.SubMode, Query: msg.Query, IssueID: msg.IssueID}
 		}
 
+	case kanban.RequestRefreshMsg:
+		// Manual "r" refresh: flush caches before re-querying so stale data isn't served.
+		if err := m.bqlCache.Flush(context.Background()); err != nil {
+			log.Warn(log.CatCache, "Failed to flush BQL cache on manual refresh", "error", err)
+		}
+		if err := m.depGraphCache.Flush(context.Background()); err != nil {
+			log.Warn(log.CatCache, "Failed to flush dep graph cache on manual refresh", "error", err)
+		}
+		var cmd tea.Cmd
+		m.kanban, cmd = m.kanban.HandleManualRefresh()
+		return m, cmd
+
 	case search.ExitToKanbanMsg:
 		// Switch back to kanban mode from search
 		log.Info(log.CatMode, "Switching mode", "from", "search", "to", "kanban")

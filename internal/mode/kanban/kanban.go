@@ -732,6 +732,11 @@ type SwitchToSearchMsg struct {
 // SwitchToDashboardMsg requests switching to the multi-workflow dashboard mode.
 type SwitchToDashboardMsg struct{}
 
+// RequestRefreshMsg requests the app flush caches and reload the kanban board.
+// Emitted by the "r" key handler so the app can flush BQL/dep-graph caches
+// (which the kanban model does not own) before re-querying.
+type RequestRefreshMsg struct{}
+
 // OpenEditMenuMsg requests opening the issue editor modal.
 type OpenEditMenuMsg struct {
 	Issue beads.Issue

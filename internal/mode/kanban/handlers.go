@@ -71,14 +71,9 @@ func (m Model) handleBoardKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, keys.Kanban.Refresh):
-		// Save cursor before refresh to restore position after
-		m.pendingCursor = m.saveCursor()
-		m.startReloadCycle()
-		m.manualRefreshed = true
-		m.autoRefreshed = false
-		// Invalidate other views so they reload when switched to
-		m.board = m.board.InvalidateViews()
-		return m, m.board.LoadAllColumns()
+		// Emit RequestRefreshMsg so the app can flush BQL/dep-graph caches
+		// before we re-query. Without this, stale cached data is returned.
+		return m, func() tea.Msg { return RequestRefreshMsg{} }
 
 	case key.Matches(msg, keys.Kanban.Yank):
 		// Yank (copy) selected issue ID to clipboard
@@ -573,6 +568,17 @@ func (m Model) HandleDBChanged() (Model, tea.Cmd) {
 	if m.board.ViewCount() > 0 {
 		return m, m.board.LoadCurrentViewCmd()
 	}
+	return m, m.board.LoadAllColumns()
+}
+
+// HandleManualRefresh processes a manual refresh request (from the "r" key).
+// Called by app.go after flushing BQL/dep-graph caches to ensure fresh data.
+func (m Model) HandleManualRefresh() (Model, tea.Cmd) {
+	m.pendingCursor = m.saveCursor()
+	m.startReloadCycle()
+	m.manualRefreshed = true
+	m.autoRefreshed = false
+	m.board = m.board.InvalidateViews()
 	return m, m.board.LoadAllColumns()
 }
 
