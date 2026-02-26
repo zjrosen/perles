@@ -40,13 +40,13 @@ var (
 // DoltClient provides read access to the beads Dolt database.
 type DoltClient struct {
 	db      *sql.DB
-	doltDir string // Path to .beads/dolt/{database} directory
+	doltDir string // Path to .beads/dolt/ directory
 }
 
 // NewDoltServerClient creates a client connected to a running dolt sql-server via MySQL protocol.
 // This allows concurrent access from multiple processes (Perles + bd).
 func NewDoltServerClient(beadsDir, databaseName, host string, port int, user string) (*DoltClient, error) {
-	doltDir := filepath.Join(beadsDir, "dolt", databaseName)
+	doltDir := filepath.Join(beadsDir, "dolt")
 	addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
 
 	log.Debug(log.CatDB, "Connecting to Dolt server", "addr", addr, "database", databaseName)
