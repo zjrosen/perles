@@ -78,6 +78,14 @@ cd your-project
 perles
 ```
 
+> **DOLT WARNING** Since beads version v0.50.1 SQLite is no longer supported in beads. Dolt is now the only backed for beads and recent beads versions
+> are only using Dolt server mode, embedded mode has been deprecated in beads and will not work with perles. 
+> 
+> There is experimental support for Dolt in perles after v0.56.1 but there are still open issues
+> in beads so changes will still be made in perles for Dolt support as beads fixes are made. 
+> If you plan on using Dolt you will have to be running the latest version of beads built from 
+> the beads source until a new release is made in beads.
+
 ### CLI Flags
 
 | Flag | Short | Description |
