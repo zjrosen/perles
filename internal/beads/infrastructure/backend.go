@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	appbeads "github.com/zjrosen/perles/internal/beads/application"
 	"github.com/zjrosen/perles/internal/log"
@@ -46,8 +47,10 @@ func (m *BeadsMetadata) GetDoltServerHost() string {
 	return defaultDoltServerHost
 }
 
-// GetDoltServerPort returns the server port, with env var override.
-func (m *BeadsMetadata) GetDoltServerPort() int {
+// GetDoltServerPortWithDir returns the server port, discovering it from the
+// dolt-server.port file that bd writes when starting the Dolt SQL server.
+// Resolution order: env var → metadata.json → .beads/dolt-server.port → default.
+func (m *BeadsMetadata) GetDoltServerPortWithDir(beadsDir string) int {
 	if p := os.Getenv("BEADS_DOLT_SERVER_PORT"); p != "" {
 		if port, err := strconv.Atoi(p); err == nil && port > 0 {
 			return port
@@ -55,6 +58,15 @@ func (m *BeadsMetadata) GetDoltServerPort() int {
 	}
 	if m.DoltServerPort > 0 {
 		return m.DoltServerPort
+	}
+	// bd writes the actual server port to .beads/dolt-server.port at startup.
+	// This is the most reliable source when metadata.json doesn't specify a port.
+	portFile := filepath.Join(beadsDir, "dolt-server.port")
+	if data, err := os.ReadFile(portFile); err == nil { //nolint:gosec // within .beads dir
+		if port, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil && port > 0 {
+			log.Debug(log.CatDB, "Discovered Dolt server port from dolt-server.port", "port", port)
+			return port
+		}
 	}
 	return defaultDoltServerPort
 }
@@ -126,19 +138,17 @@ func NewClient(beadsDir string) (appbeads.DBClient, error) {
 
 	switch meta.Backend {
 	case "dolt":
-		// Dolt always uses server mode (MySQL protocol) in Perles.
-		// The embedded Dolt driver takes an exclusive lock that blocks all
-		// other processes (including bd) for the entire Perles session.
+		port := meta.GetDoltServerPortWithDir(beadsDir)
 		log.Info(log.CatDB, "Connecting to Dolt server",
 			"host", meta.GetDoltServerHost(),
-			"port", meta.GetDoltServerPort(),
+			"port", port,
 			"user", meta.GetDoltServerUser(),
 			"database", meta.DoltDatabase)
 		return NewDoltServerClient(
 			beadsDir,
 			meta.DoltDatabase,
 			meta.GetDoltServerHost(),
-			meta.GetDoltServerPort(),
+			port,
 			meta.GetDoltServerUser(),
 		)
 	default:

@@ -246,7 +246,7 @@ func runApp(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		// If metadata says dolt+server, the failure is a connection issue, not a missing .beads dir.
 		if meta, metaErr := infrabeads.LoadMetadata(cfg.ResolvedBeadsDir); metaErr == nil && meta.IsDoltServer() {
-			return runServerDownMode(meta.GetDoltServerHost(), meta.GetDoltServerPort())
+			return runServerDownMode(meta.GetDoltServerHost(), meta.GetDoltServerPortWithDir(cfg.ResolvedBeadsDir))
 		}
 		return runNoBeadsMode()
 	}
