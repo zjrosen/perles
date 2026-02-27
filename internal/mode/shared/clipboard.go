@@ -5,8 +5,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
-	"os/exec"
-	"runtime"
+
+	"github.com/atotto/clipboard"
 )
 
 // Clipboard defines the interface for clipboard operations.
@@ -22,9 +22,10 @@ type SystemClipboard struct{}
 
 // Copy copies text to the system clipboard.
 // Priority:
-// 1. Local tmux session → use native tools (pbcopy/xclip) directly
+// 1. Local tmux session → use native clipboard tools directly
 // 2. Remote SSH session → use OSC 52 escape sequences
 // 3. GNU screen → use OSC 52 escape sequences
+// 4. Bare local terminal → use native clipboard tools directly
 func (SystemClipboard) Copy(text string) error {
 	if isLocalTmux() {
 		return copyViaNative(text)
@@ -87,34 +88,9 @@ func copyViaOSC52(text string) (err error) {
 	return err
 }
 
-// copyViaNative copies text using native clipboard tools.
 func copyViaNative(text string) error {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("pbcopy")
-	case "linux":
-		cmd = exec.Command("xclip", "-selection", "clipboard")
-	default:
-		cmd = exec.Command("xclip", "-selection", "clipboard")
+	if err := clipboard.WriteAll(text); err != nil {
+		return fmt.Errorf("native clipboard copy: %w", err)
 	}
-
-	pipe, err := cmd.StdinPipe()
-	if err != nil {
-		return err
-	}
-
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-
-	if _, err := pipe.Write([]byte(text)); err != nil {
-		return err
-	}
-
-	if err := pipe.Close(); err != nil {
-		return err
-	}
-
-	return cmd.Wait()
+	return nil
 }
