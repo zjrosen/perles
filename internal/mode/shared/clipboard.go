@@ -55,22 +55,22 @@ func isGNUScreen() bool {
 	return os.Getenv("STY") != ""
 }
 
-// copyViaOSC52 copies text using OSC 52 escape sequences.
-// When inside tmux, it wraps the sequence in a DCS passthrough.
-func copyViaOSC52(text string) (err error) {
+// buildOSC52Sequence builds an OSC 52 clipboard escape sequence for the given
+// text. When inTmux is true, wraps the sequence in a DCS passthrough.
+func buildOSC52Sequence(text string, inTmux bool) string {
 	encoded := base64.StdEncoding.EncodeToString([]byte(text))
 
-	var seq string
-	if os.Getenv("TMUX") != "" {
-		// tmux passthrough: wrap OSC 52 in DCS sequence
-		// \x1bP starts DCS, tmux; identifies passthrough
-		// Inner \x1b is doubled to \x1b\x1b
-		// \x1b\\ ends DCS
-		seq = fmt.Sprintf("\x1bPtmux;\x1b\x1b]52;c;%s\x07\x1b\\", encoded)
-	} else {
-		// Direct OSC 52
-		seq = fmt.Sprintf("\x1b]52;c;%s\x07", encoded)
+	if inTmux {
+		return fmt.Sprintf("\x1bPtmux;\x1b\x1b]52;c;%s\x07\x1b\\", encoded)
 	}
+
+	return fmt.Sprintf("\x1b]52;c;%s\x07", encoded)
+}
+
+// copyViaOSC52 copies text using OSC 52 escape sequences.
+// This path uses /dev/tty and is Unix-only.
+func copyViaOSC52(text string) (err error) {
+	seq := buildOSC52Sequence(text, os.Getenv("TMUX") != "")
 
 	// Write to /dev/tty to bypass any stdout redirection
 	// and work correctly with Bubble Tea's alt-screen mode

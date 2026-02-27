@@ -1,23 +1,21 @@
 package shared
 
 import (
-	"encoding/base64"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestClipboardDetection(t *testing.T) {
-	// Helper to clear all relevant env vars
-	clearEnv := func() {
-		os.Unsetenv("SSH_TTY")
-		os.Unsetenv("SSH_CLIENT")
-		os.Unsetenv("SSH_CONNECTION")
-		os.Unsetenv("TMUX")
-		os.Unsetenv("STY")
-	}
+func clearClipboardEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("SSH_TTY", "")
+	t.Setenv("SSH_CLIENT", "")
+	t.Setenv("SSH_CONNECTION", "")
+	t.Setenv("TMUX", "")
+	t.Setenv("STY", "")
+}
 
+func TestClipboardDetection(t *testing.T) {
 	t.Run("isRemoteSession", func(t *testing.T) {
 		tests := []struct {
 			name     string
@@ -48,11 +46,10 @@ func TestClipboardDetection(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				clearEnv()
+				clearClipboardEnv(t)
 				for k, v := range tt.envVars {
-					os.Setenv(k, v)
+					t.Setenv(k, v)
 				}
-				t.Cleanup(clearEnv)
 
 				require.Equal(t, tt.expected, isRemoteSession())
 			})
@@ -84,11 +81,10 @@ func TestClipboardDetection(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				clearEnv()
+				clearClipboardEnv(t)
 				for k, v := range tt.envVars {
-					os.Setenv(k, v)
+					t.Setenv(k, v)
 				}
-				t.Cleanup(clearEnv)
 
 				require.Equal(t, tt.expected, isLocalTmux())
 			})
@@ -115,11 +111,10 @@ func TestClipboardDetection(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				clearEnv()
+				clearClipboardEnv(t)
 				for k, v := range tt.envVars {
-					os.Setenv(k, v)
+					t.Setenv(k, v)
 				}
-				t.Cleanup(clearEnv)
 
 				require.Equal(t, tt.expected, isGNUScreen())
 			})
@@ -127,56 +122,45 @@ func TestClipboardDetection(t *testing.T) {
 	})
 }
 
-func TestOSC52SequenceFormat(t *testing.T) {
-	// Test that base64 encoding is correct
-	text := "ISSUE-123"
-	encoded := base64.StdEncoding.EncodeToString([]byte(text))
-	require.Equal(t, "SVNTVUUtMTIz", encoded)
+func TestBuildOSC52Sequence(t *testing.T) {
+	t.Run("direct sequence", func(t *testing.T) {
+		seq := buildOSC52Sequence("ISSUE-123", false)
+		require.Equal(t, "\x1b]52;c;SVNTVUUtMTIz\x07", seq)
+	})
 
-	// Verify the expected OSC 52 sequence format
-	expectedDirect := "\x1b]52;c;SVNTVUUtMTIz\x07"
-	directSeq := "\x1b]52;c;" + encoded + "\x07"
-	require.Equal(t, expectedDirect, directSeq)
+	t.Run("tmux passthrough sequence", func(t *testing.T) {
+		seq := buildOSC52Sequence("ISSUE-123", true)
+		require.Equal(t, "\x1bPtmux;\x1b\x1b]52;c;SVNTVUUtMTIz\x07\x1b\\", seq)
+	})
 
-	// Verify the expected tmux passthrough format
-	expectedTmux := "\x1bPtmux;\x1b\x1b]52;c;SVNTVUUtMTIz\x07\x1b\\"
-	tmuxSeq := "\x1bPtmux;\x1b\x1b]52;c;" + encoded + "\x07\x1b\\"
-	require.Equal(t, expectedTmux, tmuxSeq)
-}
+	t.Run("special characters", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			text     string
+			expected string
+		}{
+			{
+				name:     "with spaces",
+				text:     "hello world",
+				expected: "\x1b]52;c;aGVsbG8gd29ybGQ=\x07",
+			},
+			{
+				name:     "with newlines",
+				text:     "line1\nline2",
+				expected: "\x1b]52;c;bGluZTEKbGluZTI=\x07",
+			},
+			{
+				name:     "unicode",
+				text:     "hello 世界",
+				expected: "\x1b]52;c;aGVsbG8g5LiW55WM\x07",
+			},
+		}
 
-func TestOSC52SequenceWithSpecialChars(t *testing.T) {
-	// Test that special characters are properly base64 encoded
-	tests := []struct {
-		name    string
-		text    string
-		encoded string
-	}{
-		{
-			name:    "simple text",
-			text:    "hello",
-			encoded: "aGVsbG8=",
-		},
-		{
-			name:    "with spaces",
-			text:    "hello world",
-			encoded: "aGVsbG8gd29ybGQ=",
-		},
-		{
-			name:    "with newlines",
-			text:    "line1\nline2",
-			encoded: "bGluZTEKbGluZTI=",
-		},
-		{
-			name:    "unicode",
-			text:    "hello 世界",
-			encoded: "aGVsbG8g5LiW55WM",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			encoded := base64.StdEncoding.EncodeToString([]byte(tt.text))
-			require.Equal(t, tt.encoded, encoded)
-		})
-	}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				seq := buildOSC52Sequence(tt.text, false)
+				require.Equal(t, tt.expected, seq)
+			})
+		}
+	})
 }
