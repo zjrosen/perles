@@ -334,9 +334,7 @@ func (m Model) renderView() string {
 		if stackCoordinator {
 			tableView := m.renderBorderedWorkflowTable(m.width, tableHeight)
 			panelHeight := contentHeight - tableHeight - epicSectionHeight
-			if panelHeight < 8 {
-				panelHeight = 8
-			}
+			panelHeight = max(8, panelHeight)
 			m.coordinatorPanel.SetSize(m.width, panelHeight)
 			m.coordinatorPanel.SetScreenXOffset(0)
 			m.coordinatorPanel.SetScreenYOffset(headerHeight + tableHeight + epicSectionHeight)

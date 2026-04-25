@@ -367,7 +367,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		// Forward to issueeditor modal if open - this allows Ctrl+G external editor
 		// to work from the modal's description field. Without this check, the message
 		// would be intercepted here and lost.
-		if m.view == ViewEditIssue {
+		if m.view == ViewEditIssue || m.view == ViewNewIssue {
 			var cmd tea.Cmd
 			m.issueEditor, cmd = m.issueEditor.Update(msg)
 			return m, cmd
@@ -377,12 +377,18 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case editor.FinishedMsg:
 		// Forward to issueeditor modal if open - ensures editor results return
 		// to the modal's description field when editing via Ctrl+G.
-		if m.view == ViewEditIssue {
+		if m.view == ViewEditIssue || m.view == ViewNewIssue {
 			var cmd tea.Cmd
 			m.issueEditor, cmd = m.issueEditor.Update(msg)
 			return m, cmd
 		}
 		return m, nil
+	}
+
+	if m.view == ViewEditIssue || m.view == ViewNewIssue {
+		var cmd tea.Cmd
+		m.issueEditor, cmd = m.issueEditor.Update(msg)
+		return m, cmd
 	}
 
 	return m, nil

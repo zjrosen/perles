@@ -1,30 +1,30 @@
 ╭────────────────────────────╮  ╭─ commandpalette ─────────────────────────────────────────────────╮
-│ Components                 │  │                                                                  │
-│ ────────────────────────── │  │╭─────────────────────────────────────────────────────────────────│
-│   vimtextarea              │  │───────────────╮                                                  │
-│   modal                    │  │ │ Demo Commands                                                  │
-│   formmodal                │  │↑/↓ • Enter • Esc │                                               │
-│   panes                    │  │                                                                  │
-│   scrollpane               │  ││─────────────────────────────────────────────────────────────────│
-│   colorpicker              │  │───────────────│                                                  │
-│   picker                   │  │ │ > Search commands...                                           │
-│ ● commandpalette           │  ││                                                                 │
-│   toaster                  │  │                                                                  │
-│   logoverlay               │  ││─────────────────────────────────────────────────────────────────│
-│   markdown                 │  │───────────────│                                                  │
-│   chainart                 │  │ │>Create Issue                                                   │
-│   issuebadge               │  ││                                                                 │
-│   issueeditor              │  │ │  Open a new issue in the tracker                               │
-│   tabpane                  │  ││                                                                 │
-│   table                    │  │ │                                                                │
-│   Theme Tokens             │  ││                                                                 │
-│                            │  │ │ Search Files                                                   │
-│                            │  ││                                                                 │
-│                            │  │ │  Find files by name or content                                 │
-│                            │  ││                                                                 │
-│                            │  │ │                                                                │
-│                            │  ││                                                                 │
-│                            │  │ │ Run Tests                                                      │
-│                            │  ││                                                                 │
+│ Components                 │  │ ╭──────────────────────────────────────────────────────────╮     │
+│ ────────────────────────── │  │ │ Demo Commands                          ↑/↓ • Enter • Esc │     │
+│   vimtextarea              │  │ │──────────────────────────────────────────────────────────│     │
+│   modal                    │  │ │ > Search commands...                                     │     │
+│   formmodal                │  │ │──────────────────────────────────────────────────────────│     │
+│   panes                    │  │ │>Create Issue                                             │     │
+│   scrollpane               │  │ │  Open a new issue in the tracker                         │     │
+│   colorpicker              │  │ │                                                          │     │
+│   picker                   │  │ │ Search Files                                             │     │
+│ ● commandpalette           │  │ │  Find files by name or content                           │     │
+│   toaster                  │  │ │                                                          │     │
+│   logoverlay               │  │ │ Run Tests                                                │     │
+│   markdown                 │  │ │  Execute the test suite                                  │     │
+│   chainart                 │  │ │                                                          │     │
+│   issuebadge               │  │ │ Build Project                                            │     │
+│   issueeditor              │  │ │  Compile the project                                     │     │
+│   tabpane                  │  │ │                                                          │     │
+│   table                    │  │ │ Deploy                                                   │     │
+│   Theme Tokens             │  │ │  Deploy to staging environment                           │     │
+│                            │  │ │                          ↓ more                          │     │
+│                            │  │ ╰──────────────────────────────────────────────────────────╯     │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
+│                            │  │                                                                  │
 ╰────────────────────────────╯  ╰──────────────────────────────────────────────────────────────────╯
 Ctrl+C: Quit                                                                                        

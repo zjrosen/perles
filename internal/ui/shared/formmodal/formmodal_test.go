@@ -32,6 +32,24 @@ func getValues(m Model) map[string]any {
 	return values
 }
 
+func collectCommandMessages(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	msg := cmd()
+	if msg == nil {
+		return nil
+	}
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		var results []tea.Msg
+		for _, c := range batch {
+			results = append(results, collectCommandMessages(c)...)
+		}
+		return results
+	}
+	return []tea.Msg{msg}
+}
+
 // --- Focus Cycling Tests ---
 
 func TestFocusCycling_Forward(t *testing.T) {
@@ -4608,6 +4626,89 @@ func (m *mockBQLExecutor) Execute(query string) ([]task.Issue, error) {
 		return m.executeFunc(query)
 	}
 	return nil, nil
+}
+
+func TestEpicSearchField_InitExecutesInitialQueryWhenAutoExpanded(t *testing.T) {
+	var queries []string
+	mock := &mockBQLExecutor{
+		executeFunc: func(query string) ([]task.Issue, error) {
+			queries = append(queries, query)
+			return []task.Issue{{ID: "epic-1", TitleText: "First Epic"}}, nil
+		},
+	}
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:                "epic",
+				Type:               FieldTypeEpicSearch,
+				Label:              "Epic",
+				EpicSearchExecutor: mock,
+				DebounceMs:         1,
+			},
+		},
+	}
+	m := New(cfg)
+	require.True(t, m.fields[0].epicSearchExpanded, "precondition: first epic search field should auto-expand")
+
+	for _, msg := range collectCommandMessages(m.Init()) {
+		var cmd tea.Cmd
+		m, cmd = m.Update(msg)
+		for _, result := range collectCommandMessages(cmd) {
+			m, _ = m.Update(result)
+		}
+	}
+
+	require.Equal(t, []string{"type = epic and status != closed order by updated desc"}, queries)
+	require.True(t, m.fields[0].epicHasLoaded)
+	require.Len(t, m.fields[0].listItems, 1)
+	require.Equal(t, "epic-1", m.fields[0].listItems[0].value)
+}
+
+func TestEpicSearchField_FocusAutoExpandExecutesInitialQuery(t *testing.T) {
+	var queries []string
+	mock := &mockBQLExecutor{
+		executeFunc: func(query string) ([]task.Issue, error) {
+			queries = append(queries, query)
+			return []task.Issue{{ID: "epic-1", TitleText: "First Epic"}}, nil
+		},
+	}
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:   "title",
+				Type:  FieldTypeText,
+				Label: "Title",
+			},
+			{
+				Key:                "parent_id",
+				Type:               FieldTypeEpicSearch,
+				Label:              "Parent Epic",
+				EpicSearchExecutor: mock,
+				DebounceMs:         1,
+			},
+		},
+	}
+	m := New(cfg)
+	require.Equal(t, 0, m.focusedIndex, "precondition: title field should be focused")
+
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	require.Equal(t, 1, m.focusedIndex, "should move focus to parent epic field")
+	require.True(t, m.fields[1].epicSearchExpanded, "parent epic field should auto-expand")
+
+	for _, msg := range collectCommandMessages(cmd) {
+		var nextCmd tea.Cmd
+		m, nextCmd = m.Update(msg)
+		for _, result := range collectCommandMessages(nextCmd) {
+			m, _ = m.Update(result)
+		}
+	}
+
+	require.Equal(t, []string{"type = epic and status != closed order by updated desc"}, queries)
+	require.True(t, m.fields[1].epicHasLoaded)
+	require.Len(t, m.fields[1].listItems, 1)
+	require.Equal(t, "epic-1", m.fields[1].listItems[0].value)
 }
 
 // --- EpicSearch Field Tests ---

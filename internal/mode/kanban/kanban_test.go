@@ -48,6 +48,33 @@ func createTestModel(t *testing.T) Model {
 	}
 }
 
+func collectCommandMessages(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	msg := cmd()
+	if msg == nil {
+		return nil
+	}
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		var results []tea.Msg
+		for _, c := range batch {
+			results = append(results, collectCommandMessages(c)...)
+		}
+		return results
+	}
+	return []tea.Msg{msg}
+}
+
+func runCommandMessagesThroughKanban(m Model, cmd tea.Cmd) Model {
+	for _, msg := range collectCommandMessages(cmd) {
+		var next tea.Cmd
+		m, next = m.Update(msg)
+		m = runCommandMessagesThroughKanban(m, next)
+	}
+	return m
+}
+
 func TestCreateDeleteModal_RegularIssue(t *testing.T) {
 	mockExecutor := mocks.NewMockQueryExecutor(t)
 	// No expectations needed - Execute won't be called for non-epic
@@ -334,6 +361,27 @@ func TestKanban_NewIssueKey_OpensCreateEditor(t *testing.T) {
 	require.True(t, m.creatingIssue)
 	require.Nil(t, m.editingIssue)
 	require.Nil(t, cmd)
+}
+
+func TestKanban_NewIssueParentEpicSearchRoutesAsyncMessages(t *testing.T) {
+	m := createTestModel(t)
+	mockExecutor := m.services.QueryExecutor.(*mocks.MockQueryExecutor)
+	mockExecutor.EXPECT().
+		Execute("type = epic and status != closed order by updated desc").
+		Return([]task.Issue{{ID: "epic-1", TitleText: "First Epic"}}, nil)
+
+	var cmd tea.Cmd
+	m, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m = runCommandMessagesThroughKanban(m, cmd)
+	require.Equal(t, ViewNewIssue, m.view)
+
+	for range 3 {
+		m, cmd = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+		m = runCommandMessagesThroughKanban(m, cmd)
+	}
+
+	require.Contains(t, m.issueEditor.View(), "epic-1:")
+	require.Contains(t, m.issueEditor.View(), "First Epic")
 }
 
 func TestKanban_CreateIssueCmd_TaskWithCustomType_UpdatesTypeAndFields(t *testing.T) {

@@ -378,7 +378,7 @@ func (m Model) SetSize(width, height int) Model {
 
 // Init initializes the model.
 func (m Model) Init() tea.Cmd {
-	return nil
+	return m.form.Init()
 }
 
 // Update handles messages.

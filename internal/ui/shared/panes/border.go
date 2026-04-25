@@ -470,7 +470,6 @@ func buildDualTitleTopBorderWithAction(
 	middleDashes := innerWidth - leftSegmentWidth - rightSegmentWidth
 	if middleDashes < 1 {
 		displayLeft = ""
-		leftSegmentWidth = 0
 		middleDashes = innerWidth - rightSegmentWidth
 	}
 	if middleDashes < 1 {
@@ -789,9 +788,7 @@ func buildTabTitleTopBorderWithAction(
 	}
 
 	middleDashes := innerWidth - renderedContentWidth - rightSegmentWidth
-	if middleDashes < 1 {
-		middleDashes = 1
-	}
+	middleDashes = max(1, middleDashes)
 
 	result.WriteString(borderStyle.Render(strings.Repeat(borderHorizontal, middleDashes)))
 	result.WriteString(borderStyle.Render(" "))

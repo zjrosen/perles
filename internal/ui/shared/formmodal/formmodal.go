@@ -154,6 +154,10 @@ func (m Model) Init() tea.Cmd {
 			if fs.searchExpanded {
 				return textinput.Blink
 			}
+		case FieldTypeEpicSearch:
+			if fs.epicSearchExpanded {
+				return m.blinkCmd()
+			}
 		}
 	}
 	return nil
@@ -829,8 +833,7 @@ func (m Model) blinkCmd() tea.Cmd {
 		case FieldTypeEpicSearch:
 			if fs.epicSearchExpanded {
 				// If expanded with no results yet, trigger initial query
-				if len(fs.listItems) == 0 && fs.epicSearchError == nil {
-					fs.epicQueryID++
+				if len(fs.listItems) == 0 && fs.epicSearchError == nil && !fs.epicHasLoaded {
 					debounceMs := fs.config.DebounceMs
 					if debounceMs <= 0 {
 						debounceMs = 200
@@ -1637,6 +1640,13 @@ func (m *Model) focusField(index int) {
 	case FieldTypeSearchSelect:
 		// Don't auto-expand, just focus
 		if fs.searchExpanded {
+			fs.searchInput.Focus()
+		}
+	case FieldTypeEpicSearch:
+		if fs.epicSelectedID == "" {
+			fs.epicSearchExpanded = true
+			fs.searchInput.Focus()
+		} else if fs.epicSearchExpanded {
 			fs.searchInput.Focus()
 		}
 	case FieldTypeEditableList:
