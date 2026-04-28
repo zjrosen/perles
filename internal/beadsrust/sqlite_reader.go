@@ -13,7 +13,6 @@ import (
 	"github.com/zjrosen/perles/internal/task"
 
 	_ "github.com/ncruces/go-sqlite3/driver"
-	_ "github.com/ncruces/go-sqlite3/embed"
 )
 
 // issueColumns is the SELECT column list for queries against the issues table.

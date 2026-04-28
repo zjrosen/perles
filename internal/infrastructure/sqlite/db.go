@@ -15,7 +15,6 @@ import (
 	"github.com/zjrosen/perles/internal/sessions/domain"
 
 	_ "github.com/ncruces/go-sqlite3/driver"
-	_ "github.com/ncruces/go-sqlite3/embed"
 )
 
 // DB manages the SQLite database connection for Perles.

@@ -11,7 +11,6 @@ import (
 	"github.com/zjrosen/perles/internal/log"
 
 	_ "github.com/ncruces/go-sqlite3/driver"
-	_ "github.com/ncruces/go-sqlite3/embed"
 )
 
 // Compile-time check that SQLiteClient implements required interfaces.
