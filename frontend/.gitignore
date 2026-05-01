@@ -1,6 +1,6 @@
 # Dependencies
 node_modules/
-package-lock.json
+# package-lock.json is committed to ensure reproducible builds
 
 # Build output - NOT ignored because we commit pre-built assets
 # dist/

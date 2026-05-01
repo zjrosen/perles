@@ -20,7 +20,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: "lts/*"
+          node-version-file: ".nvmrc"
 
       - name: Build frontend
         run: npm install && npm run build
