@@ -4,6 +4,7 @@ package chatrender
 
 import (
 	"container/list"
+	"slices"
 	"sync"
 
 	"github.com/charmbracelet/lipgloss"
@@ -689,7 +690,7 @@ const (
 // when a new tool call is appended (making the previous one no longer the last in sequence).
 func (vc *ChatVirtualContent) updatePreviousToolCallPrefix() {
 	// Search backwards for the previous tool call line
-	for i := len(vc.lines) - 1; i >= 0; i-- {
+	for i := range slices.Backward(vc.lines) {
 		if vc.lines[i].LineType == LineTypeToolCall {
 			// Update prefix from ╰╴ to ├╴
 			if len(vc.lines[i].PlainText) >= toolPrefixByteLen && vc.lines[i].PlainText[:toolPrefixByteLen] == toolPrefixLast {

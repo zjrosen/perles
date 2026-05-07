@@ -2,6 +2,7 @@ package tree
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	zone "github.com/lrstanley/bubblezone"
@@ -480,7 +481,7 @@ func (m *Model) buildPrefix(node *TreeNode, isLast bool) string {
 
 	// Walk up the parent chain to build the prefix
 	ancestors := m.getAncestors(node)
-	for i := len(ancestors) - 1; i >= 0; i-- {
+	for i := range slices.Backward(ancestors) {
 		ancestor := ancestors[i]
 		if ancestor.Parent != nil {
 			ancestorIsLast := m.isLastChild(ancestor)

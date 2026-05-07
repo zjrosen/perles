@@ -2,6 +2,7 @@ package formmodal
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -691,7 +692,7 @@ func (m Model) firstVisibleFieldIndex() int {
 
 // lastVisibleFieldIndex returns the index of the last visible field, or -1 if none.
 func (m Model) lastVisibleFieldIndex() int {
-	for i := len(m.fields) - 1; i >= 0; i-- {
+	for i := range slices.Backward(m.fields) {
 		if m.isFieldVisible(i) {
 			return i
 		}

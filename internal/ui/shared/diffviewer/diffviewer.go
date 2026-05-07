@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -2586,7 +2587,7 @@ func (m Model) navigateToPrevHunk() (Model, tea.Cmd) {
 	}
 
 	// Find the previous hunk position before current offset
-	for i := len(hunkPositions) - 1; i >= 0; i-- {
+	for i := range slices.Backward(hunkPositions) {
 		if hunkPositions[i] < currentOffset {
 			(&m).setDiffYOffset(hunkPositions[i])
 			return m, nil

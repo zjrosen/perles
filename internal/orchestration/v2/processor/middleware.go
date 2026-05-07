@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -26,7 +27,7 @@ type Middleware func(CommandHandler) CommandHandler
 // For example: ChainMiddleware(handler, logging, dedup, timeout)
 // Results in: logging(dedup(timeout(handler)))
 func ChainMiddleware(handler CommandHandler, middlewares ...Middleware) CommandHandler {
-	for i := len(middlewares) - 1; i >= 0; i-- {
+	for i := range slices.Backward(middlewares) {
 		handler = middlewares[i](handler)
 	}
 	return handler
