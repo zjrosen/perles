@@ -67,7 +67,7 @@ func TestHelp_View_ContainsKeybindings(t *testing.T) {
 
 	// General keys
 	require.Contains(t, view, "?", "expected view to contain help key")
-	require.Contains(t, view, "ctrl+c", "expected view to contain quit key")
+	require.Contains(t, view, "q", "expected view to contain quit key")
 	require.Contains(t, view, "esc", "expected view to contain escape key")
 }
 

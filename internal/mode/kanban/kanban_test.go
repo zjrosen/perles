@@ -315,22 +315,16 @@ func TestKanban_CtrlC_ReturnsRequestQuitMsg(t *testing.T) {
 	require.True(t, isRequestQuit, "expected mode.RequestQuitMsg")
 }
 
-func TestKanban_QKey_DoesNotQuit(t *testing.T) {
+func TestKanban_QKey_QuitsDirectly(t *testing.T) {
 	m := createTestModel(t)
 	m.view = ViewBoard
 
-	// Simulate 'q' keypress - should NOT quit
 	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}}
 	_, cmd := m.handleBoardKey(msg)
 
-	// The command should be nil or delegate to board (not tea.Quit or RequestQuitMsg)
-	if cmd != nil {
-		result := cmd()
-		_, isQuit := result.(tea.QuitMsg)
-		require.False(t, isQuit, "expected 'q' key to NOT quit")
-		_, isRequestQuit := result.(mode.RequestQuitMsg)
-		require.False(t, isRequestQuit, "expected 'q' key to NOT request quit")
-	}
+	require.NotNil(t, cmd, "expected quit command")
+	_, isQuit := cmd().(tea.QuitMsg)
+	require.True(t, isQuit, "expected 'q' key to quit directly")
 }
 
 func TestKanban_HelpView_CtrlC_ReturnsRequestQuitMsg(t *testing.T) {

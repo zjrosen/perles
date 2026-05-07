@@ -1023,6 +1023,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch m.view {
 	case ViewHelp:
 		switch {
+		case msg.String() == "q":
+			return m, tea.Quit
 		case key.Matches(msg, keys.Common.Escape), key.Matches(msg, keys.Common.Help):
 			m.view = ViewSearch
 		}
@@ -1169,6 +1171,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		switch {
 		case msg.Type == tea.KeyCtrlC:
 			return m, func() tea.Msg { return mode.RequestQuitMsg{} }
+		case msg.String() == "q":
+			return m, tea.Quit
 		case key.Matches(msg, keys.Search.Blur):
 			return m, func() tea.Msg { return ExitToKanbanMsg{} }
 		case key.Matches(msg, keys.Search.Help):
@@ -1258,6 +1262,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch {
 	case msg.Type == tea.KeyCtrlC:
 		return m, func() tea.Msg { return mode.RequestQuitMsg{} }
+
+	case msg.String() == "q":
+		return m, tea.Quit
 
 	case key.Matches(msg, keys.Search.Blur):
 		// Exit search mode back to kanban
