@@ -1132,10 +1132,7 @@ func (m Model) handleTableKeys(msg tea.KeyMsg) (mode.Controller, tea.Cmd) {
 		}
 		return m, nil
 
-	case "q":
-		return m, tea.Quit
-
-	case "ctrl+c":
+	case "q", "ctrl+c":
 		return m, func() tea.Msg { return QuitMsg{} }
 	}
 
@@ -1155,10 +1152,7 @@ func (m Model) handleEpicTreeKeys(msg tea.KeyMsg) (mode.Controller, tea.Cmd) {
 	case "ctrl+w": // Toggle coordinator chat panel
 		return m.toggleCoordinatorPanel()
 
-	case "q":
-		return m, tea.Quit
-
-	case "ctrl+c", "esc":
+	case "q", "ctrl+c", "esc":
 		return m, func() tea.Msg { return QuitMsg{} }
 	}
 
@@ -1200,10 +1194,7 @@ func (m Model) handleCoordinatorKeys(msg tea.KeyMsg) (mode.Controller, tea.Cmd) 
 			m.coordinatorPanel.NextTab()
 			return m, nil
 
-		case "q":
-			return m, tea.Quit
-
-		case "ctrl+c":
+		case "q", "ctrl+c":
 			return m, func() tea.Msg { return QuitMsg{} }
 
 		default:
@@ -1241,10 +1232,7 @@ func (m Model) handleCoordinatorKeys(msg tea.KeyMsg) (mode.Controller, tea.Cmd) 
 		}
 		return m, nil
 
-	case "q":
-		return m, tea.Quit
-
-	case "ctrl+c", "esc":
+	case "q", "ctrl+c", "esc":
 		return m, func() tea.Msg { return QuitMsg{} }
 	}
 
