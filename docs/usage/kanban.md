@@ -23,13 +23,13 @@ Organize issues into customizable columns powered by BQL queries or dependency t
 
 Use `h` and `l` to move left and right between columns, `ctrl+h` / `ctrl+l` to move column positions and `ctrl+n` / `ctrl+p` to switch between views. Use `ctrl+v` to open the view menu to create, rename or delete a view.
 
-<video src="../../assets/board.mp4" controls width="100%"></video>
+<video src="./../assets/board.mp4" controls width="100%"></video>
 
 ### Adding a New Column
 
 Use `a` from kanban mode to add a new column.
 
-<video src="../../assets/add-column-from-existing.mp4" controls width="100%"></video>
+<video src="./../assets/add-column-from-existing.mp4" controls width="100%"></video>
 
 ---
 
