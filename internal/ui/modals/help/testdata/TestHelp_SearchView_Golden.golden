@@ -5,7 +5,7 @@
 │  Navigation                   Actions                      General                                          │
 │  h          focus results     enter      open tree view    ctrl+space switch mode                           │
 │  l          focus details     y          copy issue ID     ?          toggle help                           │
-│  k/↑        move up           ctrl+s     save to view      ctrl+c     quit                                  │
+│  k/↑        move up           ctrl+s     save to view      q          quit                                  │
 │  j/↓        move down                                                                                       │
 │  /          focus search                                                                                    │
 │  esc        exit to kanban                                                                                  │

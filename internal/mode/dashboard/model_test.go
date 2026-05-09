@@ -126,6 +126,37 @@ func TestModel_WorkflowsLoaded_UpdatesState(t *testing.T) {
 	require.Equal(t, controlplane.WorkflowID("wf-2"), m.workflows[1].ID)
 }
 
+func TestModel_QKeyRequestsDashboardExit(t *testing.T) {
+	workflows := []*controlplane.WorkflowInstance{
+		createTestWorkflow("wf-1", "Workflow 1", controlplane.WorkflowRunning),
+	}
+
+	tests := []struct {
+		name  string
+		focus DashboardFocus
+	}{
+		{name: "table", focus: FocusTable},
+		{name: "epic view", focus: FocusEpicView},
+		{name: "coordinator", focus: FocusCoordinator},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, _ := createTestModel(t, workflows)
+			m.focus = tt.focus
+
+			_, cmd := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+
+			require.NotNil(t, cmd, "expected dashboard exit command")
+			msg := cmd()
+			_, isTeaQuit := msg.(tea.QuitMsg)
+			require.False(t, isTeaQuit, "q should not quit the app from dashboard")
+			_, isDashboardQuit := msg.(QuitMsg)
+			require.True(t, isDashboardQuit, "expected dashboard QuitMsg")
+		})
+	}
+}
+
 // === Unit Tests: Navigation ===
 
 func TestModel_Navigation_MoveDownIncrementsSelection(t *testing.T) {

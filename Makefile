@@ -3,6 +3,7 @@
 # Version from git (tag or commit hash)
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -X 'main.version=$(VERSION)'
+BUILD_LDFLAGS := -s -w $(LDFLAGS)
 
 # Default target
 all: build test
@@ -14,7 +15,7 @@ build-frontend:
 
 # Go-only build (assumes frontend is pre-built)
 build-go:
-	go build -ldflags "$(LDFLAGS)" -o perles .
+	go build -trimpath -ldflags "$(BUILD_LDFLAGS)" -o perles .
 
 build: build-frontend build-go
 
@@ -40,7 +41,7 @@ debug: build-go
 
 # Install the binary to $GOPATH/bin with version info
 install: build-frontend
-	go install -ldflags "$(LDFLAGS)" .
+	go install -trimpath -ldflags "$(BUILD_LDFLAGS)" .
 
 # Run all tests
 test:

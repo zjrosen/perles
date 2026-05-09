@@ -1176,22 +1176,16 @@ func TestSearch_CtrlC_ReturnsRequestQuitMsg_TreeSubMode(t *testing.T) {
 	require.True(t, isRequestQuit, "expected mode.RequestQuitMsg in tree sub-mode")
 }
 
-func TestSearch_QKey_DoesNotQuit(t *testing.T) {
+func TestSearch_QKey_QuitsDirectly(t *testing.T) {
 	m := createTestModelWithResults(t)
 	m.focus = FocusResults
 
-	// Simulate 'q' keypress - should NOT quit
 	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}}
 	_, cmd := m.handleKey(msg)
 
-	// The command should be nil or not a quit-related message
-	if cmd != nil {
-		result := cmd()
-		_, isQuit := result.(tea.QuitMsg)
-		require.False(t, isQuit, "expected 'q' key to NOT quit")
-		_, isRequestQuit := result.(mode.RequestQuitMsg)
-		require.False(t, isRequestQuit, "expected 'q' key to NOT request quit")
-	}
+	require.NotNil(t, cmd, "expected quit command")
+	_, isQuit := cmd().(tea.QuitMsg)
+	require.True(t, isQuit, "expected 'q' key to quit directly")
 }
 
 // =============================================================================

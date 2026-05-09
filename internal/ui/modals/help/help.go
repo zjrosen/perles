@@ -270,7 +270,7 @@ func (m Model) renderKanbanContent() string {
 	generalCol.WriteString(renderBinding(keys.Common.Help))
 	generalCol.WriteString(renderBinding(keys.Kanban.ToggleStatus))
 	generalCol.WriteString(renderBinding(keys.Kanban.Escape))
-	generalCol.WriteString(renderBinding(keys.Kanban.QuitConfirm))
+	generalCol.WriteString(renderBinding(keys.Common.Quit))
 
 	// User Actions below General (only if user has configured actions)
 	if len(m.userActions) > 0 {
@@ -351,7 +351,7 @@ func (m Model) renderSearchContent() string {
 	generalCol.WriteString("\n")
 	generalCol.WriteString(renderBinding(keys.Search.SwitchMode))
 	generalCol.WriteString(renderBinding(keys.Search.Help))
-	generalCol.WriteString(renderBinding(keys.Search.QuitConfirm))
+	generalCol.WriteString(renderBinding(keys.Common.Quit))
 
 	// User Actions column (only if user has configured actions)
 	var userActionsCol strings.Builder
