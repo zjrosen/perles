@@ -87,6 +87,7 @@ func ToTaskIssue(b domain.Issue) task.Issue {
 		CreatedAt:          b.CreatedAt,
 		UpdatedAt:          b.UpdatedAt,
 		ClosedAt:           b.ClosedAt,
+		DeferUntil:         b.DeferUntil,
 		CloseReason:        b.CloseReason,
 		ParentID:           b.ParentID,
 		BlockedBy:          b.BlockedBy,

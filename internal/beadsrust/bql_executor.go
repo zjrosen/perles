@@ -38,6 +38,7 @@ var brValidFields = map[string]bql.FieldType{
 	"created_by":  bql.FieldString,
 	"created":     bql.FieldDate,
 	"updated":     bql.FieldDate,
+	"defer_until": bql.FieldDate,
 }
 
 // brIssueColumns is the SELECT column list for the beads_rust issues table.
@@ -47,7 +48,7 @@ const brIssueColumns = `
 	i.status, i.priority, i.issue_type, i.assignee, i.owner,
 	i.sender, i.ephemeral, i.pinned, i.is_template,
 	i.created_at, i.created_by, i.updated_at, i.closed_at, i.close_reason,
-	i.source_repo, i.external_ref
+	i.defer_until, i.source_repo, i.external_ref
 `
 
 // maxExpandIterations is the safety limit for unlimited depth expansion.
@@ -135,18 +136,19 @@ func (e *BQLExecutor) Execute(input string) ([]task.Issue, error) {
 // (e.g. sqlite_autoindex_issues_1), which cause any subquery or join to fail.
 func makeReadySQL(blockedIDs []string) func(bool) string {
 	return func(isReady bool) string {
+		readyExpr := "i.status = 'open' AND (i.defer_until IS NULL OR datetime(i.defer_until) <= datetime('now'))"
 		if len(blockedIDs) == 0 {
-			// No blocked issues: ready = open, not-ready = not open.
 			if isReady {
-				return "i.status = 'open'"
+				return readyExpr
 			}
-			return "i.status != 'open'"
+			return "NOT (" + readyExpr + ")"
 		}
 		inList := quotedIDList(blockedIDs)
+		readyExpr = "(" + readyExpr + " AND i.id NOT IN (" + inList + "))"
 		if isReady {
-			return "(i.status = 'open' AND i.id NOT IN (" + inList + "))"
+			return readyExpr
 		}
-		return "NOT (i.status = 'open' AND i.id NOT IN (" + inList + "))"
+		return "NOT " + readyExpr
 	}
 }
 
@@ -350,7 +352,7 @@ func scanBRIssueFromRows(rows *sql.Rows) (*task.Issue, error) {
 		assigneeN, ownerN, senderN          sql.NullString
 		createdByN, closeReasonN            sql.NullString
 		sourceRepoN, externalRefN           sql.NullString
-		closedAtN                           sql.NullString
+		closedAtN, deferUntilN              sql.NullString
 	)
 
 	err := rows.Scan(
@@ -358,7 +360,7 @@ func scanBRIssueFromRows(rows *sql.Rows) (*task.Issue, error) {
 		&status, &priority, &issueType, &assigneeN, &ownerN,
 		&senderN, &ephemeral, &pinned, &isTmpl,
 		&createdAt, &createdByN, &updatedAt, &closedAtN, &closeReasonN,
-		&sourceRepoN, &externalRefN,
+		&deferUntilN, &sourceRepoN, &externalRefN,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("scan issue: %w", err)
@@ -377,6 +379,9 @@ func scanBRIssueFromRows(rows *sql.Rows) (*task.Issue, error) {
 	issue.UpdatedAt = parseTime(updatedAt)
 	if s := nullStr(closedAtN); s != "" {
 		issue.ClosedAt = parseTime(s)
+	}
+	if s := nullStr(deferUntilN); s != "" {
+		issue.DeferUntil = parseTime(s)
 	}
 
 	// Extensions for beads_rust-specific fields.

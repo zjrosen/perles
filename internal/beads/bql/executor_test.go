@@ -126,18 +126,68 @@ func TestExecutor_ReadyFilter(t *testing.T) {
 
 	executor := newTestExecutor(t, db)
 
-	// Ready issues (open/in_progress and not blocked)
+	// Ready issues (open and not blocked)
 	issues, err := executor.Execute("ready = true")
 	require.NoError(t, err)
 
-	// test-1, test-2, test-5, test-6 are open/in_progress and not blocked
-	// test-3 is in_progress but blocked
+	// test-1, test-2, test-5, test-6 are open and not blocked
+	// test-3 is in_progress and blocked
 	// test-4 is closed
 	require.Len(t, issues, 4)
 	for _, issue := range issues {
 		require.NotEqual(t, "test-3", issue.ID, "blocked issue should not be ready")
 		require.NotEqual(t, "test-4", issue.ID, "closed issue should not be ready")
 	}
+}
+
+func TestExecutor_ReadyFilter_ExcludesFutureDeferred(t *testing.T) {
+	now := time.Now().UTC()
+	db := setupDB(t, func(b *testutil.Builder) *testutil.Builder {
+		return b.
+			WithIssue("ready-1", testutil.Status("open")).
+			WithIssue("deferred-future", testutil.Status("open"), testutil.DeferUntil(now.Add(24*time.Hour))).
+			WithIssue("deferred-past", testutil.Status("open"), testutil.DeferUntil(now.Add(-24*time.Hour)))
+	})
+	defer func() { _ = db.Close() }()
+
+	executor := newTestExecutor(t, db)
+
+	issues, err := executor.Execute("ready = true")
+	require.NoError(t, err)
+
+	ids := collectIDs(issues)
+	require.True(t, ids["ready-1"])
+	require.True(t, ids["deferred-past"])
+	require.False(t, ids["deferred-future"])
+
+	for _, issue := range issues {
+		if issue.ID == "deferred-past" {
+			require.False(t, issue.DeferUntil.IsZero())
+		}
+	}
+}
+
+func TestExecutor_ReadyFalse_IncludesFutureDeferred(t *testing.T) {
+	now := time.Now().UTC()
+	db := setupDB(t, func(b *testutil.Builder) *testutil.Builder {
+		return b.
+			WithIssue("ready-1", testutil.Status("open")).
+			WithIssue("deferred-future", testutil.Status("open"), testutil.DeferUntil(now.Add(24*time.Hour))).
+			WithIssue("deferred-past", testutil.Status("open"), testutil.DeferUntil(now.Add(-24*time.Hour))).
+			WithIssue("closed-1", testutil.Status("closed"))
+	})
+	defer func() { _ = db.Close() }()
+
+	executor := newTestExecutor(t, db)
+
+	issues, err := executor.Execute("ready = false")
+	require.NoError(t, err)
+
+	ids := collectIDs(issues)
+	require.False(t, ids["ready-1"])
+	require.False(t, ids["deferred-past"])
+	require.True(t, ids["deferred-future"])
+	require.True(t, ids["closed-1"])
 }
 
 func TestExecutor_LabelFilter(t *testing.T) {
@@ -2675,6 +2725,7 @@ CREATE TABLE issues (
 	created_by TEXT DEFAULT '',
 	updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	closed_at DATETIME,
+	defer_until DATETIME,
 	close_reason TEXT DEFAULT '',
 	mol_type TEXT DEFAULT ''
 );
@@ -2727,6 +2778,7 @@ CREATE VIEW ready_issues AS
 SELECT i.id
 FROM issues i
 WHERE i.status = 'open'
+  AND (i.defer_until IS NULL OR i.defer_until <= CURRENT_TIMESTAMP)
   AND i.id NOT IN (SELECT id FROM blocked_issues);
 `
 
@@ -2753,6 +2805,12 @@ func insertDoltIssue(t *testing.T, db *sql.DB, id, title, status, issueType stri
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, title, status, priority, issueType, now, now, closedAt,
 	)
+	require.NoError(t, err)
+}
+
+func deferDoltIssue(t *testing.T, db *sql.DB, id string, deferUntil time.Time) {
+	t.Helper()
+	_, err := db.Exec(`UPDATE issues SET defer_until = ? WHERE id = ?`, deferUntil, id)
 	require.NoError(t, err)
 }
 
@@ -3012,8 +3070,12 @@ func TestDoltDialect_ReadyQuery(t *testing.T) {
 	insertDoltIssue(t, db, "blocker-1", "Blocker", "open", "task", 1)
 	insertDoltIssue(t, db, "blocked-1", "Blocked Task", "open", "task", 2)
 	insertDoltIssue(t, db, "ready-1", "Ready Task", "open", "task", 2)
+	insertDoltIssue(t, db, "deferred-future", "Future Deferred", "open", "task", 2)
+	insertDoltIssue(t, db, "deferred-past", "Past Deferred", "open", "task", 2)
 	insertDoltIssue(t, db, "closed-1", "Closed Task", "closed", "task", 2)
 	insertDoltDep(t, db, "blocked-1", "blocker-1", "blocks")
+	deferDoltIssue(t, db, "deferred-future", time.Now().Add(24*time.Hour))
+	deferDoltIssue(t, db, "deferred-past", time.Now().Add(-24*time.Hour))
 
 	executor := newDoltExecutor(t, db)
 
@@ -3024,7 +3086,9 @@ func TestDoltDialect_ReadyQuery(t *testing.T) {
 	ids := collectIDs(issues)
 	require.True(t, ids["blocker-1"], "blocker is open and not blocked, so it's ready")
 	require.True(t, ids["ready-1"], "ready task is open and not blocked")
+	require.True(t, ids["deferred-past"], "past deferred task should be ready")
 	require.False(t, ids["blocked-1"], "blocked task should not be ready")
+	require.False(t, ids["deferred-future"], "future deferred task should not be ready")
 	require.False(t, ids["closed-1"], "closed task should not be ready")
 }
 

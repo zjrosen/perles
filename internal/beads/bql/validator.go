@@ -44,6 +44,7 @@ var ValidFields = map[string]FieldType{
 	"mol_type":    FieldString,
 	"created":     FieldDate,
 	"updated":     FieldDate,
+	"defer_until": FieldDate,
 }
 
 // FieldType categorizes fields for validation.

@@ -525,7 +525,7 @@ orchestration:
 ### Fields
 
 `id`, `type`, `status`, `priority`, `title`, `description`, `design`, `notes`,
-`created`, `updated`, `blocked`, `ready`, `pinned`, `is_template`, `label`,
+`created`, `updated`, `defer_until`, `blocked`, `ready`, `pinned`, `is_template`, `label`,
 `assignee`, `sender`, `created_by`, `mol_type`, `metadata.$key`
 
 ### Operators
@@ -540,7 +540,7 @@ orchestration:
 - **Strings:** `"quoted"` or `unquoted`
 - **Priorities:** `P0`, `P1`, `P2`, `P3`, `P4`
 - **Booleans:** `true`, `false`
-- **Dates:** `today`, `yesterday`, `-7d`, `-30d`
+- **Dates:** `now`, `today`, `yesterday`, `-7d`, `-30d`
 - **Null:** `nil` (for metadata existence checks)
 
 ### Special Clauses
@@ -555,6 +555,7 @@ orchestration:
 ```sql
 type = bug and priority = P0
 status != closed and ready = true
+status = deferred or status = open and defer_until > now
 title ~ "auth" and label in (security, urgent)
 created > -7d order by priority asc
 type = epic expand down depth 2

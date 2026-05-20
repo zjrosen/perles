@@ -32,6 +32,7 @@ CREATE TABLE issues (
 	created_by TEXT DEFAULT '',
 	updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	closed_at DATETIME,
+	defer_until DATETIME,
 	close_reason TEXT DEFAULT '',
 	deleted_at DATETIME,
 	mol_type TEXT DEFAULT '',
@@ -76,7 +77,8 @@ CREATE TABLE local_metadata (
 CREATE VIEW ready_issues AS
 SELECT i.id
 FROM issues i
-WHERE i.status IN ('open', 'in_progress')
+WHERE i.status = 'open'
+  AND (i.defer_until IS NULL OR datetime(i.defer_until) <= datetime('now'))
   AND i.id NOT IN (SELECT issue_id FROM blocked_issues_cache);
 `
 

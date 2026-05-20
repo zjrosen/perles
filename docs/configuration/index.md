@@ -123,6 +123,10 @@ views:
         type: bql
         query: "status = open and blocked = true"
         color: "#FF8787"
+      - name: Deferred
+        type: bql
+        query: "status = deferred or status = open and defer_until > now"
+        color: "#808000"
       - name: Ready
         query: "status = open and ready = true"
         color: "#73F59F"

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	zone "github.com/lrstanley/bubblezone"
 
@@ -390,7 +391,11 @@ func (m *Model) renderNode(node *TreeNode, isLast bool, isSelected bool) string 
 	sb.WriteString(" ")
 
 	// Status indicator
-	statusText := m.renderStatus(node.Issue.Status)
+	now := time.Now()
+	if m.clock != nil {
+		now = m.clock.Now()
+	}
+	statusText := m.renderStatus(node.Issue.DisplayStatus(now))
 	statusWidth := lipgloss.Width(statusText)
 
 	// Build right metadata: comment indicator + timestamp

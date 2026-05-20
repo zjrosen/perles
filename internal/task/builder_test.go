@@ -88,18 +88,38 @@ func TestBuildIssue_WithTimestamps(t *testing.T) {
 	now := time.Now()
 	created := now.Add(-24 * time.Hour)
 	closed := now.Add(-1 * time.Hour)
+	deferred := now.Add(24 * time.Hour)
 
 	issue := BuildIssue("bd-1",
 		WithCreatedAt(created),
 		WithUpdatedAt(now),
 		WithClosedAt(closed),
+		WithDeferUntil(deferred),
 		WithCloseReason("Completed"),
 	)
 
 	require.Equal(t, created, issue.CreatedAt)
 	require.Equal(t, now, issue.UpdatedAt)
 	require.Equal(t, closed, issue.ClosedAt)
+	require.Equal(t, deferred, issue.DeferUntil)
 	require.Equal(t, "Completed", issue.CloseReason)
+}
+
+func TestIssue_DisplayStatus(t *testing.T) {
+	now := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
+
+	require.Equal(t, StatusDeferred, BuildIssue("future",
+		WithStatus(StatusOpen),
+		WithDeferUntil(now.Add(time.Hour)),
+	).DisplayStatus(now))
+	require.Equal(t, StatusOpen, BuildIssue("past",
+		WithStatus(StatusOpen),
+		WithDeferUntil(now.Add(-time.Hour)),
+	).DisplayStatus(now))
+	require.Equal(t, StatusInProgress, BuildIssue("in-progress",
+		WithStatus(StatusInProgress),
+		WithDeferUntil(now.Add(time.Hour)),
+	).DisplayStatus(now))
 }
 
 func TestBuildIssue_WithComments(t *testing.T) {

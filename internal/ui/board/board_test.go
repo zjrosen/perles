@@ -30,16 +30,16 @@ func TestBoard_New_DefaultFocus(t *testing.T) {
 
 func TestBoard_NavigateRight(t *testing.T) {
 	m := NewFromViews(config.DefaultViews(), nil, nil)
-	// Default focus is Ready (index 1)
+	// Default focus is Ready.
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
 	require.Equal(t, ColInProgress, m.FocusedColumn(), "expected ColInProgress after 'l'")
 }
 
 func TestBoard_NavigateLeft(t *testing.T) {
 	m := NewFromViews(config.DefaultViews(), nil, nil)
-	// Default focus is Ready (index 1)
+	// Default focus is Ready.
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
-	require.Equal(t, ColBlocked, m.FocusedColumn(), "expected ColBlocked after 'h'")
+	require.Equal(t, ColDeferred, m.FocusedColumn(), "expected ColDeferred after 'h'")
 }
 
 func TestBoard_NavigateRightBoundary(t *testing.T) {
@@ -104,7 +104,11 @@ func TestBoard_SetSize_StacksColumnsOnNarrowWidth(t *testing.T) {
 	for i := range m.ColCount() {
 		col := m.BoardColumn(i)
 		require.Equal(t, 80, col.Width())
-		require.Equal(t, 6, col.Height())
+		if i == 0 {
+			require.Equal(t, 4, col.Height())
+		} else {
+			require.Equal(t, 5, col.Height())
+		}
 	}
 }
 

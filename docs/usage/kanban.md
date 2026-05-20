@@ -6,7 +6,7 @@ Organize issues into customizable columns powered by BQL queries or dependency t
 
 ## Features
 
-- Four-column default layout: Blocked, Ready, In Progress, Closed
+- Five-column default layout: Blocked, Deferred, Ready, In Progress, Closed
 - Fully customizable columns with BQL queries or dependency trees
 - Multi-view support -- create unlimited board views
 - Real-time auto-refresh when database changes
@@ -40,6 +40,7 @@ The default view includes these columns (all configurable via BQL):
 | Column | BQL Query |
 |--------|-----------|
 | **Blocked** | `status = open and blocked = true` |
+| **Deferred** | `status = deferred or status = open and defer_until > now` |
 | **Ready** | `status = open and ready = true` |
 | **In Progress** | `status = in_progress` |
 | **Closed** | `status = closed` |
@@ -148,6 +149,10 @@ views:
         type: bql
         query: "status = open and blocked = true"
         color: "#FF8787"
+      - name: Deferred
+        type: bql
+        query: "status = deferred or status = open and defer_until > now"
+        color: "#808000"
       - name: Ready
         query: "status = open and ready = true"
         color: "#73F59F"

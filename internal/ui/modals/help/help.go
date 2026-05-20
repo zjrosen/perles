@@ -45,8 +45,9 @@ func BQLFields() []BQLField {
 		{Name: "sender", Values: "string"},
 		{Name: "created_by", Values: "string"},
 		{Name: "mol_type", Values: "string"},
-		{Name: "created", Values: "date (today, yesterday, -7d)"},
-		{Name: "updated", Values: "date (today, yesterday, -7d)"},
+		{Name: "created", Values: "date (now, today, yesterday, -7d)"},
+		{Name: "updated", Values: "date (now, today, yesterday, -7d)"},
+		{Name: "defer_until", Values: "date (now, today, yesterday, -7d)"},
 	}
 }
 
@@ -72,6 +73,7 @@ func BQLExamples() []string {
 		"type in (bug, task) and status != closed",
 		`title ~ "auth" or label ~ "security"`,
 		"created >= -7d order by priority",
+		"status = open and defer_until > now",
 		"not blocked and priority = p0",
 		"type = epic expand down",
 		"type = epic expand down depth *",
@@ -446,13 +448,13 @@ func (m Model) renderSearchContent() string {
 	var examplesCol strings.Builder
 	examplesCol.WriteString(sectionStyle.Render("Examples"))
 	examplesCol.WriteString("\n")
-	examples := BQLExamples()
 	// Show only a few examples in compact overlay (skip simple ones)
 	compactExamples := []string{
-		examples[1], // "status = open and ready = true"
-		examples[3], // "type in (bug, task) and status != closed"
-		examples[5], // "created >= -7d order by priority"
-		examples[7], // "type = epic expand down"
+		"status = open and ready = true",
+		"type in (bug, task) and status != closed",
+		"status = open and defer_until > now",
+		"created >= -7d order by priority",
+		"type = epic expand down",
 	}
 	for _, ex := range compactExamples {
 		examplesCol.WriteString(bqlStyle.Render(ex) + "\n")
