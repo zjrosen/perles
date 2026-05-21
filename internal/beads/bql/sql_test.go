@@ -107,7 +107,18 @@ func TestSQLBuilder_SpecialFields(t *testing.T) {
 		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 		where, _, _ := builder.Build()
 
-		require.Equal(t, "i.id IN (SELECT id FROM ready_issues)", where)
+		require.Equal(t, "i.status = 'open' AND (i.defer_until IS NULL OR datetime(i.defer_until) <= datetime('now')) AND i.id NOT IN (SELECT issue_id FROM blocked_issues_cache)", where)
+	})
+
+	t.Run("ready false", func(t *testing.T) {
+		parser := NewParser("ready = false")
+		query, err := parser.Parse()
+		require.NoError(t, err)
+
+		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
+		where, _, _ := builder.Build()
+
+		require.Equal(t, "NOT (i.status = 'open' AND (i.defer_until IS NULL OR datetime(i.defer_until) <= datetime('now')) AND i.id NOT IN (SELECT issue_id FROM blocked_issues_cache))", where)
 	})
 
 	t.Run("pinned true", func(t *testing.T) {
@@ -580,16 +591,16 @@ func TestSQLBuilder_MySQLDialect_ReadyField(t *testing.T) {
 	query, err := parser.Parse()
 	require.NoError(t, err)
 
-	// SQLite uses the ready_issues view
+	// SQLite inlines readiness so defer_until is always honored.
 	sqliteBuilder := NewSQLBuilder(query, appbeads.DialectSQLite)
 	sqliteWhere, _, _ := sqliteBuilder.Build()
-	require.Equal(t, "i.id IN (SELECT id FROM ready_issues)", sqliteWhere)
+	require.Equal(t, "i.status = 'open' AND (i.defer_until IS NULL OR datetime(i.defer_until) <= datetime('now')) AND i.id NOT IN (SELECT issue_id FROM blocked_issues_cache)", sqliteWhere)
 
-	// Dolt inlines the SQL to bypass a server bug with views
+	// Dolt also inlines readiness to bypass views and honor defer_until.
 	mysqlBuilder := NewSQLBuilder(query, appbeads.DialectMySQL)
 	mysqlWhere, _, _ := mysqlBuilder.Build()
-	require.Contains(t, mysqlWhere, "i.id IN (SELECT ri.id FROM issues ri")
-	require.Contains(t, mysqlWhere, "ri.status = 'open'")
+	require.Contains(t, mysqlWhere, "i.status = 'open'")
+	require.Contains(t, mysqlWhere, "i.defer_until IS NULL OR i.defer_until <= CURRENT_TIMESTAMP")
 	require.Contains(t, mysqlWhere, "NOT IN (SELECT bi.id FROM issues bi")
 }
 

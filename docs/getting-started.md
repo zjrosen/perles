@@ -51,7 +51,7 @@ cd your-project
 perles
 ```
 
-You'll see the default kanban board with four columns: **Blocked**, **Ready**, **In Progress**, and **Closed**.
+You'll see the default kanban board with five columns: **Blocked**, **Deferred**, **Ready**, **In Progress**, and **Closed**.
 
 ---
 

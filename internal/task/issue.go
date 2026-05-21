@@ -66,6 +66,7 @@ type Issue struct {
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`
 	ClosedAt           time.Time `json:"closed_at"`
+	DeferUntil         time.Time `json:"defer_until,omitempty"`
 	CloseReason        string    `json:"close_reason,omitempty"`
 	ParentID           string    `json:"parent_id"`
 
@@ -85,6 +86,14 @@ type Issue struct {
 	// RoleBead, etc.) are stored here for round-tripping. UI code should
 	// not read these directly.
 	Extensions map[string]any `json:"extensions,omitempty"`
+}
+
+// DisplayStatus returns the user-visible status without changing backend semantics.
+func (i Issue) DisplayStatus(now time.Time) Status {
+	if i.Status == StatusOpen && !i.DeferUntil.IsZero() && i.DeferUntil.After(now) {
+		return StatusDeferred
+	}
+	return i.Status
 }
 
 // CreateResult holds the result of a create operation.

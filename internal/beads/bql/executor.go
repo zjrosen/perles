@@ -253,6 +253,7 @@ func (e *Executor) executeBaseQuery(query *Query, q querier) ([]beads.Issue, err
 			i.created_by,
 			i.updated_at,
 			i.closed_at,
+			i.defer_until,
 			i.close_reason,
 			i.mol_type
 		FROM issues i
@@ -350,6 +351,7 @@ func (e *Executor) scanIssuesBase(rows *sql.Rows) ([]beads.Issue, error) {
 			isTemplate         sql.NullBool
 			createdBy          sql.NullString
 			closedAt           sql.NullTime
+			deferUntil         sql.NullTime
 			closeReason        sql.NullString
 			molType            sql.NullString
 		)
@@ -373,6 +375,7 @@ func (e *Executor) scanIssuesBase(rows *sql.Rows) ([]beads.Issue, error) {
 			&createdBy,
 			&issue.UpdatedAt,
 			&closedAt,
+			&deferUntil,
 			&closeReason,
 			&molType,
 		)
@@ -413,6 +416,9 @@ func (e *Executor) scanIssuesBase(rows *sql.Rows) ([]beads.Issue, error) {
 		}
 		if closedAt.Valid {
 			issue.ClosedAt = closedAt.Time
+		}
+		if deferUntil.Valid {
+			issue.DeferUntil = deferUntil.Time
 		}
 		if closeReason.Valid {
 			issue.CloseReason = closeReason.String

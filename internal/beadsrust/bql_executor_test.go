@@ -7,6 +7,13 @@ import (
 	"github.com/zjrosen/perles/internal/task"
 )
 
+const deferredIssueSeed = `
+		INSERT INTO issues (id, title, status, priority, issue_type, defer_until, created_at, updated_at)
+		VALUES
+			('TEST-9', 'Future deferred task', 'open', 2, 'task', '2099-01-01T00:00:00Z', '2026-03-01T10:00:00Z', '2026-03-05T12:00:00Z'),
+			('TEST-10', 'Past deferred task', 'open', 2, 'task', '2000-01-01T00:00:00Z', '2026-03-01T10:00:00Z', '2026-03-05T12:00:00Z')
+`
+
 func TestBQLExecutor_EmptyQuery(t *testing.T) {
 	exec := newTestBQLExecutor(t)
 
@@ -127,7 +134,7 @@ func TestBQLExecutor_InvalidField(t *testing.T) {
 }
 
 func TestBQLExecutor_ReadyFilter_True(t *testing.T) {
-	exec := newTestBQLExecutor(t)
+	exec := newTestBQLExecutorWithExtraSeed(t, deferredIssueSeed)
 
 	issues, err := exec.Execute("ready = true")
 	require.NoError(t, err)
@@ -137,7 +144,7 @@ func TestBQLExecutor_ReadyFilter_True(t *testing.T) {
 	// Blocked: TEST-3 (in blocked_issues_cache)
 	// Ready: TEST-1, TEST-5, TEST-6, TEST-7
 	// Note: TEST-2 is in_progress, not open, so not "ready".
-	require.Len(t, issues, 4, "expected 4 ready issues")
+	require.Len(t, issues, 5, "expected 5 ready issues")
 
 	ids := make(map[string]bool)
 	for _, issue := range issues {
@@ -149,19 +156,37 @@ func TestBQLExecutor_ReadyFilter_True(t *testing.T) {
 	require.True(t, ids["TEST-5"])
 	require.True(t, ids["TEST-6"])
 	require.True(t, ids["TEST-7"])
+	require.True(t, ids["TEST-10"], "past-deferred issue should be ready again")
 	require.False(t, ids["TEST-3"], "TEST-3 is blocked, should not be ready")
+	require.False(t, ids["TEST-9"], "future-deferred issue should not be ready")
 }
 
 func TestBQLExecutor_ReadyFilter_False(t *testing.T) {
-	exec := newTestBQLExecutor(t)
+	exec := newTestBQLExecutorWithExtraSeed(t, deferredIssueSeed)
 
 	issues, err := exec.Execute("ready = false")
 	require.NoError(t, err)
 
 	// Not-ready = NOT (open AND not-blocked).
 	// This includes: closed, in_progress, and blocked issues.
-	// TEST-2 (in_progress), TEST-3 (blocked), TEST-4 (closed).
-	require.Len(t, issues, 3)
+	// TEST-2 (in_progress), TEST-3 (blocked), TEST-4 (closed), TEST-9 (future-deferred).
+	require.Len(t, issues, 4)
+
+	ids := make(map[string]bool)
+	for _, issue := range issues {
+		ids[issue.ID] = true
+	}
+	require.True(t, ids["TEST-9"], "future-deferred issue should be not-ready")
+	require.False(t, ids["TEST-10"], "past-deferred issue should be ready again")
+}
+
+func TestBQLExecutor_DeferUntilFilter(t *testing.T) {
+	exec := newTestBQLExecutorWithExtraSeed(t, deferredIssueSeed)
+
+	issues, err := exec.Execute("status = open and defer_until > now")
+	require.NoError(t, err)
+	require.Len(t, issues, 1)
+	require.Equal(t, "TEST-9", issues[0].ID)
 }
 
 func TestBQLExecutor_BlockedFilter(t *testing.T) {

@@ -191,7 +191,25 @@ func newTestReader(t *testing.T) *SQLiteReader {
 // newTestBQLExecutor returns a BQL executor connected to a fresh test database.
 func newTestBQLExecutor(t *testing.T) *BQLExecutor {
 	t.Helper()
-	reader := newTestReader(t)
+	return newTestBQLExecutorWithExtraSeed(t, "")
+}
+
+func newTestBQLExecutorWithExtraSeed(t *testing.T, seedSQL string) *BQLExecutor {
+	t.Helper()
+
+	dataDir := newTestDB(t)
+	if seedSQL != "" {
+		db, err := sql.Open("sqlite3", filepath.Join(dataDir, "beads.db"))
+		require.NoError(t, err)
+
+		_, err = db.Exec(seedSQL)
+		require.NoError(t, err)
+		require.NoError(t, db.Close())
+	}
+
+	reader, err := NewSQLiteReader(dataDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = reader.Close() })
 
 	bqlCache := cachemanager.NewInMemoryCacheManager[string, []task.Issue](
 		"test-bql-cache",

@@ -295,6 +295,8 @@ func parseIdentValue(literal string) Value {
 
 	// Check for special date values
 	switch literal {
+	case "now", "Now", "NOW":
+		return Value{Type: ValueDate, Raw: literal, String: "now"}
 	case "today", "Today", "TODAY":
 		return Value{Type: ValueDate, Raw: literal, String: "today"}
 	case "yesterday", "Yesterday", "YESTERDAY":

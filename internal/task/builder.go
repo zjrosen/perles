@@ -131,6 +131,11 @@ func WithClosedAt(t time.Time) IssueOption {
 	return func(i *Issue) { i.ClosedAt = t }
 }
 
+// WithDeferUntil sets the defer_until timestamp.
+func WithDeferUntil(t time.Time) IssueOption {
+	return func(i *Issue) { i.DeferUntil = t }
+}
+
 // WithCloseReason sets the close reason.
 func WithCloseReason(reason string) IssueOption {
 	return func(i *Issue) { i.CloseReason = reason }

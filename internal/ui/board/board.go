@@ -29,11 +29,12 @@ type ColumnIndex = int
 // Default column indices for backward compatibility with New().
 const (
 	ColBlocked    ColumnIndex = 0
-	ColReady      ColumnIndex = 1
-	ColInProgress ColumnIndex = 2
-	ColClosed     ColumnIndex = 3
+	ColDeferred   ColumnIndex = 1
+	ColReady      ColumnIndex = 2
+	ColInProgress ColumnIndex = 3
+	ColClosed     ColumnIndex = 4
 
-	minHorizontalColumnWidth = 28
+	minHorizontalColumnWidth = 24
 )
 
 // View represents a named collection of columns.
@@ -101,16 +102,14 @@ func NewFromViews(viewConfigs []config.ViewConfig, executor task.QueryExecutor, 
 		}
 	}
 
-	// Default focus to second column (Ready equivalent) or first
+	// Default focus to Ready when present, otherwise the second column or first.
 	focusIdx := 0
 	var columns []BoardColumn
 	var configs []config.ColumnConfig
 	if len(views) > 0 {
 		columns = views[0].columns
 		configs = views[0].configs
-		if len(columns) > 1 {
-			focusIdx = 1
-		}
+		focusIdx = defaultFocusIndex(configs)
 	}
 
 	return Model{
@@ -124,6 +123,21 @@ func NewFromViews(viewConfigs []config.ViewConfig, executor task.QueryExecutor, 
 		maximizedColumn: -1,
 		boardFocused:    true, // Board has focus by default
 	}
+}
+
+func defaultFocusIndex(configs []config.ColumnConfig) int {
+	if len(configs) == 0 {
+		return 0
+	}
+	for i, cfg := range configs {
+		if cfg.Name == "Ready" {
+			return i
+		}
+	}
+	if len(configs) > 1 {
+		return 1
+	}
+	return 0
 }
 
 // ColCount returns the number of columns.

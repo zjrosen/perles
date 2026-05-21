@@ -20,7 +20,7 @@ const issueColumns = `
 	i.id, i.title, i.description, i.design, i.acceptance_criteria, i.notes,
 	i.status, i.priority, i.issue_type, i.assignee, i.owner,
 	i.created_at, i.created_by, i.updated_at, i.closed_at, i.close_reason,
-	i.source_repo, i.external_ref, i.pinned, i.ephemeral, i.is_template
+	i.defer_until, i.source_repo, i.external_ref, i.pinned, i.ephemeral, i.is_template
 `
 
 // softDeleteFilter excludes tombstoned and soft-deleted issues.
@@ -160,14 +160,14 @@ func scanIssue(row *sql.Row) (*task.Issue, error) {
 		assigneeN, ownerN                          sql.NullString
 		createdByN, closeReasonN                   sql.NullString
 		sourceRepoN, externalRefN                  sql.NullString
-		closedAtN                                  sql.NullString
+		closedAtN, deferUntilN                     sql.NullString
 	)
 
 	err := row.Scan(
 		&issue.ID, &issue.TitleText, &description, &design, &acceptCriteria, &notes,
 		&status, &priority, &issueType, &assigneeN, &ownerN,
 		&createdAt, &createdByN, &updatedAt, &closedAtN, &closeReasonN,
-		&sourceRepoN, &externalRefN, &pinned, &ephemeral, &isTemplate,
+		&deferUntilN, &sourceRepoN, &externalRefN, &pinned, &ephemeral, &isTemplate,
 	)
 	if err != nil {
 		return nil, err
@@ -194,6 +194,9 @@ func scanIssue(row *sql.Row) (*task.Issue, error) {
 	issue.UpdatedAt = parseTime(updatedAt)
 	if closedAtStr != "" {
 		issue.ClosedAt = parseTime(closedAtStr)
+	}
+	if deferUntilStr := nullStr(deferUntilN); deferUntilStr != "" {
+		issue.DeferUntil = parseTime(deferUntilStr)
 	}
 
 	// Extensions for beads_rust-specific fields.

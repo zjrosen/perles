@@ -475,10 +475,15 @@ func (m Model) renderHeader() string {
 	}
 
 	// Single-column: include inline metadata (type and priority already in title line)
-	statusStyle := getStatusStyle(issue.Status)
-	metaLine := fmt.Sprintf("\nStatus: %s", statusStyle.Render(formatStatus(issue.Status)))
+	now := time.Now()
+	displayStatus := issue.DisplayStatus(now)
+	statusStyle := getStatusStyle(displayStatus)
+	metaLine := fmt.Sprintf("\nStatus: %s", statusStyle.Render(formatStatus(displayStatus)))
 
 	lines := []string{titleLine, metaLine}
+	if shouldShowDeferredUntil(issue, displayStatus) {
+		lines = append(lines, "Deferred Until: "+formatTimestamp(issue.DeferUntil))
+	}
 
 	// Close reason (for closed issues)
 	if issue.CloseReason != "" {
@@ -594,10 +599,18 @@ func (m Model) renderMetadataColumn() string {
 	sb.WriteString("\n")
 
 	// Status (read-only display, edit via e)
+	now := time.Now()
+	displayStatus := issue.DisplayStatus(now)
 	sb.WriteString(indent)
 	sb.WriteString(labelStyle.Render("Status"))
-	sb.WriteString(getStatusStyle(issue.Status).Render(formatStatus(issue.Status)))
+	sb.WriteString(getStatusStyle(displayStatus).Render(formatStatus(displayStatus)))
 	sb.WriteString("\n")
+	if shouldShowDeferredUntil(issue, displayStatus) {
+		sb.WriteString(indent)
+		sb.WriteString(labelStyle.Render("Until"))
+		sb.WriteString(valueStyle.Render(formatTimestamp(issue.DeferUntil)))
+		sb.WriteString("\n")
+	}
 	sb.WriteString(indentedDivider)
 	sb.WriteString("\n")
 
@@ -711,6 +724,14 @@ func (m Model) renderMetadataColumn() string {
 	return sb.String()
 }
 
+func shouldShowDeferredUntil(issue task.Issue, displayStatus task.Status) bool {
+	return displayStatus == task.StatusDeferred && !issue.DeferUntil.IsZero()
+}
+
+func formatTimestamp(t time.Time) string {
+	return t.Format("2006-01-02 15:04:05")
+}
+
 // renderDescription renders the issue description with markdown styling.
 func (m Model) renderDescription() string {
 	if m.issue.DescriptionText == "" {
@@ -786,7 +807,7 @@ func (m Model) renderDependencyItem(item DependencyItem, selected bool) string {
 		typeStyle.Render(typeText),
 		priorityStyle.Render(priorityText),
 		idStyle.Render("["+item.ID+"]"),
-		renderStatusIndicator(item.Issue.Status),
+		renderStatusIndicator(item.Issue.DisplayStatus(time.Now())),
 	)
 }
 

@@ -69,19 +69,22 @@ func TestValidateColumns_SecondColumnMissingQuery(t *testing.T) {
 
 func TestDefaultColumns(t *testing.T) {
 	cols := DefaultColumns()
-	require.Len(t, cols, 4)
+	require.Len(t, cols, 5)
 
 	require.Equal(t, "Blocked", cols[0].Name)
 	require.Equal(t, "status = open and blocked = true", cols[0].Query)
 
-	require.Equal(t, "Ready", cols[1].Name)
-	require.Equal(t, "status = open and ready = true", cols[1].Query)
+	require.Equal(t, "Deferred", cols[1].Name)
+	require.Equal(t, "status = deferred or status = open and defer_until > now", cols[1].Query)
 
-	require.Equal(t, "In Progress", cols[2].Name)
-	require.Equal(t, "status = in_progress", cols[2].Query)
+	require.Equal(t, "Ready", cols[2].Name)
+	require.Equal(t, "status = open and ready = true", cols[2].Query)
 
-	require.Equal(t, "Closed", cols[3].Name)
-	require.Equal(t, "status = closed", cols[3].Query)
+	require.Equal(t, "In Progress", cols[3].Name)
+	require.Equal(t, "status = in_progress", cols[3].Query)
+
+	require.Equal(t, "Closed", cols[4].Name)
+	require.Equal(t, "status = closed", cols[4].Query)
 }
 
 func TestDefaults(t *testing.T) {
@@ -89,20 +92,20 @@ func TestDefaults(t *testing.T) {
 
 	require.Len(t, cfg.Views, 1)
 	require.Equal(t, "Default", cfg.Views[0].Name)
-	require.Len(t, cfg.Views[0].Columns, 4)
+	require.Len(t, cfg.Views[0].Columns, 5)
 }
 
 func TestDefaultViews(t *testing.T) {
 	views := DefaultViews()
 	require.Len(t, views, 1)
 	require.Equal(t, "Default", views[0].Name)
-	require.Len(t, views[0].Columns, 4)
+	require.Len(t, views[0].Columns, 5)
 }
 
 func TestConfig_GetColumns(t *testing.T) {
 	cfg := Defaults()
 	cols := cfg.GetColumns()
-	require.Len(t, cols, 4)
+	require.Len(t, cols, 5)
 	require.Equal(t, "Blocked", cols[0].Name)
 }
 
@@ -110,7 +113,7 @@ func TestConfig_GetColumns_Empty(t *testing.T) {
 	cfg := Config{} // No views
 	cols := cfg.GetColumns()
 	// Should return defaults
-	require.Len(t, cols, 4)
+	require.Len(t, cols, 5)
 }
 
 func TestConfig_GetViews(t *testing.T) {
@@ -130,7 +133,7 @@ func TestConfig_GetViews_Empty(t *testing.T) {
 	// Should return defaults
 	require.Len(t, views, 1)
 	require.Equal(t, "Default", views[0].Name)
-	require.Len(t, views[0].Columns, 4)
+	require.Len(t, views[0].Columns, 5)
 }
 
 func TestConfig_SetColumns(t *testing.T) {
@@ -236,7 +239,7 @@ func TestConfig_GetColumnsForView_OutOfRange(t *testing.T) {
 
 	// Out of range should return defaults
 	cols := cfg.GetColumnsForView(5)
-	require.Len(t, cols, 4) // DefaultColumns has 4
+	require.Len(t, cols, 5) // DefaultColumns has 5
 }
 
 func TestConfig_SetColumnsForView(t *testing.T) {

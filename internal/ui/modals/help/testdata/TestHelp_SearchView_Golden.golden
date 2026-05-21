@@ -31,11 +31,13 @@
 │  mol_type    string                                                                                         │
 │  created     today, -7d                                                                                     │
 │  updated     today, -7d                                                                                     │
+│  defer_until date (now, today, yesterday, -7d)                                                              │
 │                                                                                                             │
 │                                                                                                             │
 │  Examples                                                                                                   │
 │  status = open and ready = true                                                                             │
 │  type in (bug, task) and status != closed                                                                   │
+│  status = open and defer_until > now                                                                        │
 │  created >= -7d order by priority                                                                           │
 │  type = epic expand down                                                                                    │
 │                                                                                                             │

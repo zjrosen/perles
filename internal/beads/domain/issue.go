@@ -70,6 +70,7 @@ type Issue struct {
 	CreatedBy          string    `json:"created_by,omitempty"`
 	UpdatedAt          time.Time `json:"updated_at"`
 	ClosedAt           time.Time `json:"closed_at"`
+	DeferUntil         time.Time `json:"defer_until,omitempty"`
 	CloseReason        string    `json:"close_reason,omitempty"`
 
 	MolType string `json:"mol_type,omitempty"`

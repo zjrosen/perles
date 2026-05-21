@@ -494,6 +494,11 @@ func DefaultColumns() []ColumnConfig {
 			Color: "#FF8787",
 		},
 		{
+			Name:  "Deferred",
+			Query: "status = deferred or status = open and defer_until > now",
+			Color: "#808000",
+		},
+		{
 			Name:  "Ready",
 			Query: "status = open and ready = true",
 			Color: "#73F59F",
@@ -1092,6 +1097,11 @@ views:
         type: bql
         query: "status = open and blocked = true"
         color: "#FF8787"
+
+      - name: Deferred
+        type: bql
+        query: "status = deferred or status = open and defer_until > now"
+        color: "#808000"
 
       - name: Ready
         type: bql

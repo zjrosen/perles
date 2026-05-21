@@ -108,6 +108,43 @@ func TestDetails_View_Ready(t *testing.T) {
 	require.Contains(t, view, "Test Issue", "expected view to contain title")
 }
 
+func TestDetails_View_ShowsDeferredUntilInSingleColumn(t *testing.T) {
+	deferUntil := time.Date(2099, time.May, 27, 0, 24, 59, 0, time.UTC)
+	issue := task.Issue{
+		ID:         "test-1",
+		TitleText:  "Deferred Issue",
+		Type:       task.TypeTask,
+		Priority:   task.PriorityMedium,
+		Status:     task.StatusOpen,
+		CreatedAt:  time.Date(2026, time.May, 20, 0, 0, 0, 0, time.UTC),
+		DeferUntil: deferUntil,
+	}
+	m := createTestModel(t, issue).SetSize(80, 30)
+
+	view := stripANSI(m.View())
+	require.Contains(t, view, "Status: Deferred")
+	require.Contains(t, view, "Deferred Until: 2099-05-27 00:24:59")
+	require.Less(t, strings.Index(view, "Status: Deferred"), strings.Index(view, "Deferred Until:"))
+}
+
+func TestDetails_View_ShowsDeferredUntilInMetadataColumn(t *testing.T) {
+	deferUntil := time.Date(2099, time.May, 27, 0, 24, 59, 0, time.UTC)
+	issue := task.Issue{
+		ID:         "test-1",
+		TitleText:  "Deferred Issue",
+		Type:       task.TypeTask,
+		Priority:   task.PriorityMedium,
+		Status:     task.StatusOpen,
+		CreatedAt:  time.Date(2026, time.May, 20, 0, 0, 0, 0, time.UTC),
+		DeferUntil: deferUntil,
+	}
+	m := createTestModel(t, issue).SetSize(120, 30)
+
+	view := stripANSI(m.View())
+	require.Contains(t, view, "Status    Deferred")
+	require.Contains(t, view, "Until     2099-05-27 00:24:59")
+}
+
 func TestDetails_View_WithDescription(t *testing.T) {
 	issue := task.Issue{
 		ID:              "test-1",

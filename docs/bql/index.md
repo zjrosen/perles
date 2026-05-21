@@ -52,7 +52,7 @@ type = epic expand down depth *
 | `type` | Issue type | `bug`, `feature`, `task`, `epic`, `chore`, `milestone`, `story`, `spike` |
 | `priority` | Priority level | `P0`, `P1`, `P2`, `P3`, `P4` |
 | `blocked` | Has blockers | `true`, `false` |
-| `ready` | Ready to work | `true`, `false` |
+| `ready` | Open, unblocked, and not future-deferred | `true`, `false` |
 | `pinned` | Is pinned | `true`, `false` |
 | `is_template` | Is a template | `true`, `false` |
 | `label` | Issue labels | any label string |
@@ -67,6 +67,7 @@ type = epic expand down depth *
 | `mol_type` | Molecule type | string |
 | `created` | Creation date | `today`, `yesterday`, `-7d`, `-3m` |
 | `updated` | Last update | `today`, `-24h` |
+| `defer_until` | Deferred-until date | `now`, `today`, `-7d` |
 
 ### Metadata Fields
 
@@ -168,6 +169,7 @@ updated >= -24h         # Last 24 hours
 created >= -3m          # Last 3 months
 
 # Named dates
+defer_until > now
 created >= today
 created >= yesterday
 ```

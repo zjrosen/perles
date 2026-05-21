@@ -279,6 +279,8 @@ func (b *SQLBuilder) dateToSQL(dateStr string) string {
 // dateToSQLSQLite generates SQLite date expressions.
 func (b *SQLBuilder) dateToSQLSQLite(dateStr string) string {
 	switch dateStr {
+	case "now":
+		return "datetime('now')"
 	case "today":
 		return "date('now')"
 	case "yesterday":
@@ -308,6 +310,8 @@ func (b *SQLBuilder) dateToSQLSQLite(dateStr string) string {
 // dateToSQLMySQL generates MySQL/Dolt date expressions.
 func (b *SQLBuilder) dateToSQLMySQL(dateStr string) string {
 	switch dateStr {
+	case "now":
+		return "NOW()"
 	case "today":
 		return "CURDATE()"
 	case "yesterday":
@@ -369,26 +373,43 @@ func (b *SQLBuilder) buildBlockedSQL(isBlocked bool) string {
 }
 
 // buildReadySQL returns the SQL fragment for the ready field.
-// SQLite uses the ready_issues view; Dolt inlines the SQL to bypass views.
+// Ready means open, not blocked, and not deferred into the future.
+// This is inlined instead of using ready_issues because older views may not
+// include defer_until semantics.
 // Backends can override via WithReadySQL.
 func (b *SQLBuilder) buildReadySQL(isReady bool) string {
 	if b.readySQL != nil {
 		return b.readySQL(isReady)
 	}
-	if b.dialect == appbeads.DialectMySQL {
-		readySubquery := `SELECT ri.id FROM issues ri
-WHERE ri.status = 'open'
-AND ri.id NOT IN (` + doltBlockedSubquery + `)`
-		if isReady {
-			return "i.id IN (" + readySubquery + ")"
-		}
-		return "i.id NOT IN (" + readySubquery + ")"
-	}
-	// SQLite: ready_issues view works fine
+
+	readyExpr := b.readyExpression("i")
 	if isReady {
-		return "i.id IN (SELECT id FROM ready_issues)"
+		return readyExpr
 	}
-	return "i.id NOT IN (SELECT id FROM ready_issues)"
+	return "NOT (" + readyExpr + ")"
+}
+
+func (b *SQLBuilder) readyExpression(alias string) string {
+	return fmt.Sprintf("%s.status = 'open' AND %s AND %s.id NOT IN (%s)",
+		alias,
+		b.notFutureDeferredExpression(alias),
+		alias,
+		b.blockedIDsSubquery(),
+	)
+}
+
+func (b *SQLBuilder) notFutureDeferredExpression(alias string) string {
+	if b.dialect == appbeads.DialectMySQL {
+		return fmt.Sprintf("(%s.defer_until IS NULL OR %s.defer_until <= CURRENT_TIMESTAMP)", alias, alias)
+	}
+	return fmt.Sprintf("(%s.defer_until IS NULL OR datetime(%s.defer_until) <= datetime('now'))", alias, alias)
+}
+
+func (b *SQLBuilder) blockedIDsSubquery() string {
+	if b.dialect == appbeads.DialectMySQL {
+		return doltBlockedSubquery
+	}
+	return "SELECT issue_id FROM blocked_issues_cache"
 }
 
 // buildOrderBy builds the ORDER BY clause.
