@@ -304,12 +304,12 @@ func (cs *CoordinatorServer) registerTools() {
 					Items: &PropertySchema{
 						Type: "object",
 						Properties: map[string]*PropertySchema{
-							"id":      {Type: "string", Description: "Worker ID (e.g., worker-1)"},
-							"status":  {Type: "string", Description: "Current status (Pending, Ready, Working, Paused)"},
-							"phase":   {Type: "string", Description: "Current phase (Idle, Implementing, Reviewing, etc.)"},
-							"task_id": {Type: "string", Description: "Assigned task ID if any"},
+							"worker_id": {Type: "string", Description: "Worker ID (e.g., worker-1)"},
+							"status":    {Type: "string", Description: "Current status (Pending, Ready, Working, Paused)"},
+							"phase":     {Type: "string", Description: "Current phase (Idle, Implementing, Reviewing, etc.)"},
+							"task_id":   {Type: "string", Description: "Assigned task ID if any"},
 						},
-						Required: []string{"id", "status"},
+						Required: []string{"worker_id", "status"},
 					},
 				},
 				"ready_workers": {

@@ -455,6 +455,57 @@ func TestQueryWorkerState_WithWorkerAndPhase(t *testing.T) {
 	require.Equal(t, "perles-abc.1", worker.TaskID, "TaskID mismatch")
 }
 
+// TestQueryWorkerState_OutputMatchesSchema verifies the JSON response field names
+// match the OutputSchema declaration. This prevents regressions where the struct
+// uses one field name (e.g. "worker_id") but the schema declares another (e.g. "id").
+func TestQueryWorkerState_OutputMatchesSchema(t *testing.T) {
+	tcs := NewTestCoordinatorServer(t)
+	defer tcs.Close()
+
+	// Add a worker so the response is non-empty
+	_ = tcs.ProcessRepo.Save(&repository.Process{
+		ID:     "worker-1",
+		Role:   repository.RoleWorker,
+		Status: repository.StatusWorking,
+		Phase:  ptr(events.ProcessPhaseImplementing),
+		TaskID: "perles-abc.1",
+	})
+
+	handler := tcs.handlers["query_worker_state"]
+	result, err := handler(context.Background(), json.RawMessage(`{}`))
+	require.NoError(t, err)
+
+	// Parse the raw JSON response into an untyped map so we see the actual
+	// field names produced by json.Marshal, not what a Go struct expects.
+	var raw map[string]json.RawMessage
+	err = json.Unmarshal([]byte(result.Content[0].Text), &raw)
+	require.NoError(t, err)
+
+	var workers []map[string]json.RawMessage
+	err = json.Unmarshal(raw["workers"], &workers)
+	require.NoError(t, err)
+	require.NotEmpty(t, workers, "Need at least one worker to validate field names")
+
+	worker := workers[0]
+
+	// Verify the OutputSchema required fields exist in the actual JSON.
+	tool := tcs.tools["query_worker_state"]
+	require.NotNil(t, tool.OutputSchema, "OutputSchema should be defined")
+	workerItems := tool.OutputSchema.Properties["workers"].Items
+	require.NotNil(t, workerItems, "workers items schema should be defined")
+
+	for _, reqField := range workerItems.Required {
+		_, exists := worker[reqField]
+		require.True(t, exists, "OutputSchema requires field %q but it is missing from the JSON response; the struct json tag and the schema must match", reqField)
+	}
+
+	// Also verify every property declared in the schema is present
+	for fieldName := range workerItems.Properties {
+		_, exists := worker[fieldName]
+		require.True(t, exists, "OutputSchema declares property %q but it is missing from the JSON response", fieldName)
+	}
+}
+
 // TestQueryWorkerState_FilterByWorkerID verifies query_worker_state filters by worker_id.
 // This test uses the v2 adapter since handleQueryWorkerState delegates to it.
 func TestQueryWorkerState_FilterByWorkerID(t *testing.T) {

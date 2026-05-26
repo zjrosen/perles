@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/zjrosen/perles/internal/orchestration/fabric"
 	"github.com/zjrosen/perles/internal/orchestration/fabric/domain"
@@ -259,16 +260,34 @@ func (h *Handlers) HandleAck(_ context.Context, rawArgs json.RawMessage) (*ToolC
 		return nil, fmt.Errorf("message_ids is required")
 	}
 
-	if err := h.service.Ack(h.agentID, args.MessageIDs...); err != nil {
+	// Validate that all message IDs refer to existing threads.
+	var invalid []string
+	var valid []string
+	for _, id := range args.MessageIDs {
+		if _, err := h.service.GetThread(id); err != nil {
+			invalid = append(invalid, id)
+		} else {
+			valid = append(valid, id)
+		}
+	}
+
+	if len(invalid) > 0 {
+		return nil, fmt.Errorf(
+			"unknown message_ids: [%s] — these IDs do not match any existing messages; verify the IDs from fabric_inbox or fabric_history before acking",
+			strings.Join(invalid, ", "),
+		)
+	}
+
+	if err := h.service.Ack(h.agentID, valid...); err != nil {
 		return nil, fmt.Errorf("ack: %w", err)
 	}
 
 	response := AckResponse{
-		AckedCount: len(args.MessageIDs),
+		AckedCount: len(valid),
 	}
 
 	return types.StructuredResult(
-		fmt.Sprintf("Acknowledged %d messages", len(args.MessageIDs)),
+		fmt.Sprintf("Acknowledged %d messages", len(valid)),
 		response,
 	), nil
 }
@@ -441,6 +460,11 @@ func (h *Handlers) HandleHistory(_ context.Context, rawArgs json.RawMessage) (*T
 		_, unackedExists := ackedIDs[msg.ID]
 		isAcked := !unackedExists
 
+		// Filter out acked messages when include_acked is false.
+		if args.IncludeAcked != nil && !*args.IncludeAcked && isAcked {
+			continue
+		}
+
 		response.Messages = append(response.Messages, HistoryMessage{
 			ID:          msg.ID,
 			Seq:         msg.Seq,
@@ -454,6 +478,8 @@ func (h *Handlers) HandleHistory(_ context.Context, rawArgs json.RawMessage) (*T
 			HasArtifact: len(artifacts) > 0,
 		})
 	}
+
+	response.TotalCount = len(response.Messages)
 
 	return types.StructuredResult(
 		fmt.Sprintf("Retrieved %d messages from #%s", len(response.Messages), args.Channel),

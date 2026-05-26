@@ -293,6 +293,143 @@ func TestHandlers_Ack(t *testing.T) {
 	require.Equal(t, 0, inboxResp.TotalUnacked)
 }
 
+func TestHandlers_Ack_RejectsNonexistentMessageIDs(t *testing.T) {
+	h, svc := newTestHandlers(t)
+
+	// Create one real message
+	msg, err := svc.SendMessage(fabric.SendMessageInput{
+		ChannelSlug: domain.SlugTasks,
+		Content:     "Real message",
+		CreatedBy:   "WORKER.1",
+	})
+	require.NoError(t, err)
+
+	t.Run("all IDs nonexistent", func(t *testing.T) {
+		args := ackArgs{
+			MessageIDs: []string{"fake-id-1", "fake-id-2"},
+		}
+		argsJSON, _ := json.Marshal(args)
+
+		_, err := h.HandleAck(context.Background(), argsJSON)
+		require.Error(t, err, "Should reject nonexistent message IDs")
+		require.Contains(t, err.Error(), "fake-id-1")
+		require.Contains(t, err.Error(), "fake-id-2")
+		require.Contains(t, err.Error(), "unknown message_ids")
+	})
+
+	t.Run("mix of valid and nonexistent", func(t *testing.T) {
+		args := ackArgs{
+			MessageIDs: []string{msg.ID, "does-not-exist"},
+		}
+		argsJSON, _ := json.Marshal(args)
+
+		_, err := h.HandleAck(context.Background(), argsJSON)
+		require.Error(t, err, "Should reject when any ID is nonexistent")
+		require.Contains(t, err.Error(), "does-not-exist")
+		require.NotContains(t, err.Error(), msg.ID, "Valid ID should not appear in error")
+	})
+
+	t.Run("valid IDs still succeed", func(t *testing.T) {
+		args := ackArgs{
+			MessageIDs: []string{msg.ID},
+		}
+		argsJSON, _ := json.Marshal(args)
+
+		result, err := h.HandleAck(context.Background(), argsJSON)
+		require.NoError(t, err)
+		require.NotNil(t, result)
+
+		var response AckResponse
+		responseBytes, _ := json.Marshal(result.StructuredContent)
+		require.NoError(t, json.Unmarshal(responseBytes, &response))
+		require.Equal(t, 1, response.AckedCount)
+	})
+}
+
+func TestHandlers_History_IncludeAckedFalseFiltersAckedMessages(t *testing.T) {
+	h, svc := newTestHandlers(t)
+
+	// Subscribe so we can track ack state
+	_, err := svc.Subscribe(domain.SlugTasks, "COORDINATOR", domain.ModeAll)
+	require.NoError(t, err)
+
+	// Create 3 messages
+	msg1, err := svc.SendMessage(fabric.SendMessageInput{
+		ChannelSlug: domain.SlugTasks,
+		Content:     "Message 1",
+		CreatedBy:   "WORKER.1",
+	})
+	require.NoError(t, err)
+
+	_, err = svc.SendMessage(fabric.SendMessageInput{
+		ChannelSlug: domain.SlugTasks,
+		Content:     "Message 2",
+		CreatedBy:   "WORKER.2",
+	})
+	require.NoError(t, err)
+
+	msg3, err := svc.SendMessage(fabric.SendMessageInput{
+		ChannelSlug: domain.SlugTasks,
+		Content:     "Message 3",
+		CreatedBy:   "WORKER.3",
+	})
+	require.NoError(t, err)
+
+	// Ack messages 1 and 3, leave 2 unacked
+	err = svc.Ack("COORDINATOR", msg1.ID, msg3.ID)
+	require.NoError(t, err)
+
+	t.Run("include_acked=false excludes acked messages", func(t *testing.T) {
+		includeAcked := false
+		args := historyArgs{
+			Channel:      domain.SlugTasks,
+			Limit:        10,
+			IncludeAcked: &includeAcked,
+		}
+		argsJSON, _ := json.Marshal(args)
+
+		result, err := h.HandleHistory(context.Background(), argsJSON)
+		require.NoError(t, err)
+
+		response := decodeStructuredContent[HistoryResponse](t, result)
+		require.Len(t, response.Messages, 1, "Only unacked message should be returned")
+		require.Equal(t, "Message 2", response.Messages[0].Content)
+		require.False(t, response.Messages[0].IsAcked)
+		require.Equal(t, 1, response.TotalCount, "TotalCount should match filtered count")
+	})
+
+	t.Run("include_acked=true returns all messages", func(t *testing.T) {
+		includeAcked := true
+		args := historyArgs{
+			Channel:      domain.SlugTasks,
+			Limit:        10,
+			IncludeAcked: &includeAcked,
+		}
+		argsJSON, _ := json.Marshal(args)
+
+		result, err := h.HandleHistory(context.Background(), argsJSON)
+		require.NoError(t, err)
+
+		response := decodeStructuredContent[HistoryResponse](t, result)
+		require.Len(t, response.Messages, 3, "All messages should be returned")
+		require.Equal(t, 3, response.TotalCount)
+	})
+
+	t.Run("include_acked omitted returns all messages (default)", func(t *testing.T) {
+		args := historyArgs{
+			Channel: domain.SlugTasks,
+			Limit:   10,
+		}
+		argsJSON, _ := json.Marshal(args)
+
+		result, err := h.HandleHistory(context.Background(), argsJSON)
+		require.NoError(t, err)
+
+		response := decodeStructuredContent[HistoryResponse](t, result)
+		require.Len(t, response.Messages, 3, "All messages should be returned when flag is omitted")
+	})
+}
+
 func TestHandlers_Subscribe(t *testing.T) {
 	h, _ := newTestHandlers(t)
 
