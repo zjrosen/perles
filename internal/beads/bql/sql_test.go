@@ -545,6 +545,21 @@ func TestSQLBuilder_MySQLDialect_BlockedTrue(t *testing.T) {
 	// Dolt inlines the blocked_issues view SQL to bypass a Dolt server bug with views
 	require.Contains(t, where, "i.id IN (SELECT bi.id FROM issues bi")
 	require.Contains(t, where, "d.type = 'blocks'")
+	require.Contains(t, where, "blocker.id = d.depends_on_issue_id")
+	require.NotContains(t, where, "d.depends_on_id")
+	require.Empty(t, params)
+}
+
+func TestSQLBuilder_MySQLDialect_BlockedTrueLegacyDependencyTargetColumn(t *testing.T) {
+	parser := NewParser("blocked = true")
+	query, err := parser.Parse()
+	require.NoError(t, err)
+
+	builder := NewSQLBuilder(query, appbeads.DialectMySQL, WithDependencyTargetColumn(legacyDependencyTargetColumn))
+	where, _, params := builder.Build()
+
+	require.Contains(t, where, "blocker.id = d.depends_on_id")
+	require.NotContains(t, where, "d.depends_on_issue_id")
 	require.Empty(t, params)
 }
 

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	appbeads "github.com/zjrosen/perles/internal/beads/application"
@@ -34,6 +35,9 @@ type Executor struct {
 	dialect       appbeads.SQLDialect
 	cacheManager  cachemanager.CacheManager[string, []beads.Issue]
 	depGraphCache cachemanager.CacheManager[string, *DependencyGraph]
+
+	depTargetMu     sync.Mutex
+	depTargetColumn string
 }
 
 // depGraphCacheKey is the static key for caching the dependency graph.
@@ -64,11 +68,11 @@ type DependencyEdge struct {
 }
 
 // DependencyGraph represents the in-memory dependency graph with bidirectional edges.
-// Forward edges go from issue_id -> depends_on_id (e.g., child -> parent, blocked -> blocker)
-// Reverse edges go from depends_on_id -> issue_id (e.g., parent -> children, blocker -> blocked)
+// Forward edges go from issue_id -> target issue (e.g., child -> parent, blocked -> blocker)
+// Reverse edges go from target issue -> issue_id (e.g., parent -> children, blocker -> blocked)
 type DependencyGraph struct {
-	Forward map[string][]DependencyEdge // issue_id -> edges pointing to depends_on_id
-	Reverse map[string][]DependencyEdge // depends_on_id -> edges pointing from issue_id
+	Forward map[string][]DependencyEdge // issue_id -> target issue edges
+	Reverse map[string][]DependencyEdge // target issue -> dependent issue edges
 }
 
 // Execute runs a BQL query and returns matching issues.
@@ -197,6 +201,47 @@ func (e *Executor) Execute(input string) ([]beads.Issue, error) {
 	return issues, nil
 }
 
+func (e *Executor) resolveDependencyTargetColumn(q querier) (string, error) {
+	if e.dialect != appbeads.DialectMySQL {
+		return legacyDependencyTargetColumn, nil
+	}
+
+	e.depTargetMu.Lock()
+	defer e.depTargetMu.Unlock()
+	if e.depTargetColumn != "" {
+		return e.depTargetColumn, nil
+	}
+
+	rows, err := q.Query("SELECT * FROM dependencies LIMIT 0")
+	if err != nil {
+		return "", fmt.Errorf("inspect dependencies schema: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	columns, err := rows.Columns()
+	if err != nil {
+		return "", fmt.Errorf("read dependencies columns: %w", err)
+	}
+
+	hasLegacyTarget := false
+	for _, column := range columns {
+		switch column {
+		case issueDependencyTargetColumn:
+			e.depTargetColumn = issueDependencyTargetColumn
+			return e.depTargetColumn, nil
+		case legacyDependencyTargetColumn:
+			hasLegacyTarget = true
+		}
+	}
+	if hasLegacyTarget {
+		e.depTargetColumn = legacyDependencyTargetColumn
+		return e.depTargetColumn, nil
+	}
+
+	return "", fmt.Errorf("dependencies table has no supported target column (%s or %s)",
+		issueDependencyTargetColumn, legacyDependencyTargetColumn)
+}
+
 // IssueDeps holds all dependency data for an issue, grouped by type.
 type IssueDeps struct {
 	ParentID       string   // Single parent (parent-child where this is child)
@@ -228,7 +273,11 @@ func (e *Executor) softDeleteFilter(alias string) string {
 // 4. Batch load comment counts for all result IDs
 func (e *Executor) executeBaseQuery(query *Query, q querier) ([]beads.Issue, error) {
 	// Build SQL
-	builder := NewSQLBuilder(query, e.dialect)
+	dependencyTarget, err := e.resolveDependencyTargetColumn(q)
+	if err != nil {
+		return nil, err
+	}
+	builder := NewSQLBuilder(query, e.dialect, WithDependencyTargetColumn(dependencyTarget))
 	whereClause, orderBy, params := builder.Build()
 
 	// Construct main query WITHOUT dependency subqueries
@@ -458,20 +507,25 @@ func (e *Executor) loadDependenciesForIssues(ids []string, q querier) (map[strin
 	// Single query to get all dependencies for all issues (both directions)
 	// Filter out deleted issues on the related side
 	softDelete := e.softDeleteFilter("i")
-	//nolint:gosec // G201: inClause contains only "?" placeholders, not user input
+	dependencyTargetColumn, err := e.resolveDependencyTargetColumn(q)
+	if err != nil {
+		return nil, err
+	}
+	dependencyTarget := qualifiedDependencyTargetColumn("d", dependencyTargetColumn)
+	//nolint:gosec // G201: inClause contains only "?" placeholders and dependencyTarget is dialect-selected.
 	query := fmt.Sprintf(`
-		SELECT d.issue_id, d.depends_on_id, d.type
+		SELECT d.issue_id, %s, d.type
 		FROM dependencies d
-		JOIN issues i ON d.depends_on_id = i.id
+		JOIN issues i ON %s = i.id
 		WHERE d.issue_id IN (%s)
 		  AND %s
 		UNION
-		SELECT d.issue_id, d.depends_on_id, d.type
+		SELECT d.issue_id, %s, d.type
 		FROM dependencies d
 		JOIN issues i ON d.issue_id = i.id
-		WHERE d.depends_on_id IN (%s)
+		WHERE %s IN (%s)
 		  AND %s
-	`, inClause, softDelete, inClause, softDelete)
+	`, dependencyTarget, dependencyTarget, inClause, softDelete, dependencyTarget, dependencyTarget, inClause, softDelete)
 
 	rows, err := q.Query(query, params...)
 	if err != nil {
@@ -768,15 +822,20 @@ func (e *Executor) loadDependencyGraph(q querier) (*DependencyGraph, error) {
 func (e *Executor) loadDependencyGraphFromDB(q querier) (*DependencyGraph, error) {
 	log.Debug(log.CatBQL, "Loading dependency graph from database")
 
-	//nolint:gosec // G201: softDeleteFilter returns hardcoded SQL fragments with table alias, not user input
+	dependencyTargetColumn, err := e.resolveDependencyTargetColumn(q)
+	if err != nil {
+		return nil, err
+	}
+	dependencyTarget := qualifiedDependencyTargetColumn("d", dependencyTargetColumn)
+	//nolint:gosec // G201: dependencyTarget and softDeleteFilter return hardcoded SQL fragments.
 	query := fmt.Sprintf(`
-		SELECT d.issue_id, d.depends_on_id, d.type
+		SELECT d.issue_id, %s, d.type
 		FROM dependencies d
 		JOIN issues i1 ON d.issue_id = i1.id
-		JOIN issues i2 ON d.depends_on_id = i2.id
+		JOIN issues i2 ON %s = i2.id
 		WHERE %s
 		  AND %s
-	`, e.softDeleteFilter("i1"), e.softDeleteFilter("i2"))
+	`, dependencyTarget, dependencyTarget, e.softDeleteFilter("i1"), e.softDeleteFilter("i2"))
 
 	rows, err := q.Query(query)
 	if err != nil {
@@ -797,13 +856,13 @@ func (e *Executor) loadDependencyGraphFromDB(q querier) (*DependencyGraph, error
 			return nil, fmt.Errorf("scan dependency: %w", err)
 		}
 
-		// Forward: issue_id -> depends_on_id
+		// Forward: issue_id -> target issue
 		graph.Forward[issueID] = append(graph.Forward[issueID], DependencyEdge{
 			TargetID: dependsOnID,
 			Type:     depType,
 		})
 
-		// Reverse: depends_on_id -> issue_id
+		// Reverse: target issue -> issue_id
 		graph.Reverse[dependsOnID] = append(graph.Reverse[dependsOnID], DependencyEdge{
 			TargetID: issueID,
 			Type:     depType,

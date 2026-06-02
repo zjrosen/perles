@@ -11,6 +11,22 @@ func jsonMetadataPath(key string) string {
 	return "$." + key
 }
 
+const (
+	legacyDependencyTargetColumn = "depends_on_id"
+	issueDependencyTargetColumn  = "depends_on_issue_id"
+)
+
+func defaultDependencyTargetColumn(dialect appbeads.SQLDialect) string {
+	if dialect == appbeads.DialectMySQL {
+		return issueDependencyTargetColumn
+	}
+	return legacyDependencyTargetColumn
+}
+
+func qualifiedDependencyTargetColumn(alias, column string) string {
+	return alias + "." + column
+}
+
 // SQLBuilder converts a BQL AST to SQL.
 type SQLBuilder struct {
 	query      *Query
@@ -18,6 +34,7 @@ type SQLBuilder struct {
 	dialect    appbeads.SQLDialect
 	readySQL   func(isReady bool) string   // optional override for ready field SQL
 	blockedSQL func(isBlocked bool) string // optional override for blocked field SQL
+	depTarget  string                      // dependencies target column, e.g. depends_on_issue_id
 }
 
 // SQLBuilderOption configures a SQLBuilder.
@@ -35,6 +52,11 @@ func WithBlockedSQL(fn func(isBlocked bool) string) SQLBuilderOption {
 	return func(b *SQLBuilder) { b.blockedSQL = fn }
 }
 
+// WithDependencyTargetColumn overrides the dependencies table target column.
+func WithDependencyTargetColumn(column string) SQLBuilderOption {
+	return func(b *SQLBuilder) { b.depTarget = column }
+}
+
 // NewSQLBuilder creates a builder for the query and dialect.
 func NewSQLBuilder(query *Query, dialect appbeads.SQLDialect, opts ...SQLBuilderOption) *SQLBuilder {
 	b := &SQLBuilder{query: query, dialect: dialect}
@@ -42,6 +64,13 @@ func NewSQLBuilder(query *Query, dialect appbeads.SQLDialect, opts ...SQLBuilder
 		opt(b)
 	}
 	return b
+}
+
+func (b *SQLBuilder) dependencyTargetColumn() string {
+	if b.depTarget != "" {
+		return b.depTarget
+	}
+	return defaultDependencyTargetColumn(b.dialect)
 }
 
 // Build generates the SQL WHERE clause and ORDER BY.
@@ -337,20 +366,24 @@ func (b *SQLBuilder) dateToSQLMySQL(dateStr string) string {
 	}
 }
 
-// doltBlockedSubquery is the inlined SQL for finding blocked issues in Dolt.
+// doltBlockedSubquery returns the inlined SQL for finding blocked issues in Dolt.
 // This bypasses the blocked_issues view to work around a Dolt server bug where
 // views return stale field index errors after client reconnection.
-const doltBlockedSubquery = `SELECT bi.id FROM issues bi
+func (b *SQLBuilder) doltBlockedSubquery() string {
+	dependencyTarget := qualifiedDependencyTargetColumn("d", b.dependencyTargetColumn())
+
+	return `SELECT bi.id FROM issues bi
 WHERE bi.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked')
 AND EXISTS (
   SELECT 1 FROM dependencies d
   WHERE d.issue_id = bi.id AND d.type = 'blocks'
   AND EXISTS (
     SELECT 1 FROM issues blocker
-    WHERE blocker.id = d.depends_on_id
+    WHERE blocker.id = ` + dependencyTarget + `
     AND blocker.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked')
   )
 )`
+}
 
 // buildBlockedSQL returns the SQL fragment for the blocked field.
 // SQLite uses the blocked_issues_cache table; Dolt inlines the view SQL directly.
@@ -360,10 +393,11 @@ func (b *SQLBuilder) buildBlockedSQL(isBlocked bool) string {
 		return b.blockedSQL(isBlocked)
 	}
 	if b.dialect == appbeads.DialectMySQL {
+		blockedSubquery := b.doltBlockedSubquery()
 		if isBlocked {
-			return "i.id IN (" + doltBlockedSubquery + ")"
+			return "i.id IN (" + blockedSubquery + ")"
 		}
-		return "i.id NOT IN (" + doltBlockedSubquery + ")"
+		return "i.id NOT IN (" + blockedSubquery + ")"
 	}
 	// SQLite: blocked_issues_cache is a table with issue_id column
 	if isBlocked {
@@ -407,7 +441,7 @@ func (b *SQLBuilder) notFutureDeferredExpression(alias string) string {
 
 func (b *SQLBuilder) blockedIDsSubquery() string {
 	if b.dialect == appbeads.DialectMySQL {
-		return doltBlockedSubquery
+		return b.doltBlockedSubquery()
 	}
 	return "SELECT issue_id FROM blocked_issues_cache"
 }

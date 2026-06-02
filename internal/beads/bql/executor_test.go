@@ -2,6 +2,7 @@ package bql
 
 import (
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
@@ -2703,8 +2704,9 @@ func TestBatchLoading_IssuesWithNoComments(t *testing.T) {
 // We use SQLite as the test engine but with a Dolt-like schema and DialectMySQL
 // on the executor. If any query still references deleted_at, it will error.
 
-// doltTestSchema mirrors the Dolt beads schema (post-tombstone removal).
-// It is identical to testutil.Schema but without the deleted_at column.
+// doltTestSchema mirrors the current Dolt beads schema for the columns Perles reads.
+// It is identical to testutil.Schema but without the deleted_at column and with
+// the current typed issue dependency target column.
 const doltTestSchema = `
 CREATE TABLE issues (
 	id TEXT PRIMARY KEY,
@@ -2740,10 +2742,10 @@ CREATE TABLE labels (
 CREATE TABLE dependencies (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	issue_id TEXT NOT NULL,
-	depends_on_id TEXT NOT NULL,
+	depends_on_issue_id TEXT NOT NULL,
 	type TEXT NOT NULL DEFAULT 'blocks',
 	FOREIGN KEY (issue_id) REFERENCES issues(id),
-	FOREIGN KEY (depends_on_id) REFERENCES issues(id)
+	FOREIGN KEY (depends_on_issue_id) REFERENCES issues(id)
 );
 
 CREATE TABLE comments (
@@ -2769,7 +2771,7 @@ WHERE i.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked')
       AND d.type = 'blocks'
       AND EXISTS (
         SELECT 1 FROM issues blocker
-        WHERE blocker.id = d.depends_on_id
+        WHERE blocker.id = d.depends_on_issue_id
           AND blocker.status IN ('open', 'in_progress', 'blocked', 'deferred', 'hooked')
       )
   );
@@ -2785,11 +2787,21 @@ WHERE i.status = 'open'
 // setupDoltDB creates an in-memory SQLite database with the Dolt schema (no deleted_at).
 func setupDoltDB(t *testing.T) *sql.DB {
 	t.Helper()
+	return setupDoltDBWithSchema(t, doltTestSchema)
+}
+
+func setupDoltDBWithSchema(t *testing.T, schema string) *sql.DB {
+	t.Helper()
 	db, err := sql.Open("sqlite3", ":memory:")
 	require.NoError(t, err)
-	_, err = db.Exec(doltTestSchema)
+	_, err = db.Exec(schema)
 	require.NoError(t, err)
 	return db
+}
+
+func setupLegacyDoltDB(t *testing.T) *sql.DB {
+	t.Helper()
+	return setupDoltDBWithSchema(t, strings.ReplaceAll(doltTestSchema, issueDependencyTargetColumn, legacyDependencyTargetColumn))
 }
 
 // insertDoltIssue inserts an issue into a Dolt-schema DB (no deleted_at column).
@@ -2816,6 +2828,15 @@ func deferDoltIssue(t *testing.T, db *sql.DB, id string, deferUntil time.Time) {
 
 // insertDoltDep inserts a dependency into a Dolt-schema DB.
 func insertDoltDep(t *testing.T, db *sql.DB, issueID, dependsOnID, depType string) {
+	t.Helper()
+	_, err := db.Exec(
+		`INSERT INTO dependencies (issue_id, depends_on_issue_id, type) VALUES (?, ?, ?)`,
+		issueID, dependsOnID, depType,
+	)
+	require.NoError(t, err)
+}
+
+func insertLegacyDoltDep(t *testing.T, db *sql.DB, issueID, dependsOnID, depType string) {
 	t.Helper()
 	_, err := db.Exec(
 		`INSERT INTO dependencies (issue_id, depends_on_id, type) VALUES (?, ?, ?)`,
@@ -3061,6 +3082,29 @@ func TestDoltDialect_BlockedQuery(t *testing.T) {
 	require.True(t, ids["blocker-1"])
 	require.True(t, ids["free-1"])
 	require.False(t, ids["blocked-1"])
+}
+
+func TestDoltDialect_LegacyDependencyTargetColumn(t *testing.T) {
+	db := setupLegacyDoltDB(t)
+	defer func() { _ = db.Close() }()
+
+	insertDoltIssue(t, db, "epic-1", "Epic", "open", "epic", 1)
+	insertDoltIssue(t, db, "blocker-1", "Blocker", "open", "task", 1)
+	insertDoltIssue(t, db, "task-1", "Task", "open", "task", 2)
+	insertLegacyDoltDep(t, db, "task-1", "epic-1", "parent-child")
+	insertLegacyDoltDep(t, db, "task-1", "blocker-1", "blocks")
+
+	executor := newDoltExecutor(t, db)
+
+	issues, err := executor.Execute("id = epic-1")
+	require.NoError(t, err)
+	require.Len(t, issues, 1)
+	require.Equal(t, []string{"task-1"}, issues[0].Children)
+
+	issues, err = executor.Execute("blocked = true")
+	require.NoError(t, err)
+	require.Len(t, issues, 1)
+	require.Equal(t, "task-1", issues[0].ID)
 }
 
 func TestDoltDialect_ReadyQuery(t *testing.T) {
