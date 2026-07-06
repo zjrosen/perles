@@ -11,7 +11,7 @@ type Config struct {
 	WorkDir         string
 	BeadsDir        string // Path to beads database directory for BEADS_DIR env var
 	Prompt          string // Includes prefixed system prompt
-	Model           string // e.g., "anthropic/claude-opus-4-6"
+	Model           string // e.g., "anthropic/claude-opus-4-8"
 	SessionID       string // For --session to continue existing session
 	SkipPermissions bool   // Future: if OpenCode supports --yolo equivalent
 	Timeout         time.Duration

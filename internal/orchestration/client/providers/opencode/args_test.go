@@ -25,10 +25,10 @@ func TestBuildArgs(t *testing.T) {
 			name: "new session with model includes --model flag",
 			cfg: Config{
 				Prompt: "hello world",
-				Model:  "anthropic/claude-opus-4-6",
+				Model:  "anthropic/claude-opus-4-8",
 			},
 			isResume: false,
-			want:     []string{"run", "--format", "json", "--model", "anthropic/claude-opus-4-6", "--", "hello world"},
+			want:     []string{"run", "--format", "json", "--model", "anthropic/claude-opus-4-8", "--", "hello world"},
 		},
 		{
 			name: "resume session with session ID includes --session flag",

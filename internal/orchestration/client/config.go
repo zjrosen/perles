@@ -64,7 +64,7 @@ const (
 	// ExtCodexSandbox specifies the sandbox mode (string: "read-only", "workspace-write", "danger-full-access").
 	ExtCodexSandbox = "codex.sandbox"
 
-	// ExtGeminiModel specifies the Gemini model (string: "gemini-3-pro-preview", "gemini-2.5-flash").
+	// ExtGeminiModel specifies the Gemini model (string: "gemini-3.1-pro-preview", "gemini-3.5-flash").
 	ExtGeminiModel = "gemini.model"
 
 	// ExtOpenCodeModel specifies the OpenCode model (string: "opencode/glm-4.7-free").
@@ -116,27 +116,27 @@ func (c *Config) ClaudeEnv() map[string]string {
 	return nil
 }
 
-// CodexModel returns the Codex model from Extensions, or "gpt-5.4" as default.
+// CodexModel returns the Codex model from Extensions, or "gpt-5.5" as default.
 func (c *Config) CodexModel() string {
 	if c.Extensions == nil {
-		return "gpt-5.4"
+		return "gpt-5.5"
 	}
 	if v, ok := c.Extensions[ExtCodexModel].(string); ok && v != "" {
 		return v
 	}
-	return "gpt-5.4"
+	return "gpt-5.5"
 }
 
-// GeminiModel returns the Gemini model from Extensions, or "gemini-3-pro-preview" as default.
+// GeminiModel returns the Gemini model from Extensions, or "gemini-3.1-pro-preview" as default.
 func (c *Config) GeminiModel() string {
 	if c.Extensions == nil {
-		return "gemini-3-pro-preview"
+		return "gemini-3.1-pro-preview"
 	}
 	if v, ok := c.Extensions[ExtGeminiModel].(string); ok && v != "" {
 		return v
 	}
 
-	return "gemini-3-pro-preview"
+	return "gemini-3.1-pro-preview"
 }
 
 // AmpModel returns the Amp model from Extensions, or "opus" as default.
@@ -151,16 +151,16 @@ func (c *Config) AmpModel() string {
 	return "opus"
 }
 
-// OpenCodeModel returns the OpenCode model from Extensions, or "anthropic/claude-opus-4-6" as default.
+// OpenCodeModel returns the OpenCode model from Extensions, or "anthropic/claude-opus-4-8" as default.
 func (c *Config) OpenCodeModel() string {
 	if c.Extensions == nil {
-		return "anthropic/claude-opus-4-6"
+		return "anthropic/claude-opus-4-8"
 	}
 	if v, ok := c.Extensions[ExtOpenCodeModel].(string); ok && v != "" {
 		return v
 	}
 
-	return "anthropic/claude-opus-4-6"
+	return "anthropic/claude-opus-4-8"
 }
 
 // CursorModel returns the Cursor model from Extensions, or "" as default (uses Cursor's default).

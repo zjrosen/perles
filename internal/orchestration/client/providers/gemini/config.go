@@ -11,7 +11,7 @@ type Config struct {
 	WorkDir         string
 	BeadsDir        string // Path to beads database directory for BEADS_DIR env var
 	Prompt          string // Includes prefixed system prompt
-	Model           string // e.g., "gemini-2.5-pro", "gemini-2.5-flash"
+	Model           string // e.g., "gemini-3.1-pro-preview", "gemini-3.5-flash"
 	SessionID       string // For --resume to continue existing session
 	SkipPermissions bool   // Enables --yolo
 	Timeout         time.Duration

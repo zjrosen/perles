@@ -29,7 +29,7 @@ func TestConfigFromClient(t *testing.T) {
 				BeadsDir:  "/path/to/beads",
 				Prompt:    "Hello",
 				SessionID: "session-123",
-				Model:     "gpt-5.4", // default model
+				Model:     "gpt-5.5", // default model
 				Timeout:   5 * time.Minute,
 				MCPConfig: `{"servers":{}}`,
 			},
@@ -42,7 +42,7 @@ func TestConfigFromClient(t *testing.T) {
 			},
 			expected: Config{
 				Prompt: "You are a helpful assistant.\n\nDo the task",
-				Model:  "gpt-5.4",
+				Model:  "gpt-5.5",
 			},
 		},
 		{
@@ -52,7 +52,7 @@ func TestConfigFromClient(t *testing.T) {
 			},
 			expected: Config{
 				Prompt: "System instructions only\n\n",
-				Model:  "gpt-5.4",
+				Model:  "gpt-5.5",
 			},
 		},
 		{
@@ -62,7 +62,7 @@ func TestConfigFromClient(t *testing.T) {
 			},
 			expected: Config{
 				Prompt: "Just the prompt",
-				Model:  "gpt-5.4",
+				Model:  "gpt-5.5",
 			},
 		},
 		{
@@ -73,7 +73,7 @@ func TestConfigFromClient(t *testing.T) {
 			},
 			expected: Config{
 				Prompt: "Only prompt here",
-				Model:  "gpt-5.4",
+				Model:  "gpt-5.5",
 			},
 		},
 		{
@@ -84,7 +84,7 @@ func TestConfigFromClient(t *testing.T) {
 			expected: Config{
 				SkipPermissions: true,
 				SandboxMode:     "danger-full-access",
-				Model:           "gpt-5.4",
+				Model:           "gpt-5.5",
 			},
 		},
 		{
@@ -95,7 +95,7 @@ func TestConfigFromClient(t *testing.T) {
 			expected: Config{
 				SkipPermissions: false,
 				SandboxMode:     "",
-				Model:           "gpt-5.4",
+				Model:           "gpt-5.5",
 			},
 		},
 		{
@@ -109,7 +109,7 @@ func TestConfigFromClient(t *testing.T) {
 			expected: Config{
 				SkipPermissions: true,
 				SandboxMode:     "workspace-write",
-				Model:           "gpt-5.4",
+				Model:           "gpt-5.5",
 			},
 		},
 		{
@@ -132,7 +132,7 @@ func TestConfigFromClient(t *testing.T) {
 			},
 			expected: Config{
 				SandboxMode: "read-only",
-				Model:       "gpt-5.4",
+				Model:       "gpt-5.5",
 			},
 		},
 		{
@@ -142,7 +142,7 @@ func TestConfigFromClient(t *testing.T) {
 			},
 			expected: Config{
 				MCPConfig: `{"servers":{"test":{"command":"test-server"}}}`,
-				Model:     "gpt-5.4",
+				Model:     "gpt-5.5",
 			},
 		},
 		{
@@ -152,7 +152,7 @@ func TestConfigFromClient(t *testing.T) {
 				WorkDir:         "",
 				Prompt:          "",
 				SessionID:       "",
-				Model:           "gpt-5.4",
+				Model:           "gpt-5.5",
 				SandboxMode:     "",
 				SkipPermissions: false,
 				Timeout:         0,
@@ -167,7 +167,7 @@ func TestConfigFromClient(t *testing.T) {
 			},
 			expected: Config{
 				WorkDir: "/test",
-				Model:   "gpt-5.4",
+				Model:   "gpt-5.5",
 			},
 		},
 		{

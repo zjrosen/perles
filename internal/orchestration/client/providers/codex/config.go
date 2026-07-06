@@ -12,7 +12,7 @@ type Config struct {
 	BeadsDir        string // Path to beads database directory for BEADS_DIR env var
 	Prompt          string
 	SessionID       string // For resume (Codex uses "sessions")
-	Model           string // e.g., "gpt-5.4", "o4-mini" (default: gpt-5.4)
+	Model           string // e.g., "gpt-5.5", "gpt-5.4-mini" (default: gpt-5.5)
 	SandboxMode     string // "read-only", "workspace-write", "danger-full-access"
 	SkipPermissions bool
 	Timeout         time.Duration

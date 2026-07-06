@@ -28,7 +28,7 @@ func TestConfigFromClient(t *testing.T) {
 				WorkDir:   "/work/dir",
 				BeadsDir:  "/path/to/beads",
 				Prompt:    "Hello",
-				Model:     "gemini-3-pro-preview", // default model
+				Model:     "gemini-3.1-pro-preview", // default model
 				Timeout:   5 * time.Minute,
 				MCPConfig: `{"servers":{}}`,
 			},
@@ -41,7 +41,7 @@ func TestConfigFromClient(t *testing.T) {
 			},
 			expected: Config{
 				Prompt: "You are a helpful assistant.\n\nDo the task",
-				Model:  "gemini-3-pro-preview",
+				Model:  "gemini-3.1-pro-preview",
 			},
 		},
 		{
@@ -51,7 +51,7 @@ func TestConfigFromClient(t *testing.T) {
 			},
 			expected: Config{
 				Prompt: "System instructions only\n\n",
-				Model:  "gemini-3-pro-preview",
+				Model:  "gemini-3.1-pro-preview",
 			},
 		},
 		{
@@ -61,7 +61,7 @@ func TestConfigFromClient(t *testing.T) {
 			},
 			expected: Config{
 				Prompt: "Just the prompt",
-				Model:  "gemini-3-pro-preview",
+				Model:  "gemini-3.1-pro-preview",
 			},
 		},
 		{
@@ -72,7 +72,7 @@ func TestConfigFromClient(t *testing.T) {
 			},
 			expected: Config{
 				Prompt: "Only prompt here",
-				Model:  "gemini-3-pro-preview",
+				Model:  "gemini-3.1-pro-preview",
 			},
 		},
 		{
@@ -82,7 +82,7 @@ func TestConfigFromClient(t *testing.T) {
 			},
 			expected: Config{
 				SkipPermissions: true,
-				Model:           "gemini-3-pro-preview",
+				Model:           "gemini-3.1-pro-preview",
 			},
 		},
 		{
@@ -92,7 +92,7 @@ func TestConfigFromClient(t *testing.T) {
 			},
 			expected: Config{
 				SkipPermissions: false,
-				Model:           "gemini-3-pro-preview",
+				Model:           "gemini-3.1-pro-preview",
 			},
 		},
 		{
@@ -113,7 +113,7 @@ func TestConfigFromClient(t *testing.T) {
 			},
 			expected: Config{
 				MCPConfig: `{"servers":{"test":{"command":"test-server"}}}`,
-				Model:     "gemini-3-pro-preview",
+				Model:     "gemini-3.1-pro-preview",
 			},
 		},
 		{
@@ -123,7 +123,7 @@ func TestConfigFromClient(t *testing.T) {
 			},
 			expected: Config{
 				Timeout: 10 * time.Minute,
-				Model:   "gemini-3-pro-preview",
+				Model:   "gemini-3.1-pro-preview",
 			},
 		},
 		{
@@ -132,7 +132,7 @@ func TestConfigFromClient(t *testing.T) {
 			expected: Config{
 				WorkDir:         "",
 				Prompt:          "",
-				Model:           "gemini-3-pro-preview",
+				Model:           "gemini-3.1-pro-preview",
 				SkipPermissions: false,
 				Timeout:         0,
 				MCPConfig:       "",
@@ -146,7 +146,7 @@ func TestConfigFromClient(t *testing.T) {
 			},
 			expected: Config{
 				WorkDir: "/test",
-				Model:   "gemini-3-pro-preview",
+				Model:   "gemini-3.1-pro-preview",
 			},
 		},
 		{
@@ -197,14 +197,14 @@ func TestConfigFromClient_SystemPromptPrepending(t *testing.T) {
 }
 
 func TestConfigFromClient_ModelDefaulting(t *testing.T) {
-	t.Run("defaults to gemini-3-pro-preview when not specified", func(t *testing.T) {
+	t.Run("defaults to gemini-3.1-pro-preview when not specified", func(t *testing.T) {
 		cfg := client.Config{
 			Prompt: "Test prompt",
 		}
 
 		result := configFromClient(cfg)
 
-		assert.Equal(t, "gemini-3-pro-preview", result.Model)
+		assert.Equal(t, "gemini-3.1-pro-preview", result.Model)
 	})
 
 	t.Run("uses specified model when set", func(t *testing.T) {
@@ -220,7 +220,7 @@ func TestConfigFromClient_ModelDefaulting(t *testing.T) {
 		assert.Equal(t, "gemini-2.5-flash", result.Model)
 	})
 
-	t.Run("empty string model defaults to gemini-3-pro-preview", func(t *testing.T) {
+	t.Run("empty string model defaults to gemini-3.1-pro-preview", func(t *testing.T) {
 		cfg := client.Config{
 			Prompt: "Test prompt",
 			Extensions: map[string]any{
@@ -230,6 +230,6 @@ func TestConfigFromClient_ModelDefaulting(t *testing.T) {
 
 		result := configFromClient(cfg)
 
-		assert.Equal(t, "gemini-3-pro-preview", result.Model)
+		assert.Equal(t, "gemini-3.1-pro-preview", result.Model)
 	})
 }

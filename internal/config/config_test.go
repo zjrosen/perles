@@ -578,7 +578,7 @@ func TestOrchestrationConfig_OpenCodeField(t *testing.T) {
 }
 
 func TestValidateOrchestration_ValidOpenCodeModels(t *testing.T) {
-	models := []string{"anthropic/claude-opus-4-6", "anthropic/claude-sonnet-4", "openai/gpt-4o"}
+	models := []string{"anthropic/claude-opus-4-8", "anthropic/claude-sonnet-4", "openai/gpt-4o"}
 	for _, model := range models {
 		cfg := OrchestrationConfig{
 			Client:   "opencode",
@@ -595,7 +595,7 @@ func TestDefaults_Orchestration(t *testing.T) {
 	require.Empty(t, cfg.Orchestration.Client, "legacy Client field should be empty")
 	require.Equal(t, "claude", cfg.Orchestration.CoordinatorClient)
 	require.Equal(t, "claude", cfg.Orchestration.WorkerClient)
-	require.Equal(t, "claude-opus-4-6", cfg.Orchestration.Claude.Model)
+	require.Equal(t, "claude-opus-4-8", cfg.Orchestration.Claude.Model)
 	require.Equal(t, "opus", cfg.Orchestration.Amp.Model)
 	require.Equal(t, "smart", cfg.Orchestration.Amp.Mode)
 }
@@ -2103,10 +2103,10 @@ func TestExtensionsForClient_Codex_EmptyConfig(t *testing.T) {
 
 func TestExtensionsForClient_Codex_WithModel(t *testing.T) {
 	cfg := OrchestrationConfig{
-		Codex: CodexClientConfig{Model: "gpt-5.4"},
+		Codex: CodexClientConfig{Model: "gpt-5.5"},
 	}
 	ext := cfg.extensionsForClient("codex", false)
-	require.Equal(t, "gpt-5.4", ext["codex.model"])
+	require.Equal(t, "gpt-5.5", ext["codex.model"])
 }
 
 func TestExtensionsForClient_Codex_WorkerSameAsCoordinator(t *testing.T) {
@@ -2177,7 +2177,7 @@ func TestExtensionsForClient_Gemini_WithModel(t *testing.T) {
 
 func TestExtensionsForClient_Gemini_WorkerSameAsCoordinator(t *testing.T) {
 	cfg := OrchestrationConfig{
-		Gemini: GeminiClientConfig{Model: "gemini-3-pro-preview"},
+		Gemini: GeminiClientConfig{Model: "gemini-3.1-pro-preview"},
 	}
 	extCoord := cfg.extensionsForClient("gemini", false)
 	extWorker := cfg.extensionsForClient("gemini", true)
@@ -2200,7 +2200,7 @@ func TestExtensionsForClient_OpenCode_WithModel(t *testing.T) {
 
 func TestExtensionsForClient_OpenCode_WorkerSameAsCoordinator(t *testing.T) {
 	cfg := OrchestrationConfig{
-		OpenCode: OpenCodeClientConfig{Model: "anthropic/claude-opus-4-6"},
+		OpenCode: OpenCodeClientConfig{Model: "anthropic/claude-opus-4-8"},
 	}
 	extCoord := cfg.extensionsForClient("opencode", false)
 	extWorker := cfg.extensionsForClient("opencode", true)
@@ -2210,7 +2210,7 @@ func TestExtensionsForClient_OpenCode_WorkerSameAsCoordinator(t *testing.T) {
 func TestExtensionsForClient_UnknownClient(t *testing.T) {
 	cfg := OrchestrationConfig{
 		Claude: ClaudeClientConfig{Model: "opus"},
-		Codex:  CodexClientConfig{Model: "gpt-5.4"},
+		Codex:  CodexClientConfig{Model: "gpt-5.5"},
 	}
 	ext := cfg.extensionsForClient("unknown-client", false)
 	require.Empty(t, ext, "unknown client should return empty extensions")
@@ -2858,26 +2858,26 @@ func TestExtensionsForObserver_Amp(t *testing.T) {
 
 func TestExtensionsForObserver_Codex(t *testing.T) {
 	cfg := OrchestrationConfig{
-		Codex: CodexClientConfig{Model: "gpt-5.4"},
+		Codex: CodexClientConfig{Model: "gpt-5.5"},
 	}
 	ext := cfg.extensionsForObserver(client.ClientType("codex"))
-	require.Equal(t, "gpt-5.4", ext[client.ExtCodexModel])
+	require.Equal(t, "gpt-5.5", ext[client.ExtCodexModel])
 }
 
 func TestExtensionsForObserver_Gemini(t *testing.T) {
 	cfg := OrchestrationConfig{
-		Gemini: GeminiClientConfig{Model: "gemini-3-pro-preview"},
+		Gemini: GeminiClientConfig{Model: "gemini-3.1-pro-preview"},
 	}
 	ext := cfg.extensionsForObserver(client.ClientType("gemini"))
-	require.Equal(t, "gemini-3-pro-preview", ext[client.ExtGeminiModel])
+	require.Equal(t, "gemini-3.1-pro-preview", ext[client.ExtGeminiModel])
 }
 
 func TestExtensionsForObserver_OpenCode(t *testing.T) {
 	cfg := OrchestrationConfig{
-		OpenCode: OpenCodeClientConfig{Model: "anthropic/claude-opus-4-6"},
+		OpenCode: OpenCodeClientConfig{Model: "anthropic/claude-opus-4-8"},
 	}
 	ext := cfg.extensionsForObserver(client.ClientType("opencode"))
-	require.Equal(t, "anthropic/claude-opus-4-6", ext[client.ExtOpenCodeModel])
+	require.Equal(t, "anthropic/claude-opus-4-8", ext[client.ExtOpenCodeModel])
 }
 
 func TestExtensionsForObserver_Unknown(t *testing.T) {

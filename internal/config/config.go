@@ -209,13 +209,13 @@ type OrchestrationConfig struct {
 
 // ClaudeClientConfig holds Claude-specific settings.
 type ClaudeClientConfig struct {
-	Model string            `mapstructure:"model"` // sonnet (default), opus, haiku
+	Model string            `mapstructure:"model"` // claude-opus-4-8 (default), or aliases: opus, sonnet, haiku
 	Env   map[string]string `mapstructure:"env"`   // Custom environment variables (supports ${VAR} expansion)
 }
 
 // CodexClientConfig holds Claude-specific settings.
 type CodexClientConfig struct {
-	Model string `mapstructure:"model"` // gpt-5.4 (default), o4-mini
+	Model string `mapstructure:"model"` // gpt-5.5 (default), gpt-5.4-mini
 }
 
 // AmpClientConfig holds Amp-specific settings.
@@ -226,12 +226,12 @@ type AmpClientConfig struct {
 
 // GeminiClientConfig holds Gemini-specific settings.
 type GeminiClientConfig struct {
-	Model string `mapstructure:"model"` // gemini-3-pro-preview (default), gemini-2.5-flash
+	Model string `mapstructure:"model"` // gemini-3.1-pro-preview (default), gemini-3.5-flash
 }
 
 // OpenCodeClientConfig holds OpenCode-specific settings.
 type OpenCodeClientConfig struct {
-	Model string `mapstructure:"model"` // anthropic/claude-opus-4-6 (default)
+	Model string `mapstructure:"model"` // anthropic/claude-opus-4-8 (default)
 }
 
 // CursorClientConfig holds Cursor-specific settings.
@@ -1009,17 +1009,17 @@ func Defaults() Config {
 			CoordinatorClient: "claude",
 			WorkerClient:      "claude",
 			Claude: ClaudeClientConfig{
-				Model: "claude-opus-4-6",
+				Model: "claude-opus-4-8",
 			},
 			Amp: AmpClientConfig{
 				Model: "opus",
 				Mode:  "smart",
 			},
 			Codex: CodexClientConfig{
-				Model: "gpt-5.4",
+				Model: "gpt-5.5",
 			},
 			Gemini: GeminiClientConfig{
-				Model: "gemini-3-pro-preview",
+				Model: "gemini-3.1-pro-preview",
 			},
 			Tracing: TracingConfig{
 				Enabled:      false,
@@ -1151,11 +1151,11 @@ orchestration:
 
   # Claude-specific settings (only used when client: claude)
   claude:
-    model: opus  # sonnet (default), opus, or haiku
+    model: claude-opus-4-8  # claude-opus-4-8 (default); aliases like opus, sonnet, haiku also work
 
   # Codex-specific settings (only used when client: codex)
   codex:
-    model: gpt-5.4  # gpt-5.4 (default)
+    model: gpt-5.5  # gpt-5.5 (default)
 
   # Amp-specific settings (only used when client: amp)
   amp:
@@ -1164,7 +1164,7 @@ orchestration:
 
   # OpenCode-specific settings (only used when client: opencode)
   opencode:
-    model: anthropic/claude-opus-4-6  # anthropic/claude-opus-4-6 (default)
+    model: anthropic/claude-opus-4-8  # anthropic/claude-opus-4-8 (default)
 
   # Cursor-specific settings (only used when client: cursor)
   # cursor:

@@ -69,7 +69,7 @@ func TestIntegration_Spawn_ReceivesInitEvent(t *testing.T) {
 	cfg := Config{
 		WorkDir: workDir,
 		Prompt:  "Say 'test' and nothing else",
-		Model:   "anthropic/claude-opus-4-6",
+		Model:   "anthropic/claude-opus-4-8",
 		Timeout: 30 * time.Second,
 	}
 
@@ -141,7 +141,7 @@ func TestIntegration_Spawn_ReceivesAssistantEvents(t *testing.T) {
 	cfg := Config{
 		WorkDir: workDir,
 		Prompt:  "Reply with exactly one word: hello",
-		Model:   "anthropic/claude-opus-4-6",
+		Model:   "anthropic/claude-opus-4-8",
 		Timeout: 60 * time.Second,
 	}
 
@@ -204,7 +204,7 @@ func TestIntegration_ProcessCompletion(t *testing.T) {
 	cfg := Config{
 		WorkDir: workDir,
 		Prompt:  "Say 'done'",
-		Model:   "anthropic/claude-opus-4-6",
+		Model:   "anthropic/claude-opus-4-8",
 		Timeout: 45 * time.Second,
 	}
 
@@ -239,7 +239,7 @@ func TestIntegration_Cancel_TerminatesProcess(t *testing.T) {
 	cfg := Config{
 		WorkDir: workDir,
 		Prompt:  "Count from 1 to 1000 very slowly, one number per line",
-		Model:   "anthropic/claude-opus-4-6",
+		Model:   "anthropic/claude-opus-4-8",
 		// No timeout - we'll cancel manually
 	}
 
@@ -311,7 +311,7 @@ func TestIntegration_SessionResume(t *testing.T) {
 	cfg := Config{
 		WorkDir: workDir,
 		Prompt:  "Say 'first message'",
-		Model:   "anthropic/claude-opus-4-6",
+		Model:   "anthropic/claude-opus-4-8",
 		Timeout: 30 * time.Second,
 	}
 
@@ -360,7 +360,7 @@ waitForInit:
 	resumeCfg := Config{
 		WorkDir:   workDir,
 		Prompt:    "Say 'resumed'",
-		Model:     "anthropic/claude-opus-4-6",
+		Model:     "anthropic/claude-opus-4-8",
 		SessionID: sessionID,
 		Timeout:   30 * time.Second,
 	}
@@ -417,7 +417,7 @@ func TestIntegration_WorkDir_Respected(t *testing.T) {
 	cfg := Config{
 		WorkDir: workDir,
 		Prompt:  "test",
-		Model:   "anthropic/claude-opus-4-6",
+		Model:   "anthropic/claude-opus-4-8",
 	}
 
 	// Just verify config setup works with the work dir
