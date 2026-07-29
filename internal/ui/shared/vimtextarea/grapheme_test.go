@@ -45,8 +45,7 @@ var unicodeTestCases = []struct {
 	// 👨‍💻 = Man + ZWJ + Computer = 1 grapheme
 	{"ZWJ technologist", "👨\u200d💻", 1, 11, 2},
 	// Rainbow flag: 🏳️‍🌈
-	// Note: runewidth reports this complex ZWJ as width=1 (terminal-dependent)
-	{"ZWJ rainbow flag", "🏳\ufe0f\u200d🌈", 1, 14, 1},
+	{"ZWJ rainbow flag", "🏳\ufe0f\u200d🌈", 1, 14, 2},
 
 	// Category 5: Skin tone modifiers
 	// 👋🏽 = Waving hand + medium skin tone
@@ -56,12 +55,11 @@ var unicodeTestCases = []struct {
 
 	// Category 6: Regional indicators (flags)
 	// 🇺🇸 = U+1F1FA (U) + U+1F1F8 (S) = 1 grapheme, 8 bytes
-	// Note: runewidth reports flags as width=1 (terminal-dependent)
-	{"flag US", "🇺🇸", 1, 8, 1},
+	{"flag US", "🇺🇸", 1, 8, 2},
 	// 🇯🇵 = Japan flag
-	{"flag Japan", "🇯🇵", 1, 8, 1},
+	{"flag Japan", "🇯🇵", 1, 8, 2},
 	// Multiple flags
-	{"multiple flags", "🇺🇸🇯🇵", 2, 16, 2},
+	{"multiple flags", "🇺🇸🇯🇵", 2, 16, 4},
 
 	// Category 7: Variation selectors
 	// ☀️ = Sun + variation selector-16 (emoji presentation)
@@ -320,7 +318,7 @@ func TestGraphemeDisplayWidth(t *testing.T) {
 		{"simple emoji", "😀", 2},
 		{"ZWJ family", "👨\u200d👩\u200d👧\u200d👦", 2},
 		{"skin tone", "👋🏽", 2},
-		{"flag", "🇺🇸", 1}, // Note: runewidth reports flags as width=1 (terminal-dependent)
+		{"flag", "🇺🇸", 2},
 
 		{"combining", "e\u0301", 1}, // é with combining = 1 column
 
