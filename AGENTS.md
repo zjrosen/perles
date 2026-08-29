@@ -12,7 +12,7 @@ issue tracking, built in Go using the Bubble Tea TUI framework. It includes a
 
 **Requirements:**
 
-- Go 1.24+
+- Go 1.26+
 - A beads-enabled project (`.beads/` directory with `beads.db`)
 - golangci-lint (for linting)
 - mockery (for mock generation)
@@ -745,7 +745,7 @@ This limitation ensures no conflicts with built-in keybindings across all modes.
 - **Triggers:** Push to main, pull requests
 - **Platforms:** Ubuntu, macOS
 - **Steps:** Build → Test → Lint
-- **Go version:** 1.24
+- **Go version:** 1.26
 - **Linter:** golangci-lint (latest)
 
 ### Release Process

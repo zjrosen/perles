@@ -479,8 +479,7 @@ func (h *ProcessTurnCompleteHandler) Handle(ctx context.Context, cmd command.Com
 	// Context Exceeded Error Handling
 	// ===========================================================================
 	if turnCmd.Error != nil && proc.Role == repository.RoleWorker {
-		var contextExceededError *process.ContextExceededError
-		if errors.As(turnCmd.Error, &contextExceededError) {
+		if _, ok := errors.AsType[*process.ContextExceededError](turnCmd.Error); ok {
 			coordinator, err := h.processRepo.GetCoordinator()
 			if err != nil {
 				return nil, fmt.Errorf("failed to get coordinator: %w", err)
@@ -530,8 +529,7 @@ func (h *ProcessTurnCompleteHandler) Handle(ctx context.Context, cmd command.Com
 	// When the coordinator's context window is exhausted, we automatically trigger
 	// replacement. This enables truly uninterrupted orchestration sessions.
 	if turnCmd.Error != nil && proc.Role == repository.RoleCoordinator {
-		var contextExceededError *process.ContextExceededError
-		if errors.As(turnCmd.Error, &contextExceededError) {
+		if _, ok := errors.AsType[*process.ContextExceededError](turnCmd.Error); ok {
 			// Mark coordinator as Failed
 			proc.Status = repository.StatusFailed
 			proc.LastActivityAt = time.Now()
@@ -574,8 +572,7 @@ func (h *ProcessTurnCompleteHandler) Handle(ctx context.Context, cmd command.Com
 	// When the observer's context window is exhausted, we automatically trigger
 	// replacement. This enables uninterrupted monitoring sessions.
 	if turnCmd.Error != nil && proc.Role == repository.RoleObserver {
-		var contextExceededError *process.ContextExceededError
-		if errors.As(turnCmd.Error, &contextExceededError) {
+		if _, ok := errors.AsType[*process.ContextExceededError](turnCmd.Error); ok {
 			// Mark observer as Failed
 			proc.Status = repository.StatusFailed
 			proc.LastActivityAt = time.Now()

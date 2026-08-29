@@ -365,8 +365,7 @@ func (p *Process) handleError(err error) {
 func (p *Process) handleInFlightError(err error) {
 	p.mu.Lock()
 	// Don't overwrite a ContextExceededError with a generic error
-	var existing *ContextExceededError
-	if !errors.As(p.lastError, &existing) {
+	if _, ok := errors.AsType[*ContextExceededError](p.lastError); !ok {
 		p.lastError = err
 	}
 	p.mu.Unlock()

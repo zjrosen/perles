@@ -37,8 +37,7 @@ func NewBeadsBackend(dataDir, workDir string) (*BeadsBackend, error) {
 	client, err := infrabeads.NewClient(dataDir)
 	if err != nil {
 		// Check if embedded mode (exclusive lock, can't share with perles)
-		var embeddedErr *infrabeads.EmbeddedModeUnsupportedError
-		if errors.As(err, &embeddedErr) {
+		if _, ok := errors.AsType[*infrabeads.EmbeddedModeUnsupportedError](err); ok {
 			return nil, &task.EmbeddedModeError{BeadsDir: dataDir}
 		}
 		// Check if this is a Dolt server that's unreachable

@@ -110,8 +110,7 @@ func initConfig() {
 
 	if err := viper.ReadInConfig(); err != nil {
 		// No config file found anywhere - create default at .perles/config.yaml
-		var configNotFound viper.ConfigFileNotFoundError
-		if errors.As(err, &configNotFound) {
+		if _, ok := errors.AsType[viper.ConfigFileNotFoundError](err); ok {
 			defaultPath := ".perles/config.yaml"
 			if writeErr := config.WriteDefaultConfig(defaultPath); writeErr == nil {
 				viper.SetConfigFile(defaultPath)
@@ -236,12 +235,10 @@ func runApp(cmd *cobra.Command, args []string) error {
 
 	backend, err := newBackend(&cfg, workDir)
 	if err != nil {
-		var embeddedMode *task.EmbeddedModeError
-		if errors.As(err, &embeddedMode) {
+		if _, ok := errors.AsType[*task.EmbeddedModeError](err); ok {
 			return runEmbeddedMode()
 		}
-		var serverDown *task.ServerDownError
-		if errors.As(err, &serverDown) {
+		if serverDown, ok := errors.AsType[*task.ServerDownError](err); ok {
 			return serverNotStarted(serverDown.Host, serverDown.Port)
 		}
 		return runNoBeadsMode()
@@ -250,8 +247,7 @@ func runApp(cmd *cobra.Command, args []string) error {
 
 	// Verify the backend data store is compatible with this version of perles
 	if err := backend.CheckCompatibility(); err != nil {
-		var versionErr *task.VersionIncompatibleError
-		if errors.As(err, &versionErr) {
+		if versionErr, ok := errors.AsType[*task.VersionIncompatibleError](err); ok {
 			log.Debug(log.CatBeads, "Version incompatible", "current", versionErr.Current, "required", versionErr.Required)
 			return runOutdatedMode(versionErr.Current, versionErr.Required)
 		}

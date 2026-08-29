@@ -221,7 +221,7 @@ func (m Model) View(maxWidth int) string {
 		}
 
 		// Format content preview (first line, truncated)
-		content := strings.Split(t.Content, "\n")[0]
+		content, _, _ := strings.Cut(t.Content, "\n")
 		if len(content) > contentWidth {
 			content = content[:contentWidth-3] + "..."
 		}

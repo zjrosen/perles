@@ -22,8 +22,7 @@ func isProcessAlive(pid int) bool {
 	}
 	// EPERM means process exists but we don't have permission to signal it
 	// ESRCH means no such process
-	var errno syscall.Errno
-	if errors.As(err, &errno) {
+	if errno, ok := errors.AsType[syscall.Errno](err); ok {
 		return errno == syscall.EPERM
 	}
 	return false

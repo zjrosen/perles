@@ -1576,8 +1576,7 @@ func (m Model) renderError(width, height int) string {
 	}
 
 	// Check if error is a DiffError for enhanced rendering
-	var diffErr DiffError
-	if errors.As(m.err, &diffErr) {
+	if diffErr, ok := errors.AsType[DiffError](m.err); ok {
 		return renderErrorState(diffErr, width, height)
 	}
 
