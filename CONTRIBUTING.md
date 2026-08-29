@@ -16,7 +16,7 @@ Thank you for your interest in contributing to Perles! This document provides gu
 
 ### Prerequisites
 
-- Go 1.24+
+- Go 1.27+
 - A beads-enabled project for testing (`.beads/` directory with `beads.db`)
 
 ### Building

@@ -17,7 +17,7 @@ curl -sSL https://raw.githubusercontent.com/zjrosen/perles/main/install.sh | bas
 
 ### Go Install
 
-Requires Go 1.21+:
+Requires Go 1.27+:
 
 ```bash
 go install github.com/zjrosen/perles@latest

@@ -100,4 +100,4 @@ perles
 
 - A beads-enabled project (`.beads/` directory)
 - Minimum beads database version v0.62.0 (run `bd migrate` to upgrade)
-- Go 1.21+ (if building from source)
+- Go 1.27+ (if building from source)
