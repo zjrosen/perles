@@ -11,7 +11,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/charmbracelet/x/exp/teatest v0.0.0-20260828171018-3c30eef5e73e
 	github.com/fsnotify/fsnotify v1.10.1
-	github.com/go-sql-driver/mysql v1.10.0
+	github.com/go-sql-driver/mysql v1.10.1
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/google/uuid v1.6.0
 	github.com/lrstanley/bubblezone v1.0.0
