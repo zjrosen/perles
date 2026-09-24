@@ -35,7 +35,7 @@ orchestration:
     model: "opus"               # Options: opus, sonnet
     mode: "smart"               # Options: free, rush, smart
   codex:
-    model: "gpt-5.2-codex"      # Options: gpt-5.2-codex, o4-mini
+    model: "gpt-6-sol"          # Options: gpt-6-sol, gpt-6-astra, gpt-6-luna
 ```
 
 ### Quick Start

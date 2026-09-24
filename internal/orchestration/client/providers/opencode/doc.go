@@ -24,11 +24,11 @@
 //
 // OpenCode runs in headless mode using the run command with JSON output:
 //
-//	opencode run --format json --model anthropic/claude-opus-4-8 -- "your prompt here"
+//	opencode run --format json --model anthropic/claude-opus-5-5 -- "your prompt here"
 //
 // Key flags:
 //   - --format json: Structured JSON output for parsing
-//   - --model: Model selection (e.g., anthropic/claude-opus-4-8)
+//   - --model: Model selection (e.g., anthropic/claude-opus-5-5)
 //   - --session: Resume existing session by ID
 //   - --: Separator before prompt argument
 //

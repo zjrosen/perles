@@ -57,7 +57,7 @@ Configure model and environment for each AI provider.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `orchestration.claude.model` | string | `"claude-opus-4-8"` | Claude model to use |
+| `orchestration.claude.model` | string | `"claude-opus-5-5"` | Claude model to use |
 | `orchestration.claude.env` | map | `{}` | Environment variables passed to Claude Code CLI |
 | `orchestration.claude_worker.model` | string | inherits `claude.model` | Worker-specific Claude model override |
 | `orchestration.claude_worker.env` | map | `{}` | Worker-specific environment variables |
@@ -65,9 +65,9 @@ Configure model and environment for each AI provider.
 | `orchestration.claude_observer.env` | map | `{}` | Observer-specific environment variables |
 | `orchestration.amp.model` | string | `"opus"` | Amp model (`opus`, `sonnet`) |
 | `orchestration.amp.mode` | string | `"smart"` | Amp execution mode (`free`, `rush`, `smart`) |
-| `orchestration.codex.model` | string | `"gpt-5.5"` | OpenAI Codex model |
-| `orchestration.gemini.model` | string | `"gemini-3.1-pro-preview"` | Gemini model |
-| `orchestration.opencode.model` | string | `"anthropic/claude-opus-4-8"` | OpenCode model |
+| `orchestration.codex.model` | string | `"gpt-6-sol"` | OpenAI Codex model |
+| `orchestration.gemini.model` | string | `"gemini-3.8-flash"` | Gemini model |
+| `orchestration.opencode.model` | string | `"anthropic/claude-opus-5-5"` | OpenCode model |
 | `orchestration.cursor.model` | string | `""` | Cursor model (empty = Cursor default) |
 
 ### Tracing
@@ -185,7 +185,7 @@ orchestration:
   # observer_enabled: false
   # api_port: 0
   claude:
-    model: claude-opus-4-8
+    model: claude-opus-5-5
     # env:
     #   CUSTOM_VAR: value
   # claude_worker:
@@ -194,9 +194,9 @@ orchestration:
   #   model: opus
   #   mode: smart
   # codex:
-  #   model: gpt-5.5
+  #   model: gpt-6-sol
   # gemini:
-  #   model: gemini-3.1-pro-preview
+  #   model: gemini-3.8-flash
   session_storage:
     # application_name: my-project
   templates:
