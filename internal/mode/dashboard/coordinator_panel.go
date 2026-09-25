@@ -867,13 +867,13 @@ func (p *CoordinatorPanel) checkMentionTrigger(prevContent, newContent string) {
 // completeMention replaces the partial @mention with the selected process ID.
 func (p *CoordinatorPanel) completeMention(processID string) {
 	content := p.input.Value()
-	atPos := strings.LastIndex(content, "@")
-	if atPos < 0 {
+	before, _, found := strings.CutLast(content, "@")
+	if !found {
 		return
 	}
 
 	// Replace @partial with @processID
-	newContent := content[:atPos] + "@" + processID + " "
+	newContent := before + "@" + processID + " "
 	p.input.SetValue(newContent)
 	p.input.CursorToEnd()
 }
