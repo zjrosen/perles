@@ -24,7 +24,6 @@ curl -sSL https://raw.githubusercontent.com/zjrosen/perles/main/install.sh | bas
 ### Homebrew (macOS/Linux)
 
 ```bash
-# Install via Homebrew
 brew tap zjrosen/perles
 brew install perles
 ```
