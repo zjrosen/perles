@@ -172,6 +172,9 @@ func (e *BRExecutor) UpdateIssue(issueID string, opts task.UpdateOptions) error 
 	if opts.Type != nil {
 		args = append(args, "-t", string(*opts.Type))
 	}
+	if opts.ParentID != nil {
+		args = append(args, "--parent", *opts.ParentID)
+	}
 
 	// Execute non-label update if any fields were set.
 	if len(args) > 2 {

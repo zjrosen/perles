@@ -108,4 +108,5 @@ type UpdateIssueOptions struct {
 	Labels      *[]string  // nil = unchanged, &[]string{} = clear all
 	Assignee    *string    // proactive; not used by current editor
 	Type        *IssueType // proactive; not used by current editor
+	ParentID    *string    // nil = unchanged, &"" = remove parent
 }

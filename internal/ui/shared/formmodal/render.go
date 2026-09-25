@@ -853,13 +853,16 @@ func (m Model) renderEpicSearchCollapsed(fs *fieldState, width int, focused bool
 		if len(title) > maxTitleLen {
 			title = title[:maxTitleLen-3] + "..."
 		}
-		fullText := fs.epicSelectedID + ": " + title
+		fullText := fs.epicSelectedID
+		if title != "" {
+			fullText += ": " + title
+		}
 		displayText = styles.TruncateString(fullText, availableWidth)
 	} else {
 		// Show placeholder text (styled as muted)
 		placeholder := fs.searchInput.Placeholder
 		if placeholder == "" {
-			placeholder = "Search epics..."
+			placeholder = "Search " + cfg.searchNoun() + "..."
 		}
 		placeholderStyle := lipgloss.NewStyle().Foreground(styles.TextMutedColor)
 		displayText = placeholderStyle.Render(placeholder)
@@ -927,7 +930,7 @@ func (m Model) renderEpicSearchExpanded(fs *fieldState, fieldIndex int, width in
 			// Show appropriate empty message after load completes
 			query := fs.searchInput.Value()
 			if query == "" {
-				rows = append(rows, loadingStyle.Render(" No epics found"))
+				rows = append(rows, loadingStyle.Render(" No "+cfg.searchNoun()+" found"))
 			} else {
 				rows = append(rows, loadingStyle.Render(" No matches for '"+query+"'"))
 			}

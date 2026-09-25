@@ -157,6 +157,7 @@ func FromTaskUpdateOptions(o task.UpdateOptions) domain.UpdateIssueOptions {
 	result.Description = o.Description
 	result.Notes = o.Notes
 	result.Assignee = o.Assignee
+	result.ParentID = o.ParentID
 
 	if o.Priority != nil {
 		p := domain.Priority(*o.Priority)

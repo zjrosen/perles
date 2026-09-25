@@ -196,7 +196,7 @@ func newFieldState(cfg FieldConfig) fieldState {
 		ti := textinput.New()
 		ti.Placeholder = cfg.SearchPlaceholder
 		if ti.Placeholder == "" {
-			ti.Placeholder = "Search epics..."
+			ti.Placeholder = "Search " + cfg.searchNoun() + "..."
 		}
 		ti.Prompt = ""
 		ti.Width = 36
@@ -276,4 +276,21 @@ func (fs *fieldState) value() any {
 		return fs.epicSelectedID
 	}
 	return nil
+}
+
+// searchTypeFilter returns the BQL type predicate for an EpicSearch field,
+// defaulting to epics.
+func (cfg FieldConfig) searchTypeFilter() string {
+	if cfg.SearchTypeFilter == "" {
+		return "type = epic"
+	}
+	return cfg.SearchTypeFilter
+}
+
+// searchNoun returns the plural display noun for an EpicSearch field (e.g., "epics").
+func (cfg FieldConfig) searchNoun() string {
+	if cfg.SearchNoun == "" {
+		return "epics"
+	}
+	return cfg.SearchNoun
 }

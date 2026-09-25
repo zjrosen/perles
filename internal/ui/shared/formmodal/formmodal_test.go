@@ -4490,6 +4490,65 @@ func TestTextAreaField_View_LongValueContainedAcrossLayoutWidthTransition(t *tes
 	require.Greater(t, checkedGapLines, 0, "expected to validate at least one joined multi-column line")
 }
 
+func TestEpicSearchField_TabFromEpicSearchExecutesNextFieldInitialQuery(t *testing.T) {
+	var queries []string
+	mock := &mockBQLExecutor{
+		executeFunc: func(query string) ([]task.Issue, error) {
+			queries = append(queries, query)
+			return []task.Issue{{ID: "issue-1", TitleText: "First"}}, nil
+		},
+	}
+	cfg := FormConfig{
+		Title: "Test Form",
+		Fields: []FieldConfig{
+			{
+				Key:                "parent_id",
+				Type:               FieldTypeEpicSearch,
+				Label:              "Parent Epic",
+				EpicSearchExecutor: mock,
+				DebounceMs:         1,
+			},
+			{
+				Key:                "parent_task_id",
+				Type:               FieldTypeEpicSearch,
+				Label:              "Parent Task",
+				EpicSearchExecutor: mock,
+				SearchTypeFilter:   "type != epic",
+				SearchNoun:         "tasks",
+				DebounceMs:         1,
+			},
+		},
+	}
+	m := New(cfg)
+	require.True(t, m.fields[0].epicSearchExpanded, "precondition: first epic search field should auto-expand")
+
+	// Tab out of the expanded epic search into the next epic search field.
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	require.Equal(t, 1, m.focusedIndex, "should move focus to parent task field")
+	require.True(t, m.fields[1].epicSearchExpanded, "parent task field should auto-expand")
+
+	for _, msg := range collectCommandMessages(cmd) {
+		var nextCmd tea.Cmd
+		m, nextCmd = m.Update(msg)
+		for _, result := range collectCommandMessages(nextCmd) {
+			m, _ = m.Update(result)
+		}
+	}
+
+	require.Equal(t, []string{"type != epic and status != closed order by updated desc"}, queries,
+		"initial query must run for the newly focused field, not stay stuck loading")
+	require.True(t, m.fields[1].epicHasLoaded)
+	require.Len(t, m.fields[1].listItems, 1)
+}
+
+func TestEpicSearchField_SearchNounDefaults(t *testing.T) {
+	fs := newFieldState(FieldConfig{Type: FieldTypeEpicSearch})
+	require.Equal(t, "Search epics...", fs.searchInput.Placeholder)
+
+	fs = newFieldState(FieldConfig{Type: FieldTypeEpicSearch, SearchNoun: "tasks"})
+	require.Equal(t, "Search tasks...", fs.searchInput.Placeholder)
+}
+
 // --- EpicSearch Field Tests ---
 
 func TestEpicSearchField_ConstantExists(t *testing.T) {
@@ -5080,16 +5139,16 @@ func TestEpicSearchField_ErrorStateManagedCorrectly(t *testing.T) {
 
 func TestEpicSearchField_BuildEpicSearchQueryEscapesQuotes(t *testing.T) {
 	// Empty input
-	query := buildEpicSearchQuery("")
+	query := buildEpicSearchQuery("type = epic", "")
 	require.Equal(t, "type = epic and status != closed order by updated desc", query)
 
 	// Simple input
-	query = buildEpicSearchQuery("test")
+	query = buildEpicSearchQuery("type = epic", "test")
 	require.Contains(t, query, `title ~ "test"`)
 	require.Contains(t, query, `description ~ "test"`)
 
 	// Input with quotes (should be escaped)
-	query = buildEpicSearchQuery(`test "quoted"`)
+	query = buildEpicSearchQuery("type = epic", `test "quoted"`)
 	require.Contains(t, query, `title ~ "test \"quoted\""`)
 	require.Contains(t, query, `description ~ "test \"quoted\""`)
 }

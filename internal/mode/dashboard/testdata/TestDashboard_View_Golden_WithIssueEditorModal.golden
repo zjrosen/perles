@@ -16,12 +16,12 @@
 ╰────────│ │ ( ) P4 - Backlog                  │   ╭─ Notes (Ctrl+G for editor) ────────╮ │────────╯
          │ ╰───────────────────────────────────╯   │Issue notes...                      │ │         
          │                                         │                                    │ │         
-         │ ╭─ Status (Space to toggle) ────────╮   │                                    │ │         
-         │ │ (●) Open                          │   │                                    │ │         
-         │ │ ( ) In Progress                   │   │                                    │ │         
-         │ │ ( ) Closed                        │   │                                    │ │         
-         │ │ ( ) Deferred                      │   │                                    │ │         
-         │ │ ( ) Blocked                       │   │                                    │ │         
+         │ ╭─ Parent Epic (Enter to search) ───╮   │                                    │ │         
+         │ │ Search epics...                   │   │                                    │ │         
+         │ ╰───────────────────────────────────╯   │                                    │ │         
+         │                                         │                                    │ │         
+         │ ╭─ Parent Task (Enter to search) ───╮   │                                    │ │         
+         │ │ Search tasks...                   │   │                                    │ │         
          │ ╰───────────────────────────────────╯   ╰────────────────────────────────────╯ │         
          │                                                                                │         
          │    Save      Cancel                                                            │         

@@ -886,6 +886,37 @@ func (m Model) SetError(text string) Model {
 	return m
 }
 
+// Value returns the current value of the field with the given key,
+// or nil if no such field exists.
+func (m Model) Value(key string) any {
+	for i := range m.fields {
+		if m.fields[i].config.Key == key {
+			return m.fields[i].value()
+		}
+	}
+	return nil
+}
+
+// SetEpicSearchSelection sets the selected issue of the EpicSearch field with
+// the given key and collapses it. Pass an empty id to clear the selection.
+// Used to fill in a pre-selected value once its title has been resolved.
+func (m Model) SetEpicSearchSelection(key, id, title string) Model {
+	m.fields = slices.Clone(m.fields)
+	for i := range m.fields {
+		fs := &m.fields[i]
+		if fs.config.Key != key || fs.config.Type != FieldTypeEpicSearch {
+			continue
+		}
+		fs.epicSelectedID = id
+		fs.epicSelectedTitle = title
+		if id != "" {
+			fs.epicSearchExpanded = false
+			fs.searchInput.Blur()
+		}
+	}
+	return m
+}
+
 // listContains checks if the editable list already contains a value.
 // Used for duplicate detection when AllowDuplicates is false.
 func (m Model) listContains(fs *fieldState, value string) bool {
@@ -939,7 +970,8 @@ func (m Model) handleKeyForEditableList(msg tea.KeyMsg, fs *fieldState) (Model, 
 			return m, textinput.Blink
 		}
 		// Move to next field
-		return m.nextField(), m.blinkCmd()
+		m = m.nextField()
+		return m, m.blinkCmd()
 
 	case key.Matches(msg, keys.Component.ShiftTab):
 		if fs.subFocus == SubFocusInput {
@@ -953,7 +985,8 @@ func (m Model) handleKeyForEditableList(msg tea.KeyMsg, fs *fieldState) (Model, 
 			return m, nil
 		}
 		// Move to previous field
-		return m.prevField(), m.blinkCmd()
+		m = m.prevField()
+		return m, m.blinkCmd()
 
 	case msg.String() == "j" || msg.String() == "k":
 		// j/k only navigate in list mode; in input they type characters
@@ -975,7 +1008,8 @@ func (m Model) handleKeyForEditableList(msg tea.KeyMsg, fs *fieldState) (Model, 
 				return m, nil
 			}
 			// At top of list, go to previous field (wraps to cancel)
-			return m.prevField(), m.blinkCmd()
+			m = m.prevField()
+			return m, m.blinkCmd()
 		}
 		// In input, let j/k type characters - fall through to input handler
 
@@ -992,7 +1026,8 @@ func (m Model) handleKeyForEditableList(msg tea.KeyMsg, fs *fieldState) (Model, 
 		}
 		// In input, down/ctrl+n moves to next field
 		fs.addInput.Blur()
-		return m.nextField(), m.blinkCmd()
+		m = m.nextField()
+		return m, m.blinkCmd()
 
 	case key.Matches(msg, keys.Common.Up), key.Matches(msg, keys.Component.Prev):
 		if fs.subFocus == SubFocusList {
@@ -1001,7 +1036,8 @@ func (m Model) handleKeyForEditableList(msg tea.KeyMsg, fs *fieldState) (Model, 
 				return m, nil
 			}
 			// At top of list, go to previous field (wraps to cancel)
-			return m.prevField(), m.blinkCmd()
+			m = m.prevField()
+			return m, m.blinkCmd()
 		}
 		// In input, up/ctrl+p moves to list (at bottom)
 		fs.subFocus = SubFocusList
@@ -1060,9 +1096,11 @@ func (m Model) handleKeyForSearchSelect(msg tea.KeyMsg, fs *fieldState) (Model, 
 	if !fs.searchExpanded {
 		switch {
 		case key.Matches(msg, keys.Component.Tab), msg.Type == tea.KeyDown, key.Matches(msg, keys.Component.Next), msg.String() == "j":
-			return m.nextField(), m.blinkCmd()
+			m = m.nextField()
+			return m, m.blinkCmd()
 		case key.Matches(msg, keys.Component.ShiftTab), msg.Type == tea.KeyUp, key.Matches(msg, keys.Component.Prev), msg.String() == "k":
-			return m.prevField(), m.blinkCmd()
+			m = m.prevField()
+			return m, m.blinkCmd()
 		case key.Matches(msg, keys.Common.Enter):
 			// Expand to show search + list
 			fs.searchExpanded = true
@@ -1090,13 +1128,15 @@ func (m Model) handleKeyForSearchSelect(msg tea.KeyMsg, fs *fieldState) (Model, 
 		// Tab collapses and moves to next field
 		fs.searchExpanded = false
 		fs.searchInput.Blur()
-		return m.nextField(), m.blinkCmd()
+		m = m.nextField()
+		return m, m.blinkCmd()
 
 	case key.Matches(msg, keys.Component.ShiftTab):
 		// Shift+Tab collapses and moves to previous field
 		fs.searchExpanded = false
 		fs.searchInput.Blur()
-		return m.prevField(), m.blinkCmd()
+		m = m.prevField()
+		return m, m.blinkCmd()
 
 	// Note: Escape is handled in handleKeyMsg before dispatch to collapse search
 
@@ -1153,9 +1193,11 @@ func (m Model) handleKeyForEpicSearch(msg tea.KeyMsg, fs *fieldState) (Model, te
 	if !fs.epicSearchExpanded {
 		switch {
 		case key.Matches(msg, keys.Component.Tab), msg.Type == tea.KeyDown, key.Matches(msg, keys.Component.Next), msg.String() == "j":
-			return m.nextField(), m.blinkCmd()
+			m = m.nextField()
+			return m, m.blinkCmd()
 		case key.Matches(msg, keys.Component.ShiftTab), msg.Type == tea.KeyUp, key.Matches(msg, keys.Component.Prev), msg.String() == "k":
-			return m.prevField(), m.blinkCmd()
+			m = m.prevField()
+			return m, m.blinkCmd()
 		case key.Matches(msg, keys.Common.Enter):
 			// Enter clears selection and expands to search
 			return m.expandEpicSearch(fs, "")
@@ -1174,13 +1216,15 @@ func (m Model) handleKeyForEpicSearch(msg tea.KeyMsg, fs *fieldState) (Model, te
 		// Tab collapses and moves to next field
 		fs.epicSearchExpanded = false
 		fs.searchInput.Blur()
-		return m.nextField(), m.blinkCmd()
+		m = m.nextField()
+		return m, m.blinkCmd()
 
 	case key.Matches(msg, keys.Component.ShiftTab):
 		// Shift+Tab collapses and moves to previous field
 		fs.epicSearchExpanded = false
 		fs.searchInput.Blur()
-		return m.prevField(), m.blinkCmd()
+		m = m.prevField()
+		return m, m.blinkCmd()
 
 	// Note: Escape is handled in handleKeyMsg before dispatch to collapse search
 
@@ -1270,15 +1314,15 @@ func (m Model) expandEpicSearch(fs *fieldState, initialText string) (Model, tea.
 	})
 }
 
-// buildEpicSearchQuery constructs a BQL query for searching epics.
-// Searches id, title, and description fields to support pasting epic IDs directly.
-func buildEpicSearchQuery(input string) string {
+// buildEpicSearchQuery constructs a BQL query for searching open issues matching typeFilter.
+// Searches id, title, and description fields to support pasting issue IDs directly.
+func buildEpicSearchQuery(typeFilter, input string) string {
 	if input == "" {
-		return "type = epic and status != closed order by updated desc"
+		return fmt.Sprintf("%s and status != closed order by updated desc", typeFilter)
 	}
 	// Escape quotes in the input
 	escaped := strings.ReplaceAll(input, `"`, `\"`)
-	return fmt.Sprintf(`type = epic and status != closed and (id ~ "%s" or title ~ "%s" or description ~ "%s") order by updated desc`, escaped, escaped, escaped)
+	return fmt.Sprintf(`%s and status != closed and (id ~ "%s" or title ~ "%s" or description ~ "%s") order by updated desc`, typeFilter, escaped, escaped, escaped)
 }
 
 // executeEpicSearch creates a command that executes the BQL query asynchronously.
@@ -1298,7 +1342,7 @@ func (m Model) executeEpicSearch(fieldIndex int, query string, queryID int) tea.
 	}
 
 	executor := fs.config.EpicSearchExecutor
-	bqlQuery := buildEpicSearchQuery(query)
+	bqlQuery := buildEpicSearchQuery(fs.config.searchTypeFilter(), query)
 
 	return func() tea.Msg {
 		issues, err := executor.Execute(bqlQuery)

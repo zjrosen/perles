@@ -16,23 +16,23 @@
 │ │ ( ) P4 - Backlog                          │   ╭─ Notes (Ctrl+G for editor) ────────────────╮ │
 │ ╰───────────────────────────────────────────╯   │Internal notes here                         │ │
 │                                                 │                                            │ │
-│ ╭─ Status (Space to toggle) ────────────────╮   │                                            │ │
-│ │ (●) Open                                  │   │                                            │ │
-│ │ ( ) In Progress                           │   │                                            │ │
-│ │ ( ) Closed                                │   │                                            │ │
-│ │ ( ) Deferred                              │   │                                            │ │
-│ │ ( ) Blocked                               │   │                                            │ │
+│ ╭─ Parent Epic (Enter to search) ───────────╮   │                                            │ │
+│ │ Search epics...                           │   │                                            │ │
+│ ╰───────────────────────────────────────────╯   │                                            │ │
+│                                                 │                                            │ │
+│ ╭─ Parent Task (Enter to search) ───────────╮   │                                            │ │
+│ │ Search tasks...                           │   │                                            │ │
 │ ╰───────────────────────────────────────────╯   ╰────────────────────────────────────────────╯ │
 │                                                                                                │
+│ ╭─ Status (Space to toggle) ────────────────╮                                                  │
+│ │ (●) Open                                  │                                                  │
+│ │ ( ) In Progress                           │                                                  │
+│ │ ( ) Closed                                │                                                  │
+│ │ ( ) Deferred                              │                                                  │
+│ │ ( ) Blocked                               │                                                  │
+│ ╰───────────────────────────────────────────╯                                                  │
+│                                                                                                │
 │ ╭─ Labels (Space to toggle) ────────────────╮                                                  │
-│ │ [x] bug                                   │                                                  │
-│ │ [x] feature                               │                                                  │
-│ ╰───────────────────────────────────────────╯                                                  │
-│                                                                                                │
-│ ╭─ Add Label (Enter to add) ────────────────╮                                                  │
-│ │ Enter label name...                       │                                                  │
-│ ╰───────────────────────────────────────────╯                                                  │
-│                                                                                                │
 │                                                                                                │
 │    Save      Cancel                                                                            │
 │                                                                                                │

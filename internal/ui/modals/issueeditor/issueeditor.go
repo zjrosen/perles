@@ -5,6 +5,7 @@
 package issueeditor
 
 import (
+	"fmt"
 	"slices"
 	"strconv"
 
@@ -21,6 +22,7 @@ type Model struct {
 	issue      task.Issue
 	form       formmodal.Model
 	createMode bool
+	executor   task.QueryExecutor
 }
 
 // SaveMsg is sent when the user confirms issue changes.
@@ -39,9 +41,16 @@ type SaveMsg struct {
 // CancelMsg is sent when the user cancels the editor.
 type CancelMsg struct{}
 
+// parentResolvedMsg carries the edited issue's current parent, looked up so the
+// editor can show it in the matching Parent Epic / Parent Task field with its title.
+type parentResolvedMsg struct {
+	parent task.Issue
+}
+
 // BuildUpdateOptions compares the SaveMsg fields against the original issue
 // snapshot and returns an UpdateIssueOptions with only changed fields set (non-nil).
-// If original is nil (safety fallback), all fields are populated from the SaveMsg.
+// If original is nil (safety fallback), all fields are populated from the SaveMsg,
+// except ParentID, which create flows pass to CreateTask directly.
 func (m SaveMsg) BuildUpdateOptions(original *task.Issue) task.UpdateOptions {
 	var opts task.UpdateOptions
 	if original == nil {
@@ -77,6 +86,10 @@ func (m SaveMsg) BuildUpdateOptions(original *task.Issue) task.UpdateOptions {
 		labels := cloneLabels(m.Labels)
 		opts.Labels = &labels
 	}
+	if m.ParentID != original.ParentID {
+		parentID := m.ParentID
+		opts.ParentID = &parentID
+	}
 	return opts
 }
 
@@ -95,7 +108,13 @@ func New(issue task.Issue) Model {
 
 // NewWithVimMode creates a new issue editor with the given issue and vim mode setting.
 func NewWithVimMode(issue task.Issue, vimEnabled bool) Model {
-	return newModel(issue, nil, vimEnabled, false)
+	return NewWithExecutorAndVimMode(issue, nil, vimEnabled)
+}
+
+// NewWithExecutorAndVimMode creates a new issue editor whose parent epic/task
+// fields search and resolve issues using the given executor.
+func NewWithExecutorAndVimMode(issue task.Issue, epicSearchExecutor task.QueryExecutor, vimEnabled bool) Model {
+	return newModel(issue, epicSearchExecutor, vimEnabled, false)
 }
 
 // NewForCreate creates a new issue editor in create mode with vim mode disabled.
@@ -120,7 +139,7 @@ func NewForCreateWithExecutorAndVimMode(epicSearchExecutor task.QueryExecutor, v
 }
 
 func newModel(issue task.Issue, epicSearchExecutor task.QueryExecutor, vimEnabled, createMode bool) Model {
-	m := Model{issue: issue, createMode: createMode}
+	m := Model{issue: issue, createMode: createMode, executor: epicSearchExecutor}
 	cfg := formmodal.FormConfig{
 		Title:        m.title(),
 		TitleContent: m.titleContent(),
@@ -172,7 +191,8 @@ func issueFields(issue task.Issue, epicSearchExecutor task.QueryExecutor, vimEna
 		Column:  0,
 	})
 
-	if createMode {
+	// Epics are top-level, so editing one doesn't offer parent fields.
+	if createMode || issue.Type != task.TypeEpic {
 		fields = append(fields, formmodal.FieldConfig{
 			Key:                "parent_id",
 			Type:               formmodal.FieldTypeEpicSearch,
@@ -181,11 +201,27 @@ func issueFields(issue task.Issue, epicSearchExecutor task.QueryExecutor, vimEna
 			SearchPlaceholder:  "Search epics...",
 			InitialValue:       issue.ParentID,
 			EpicSearchExecutor: epicSearchExecutor,
+			SearchTypeFilter:   parentSearchFilter("type = epic", issue.ID),
 			DebounceMs:         200,
 			Column:             0,
 			VisibleWhen: func(values map[string]any) bool {
-				issueType, _ := values["type"].(string)
-				return issueType != string(task.TypeEpic)
+				parentTaskID, _ := values["parent_task_id"].(string)
+				return parentFieldsVisible(values) && parentTaskID == ""
+			},
+		}, formmodal.FieldConfig{
+			Key:                "parent_task_id",
+			Type:               formmodal.FieldTypeEpicSearch,
+			Label:              "Parent Task",
+			Hint:               "Enter to search",
+			SearchPlaceholder:  "Search tasks...",
+			EpicSearchExecutor: epicSearchExecutor,
+			SearchTypeFilter:   parentSearchFilter("type != epic", issue.ID),
+			SearchNoun:         "tasks",
+			DebounceMs:         200,
+			Column:             0,
+			VisibleWhen: func(values map[string]any) bool {
+				parentEpicID, _ := values["parent_id"].(string)
+				return parentFieldsVisible(values) && parentEpicID == ""
 			},
 		})
 	}
@@ -242,9 +278,20 @@ func saveMsgFromValues(issue task.Issue, values map[string]any, createMode bool)
 	if createMode {
 		issueType = task.IssueType(values["type"].(string))
 	}
-	parentID, _ := values["parent_id"].(string)
-	if issueType == task.TypeEpic {
+	// Parent epic and parent task are mutually exclusive in the form; hidden
+	// fields are omitted from values, so at most one is set.
+	parentEpicID, hasParentEpic := values["parent_id"].(string)
+	parentTaskID, hasParentTask := values["parent_task_id"].(string)
+	parentID := parentEpicID
+	if parentTaskID != "" {
+		parentID = parentTaskID
+	}
+	switch {
+	case createMode && issueType == task.TypeEpic:
 		parentID = ""
+	case !createMode && !hasParentEpic && !hasParentTask:
+		// No parent fields shown (e.g., editing an epic): leave the parent unchanged.
+		parentID = issue.ParentID
 	}
 
 	return SaveMsg{
@@ -258,6 +305,22 @@ func saveMsgFromValues(issue task.Issue, values map[string]any, createMode bool)
 		Status:      task.Status(values["status"].(string)),
 		Labels:      append([]string(nil), values["labels"].([]string)...),
 	}
+}
+
+// parentSearchFilter builds the BQL type filter for a parent search field,
+// excluding the issue being edited so it can't be chosen as its own parent.
+func parentSearchFilter(typeFilter, selfID string) string {
+	if selfID == "" {
+		return typeFilter
+	}
+	return fmt.Sprintf(`%s and id != "%s"`, typeFilter, selfID)
+}
+
+// parentFieldsVisible reports whether the parent selectors apply to the
+// selected issue type. Epics are top-level and cannot have a parent.
+func parentFieldsVisible(values map[string]any) bool {
+	issueType, _ := values["type"].(string)
+	return issueType != string(task.TypeEpic)
 }
 
 func issueTypeListOptions(current task.IssueType) []formmodal.ListOption {
@@ -377,12 +440,44 @@ func (m Model) SetSize(width, height int) Model {
 }
 
 // Init initializes the model.
+// In edit mode, it also looks up the current parent to show its title and
+// place it in the Parent Epic or Parent Task field based on its type.
 func (m Model) Init() tea.Cmd {
-	return m.form.Init()
+	return tea.Batch(m.form.Init(), m.resolveParentCmd())
+}
+
+func (m Model) resolveParentCmd() tea.Cmd {
+	if m.createMode || m.executor == nil || m.issue.ParentID == "" || m.issue.Type == task.TypeEpic {
+		return nil
+	}
+	executor := m.executor
+	parentID := m.issue.ParentID
+	return func() tea.Msg {
+		issues, err := executor.Execute(fmt.Sprintf(`id = "%s"`, parentID))
+		if err != nil || len(issues) == 0 {
+			// Leave the parent ID displayed without a title.
+			return nil
+		}
+		return parentResolvedMsg{parent: issues[0]}
+	}
 }
 
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
+	if msg, ok := msg.(parentResolvedMsg); ok {
+		// Skip if the user already changed the parent before the lookup returned.
+		if current, _ := m.form.Value("parent_id").(string); current != msg.parent.ID {
+			return m, nil
+		}
+		if msg.parent.Type == task.TypeEpic {
+			m.form = m.form.SetEpicSearchSelection("parent_id", msg.parent.ID, msg.parent.TitleText)
+		} else {
+			m.form = m.form.SetEpicSearchSelection("parent_id", "", "").
+				SetEpicSearchSelection("parent_task_id", msg.parent.ID, msg.parent.TitleText)
+		}
+		return m, nil
+	}
+
 	var cmd tea.Cmd
 	m.form, cmd = m.form.Update(msg)
 	return m, cmd

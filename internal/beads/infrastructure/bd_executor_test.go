@@ -107,6 +107,23 @@ func TestBDExecutor_UpdateIssue_SingleField(t *testing.T) {
 	require.Equal(t, []string{"update", "PROJ-1", "--title", "New Title", "--json"}, captured)
 }
 
+func TestBDExecutor_UpdateIssue_ParentID(t *testing.T) {
+	var captured []string
+	executor := newTestExecutor(func(args ...string) (string, error) {
+		captured = args
+		return "", nil
+	})
+
+	parent := "PROJ-9"
+	require.NoError(t, executor.UpdateIssue("PROJ-1", domain.UpdateIssueOptions{ParentID: &parent}))
+	require.Equal(t, []string{"update", "PROJ-1", "--parent", "PROJ-9", "--json"}, captured)
+
+	// Empty string removes the parent.
+	empty := ""
+	require.NoError(t, executor.UpdateIssue("PROJ-1", domain.UpdateIssueOptions{ParentID: &empty}))
+	require.Equal(t, []string{"update", "PROJ-1", "--parent", "", "--json"}, captured)
+}
+
 func TestBDExecutor_GetComments(t *testing.T) {
 	executor := newTestExecutor(func(args ...string) (string, error) {
 		require.Equal(t, []string{"comments", "PROJ-1", "--json"}, args)

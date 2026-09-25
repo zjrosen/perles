@@ -179,6 +179,9 @@ func (e *BDExecutor) UpdateIssue(issueID string, opts domain.UpdateIssueOptions)
 	if opts.Type != nil {
 		args = append(args, "--type", string(*opts.Type))
 	}
+	if opts.ParentID != nil {
+		args = append(args, "--parent", *opts.ParentID)
+	}
 
 	// Execute non-label update if any fields were set.
 	if len(args) > 2 {

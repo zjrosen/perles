@@ -113,4 +113,5 @@ type UpdateOptions struct {
 	Labels      *[]string  // nil = unchanged, &[]string{} = clear all
 	Assignee    *string    // nil = unchanged
 	Type        *IssueType // nil = unchanged
+	ParentID    *string    // nil = unchanged, &"" = remove parent
 }

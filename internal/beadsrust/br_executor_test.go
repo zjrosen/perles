@@ -277,6 +277,18 @@ func TestBRExecutor_UpdateIssue_AllFields(t *testing.T) {
 	require.Contains(t, secondCall, "--set-labels")
 }
 
+func TestBRExecutor_UpdateIssue_ParentID(t *testing.T) {
+	var captured []string
+	executor := newTestExecutor(func(args ...string) (string, error) {
+		captured = args
+		return "{}", nil
+	})
+
+	empty := ""
+	require.NoError(t, executor.UpdateIssue("proj-1", task.UpdateOptions{ParentID: &empty}))
+	require.Equal(t, []string{"update", "proj-1", "--parent", "", "--json"}, captured)
+}
+
 func TestBRExecutor_UpdateIssue_NoFields(t *testing.T) {
 	called := false
 	executor := newTestExecutor(func(args ...string) (string, error) {

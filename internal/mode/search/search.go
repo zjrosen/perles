@@ -920,7 +920,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case details.OpenEditMenuMsg:
 		issue := msg.Issue
 		m.selectedIssue = &issue // Store for title/description comparison on save
-		m.issueEditor = issueeditor.NewWithVimMode(msg.Issue, m.services.Config.UI.VimMode).
+		m.issueEditor = issueeditor.NewWithExecutorAndVimMode(msg.Issue, m.services.QueryExecutor, m.services.Config.UI.VimMode).
 			SetSize(m.width, m.height)
 		m.view = ViewEditIssue
 		return m, m.issueEditor.Init()
@@ -985,6 +985,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case shared.ActionExecutedMsg:
 		return m.handleActionExecuted(msg)
+	}
+
+	// Forward remaining messages (e.g., async parent search results) to the issue editor.
+	if m.view == ViewEditIssue {
+		var cmd tea.Cmd
+		m.issueEditor, cmd = m.issueEditor.Update(msg)
+		return m, cmd
 	}
 
 	return m, nil

@@ -135,12 +135,13 @@ const (
 	// Returns the content as a string.
 	FieldTypeTextArea
 
-	// FieldTypeEpicSearch is a searchable epic selector with live BQL queries.
-	// Combines a search input with a dynamically populated list of epics.
+	// FieldTypeEpicSearch is a searchable issue selector with live BQL queries.
+	// Combines a search input with a dynamically populated list of issues
+	// matching SearchTypeFilter (epics by default).
 	// Executes BQL queries as the user types (debounced at 200ms by default).
 	// Navigate with arrow keys (not j/k which type in search), select with Enter.
-	// Supports EpicSearchExecutor (required), DebounceMs, SearchPlaceholder, MaxVisibleItems.
-	// Returns the selected epic's ID as a string.
+	// Supports EpicSearchExecutor (required), SearchTypeFilter, SearchNoun, DebounceMs, SearchPlaceholder, MaxVisibleItems.
+	// Returns the selected issue's ID as a string.
 	FieldTypeEpicSearch
 )
 
@@ -208,6 +209,8 @@ type FieldConfig struct {
 
 	// EpicSearch field options (FieldTypeEpicSearch)
 	EpicSearchExecutor task.QueryExecutor // Required: injected for query execution
+	SearchTypeFilter   string             // BQL type predicate for results (default: "type = epic")
+	SearchNoun         string             // Plural noun for placeholder/empty text (default: "epics")
 	DebounceMs         int                // Debounce delay in milliseconds (default: 200ms)
 
 	// Conditional visibility

@@ -1,6 +1,7 @@
 package issueeditor
 
 import (
+	"fmt"
 	"os"
 	"regexp"
 	"strings"
@@ -270,10 +271,161 @@ func TestIssueFields_CreateMode_ParentEpicVisibilityFollowsType(t *testing.T) {
 	require.False(t, parentField.VisibleWhen(map[string]any{"type": string(task.TypeEpic)}))
 }
 
-func TestIssueFields_EditMode_DoesNotIncludeParentEpic(t *testing.T) {
-	fields := issueFields(task.Issue{Type: task.TypeTask}, nil, false, false)
+func TestIssueFields_CreateMode_ParentTaskSearchesNonEpics(t *testing.T) {
+	fields := issueFields(task.Issue{Type: task.TypeTask}, nil, false, true)
+	parentTaskField, ok := findFieldConfig(fields, "parent_task_id")
+	require.True(t, ok, "create mode should include parent task field")
+	require.Equal(t, formmodal.FieldTypeEpicSearch, parentTaskField.Type)
+	require.Equal(t, "type != epic", parentTaskField.SearchTypeFilter, "any non-epic issue can be a parent task")
+	require.Equal(t, "Parent Task", parentTaskField.Label)
+}
+
+func TestIssueFields_CreateMode_ParentEpicAndTaskAreMutuallyExclusive(t *testing.T) {
+	fields := issueFields(task.Issue{Type: task.TypeTask}, nil, false, true)
+	epicField, ok := findFieldConfig(fields, "parent_id")
+	require.True(t, ok)
+	taskField, ok := findFieldConfig(fields, "parent_task_id")
+	require.True(t, ok)
+
+	none := map[string]any{"type": string(task.TypeTask), "parent_id": "", "parent_task_id": ""}
+	require.True(t, epicField.VisibleWhen(none), "parent epic visible when nothing selected")
+	require.True(t, taskField.VisibleWhen(none), "parent task visible when nothing selected")
+
+	epicSelected := map[string]any{"type": string(task.TypeTask), "parent_id": "epic-1", "parent_task_id": ""}
+	require.True(t, epicField.VisibleWhen(epicSelected))
+	require.False(t, taskField.VisibleWhen(epicSelected), "parent task hidden once an epic is selected")
+
+	taskSelected := map[string]any{"type": string(task.TypeTask), "parent_id": "", "parent_task_id": "task-1"}
+	require.False(t, epicField.VisibleWhen(taskSelected), "parent epic hidden once a task is selected")
+	require.True(t, taskField.VisibleWhen(taskSelected))
+
+	epicType := map[string]any{"type": string(task.TypeEpic), "parent_id": "", "parent_task_id": ""}
+	require.False(t, taskField.VisibleWhen(epicType), "parent task hidden for epic issue types")
+}
+
+func TestIssueFields_EditMode_IncludesParentFields(t *testing.T) {
+	issue := task.Issue{ID: "task-1", Type: task.TypeTask, ParentID: "epic-9"}
+	fields := issueFields(issue, nil, false, false)
+
+	epicField, ok := findFieldConfig(fields, "parent_id")
+	require.True(t, ok, "edit mode should include parent epic field")
+	require.Equal(t, "epic-9", epicField.InitialValue, "current parent is pre-selected")
+	require.Equal(t, `type = epic and id != "task-1"`, epicField.SearchTypeFilter, "issue can't be its own parent")
+
+	taskField, ok := findFieldConfig(fields, "parent_task_id")
+	require.True(t, ok, "edit mode should include parent task field")
+	require.Equal(t, `type != epic and id != "task-1"`, taskField.SearchTypeFilter, "issue can't be its own parent")
+}
+
+func TestIssueFields_EditMode_EpicHasNoParentFields(t *testing.T) {
+	fields := issueFields(task.Issue{ID: "epic-1", Type: task.TypeEpic}, nil, false, false)
 	_, ok := findFieldConfig(fields, "parent_id")
-	require.False(t, ok, "edit mode should not include create-only parent epic field")
+	require.False(t, ok, "editing an epic should not offer a parent epic")
+	_, ok = findFieldConfig(fields, "parent_task_id")
+	require.False(t, ok, "editing an epic should not offer a parent task")
+}
+
+func TestSaveMsgFromValues_EditMode_ParentHandling(t *testing.T) {
+	base := func(extra map[string]any) map[string]any {
+		v := map[string]any{
+			"title":       "Title",
+			"description": "",
+			"notes":       "",
+			"priority":    "P2",
+			"status":      string(task.StatusOpen),
+			"labels":      []string{},
+		}
+		for k, val := range extra {
+			v[k] = val
+		}
+		return v
+	}
+	issue := task.Issue{ID: "task-1", Type: task.TypeTask, ParentID: "epic-9"}
+
+	msg := saveMsgFromValues(issue, base(map[string]any{"parent_task_id": "task-2"}), false)
+	require.Equal(t, "task-2", msg.ParentID, "switching to a parent task")
+
+	msg = saveMsgFromValues(issue, base(map[string]any{"parent_id": "", "parent_task_id": ""}), false)
+	require.Empty(t, msg.ParentID, "clearing both fields removes the parent")
+
+	epic := task.Issue{ID: "epic-1", Type: task.TypeEpic, ParentID: "epic-0"}
+	msg = saveMsgFromValues(epic, base(nil), false)
+	require.Equal(t, "epic-0", msg.ParentID, "epics have no parent fields, so their parent is left unchanged")
+}
+
+func TestBuildUpdateOptions_ParentID(t *testing.T) {
+	original := &task.Issue{ID: "task-1", ParentID: "epic-9"}
+
+	opts := SaveMsg{ParentID: "epic-9"}.BuildUpdateOptions(original)
+	require.Nil(t, opts.ParentID, "unchanged parent should not be sent")
+
+	opts = SaveMsg{ParentID: "task-2"}.BuildUpdateOptions(original)
+	require.NotNil(t, opts.ParentID)
+	require.Equal(t, "task-2", *opts.ParentID)
+
+	opts = SaveMsg{ParentID: ""}.BuildUpdateOptions(original)
+	require.NotNil(t, opts.ParentID, "clearing the parent should be sent")
+	require.Empty(t, *opts.ParentID)
+
+	opts = SaveMsg{ParentID: "epic-9"}.BuildUpdateOptions(nil)
+	require.Nil(t, opts.ParentID, "create flows set the parent via CreateTask, not UpdateIssue")
+}
+
+type fakeQueryExecutor struct {
+	issues  []task.Issue
+	queries []string
+}
+
+func (f *fakeQueryExecutor) Execute(query string) ([]task.Issue, error) {
+	f.queries = append(f.queries, query)
+	return f.issues, nil
+}
+
+func TestEditMode_ResolvesParentIntoMatchingField(t *testing.T) {
+	tests := []struct {
+		name         string
+		parent       task.Issue
+		wantEpicID   string
+		wantParentID string
+	}{
+		{
+			name:       "epic parent stays in parent epic field",
+			parent:     task.Issue{ID: "epic-9", TitleText: "Big Epic", Type: task.TypeEpic},
+			wantEpicID: "epic-9",
+		},
+		{
+			name:         "task parent moves to parent task field",
+			parent:       task.Issue{ID: "task-9", TitleText: "Parent Task", Type: task.TypeTask},
+			wantParentID: "task-9",
+		},
+		{
+			name:         "bug parent moves to parent task field",
+			parent:       task.Issue{ID: "bug-9", TitleText: "Parent Bug", Type: task.TypeBug},
+			wantParentID: "bug-9",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			exec := &fakeQueryExecutor{issues: []task.Issue{tt.parent}}
+			issue := task.Issue{ID: "task-1", Type: task.TypeTask, ParentID: tt.parent.ID}
+			m := NewWithExecutorAndVimMode(issue, exec, false).SetSize(120, 40)
+
+			cmd := m.resolveParentCmd()
+			require.NotNil(t, cmd)
+			m, _ = m.Update(cmd())
+			require.Equal(t, []string{fmt.Sprintf(`id = "%s"`, tt.parent.ID)}, exec.queries)
+
+			require.Equal(t, tt.wantEpicID, m.form.Value("parent_id"))
+			require.Equal(t, tt.wantParentID, m.form.Value("parent_task_id"))
+			require.Contains(t, m.View(), tt.parent.TitleText, "resolved parent title is displayed")
+		})
+	}
+}
+
+func TestEditMode_ResolveParentSkippedWithoutParent(t *testing.T) {
+	exec := &fakeQueryExecutor{}
+	m := NewWithExecutorAndVimMode(task.Issue{ID: "task-1", Type: task.TypeTask}, exec, false)
+	require.Nil(t, m.resolveParentCmd())
 }
 
 func TestSaveMsgFromValues_CreateMode_ParentIDHandling(t *testing.T) {
@@ -306,6 +458,17 @@ func TestSaveMsgFromValues_CreateMode_ParentIDHandling(t *testing.T) {
 
 	msg = saveMsgFromValues(task.Issue{}, epicValues, true)
 	require.Empty(t, msg.ParentID, "epic creates should clear any parent link")
+
+	parentTaskValues := map[string]any{
+		"type":           string(task.TypeTask),
+		"parent_task_id": "task-456",
+	}
+	for k, v := range baseValues {
+		parentTaskValues[k] = v
+	}
+
+	msg = saveMsgFromValues(task.Issue{}, parentTaskValues, true)
+	require.Equal(t, "task-456", msg.ParentID, "non-epic creates should use the selected parent task")
 }
 
 func TestNew_InitializesFormModalWithCorrectFields(t *testing.T) {
@@ -447,6 +610,8 @@ func TestSaveMsg_ContainsCorrectParsedValues(t *testing.T) {
 	// Navigate to submit button and press Enter
 	// Tab through Title -> Priority -> Status -> Labels -> Add Label input -> Description -> Notes -> Submit button
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // to Priority
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // to Parent Epic
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // to Parent Task
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // to Status
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // to Labels
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // to Add Label input
@@ -592,7 +757,9 @@ func TestSaveMsg_PriorityChange(t *testing.T) {
 	// Press Space to confirm selection
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
 
-	// Tab to Status -> Labels -> Add Label input -> Description -> Notes -> Submit
+	// Tab to Parent Epic -> Parent Task -> Status -> Labels -> Add Label input -> Description -> Notes -> Submit
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
@@ -615,7 +782,9 @@ func TestSaveMsg_StatusChange(t *testing.T) {
 	issue := testIssue("test-123", []string{}, task.PriorityMedium, task.StatusOpen)
 	m := New(issue)
 
-	// Tab to Status field (Title -> Priority -> Status)
+	// Tab to Status field (Title -> Priority -> Parent Epic -> Parent Task -> Status)
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 
@@ -648,6 +817,8 @@ func TestSaveMsg_LabelsToggle(t *testing.T) {
 
 	// Tab to Labels (Title -> Priority -> Status -> Labels)
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Priority
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Parent Epic
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Parent Task
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Status
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Labels
 
@@ -678,6 +849,8 @@ func TestSaveMsg_AddNewLabel(t *testing.T) {
 
 	// Tab to Add Label input (Title -> Priority -> Status -> Labels -> Add Label input)
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Priority
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Parent Epic
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Parent Task
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Status
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Labels
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Add Label input
@@ -733,6 +906,8 @@ func TestSaveMsg_ContainsTitleValue(t *testing.T) {
 	// Tab through all fields to Submit button
 	// Title -> Priority -> Status -> Labels -> Add Label -> Description -> Notes -> Submit
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Priority
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Parent Epic
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Parent Task
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Status
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Labels
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Add Label input
@@ -756,6 +931,8 @@ func TestSaveMsg_ContainsDescriptionValue(t *testing.T) {
 	// Tab through all fields to Submit button
 	// Title -> Priority -> Status -> Labels -> Add Label -> Description -> Notes -> Submit
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Priority
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Parent Epic
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Parent Task
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Status
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Labels
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Add Label input
@@ -848,6 +1025,8 @@ func TestSaveMsg_ContainsNotesValue(t *testing.T) {
 	// Tab through all fields to Submit button
 	// Title -> Priority -> Status -> Labels -> Add Label input -> Description -> Notes -> Submit
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Priority
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Parent Epic
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Parent Task
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Status
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Labels
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Add Label input
@@ -870,6 +1049,8 @@ func TestIssueeditor_SaveMsg_IncludesNotes(t *testing.T) {
 
 	// Tab through all fields to Submit button
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Priority
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Parent Epic
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Parent Task
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Status
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Labels
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Add Label input
@@ -893,6 +1074,8 @@ func TestIssueeditor_NotesField_VimEnabled(t *testing.T) {
 
 	// Tab to Notes field (Title -> Priority -> Status -> Labels -> Add Label input -> Description -> Notes)
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Priority
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Parent Epic
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Parent Task
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Status
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Labels
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Add Label input
@@ -946,7 +1129,7 @@ func TestIssueEditor_TitleField_VimModeEnabled_EscapeStaysInModal(t *testing.T) 
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})                       // Priority
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}}) // P1
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})                     // select P1
-	for range 6 {                                                       // Status -> Labels -> Add Label -> Description -> Notes -> Submit
+	for range 8 {                                                       // Parent Epic -> Parent Task -> Status -> Labels -> Add Label -> Description -> Notes -> Submit
 		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	}
 	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -1064,7 +1247,7 @@ func TestIssueEditor_TitleField_NextFlowViaEnterAndDownArrow(t *testing.T) {
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})                     // select P2
 
 	// Continue to submit and save.
-	for range 6 { // Status -> Labels -> Add Label -> Description -> Notes -> Submit
+	for range 8 { // Parent Epic -> Parent Task -> Status -> Labels -> Add Label -> Description -> Notes -> Submit
 		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	}
 	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -1080,7 +1263,7 @@ func TestIssueEditor_TitleField_NextFlowViaEnterAndDownArrow(t *testing.T) {
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}}) // P1
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}}) // P2
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})                     // select P2
-	for range 6 {                                                       // Status -> Labels -> Add Label -> Description -> Notes -> Submit
+	for range 8 {                                                       // Parent Epic -> Parent Task -> Status -> Labels -> Add Label -> Description -> Notes -> Submit
 		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	}
 	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -1104,7 +1287,7 @@ func TestIssueEditor_SingleColumn_80x40_Golden(t *testing.T) {
 // Tab order tests verify that Tab/Shift-Tab traverse fields in array order regardless of column
 
 func TestTabOrder_TraversesFieldsInArrayOrder(t *testing.T) {
-	// Tab order should be: title -> priority -> status -> labels -> add-label-input -> description -> notes -> submit
+	// Tab order should be: title -> priority -> parent epic -> parent task -> status -> labels -> add-label-input -> description -> notes -> submit
 	issue := testIssueWithNotes("test-tab", "Tab Order Test", "Description", "Notes", []string{"label1"}, task.PriorityMedium, task.StatusOpen)
 	m := New(issue)
 	m = m.SetSize(120, 40) // Two-column mode
@@ -1112,6 +1295,10 @@ func TestTabOrder_TraversesFieldsInArrayOrder(t *testing.T) {
 	// Starting position: title field is focused
 
 	// Tab to priority
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	// Tab to parent epic
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	// Tab to parent task
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	// Tab to status
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
@@ -1141,16 +1328,18 @@ func TestShiftTabOrder_ReversesCorrectly(t *testing.T) {
 	m = m.SetSize(120, 40) // Two-column mode
 
 	// Navigate to submit button first
-	for i := 0; i < 7; i++ {
+	for i := 0; i < 9; i++ {
 		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	}
 
-	// Now Shift-Tab should go back: notes -> description -> add-label -> labels -> status -> priority -> title
+	// Now Shift-Tab should go back: notes -> description -> add-label -> labels -> status -> parent task -> parent epic -> priority -> title
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab}) // to notes
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab}) // to description
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab}) // to add-label input
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab}) // to labels
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab}) // to status
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab}) // to parent task
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab}) // to parent epic
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab}) // to priority
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab}) // to title
 
@@ -1160,7 +1349,7 @@ func TestShiftTabOrder_ReversesCorrectly(t *testing.T) {
 	}
 
 	// Tab forward to submit and save
-	for i := 0; i < 7; i++ {
+	for i := 0; i < 9; i++ {
 		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	}
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -1185,8 +1374,8 @@ func TestTabOrder_ConsistentBetweenSingleAndTwoColumn(t *testing.T) {
 	mWide = mWide.SetSize(120, 40)
 
 	// Both should take the same number of tabs to reach submit
-	// title -> priority -> status -> labels -> add-label-input -> description -> notes -> submit
-	tabsToSubmit := 7
+	// title -> priority -> parent epic -> parent task -> status -> labels -> add-label-input -> description -> notes -> submit
+	tabsToSubmit := 9
 
 	// Navigate narrow version to submit
 	for i := 0; i < tabsToSubmit; i++ {

@@ -241,7 +241,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.creatingIssue = false
 		m.createIssueID = ""
 		m.createIssue = nil
-		m.issueEditor = issueeditor.NewWithVimMode(msg.Issue, m.services.Config.UI.VimMode).
+		m.issueEditor = issueeditor.NewWithExecutorAndVimMode(msg.Issue, m.services.QueryExecutor, m.services.Config.UI.VimMode).
 			SetSize(m.width, m.height)
 		m.view = ViewEditIssue
 		return m, m.issueEditor.Init()
