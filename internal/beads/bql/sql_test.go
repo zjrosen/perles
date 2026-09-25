@@ -449,6 +449,59 @@ func TestSQLBuilder_ComplexQuery(t *testing.T) {
 	require.Equal(t, []interface{}{"bug", "task"}, params)
 }
 
+func TestSQLBuilder_MySQLDialect_ContainsIsCaseInsensitive(t *testing.T) {
+	// Dolt's default utf8mb4_0900_bin collation makes LIKE case-sensitive,
+	// so ~ and !~ must lowercase both sides to match SQLite behavior.
+	tests := []struct {
+		input      string
+		wantWhere  string
+		wantParams []interface{}
+	}{
+		{
+			input:      `title ~ "Test Issue"`,
+			wantWhere:  "LOWER(i.title) LIKE ?",
+			wantParams: []interface{}{"%test issue%"},
+		},
+		{
+			input:      `title !~ "WIP"`,
+			wantWhere:  "LOWER(i.title) NOT LIKE ?",
+			wantParams: []interface{}{"%wip%"},
+		},
+		{
+			input:      "assignee ~ Bob",
+			wantWhere:  "LOWER(COALESCE(i.assignee, '')) LIKE ?",
+			wantParams: []interface{}{"%bob%"},
+		},
+		{
+			input:      "label ~ Spec",
+			wantWhere:  "i.id IN (SELECT issue_id FROM labels WHERE LOWER(label) LIKE ?)",
+			wantParams: []interface{}{"%spec%"},
+		},
+		{
+			input:      "label !~ Backlog",
+			wantWhere:  "i.id NOT IN (SELECT issue_id FROM labels WHERE LOWER(label) LIKE ?)",
+			wantParams: []interface{}{"%backlog%"},
+		},
+		{
+			input:      "metadata.team ~ Backend",
+			wantWhere:  "LOWER(JSON_UNQUOTE(JSON_EXTRACT(i.metadata, ?))) LIKE ?",
+			wantParams: []interface{}{"$.team", "%backend%"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			query, err := NewParser(tt.input).Parse()
+			require.NoError(t, err)
+
+			where, _, params := NewSQLBuilder(query, appbeads.DialectMySQL).Build()
+
+			require.Equal(t, tt.wantWhere, where)
+			require.Equal(t, tt.wantParams, params)
+		})
+	}
+}
+
 func TestSQLBuilder_MySQLDialect_DateToday(t *testing.T) {
 	parser := NewParser("created > today")
 	query, err := parser.Parse()

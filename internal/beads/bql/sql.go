@@ -136,11 +136,9 @@ func (b *SQLBuilder) buildCompare(e *CompareExpr) string {
 		// Supports exact match (=, !=) and partial match (~, !~)
 		switch e.Op {
 		case TokenContains:
-			b.params = append(b.params, "%"+e.Value.String+"%")
-			return "i.id IN (SELECT issue_id FROM labels WHERE label LIKE ?)"
+			return "i.id IN (SELECT issue_id FROM labels WHERE " + b.likeSQL("label", TokenContains, e.Value.String) + ")"
 		case TokenNotContains:
-			b.params = append(b.params, "%"+e.Value.String+"%")
-			return "i.id NOT IN (SELECT issue_id FROM labels WHERE label LIKE ?)"
+			return "i.id NOT IN (SELECT issue_id FROM labels WHERE " + b.likeSQL("label", TokenContains, e.Value.String) + ")"
 		case TokenNeq:
 			b.params = append(b.params, e.Value.String)
 			return "i.id NOT IN (SELECT issue_id FROM labels WHERE label = ?)"
@@ -163,12 +161,9 @@ func (b *SQLBuilder) buildCompare(e *CompareExpr) string {
 
 		extracted := "JSON_UNQUOTE(JSON_EXTRACT(i.metadata, ?))"
 		switch e.Op {
-		case TokenContains:
-			b.params = append(b.params, path, "%"+e.Value.String+"%")
-			return fmt.Sprintf("%s LIKE ?", extracted)
-		case TokenNotContains:
-			b.params = append(b.params, path, "%"+e.Value.String+"%")
-			return fmt.Sprintf("%s NOT LIKE ?", extracted)
+		case TokenContains, TokenNotContains:
+			b.params = append(b.params, path)
+			return b.likeSQL(extracted, e.Op, e.Value.String)
 		default:
 			b.params = append(b.params, path, e.Value.String)
 			return fmt.Sprintf("%s %s ?", extracted, b.opToSQL(e.Op))
@@ -199,12 +194,8 @@ func (b *SQLBuilder) buildCompare(e *CompareExpr) string {
 	// Handle nullable string fields (use COALESCE so NULL matches empty string)
 	if e.Field == "assignee" {
 		switch e.Op {
-		case TokenContains:
-			b.params = append(b.params, "%"+e.Value.String+"%")
-			return fmt.Sprintf("COALESCE(%s, '') LIKE ?", column)
-		case TokenNotContains:
-			b.params = append(b.params, "%"+e.Value.String+"%")
-			return fmt.Sprintf("COALESCE(%s, '') NOT LIKE ?", column)
+		case TokenContains, TokenNotContains:
+			return b.likeSQL(fmt.Sprintf("COALESCE(%s, '')", column), e.Op, e.Value.String)
 		default:
 			b.params = append(b.params, e.Value.String)
 			return fmt.Sprintf("COALESCE(%s, '') %s ?", column, b.opToSQL(e.Op))
@@ -213,12 +204,8 @@ func (b *SQLBuilder) buildCompare(e *CompareExpr) string {
 
 	// Handle contains/not contains operators
 	switch e.Op {
-	case TokenContains:
-		b.params = append(b.params, "%"+e.Value.String+"%")
-		return fmt.Sprintf("%s LIKE ?", column)
-	case TokenNotContains:
-		b.params = append(b.params, "%"+e.Value.String+"%")
-		return fmt.Sprintf("%s NOT LIKE ?", column)
+	case TokenContains, TokenNotContains:
+		return b.likeSQL(column, e.Op, e.Value.String)
 	}
 
 	// Standard comparison
@@ -275,6 +262,23 @@ func (b *SQLBuilder) fieldToColumn(field string) string {
 		return col
 	}
 	return "i." + field
+}
+
+// likeSQL builds a case-insensitive substring match for the ~ and !~ operators
+// and appends the pattern param. SQLite's LIKE is already case-insensitive for
+// ASCII, but MySQL/Dolt's default utf8mb4_0900_bin collation is case-sensitive,
+// so both sides are lowercased there.
+func (b *SQLBuilder) likeSQL(expr string, op TokenType, value string) string {
+	pattern := "%" + value + "%"
+	if b.dialect == appbeads.DialectMySQL {
+		expr = "LOWER(" + expr + ")"
+		pattern = strings.ToLower(pattern)
+	}
+	b.params = append(b.params, pattern)
+	if op == TokenNotContains {
+		return expr + " NOT LIKE ?"
+	}
+	return expr + " LIKE ?"
 }
 
 // opToSQL converts a token operator to SQL.
