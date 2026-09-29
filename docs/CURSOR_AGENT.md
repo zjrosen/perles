@@ -38,7 +38,7 @@ Key flags:
 
 ### MCP Configuration (File-Based)
 
-Cursor CLI does not accept `--mcp-config` as a command-line flag. It reads MCP server configuration from `.cursor/mcp.json` in the project directory.
+Cursor CLI does not accept `--mcp-config` as a command-line flag. It reads MCP server configuration from `.cursor/mcp.json` in its working directory.
 
 Before spawning `cursor-agent`, Perles:
 
@@ -67,11 +67,13 @@ Cursor does not support `--append-system-prompt`. The system prompt is prepended
 
 ### Session Resumption
 
-Cursor supports session resumption via `--resume <session-id>`. The session ID is extracted from the `init` event in the stream-json output. Health checks and context exhaustion recovery use this to continue existing sessions.
+Cursor supports session resumption via `--resume <session-id>`. The session ID is extracted from the `init` event in the stream-json output. Every follow-up message to an existing process (user input, inter-agent messages, health-check nudges) re-spawns `cursor-agent` with `--resume <session-id>`. Resuming a paused workflow continues the same sessions; for a workflow restored from disk, the session IDs saved in its session metadata are restored first.
+
+Context-exhaustion recovery does not resume. An exhausted coordinator is replaced with a fresh session and a handoff prompt, and an exhausted observer is replaced with a fresh session that recovers from its notes file. An exhausted worker is marked failed so the coordinator can replace it.
 
 ## CLI Requirements
 
-The `cursor-agent` command must be available in `PATH`. Common locations checked:
+Perles looks for `cursor-agent` in these locations, in order, and then falls back to `PATH`:
 
 - `~/.local/bin/cursor-agent`
 - `/opt/homebrew/bin/cursor-agent` (Apple Silicon Mac)
@@ -107,7 +109,7 @@ Cursor CLI does not support `--allowed-tools` or `--disallowed-tools`. All tools
 
 ### Shared MCP Config File
 
-Every other provider (Claude, Amp, Codex, OpenCode, Gemini) passes MCP config via a command-line flag or environment variable. Cursor is the exception — it only reads MCP config from `.cursor/mcp.json` on disk. This creates a constraint: all processes in a workflow share the same working directory, so they share a single config file.
+Claude and Amp pass MCP config via `--mcp-config`, Codex via `-c mcp_servers.*`, and OpenCode via the `OPENCODE_CONFIG_CONTENT` environment variable. Like Gemini (which writes `{workDir}/.gemini/settings.json`), Cursor reads MCP config only from a file in the working directory: `.cursor/mcp.json`. This creates a constraint: all processes in a workflow share the same working directory, so they share a single config file.
 
 #### How the current solution works
 
@@ -118,11 +120,15 @@ Each process writes its MCP server entry to `{workDir}/.cursor/mcp.json` before 
 - Worker 2: `perles-worker-2` → `http://localhost:<port>/worker/worker-2`
 - Observer: `perles-observer` → `http://localhost:<port>/observer`
 
-Writes use a read-merge-write pattern: read any existing file, add/overwrite our entries, write back. This preserves user-defined MCP servers already in the file. Each `cursor-agent` process reads the file at startup and connects to all listed servers, but only the server with its role-specific tools matters.
+Writes use a read-merge-write pattern: read any existing file, add/overwrite our entries, write back. This preserves user-defined MCP servers already in the file (if the existing file is not valid JSON, it is replaced). A process's entry is rewritten before every spawn, including each `--resume`. Each `cursor-agent` process reads the file at startup and, because Perles passes `--approve-mcps`, connects to every server listed in it.
 
-When running in **worktree mode**, the working directory is an ephemeral git worktree created for the workflow. The `.cursor/mcp.json` lives there, not in the main project directory, and is cleaned up when the worktree is removed.
+Perles does not enforce role separation, since the MCP endpoints don't check which process is calling. A Cursor worker can therefore use other workers' tools and, when the coordinator also runs on Cursor, coordinator tools via `perles-orchestrator` (likewise observer tools via `perles-observer` when the observer runs on Cursor). Only the prompts keep each agent on its own role's tools.
 
-Without worktree mode, the file persists in the project directory after the workflow ends. The stale server URLs are harmless (they point to ports no longer in use) but visible.
+When running in **worktree mode**, the working directory is the workflow's git worktree (newly created or an existing one you selected), so `.cursor/mcp.json` is written there instead of the main project directory. Perles does not delete worktrees when a workflow ends, so the file stays until you remove the worktree yourself.
+
+Workflows that run at the same time in the same directory (for example, two workflows started with **No Worktree**) also share the file. Their entries have the same names (`perles-orchestrator`, `perles-worker-1`, ...), so each workflow's writes overwrite the other's, and a Cursor process can end up connected to the other workflow's servers. Give each workflow its own worktree to keep the files separate.
+
+Perles never deletes or git-ignores `.cursor/mcp.json`, and writes only add or update entries. Entries from earlier runs (for example a `perles-worker-5` left by a workflow that had more workers) are never removed, so later `cursor-agent` runs also try to connect to those dead servers. Add `.cursor/mcp.json` (or `.cursor/`) to your repo's `.gitignore` so it doesn't show up in `git status` or get committed by agents, and delete the file to clear stale entries. If your repo already tracks `.cursor/mcp.json`, Perles modifies that tracked file, so review diffs before committing.
 
 #### Alternatives explored and rejected
 

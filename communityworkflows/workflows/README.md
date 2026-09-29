@@ -1,6 +1,6 @@
 # Community Workflows
 
-Community-contributed workflow templates for Perles orchestration mode.
+Community-contributed workflow templates for the Perles orchestration dashboard.
 Workflows here are embedded at compile time and distributed with the binary,
 but users must explicitly opt in via config to use them.
 
@@ -36,7 +36,8 @@ orchestration:
 ```
 
 Restart perles after changing config. The workflow will appear in the
-dashboard's new workflow modal (press `n`).
+dashboard's new workflow modal (press `n`) and in `perles workflows` with a
+`[community]` label.
 
 ## Creating a New Community Workflow
 
@@ -90,19 +91,22 @@ registry:
 ### 3. Add prompt templates
 
 Each node references a markdown template file. Templates in the workflow
-directory are resolved first, then shared templates in `workflows/` are
-checked as a fallback.
+directory are resolved first, then shared templates in `workflows/`, then
+perles' built-in templates as a final fallback.
 
 Template files support Go template syntax with these variables:
 
 | Variable | Description |
 |----------|-------------|
-| `{{.Slug}}` | Feature slug (e.g., "my-feature") |
-| `{{.Name}}` | Human-readable name |
-| `{{.Date}}` | Current date |
+| `{{.Slug}}` | Workflow name as entered in the New Workflow form (defaults to the template key; not slugified) |
+| `{{.Name}}` | Same value as `{{.Slug}}` |
+| `{{.Date}}` | Current date (`YYYY-MM-DD`) |
 | `{{.Args.key}}` | User-provided argument values |
-| `{{.Inputs.key}}` | Input artifact paths |
-| `{{.Outputs.key}}` | Output artifact paths |
+| `{{.Inputs.key}}` | Input artifact paths (node templates only) |
+| `{{.Outputs.key}}` | Output artifact paths (node templates only) |
+| `{{.Config.document_path}}` | Base docs path from `orchestration.templates.document_path` (default `docs/proposals`) |
+
+The `system_prompt` template is passed to the coordinator as-is and is not rendered.
 
 ### 4. Key conventions
 
@@ -110,8 +114,14 @@ Template files support Go template syntax with these variables:
 - **Key** should be lowercase with hyphens (e.g., `"code-review"`)
 - **Version** should be `"v1"` (bump when making breaking changes)
 - **Assignees**: `worker-1` through `worker-99` for AI agents, `human` for review checkpoints
-- **Node ordering**: use `after` to declare dependencies; nodes without `after` run in parallel
+- **Node ordering**: dependencies come from `after` and from `inputs` (a node waits for whichever node outputs the same `file`). Nodes with neither run in parallel. Every input `file` must exactly match another node's output `file`
 - **File naming**: prefix template files with the version (e.g., `v1-my-workflow-research.md`)
+
+Community workflows load as a set: if any community `template.yaml` is invalid
+(bad YAML, missing template, dangling input, unknown `after` key, cycle, invalid
+assignee), no community workflows load. The warning
+(`loading community registrations`) is only visible in `debug.log` when perles
+runs with `-d`.
 
 ### Shared Templates
 
@@ -125,4 +135,8 @@ workflows. Currently available:
 
 Reference shared templates by filename in your node definitions. The loader
 resolves them automatically -- it checks the workflow directory first, then
-falls back to the shared `workflows/` directory.
+the shared `workflows/` directory, then perles' built-in templates
+(`internal/templates/workflows/`).
+
+These two files are copies of perles' built-in shared templates and must stay
+identical to them; `TestSharedTemplateSyncCheck` fails if they diverge.

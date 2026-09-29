@@ -9,17 +9,41 @@ Workflow templates are pre-defined "recipes" for common orchestration patterns. 
 | Template | Description |
 |----------|-------------|
 | **Cook** | Sequential task execution with code review |
-| **Research to Tasks** | Research a topic and convert findings to actionable tasks |
-| **Debate** | Multi-agent debate for exploring solutions |
+| **Research to Tasks** | Convert an existing research or proposal document into a beads epic and tasks, with multi-perspective review |
+| **Technical Debate** | Structured multi-perspective debate (moderator, affirmative, negative, neutral analyst) |
 | **Mediated Investigation** | Structured investigation with mediator |
 | **Research Proposal** | Collaborative proposal development |
 | **Quick Plan** | Rapid planning and task breakdown |
 
-List all available templates with:
+Start a workflow from the dashboard's New Workflow dialog: press `ctrl+o` on the kanban board to open the dashboard, then `n`. The dialog lists the built-in templates, any [community workflows](#community-workflows) you have enabled, and your own [custom workflows](custom-workflows.md) from `~/.perles/workflows/<name>/template.yaml`.
+
+List the same templates from the command line with:
 
 ```bash
 perles workflows
 ```
+
+The first section, **Dashboard Workflows**, shows each template's key and name with a `[built-in]`, `[community]`, or `[user]` label. The second section, **Chat Panel Workflows**, lists the separate markdown workflows offered by the chat panel's Workflows tab. For JSON output, use `perles registry:list -n workflow`.
+
+---
+
+## Community Workflows
+
+Community workflows are contributed templates that ship with the perles binary but stay hidden until you opt in. Currently available:
+
+| ID | Description |
+|----|-------------|
+| `joke-contest` | Two workers write jokes in parallel, a human reviews them, then a third worker judges and picks a winner |
+
+Enable them in your config and restart perles:
+
+```yaml
+orchestration:
+  community_workflows:
+    - "joke-contest"          # or the fully-qualified "workflow/joke-contest"
+```
+
+Enabled community workflows appear in the New Workflow dialog and in `perles workflows` with a `[community]` label.
 
 ---
 
@@ -60,10 +84,11 @@ Execute the tasks with code review:
 Cook is the primary implementation workflow. It processes an existing epic's tasks in order:
 
 1. **Task Assignment**: Coordinator assigns the next task to an available worker
-2. **Implementation**: Worker implements the task (`impl` phase)
-3. **Review**: Worker reviews their own work or another worker reviews (`review` phase)
-4. **Feedback**: If review has issues, worker addresses feedback (`feedback` phase)
-5. **Commit**: Worker commits changes (`commit` phase)
-6. **Next Task**: Coordinator moves to the next task
+2. **Implementation**: Worker implements the task (`implementing` phase)
+3. **Review**: A different worker reviews the implementation (`reviewing` phase) while the implementer waits (`awaiting_review` phase); a worker can never review its own task
+4. **Feedback**: If the review is denied, the implementer addresses the feedback (`addressing_feedback` phase) and the task is reviewed again
+5. **Commit**: After approval, the coordinator approves the commit and the implementer commits the changes (`committing` phase)
+6. **Worker Cycling**: The coordinator replaces both the implementer and the reviewer with fresh workers
+7. **Next Task**: The coordinator moves to the next task; when all tasks are done it closes the epic and signals completion
 
-Workers that run out of context are automatically replaced with fresh instances.
+If a worker runs out of context mid-task, it is marked failed and the coordinator is prompted to replace it and reassign the task. The coordinator itself is replaced automatically when it runs out of context.

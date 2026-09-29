@@ -20,29 +20,40 @@ This allows for structured workflow instructions that can manage and orchestrate
 
 ### Configuration
 
-The default orchestration settings use Claude Code with Opus 4.5 and by far works the best. 
-You can customize these settings in your `~/.config/perles/config.yaml` but they are optional:
+The default orchestration settings use Claude Code with Opus 5.5 (`claude-opus-5-5`) and by far work the best. 
+You can customize these settings in your config file, but they are optional. Perles uses the file given with `--config`/`-c`,
+otherwise `.perles/config.yaml` in the current directory, otherwise `~/.config/perles/config.yaml`. The first time you run
+`perles` in a beads project with no config file anywhere, it writes the default config to `.perles/config.yaml` (you can also create it with
+`perles init`), and that local file then takes precedence over `~/.config/perles/config.yaml`.
 
 ```yaml
 orchestration:
-  coordinator_client: "claude"  # Options: claude, amp, codex, opencode
-  worker_client: "claude"       # Options: claude, amp, codex, opencode
+  coordinator_client: "claude"  # Options: claude, amp, codex, gemini, opencode, cursor
+  worker_client: "claude"       # Options: claude, amp, codex, gemini, opencode, cursor
   
   # Provider-specific settings
   claude:
-    model: "opus"               # Options: sonnet, opus, haiku
+    model: "claude-opus-5-5"    # Default: claude-opus-5-5; aliases: opus, sonnet, haiku
   amp:
     model: "opus"               # Options: opus, sonnet
     mode: "smart"               # Options: free, rush, smart
   codex:
-    model: "gpt-6-sol"          # Options: gpt-6-sol, gpt-6-astra, gpt-6-luna
+    model: "gpt-6-sol"          # Default: gpt-6-sol; any Codex model ID is passed through (e.g. gpt-6-luna)
+  gemini:
+    model: "gemini-3.8-flash"   # Default: gemini-3.8-flash
+  opencode:
+    model: "anthropic/claude-opus-5-5"  # Default: anthropic/claude-opus-5-5
+  # cursor:
+  #   model: "composer-1"       # Uses Cursor's default model if empty
 ```
+
+If `coordinator_client` or `worker_client` is omitted, that role falls back to the legacy `orchestration.client` key, then to `claude`.
 
 ### Quick Start
 
 1. Open Perles in your project directory.
-2. Press `ctrl+o` to enter orchestration mode.
-3. Select a workflow template and fill in any required fields.
+2. Press `ctrl+o` in kanban mode to open the orchestration dashboard (configurable via `ui.keybindings.dashboard`).
+3. Press `n` to open the New Workflow dialog, then select a workflow template and fill in any required fields.
    - A typical coding workflow is done over multiple workflows. You would start with the  **Research Proposal** to generate a proposal document. Then launch a **Research to Tasks** to break down the proposal document into beads epics and tasks. Then launch the **Cook** workflow with that epic to work through the entire epic's tasks.
 
 ---
@@ -68,6 +79,10 @@ New workflows are started by pressing "n" when the workflows table is in focus.
 ### Coordinator Pane
 
 The headless AI agent process that plans and delegates work to the workers based on workflow instructions. You can communicate to the coordinator using the chat input.
+In the workflows table, press `enter` on a workflow to focus its chat input, or `ctrl+w` to hide or show the pane.
+
+The pane is split into tabs: `Coord` (coordinator), `Obs` (observer, only when `orchestration.observer_enabled` is true), `Msgs` (message log),
+`CmdLog` (command log, only in debug mode with `perles -d`), and one tab per worker (`W1`, `W2`, ...). Use `ctrl+j`/`ctrl+k` to cycle tabs.
 
 **What you see:**
 - Status indicator showing coordinator state
@@ -82,52 +97,40 @@ The headless AI agent process that plans and delegates work to the workers based
 | `○` (green) | Ready — waiting for input |
 | `⏸` | Paused — workflow paused |
 | `⚠` (yellow) | Stopped — needs attention |
-| `✗` (red) | Failed — error occurred |
+| `✗` (red) | Retired or failed |
 
-#### Message Log (Tab)
+#### Message Log (`Msgs` Tab)
 
 The timeline of all inter-agent communication. Workers post to the message log when they finish their turns which nudges the coordinator to read and act.
 Workers are automatically enforced to end their turn with an MCP tool call to post their message to the log, if they do not use a tool call the system will
 intercept and remind them to do so.
 
 **What you see:**
-- Timestamps for each message
-- Sender → Recipient labels
+- A header for each message with its time, channel and sender (e.g., `14:02 [#tasks] worker-1`)
+- The message content (thread replies are prefixed with `↳ reply:`)
 
 #### Worker Panes (Tabs)
 
 When workers are spawned they are shown as tabs in the coordinator pane which you can view the output of each individual AI agent process.
 
 **What you see for each worker:**
-- Worker ID and name (e.g., `WORKER-1 perles-abc.1`)
-- Current phase: `(impl)`, `(review)`, `(commit)`, etc.
-- Status indicator (same icons as coordinator)
-- Token/cost metrics
+- Tab label with a status indicator (same icons as coordinator) and short worker ID (e.g., `● W1`)
+- Context token usage (e.g., `45k/200k`)
+- Queue count when messages are pending (e.g., `[2 queued]`)
 - Output content
-
-**Worker phases:**
-
-When using the Cook workflow template workers have additional phases to indicate their current activity:
-
-| Phase | Meaning |
-|-------|---------|
-| `idle` | Waiting for assignment |
-| `impl` | Implementing a task |
-| `review` | Reviewing work |
-| `await` | Awaiting feedback |
-| `feedback` | Addressing feedback |
-| `commit` | Committing changes |
 
 #### Chat Input Bar
 
-Text input area for sending messages to the coordinator or workers. 
+Text input area for sending messages to the coordinator or to a fabric channel.
 
 **Visual feedback:**
-- Border color indicates your message target:
-  - **Teal** = Sending to coordinator
-  - **Green** = Sending to a specific worker
-  - **Orange** = Broadcasting to all
-- When vim_mode is enabled shows which vim mode you are in for the text input.
+- The bottom-right of the input shows your current message target: `DM: Coordinator`, `#general`, `#tasks`, `#planning`,
+  and `#observer` when the observer is enabled. Press `Tab` while the coordinator pane is focused to cycle targets
+  (use `ctrl+n` or `shift+tab` to move focus out of the pane).
+- In a channel, type `@` to mention a participant: `@worker-N` or `@coordinator` notifies that agent, and `@here` notifies every agent that has joined the fabric.
+- After you post in a channel, your next messages there reply in that thread, and the top-right shows the thread ID (e.g., `↩ a1b2c3`).
+  Press `ctrl+t` to pick a different thread, or `esc` with an empty input to start a new one.
+- When vim_mode is enabled the bottom-left shows which vim mode you are in for the text input.
 
 ### Epic Tree and Details
 
@@ -147,18 +150,42 @@ then converted into a beads epic and tasks.
 | Template | Description |
 |----------|-------------|
 | **Cook** | Sequential task execution with code review |
-| **Research to Tasks** | Research a topic and convert findings to actionable tasks |
-| **Debate** | Multi-agent debate for exploring solutions |
+| **Research to Tasks** | Convert an existing research/proposal document into a beads epic and tasks with multi-perspective review |
+| **Technical Debate** | Structured multi-perspective debate (moderator, affirmative, negative, neutral analyst) |
 | **Mediated Investigation** | Structured investigation with mediator |
 | **Research Proposal** | Collaborative proposal development |
 | **Quick Plan** | Rapid planning and task breakdown |
 
+### Community Templates
+
+Extra community workflows ship with perles (currently `joke-contest`) but are disabled by default. Enable them by ID in your config
+and restart perles; they then appear in the new workflow picker:
+
+```yaml
+orchestration:
+  community_workflows:
+    - "joke-contest"   # "workflow/joke-contest" also works
+```
+
+A user template with the same `key` overrides a community or built-in template.
+
+Run `perles workflows` to check what's loaded: its `Dashboard Workflows` section lists every template the new workflow picker will show,
+labeled `[built-in]`, `[community]` or `[user]`.
+
 ### Creating Custom Templates
 
-Create your own templates in `~/.perles/workflows/{your_workflow_name}` and they will be loaded into the workflow picker automatically.
+Create your own templates in `~/.perles/workflows/{your_workflow_name}` and they will be loaded into the workflow picker automatically the next time perles starts.
 
 Templates consist of a `template.yaml` file that specifies the DAG for the epic and its tasks and custom arguments that can be used in templates. 
 And individual task markdown files that are referenced in the yaml file.
+
+A template given as a bare filename is looked up in `~/.perles/workflows/{your_workflow_name}/`, then `~/.perles/workflows/`,
+then perles' built-in shared templates (`v1-epic-instructions.md`, the default coordinator prompt, and `v1-human-review.md`, used by
+human review nodes), so you don't need to copy the shared templates. A file of the same name in your directories overrides the built-in copy.
+Paths containing `/` are relative to `~/.perles/` (e.g. `workflows/v1-human-review.md`), falling back to the same path in the built-in templates.
+
+Every referenced markdown file must exist in one of those places. An invalid workflow (missing template, bad YAML, invalid assignee, etc.) is skipped
+and your other workflows still load; perles writes a `skipping invalid workflow` warning with the error to the debug log (run `perles -d` and check `debug.log`).
 
 #### Template YAML Fields
 
@@ -171,12 +198,12 @@ And individual task markdown files that are referenced in the yaml file.
 | `version` | string | Yes      | Version identifier (e.g., `"v1"`)                                                                                                                                  |
 | `name` | string | Yes      | Human-readable name shown in the workflow picker                                                                                                                   |
 | `description` | string | Yes      | Description of what the workflow does                                                                                                                              |
-| `epic_template` | string | Yes      | Filename of the markdown template for the epic content                                                                                                             |
-| `system_prompt` | string | No       | Leave this empty most of the time to use the default and use the epic_template for instructions unless you want to override the system prompt for the coordinator. |
+| `epic_template` | string | No       | Filename of the markdown template for the epic description (omit for epic-driven workflows like Cook)                                                              |
+| `system_prompt` | string | No       | Leave this empty most of the time: the coordinator then uses the built-in `v1-epic-instructions.md` prompt and takes its instructions from the epic_template. Set it only to override the coordinator's system prompt; the file must exist. |
 | `path` | string | No       | Path prefix for artifact inputs/outputs (example: `".spec"`)                                                                                                       |
 | `labels` | list | No       | Tags for filtering (e.g., `["category:meta", "lang:go"]`)                                                                                                          |
 | `arguments` | list | No       | User-configurable parameters (see Arguments table)                                                                                                                 |
-| `nodes` | list | No       | DAG of workflow tasks (see Nodes table)                                                                                                                            |
+| `nodes` | list | Conditional | DAG of workflow tasks (see Nodes table). Required unless the workflow is epic-driven (a single `epic_id` argument, like Cook) or sets `system_prompt` |
 
 **Argument Fields**
 
@@ -185,7 +212,7 @@ And individual task markdown files that are referenced in the yaml file.
 | `key` | string | Yes | Unique identifier, accessed in templates as `{{.Args.key}}` |
 | `label` | string | Yes | Human-readable label for the form field |
 | `description` | string | No | Help text/placeholder for the form field |
-| `type` | string | Yes | Input type: `text`, `number`, `textarea`, `select`, or `multi-select` |
+| `type` | string | Yes | Input type: `text`, `number`, `textarea`, `select`, `multi-select`, or `epic-search` (searchable epic picker) |
 | `required` | bool | No | Whether the argument must be filled (default: `false`) |
 | `default` | string | No | Default value for the field |
 | `options` | list | Conditional | Required for `select` and `multi-select` types |
@@ -218,8 +245,9 @@ registry:
     name: "Joke Contest"
     description: "Test workflow where two workers write jokes in parallel, then a third worker judges and picks a winner"
     epic_template: "v1-joke-contest-epic.md"
-    # Optional system prompt override most of the time you should leave this empty or omitted
-    system_prompt: "v1-system-prompt.md"
+    # Optional system prompt override most of the time you should leave this omitted.
+    # If you set it, the file must exist.
+    # system_prompt: "my-coordinator-prompt.md"
     # Optional prefix path to the inputs / outputs
     path: ""
     labels:
@@ -258,7 +286,7 @@ registry:
       # Phase 2: Human review gate
       - key: "review"
         name: "Human Review"
-        template: "v1-human-review.md"
+        template: "v1-human-review.md"  # Built-in shared template, no need to copy it
         assignee: "human"
         after:
           - "joke-1"
@@ -317,15 +345,16 @@ A successful joke contest should have:
 
 ### Slash Commands
 
-Slash commands let you control workers directly to stop, retire, or replace them. You generally do not have to use these
+Slash commands let you control processes directly to spawn, stop, retire, or replace them. You generally do not have to use these
 but if a worker does get stuck for any reason you can stop them directly using slash commands. You can ask the coordinator
-to do this as well.
+to do this as well. Type them in the chat input; any other `/...` text is sent to the coordinator as a normal message.
 
-| Command                | Action |
-|------------------------|--------|
-| `/stop <worker-id>`    | Gracefully retire a worker |
-| `/retire <worker-id>`  | Gracefully retire a worker |
-| `/replace <worker-id>` | Replace a worker with a fresh one |
+| Command                           | Action |
+|-----------------------------------|--------|
+| `/stop <process-id> [--force]`    | Stop a worker or the coordinator. The process is stopped, not retired, so it can be resumed. It is asked to exit and killed if it hasn't exited after 5 seconds; `--force` kills it immediately (a worker that is committing is only stopped with `--force`) |
+| `/spawn`                          | Spawn a new worker |
+| `/retire <worker-id> [reason]`    | Gracefully retire a worker (the coordinator cannot be retired) |
+| `/replace <process-id> [reason]`  | Replace a worker, the coordinator (`/replace coordinator`) or the observer with a fresh process |
 
 ---
 
@@ -333,7 +362,8 @@ to do this as well.
 
 ### Sound Configuration
 
-Perles supports audio feedback for various orchestration events. Sounds are optional and disabled by default.
+Perles plays audio feedback for various orchestration events. All sounds are enabled by default, including events you leave out of
+your config. Set `enabled: false` on an event to silence it, or use `override_sounds` to replace the built-in sound.
 
 **Available Sound Events**
 
@@ -341,8 +371,10 @@ Perles supports audio feedback for various orchestration events. Sounds are opti
 |-------|----------------------------------------------------|
 | `review_verdict_approve` | Plays when a review is approved in a cook workflow |
 | `review_verdict_deny` | Plays when a review is denied in a cook workflow   |
-| `user_notification` | Plays when user attention is needed                |
+| `user_notification` | Plays when the coordinator needs your attention. There is no built-in sound for this event, so it is silent unless you set `override_sounds` |
 | `worker_out_of_context` | Plays when a worker runs out of context            |
+| `coordinator_out_of_context` | Plays when the coordinator runs out of context |
+| `observer_out_of_context` | Plays when the observer runs out of context |
 | `workflow_complete` | Plays when a workflow completes                    |
 
 **Configuration Example**
@@ -369,24 +401,39 @@ sound:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `enabled` | bool | Whether to play sounds for this event |
+| `enabled` | bool | Whether to play sounds for this event. An event you list without `enabled: true` is silenced, so set it even when you only want `override_sounds` |
 | `override_sounds` | list | Custom sound file paths (WAV format). If multiple are provided, one is randomly selected |
+
+Override sound paths may start with `~/`. Each file must be a `.wav` file, must exist, must be inside `~/.perles/sounds/`
+(after following symlinks), and must be 1MB or smaller. Otherwise perles exits at startup with an `invalid sound configuration` error.
+If an override file is removed while perles is running, the event's built-in sound plays instead.
 
 ---
 
 ### Session Storage
 
-Every orchestration session data is stored centrally in your home directory `~/.perles/sessions/`
+Every orchestration session data is stored centrally in your home directory, by default in `~/.perles/sessions/`
 
 ```
 ~/.perles/sessions/
 ├── sessions.json                    # Global session index
-└── {project-name}/
-    ├── sessions.json                # Per-project index
+└── {application-name}/
+    ├── sessions.json                # Per-application index
     └── 2026-01-12/
         └── {session-uuid}/
             ├── metadata.json
             ├── coordinator/
             ├── workers/
             └── messages.jsonl
+```
+
+`{application-name}` is `orchestration.session_storage.application_name` if set, otherwise the repository name from the git `origin` remote,
+falling back to the working directory name (`perles daemon` skips the git lookup and uses the directory name). You can change the
+location and the application name in config:
+
+```yaml
+orchestration:
+  session_storage:
+    base_dir: ~/.perles/sessions      # Must be absolute or start with ~/
+    application_name: my-project      # Overrides {application-name}
 ```
