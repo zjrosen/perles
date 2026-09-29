@@ -451,9 +451,22 @@ func BenchmarkRenderCache_Get(b *testing.B) {
 // Test: Performance Thresholds (Fails CI if exceeded)
 // ============================================================================
 
+// skipWallClockThresholdUnderRace skips tests that assert wall-clock timing
+// thresholds when the race detector is enabled. Race instrumentation slows
+// execution roughly 5-15x, so timings measured under -race say nothing about
+// real-world performance.
+func skipWallClockThresholdUnderRace(t *testing.T) {
+	t.Helper()
+	if raceEnabled {
+		t.Skip("skipping wall-clock performance threshold under the race detector")
+	}
+}
+
 // TestPerformanceThresholds tests that performance meets documented requirements.
 // These tests will fail if performance regresses beyond acceptable thresholds.
 func TestPerformanceThresholds_InitialRender(t *testing.T) {
+	skipWallClockThresholdUnderRace(t)
+
 	// Target: <150ms for 10K lines initial render (with CI variance headroom)
 	file := generateSyntheticDiffFile("test.go", 10000)
 	width := 120
@@ -476,6 +489,8 @@ func TestPerformanceThresholds_InitialRender(t *testing.T) {
 }
 
 func TestPerformanceThresholds_ScrollLatency(t *testing.T) {
+	skipWallClockThresholdUnderRace(t)
+
 	// Target: <16ms for 60fps scrolling
 	file := generateSyntheticDiffFile("test.go", 10000)
 	config := DefaultVirtualContentConfig()
