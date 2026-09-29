@@ -21,7 +21,7 @@ func init() {
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
-	configPath := ".perles/config.yaml"
+	configPath := defaultConfigPath
 
 	// Check if config already exists
 	if _, err := os.Stat(configPath); err == nil {
@@ -33,6 +33,6 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("creating config file: %w", err)
 	}
 
-	fmt.Printf("Created %s\n", configPath)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Created %s\n", configPath)
 	return nil
 }

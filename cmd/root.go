@@ -67,6 +67,19 @@ func init() {
 	rootCmd.Flags().IntVarP(&apiPortFlag, "port", "p", 0,
 		"API server port (0 = auto-assign, overrides config)")
 
+	bindConfigFlags()
+}
+
+// defaultConfigPath is where `perles init` and the first TUI launch write the
+// default config template.
+const defaultConfigPath = ".perles/config.yaml"
+
+// configNotFound records that initConfig found no config file anywhere.
+// The root TUI command uses it to write a default config on first launch.
+var configNotFound bool
+
+// bindConfigFlags binds root command flags to their viper config keys.
+func bindConfigFlags() {
 	_ = viper.BindPFlag("beads_dir", rootCmd.Flags().Lookup("beads-dir"))
 	_ = viper.BindPFlag("ui.markdown_style", rootCmd.Flags().Lookup("markdown-style"))
 }
@@ -98,8 +111,8 @@ func initConfig() {
 		// Config lookup order:
 		// 1. .perles/config.yaml (current directory)
 		// 2. ~/.config/perles/config.yaml (user config)
-		if _, err := os.Stat(".perles/config.yaml"); err == nil {
-			viper.SetConfigFile(".perles/config.yaml")
+		if _, err := os.Stat(defaultConfigPath); err == nil {
+			viper.SetConfigFile(defaultConfigPath)
 		} else {
 			home, _ := os.UserHomeDir()
 			viper.AddConfigPath(filepath.Join(home, ".config", "perles"))
@@ -108,22 +121,48 @@ func initConfig() {
 		}
 	}
 
+	configNotFound = false
 	if err := viper.ReadInConfig(); err != nil {
-		// No config file found anywhere - create default at .perles/config.yaml
+		// No config file found anywhere. Continue with defaults; the root TUI
+		// command writes a default config once the board can start (see
+		// writeDefaultConfigIfMissing). Other commands, notably `perles init`,
+		// must not create one.
 		if _, ok := errors.AsType[viper.ConfigFileNotFoundError](err); ok {
-			defaultPath := ".perles/config.yaml"
-			if writeErr := config.WriteDefaultConfig(defaultPath); writeErr == nil {
-				viper.SetConfigFile(defaultPath)
-				_ = viper.ReadInConfig()
-				log.Info(log.CatConfig, "Config loaded", "path", defaultPath)
-			}
-			// If write fails, just continue with defaults (no config file)
+			configNotFound = true
 		}
 	} else {
 		log.Info(log.CatConfig, "Config loaded", "path", viper.ConfigFileUsed())
 	}
 
+	unmarshalConfig()
+}
+
+// unmarshalConfig decodes viper's settings into a fresh cfg.
+func unmarshalConfig() {
+	cfg = config.Config{}
 	_ = viper.Unmarshal(&cfg)
+}
+
+// writeDefaultConfigIfMissing writes the default config template to
+// .perles/config.yaml and reloads cfg from it when initConfig found no config
+// file anywhere. It reports whether cfg was reloaded. Only the root TUI command
+// calls this, so subcommands (notably `perles init`) never auto-create a config
+// file. If the write fails, perles continues with defaults.
+func writeDefaultConfigIfMissing() bool {
+	if !configNotFound {
+		return false
+	}
+	if err := config.WriteDefaultConfig(defaultConfigPath); err != nil {
+		return false
+	}
+	viper.SetConfigFile(defaultConfigPath)
+	if err := viper.ReadInConfig(); err != nil {
+		return false
+	}
+	configNotFound = false
+	log.Info(log.CatConfig, "Config loaded", "path", defaultConfigPath)
+	unmarshalConfig()
+	return true
 }
 
 func initServices() {
@@ -254,11 +293,24 @@ func runApp(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("compatibility check: %w", err)
 	}
 
+	// First launch with no config file anywhere: write the default template to
+	// .perles/config.yaml and load it. This waits until the board can actually
+	// start, so launching perles outside a beads project (whose screen suggests
+	// running `perles init`) does not leave a config file behind.
+	resolvedBeadsDir := cfg.ResolvedBeadsDir
+	if writeDefaultConfigIfMissing() {
+		// Reloading rebuilt cfg from the new file; restore runtime-resolved values.
+		cfg.ResolvedBeadsDir = resolvedBeadsDir
+		if apiPortFlag != 0 {
+			cfg.Orchestration.APIPort = apiPortFlag
+		}
+	}
+
 	// Store the config file path for saving column changes
 	configFilePath := viper.ConfigFileUsed()
 	if configFilePath == "" {
 		// No config file was loaded, default to .perles/config.yaml
-		configFilePath = ".perles/config.yaml"
+		configFilePath = defaultConfigPath
 	}
 
 	// Pass config to app with the fully-wired backend

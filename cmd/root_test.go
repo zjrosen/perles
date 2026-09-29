@@ -1,14 +1,17 @@
 package cmd
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/spf13/viper"
+	"github.com/stretchr/testify/require"
+
 	"github.com/zjrosen/perles/internal/config"
 	"github.com/zjrosen/perles/internal/keys"
-
-	"github.com/stretchr/testify/require"
 )
 
 // TestNoBeadsDirectory_BackendFails verifies that newBackend returns an error
@@ -228,4 +231,98 @@ func TestStartup_PartialKeybindings(t *testing.T) {
 		require.Equal(t, []string{"ctrl+d"}, keys.Kanban.Dashboard.Keys(),
 			"dashboard key should be ctrl+d")
 	})
+}
+
+// ============================================================================
+// Config Loading Tests
+// ============================================================================
+
+// isolateConfig gives a test a clean global config state: HOME and the working
+// directory point at fresh temp dirs (so no real config file is found), and
+// viper, cfg, cfgFile and configNotFound are reset before and after the test.
+func isolateConfig(t *testing.T) (home, workDir string) {
+	t.Helper()
+	home = t.TempDir()
+	workDir = t.TempDir()
+	t.Setenv("HOME", home)
+	t.Chdir(workDir)
+
+	origCfg, origCfgFile := cfg, cfgFile
+	resetGlobals := func() {
+		viper.Reset()
+		bindConfigFlags()
+		cfg, cfgFile, configNotFound = config.Config{}, "", false
+	}
+	resetGlobals()
+	t.Cleanup(func() {
+		resetGlobals()
+		cfg, cfgFile = origCfg, origCfgFile
+	})
+	return home, workDir
+}
+
+// loadConfigFile writes content to a temp config file, points --config at it,
+// and runs initConfig.
+func loadConfigFile(t *testing.T, content string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	cfgFile = path
+	initConfig()
+}
+
+// executeRoot runs rootCmd with args (including cobra.OnInitialize hooks) and
+// returns its stdout.
+func executeRoot(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	var out bytes.Buffer
+	rootCmd.SetArgs(args)
+	rootCmd.SetOut(&out)
+	rootCmd.SetErr(io.Discard)
+	t.Cleanup(func() {
+		rootCmd.SetArgs(nil)
+		rootCmd.SetOut(nil)
+		rootCmd.SetErr(nil)
+	})
+	err := rootCmd.Execute()
+	return out.String(), err
+}
+
+func TestInitConfig_NoConfigFile_DoesNotCreateOne(t *testing.T) {
+	isolateConfig(t)
+
+	initConfig()
+
+	_, err := os.Stat(defaultConfigPath)
+	require.True(t, os.IsNotExist(err), "initConfig must not auto-create %s", defaultConfigPath)
+	require.True(t, configNotFound, "initConfig should record that no config file was found")
+}
+
+func TestWriteDefaultConfigIfMissing_CreatesAndLoadsDefaultConfig(t *testing.T) {
+	isolateConfig(t)
+	initConfig()
+	require.Empty(t, cfg.Views, "no views are loaded before the default config is written")
+
+	require.True(t, writeDefaultConfigIfMissing(), "cfg should be reloaded from the written file")
+
+	data, err := os.ReadFile(defaultConfigPath)
+	require.NoError(t, err, "first TUI launch should write %s", defaultConfigPath)
+	require.Equal(t, config.DefaultConfigTemplate(), string(data))
+	require.Equal(t, defaultConfigPath, viper.ConfigFileUsed())
+	require.False(t, configNotFound)
+	require.Len(t, cfg.Views, 1, "the written template should be loaded into cfg")
+	require.Len(t, cfg.Sound.Events, 6)
+
+	require.False(t, writeDefaultConfigIfMissing(), "second call is a no-op")
+}
+
+func TestWriteDefaultConfigIfMissing_ConfigFound_NoOp(t *testing.T) {
+	isolateConfig(t)
+	loadConfigFile(t, "ui:\n  show_counts: false\n")
+
+	require.False(t, writeDefaultConfigIfMissing())
+
+	_, err := os.Stat(defaultConfigPath)
+	require.True(t, os.IsNotExist(err), "must not write a default config when one was loaded")
+	require.False(t, cfg.UI.ShowCounts)
 }
