@@ -2,14 +2,14 @@
 │ Select Epic                                      │
 │──────────────────────────────────────────────────│
 │                                                  │
-│ [1001z╭─ Epic (Enter to search) ─────────────────────╮ │
+│ ╭─ Epic (Enter to search) ─────────────────────╮ │
 │ │ Search epics...                              │ │
 │ │──────────────────────────────────────────────│ │
-│ │[1008z EPIC-1: Implement user authentication        [1008z│ │
-│ │[1009z EPIC-2: Build payment processing             [1009z│ │
-│ │[1010z EPIC-3: Create notification system           [1010z│ │
-│ ╰──────────────────────────────────────────────╯[1001z │
+│ │ EPIC-1: Implement user authentication        │ │
+│ │ EPIC-2: Build payment processing             │ │
+│ │ EPIC-3: Create notification system           │ │
+│ ╰──────────────────────────────────────────────╯ │
 │                                                  │
-│  [1002z  Create  [1002z  [1003z  Cancel  [1003z                          │
+│    Create      Cancel                            │
 │                                                  │
 ╰──────────────────────────────────────────────────╯

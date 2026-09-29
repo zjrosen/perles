@@ -2,6 +2,7 @@ package formmodal
 
 import (
 	"errors"
+	"flag"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -1831,30 +1832,35 @@ func TestGolden_ListFieldFocused(t *testing.T) {
 	compareGolden(t, "list_field_focused", m.View())
 }
 
+// updateGolden mirrors teatest's -update flag so `go test -update` (and
+// `make test-update`) rewrites this package's golden files too.
+var updateGolden = flag.Bool("update", false, "update .golden files")
+
 // compareGolden compares output against a golden file.
-// Set UPDATE_GOLDEN=1 to update golden files.
+// Run with -update (or set UPDATE_GOLDEN=1) to update golden files.
 func compareGolden(t *testing.T, name, got string) {
 	t.Helper()
 	goldenPath := filepath.Join("testdata", name+".golden")
 
-	if os.Getenv("UPDATE_GOLDEN") == "1" {
-		err := os.WriteFile(goldenPath, []byte(got), 0644)
+	// Strip zone markers (e.g., \x1b[1234z) since zone IDs are global and
+	// vary based on test execution order
+	zonePattern := regexp.MustCompile(`\x1b\[\d+z`)
+	gotStr := zonePattern.ReplaceAllString(got, "")
+
+	if *updateGolden || os.Getenv("UPDATE_GOLDEN") == "1" {
+		// Write without zone markers so repeated updates are deterministic
+		err := os.WriteFile(goldenPath, []byte(gotStr), 0644)
 		require.NoError(t, err, "failed to write golden file")
 		return
 	}
 
 	want, err := os.ReadFile(goldenPath)
-	require.NoError(t, err, "failed to read golden file %s (run with UPDATE_GOLDEN=1 to create)", goldenPath)
+	require.NoError(t, err, "failed to read golden file %s (run with -update to create)", goldenPath)
 
 	// Normalize line endings for cross-platform compatibility
 	wantStr := strings.ReplaceAll(string(want), "\r\n", "\n")
-	gotStr := strings.ReplaceAll(got, "\r\n", "\n")
-
-	// Strip zone markers (e.g., \x1b[1234z) since zone IDs are global and
-	// vary based on test execution order
-	zonePattern := regexp.MustCompile(`\x1b\[\d+z`)
+	gotStr = strings.ReplaceAll(gotStr, "\r\n", "\n")
 	wantStr = zonePattern.ReplaceAllString(wantStr, "")
-	gotStr = zonePattern.ReplaceAllString(gotStr, "")
 
 	require.Equal(t, wantStr, gotStr, "output does not match golden file %s", goldenPath)
 }

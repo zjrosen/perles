@@ -66,10 +66,12 @@ test-update:
 		./internal/ui/shared/chatpanel/... \
 		./internal/ui/shared/colorpicker/... \
 		./internal/ui/shared/diffviewer/... \
+		./internal/ui/shared/formmodal/... \
 		./internal/ui/shared/issuebadge/... \
 		./internal/ui/shared/logoverlay/... \
 		./internal/ui/shared/modal/... \
 		./internal/ui/shared/overlay/... \
+		./internal/ui/shared/panes/... \
 		./internal/ui/shared/picker/... \
 		./internal/ui/shared/table/... \
 		./internal/ui/shared/selection/... \
