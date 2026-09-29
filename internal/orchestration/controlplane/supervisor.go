@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/zjrosen/perles/internal/flags"
 	appgit "github.com/zjrosen/perles/internal/git/application"
 	domaingit "github.com/zjrosen/perles/internal/git/domain"
@@ -159,6 +161,12 @@ type SupervisorConfig struct {
 	// Used for syncing orchestration state changes and MCP coordinator tools.
 	// If nil, a beads executor is created from WorkDir/BeadsDir (legacy behavior).
 	TaskExecutor taskpkg.TaskExecutor
+
+	// Tracer is the OpenTelemetry tracer for distributed tracing (optional).
+	// When set, it is passed to each workflow's v2 infrastructure (tracing middleware
+	// and traced handlers) and to the coordinator MCP server. When nil (tracing
+	// disabled), all tracing code paths are pass-throughs.
+	Tracer trace.Tracer
 }
 
 // defaultSupervisor is the default implementation of Supervisor.
@@ -174,6 +182,7 @@ type defaultSupervisor struct {
 	soundService          sound.SoundService
 	beadsDir              string
 	taskExecutor          taskpkg.TaskExecutor
+	tracer                trace.Tracer
 }
 
 // NewSupervisor creates a new Supervisor with the given configuration.
@@ -217,6 +226,7 @@ func NewSupervisor(cfg SupervisorConfig) (Supervisor, error) {
 		soundService:          cfg.SoundService,
 		beadsDir:              cfg.BeadsDir,
 		taskExecutor:          cfg.TaskExecutor,
+		tracer:                cfg.Tracer,
 	}, nil
 }
 
@@ -458,6 +468,7 @@ func (s *defaultSupervisor) AllocateResources(ctx context.Context, inst *Workflo
 		SessionMetadataProvider: sess,
 		SoundService:            s.soundService,
 		TaskExecutor:            s.taskExecutor,
+		Tracer:                  s.tracer, // nil when tracing disabled - middleware handles this gracefully
 		CommandPersistenceProvider: func() processor.CommandWriter {
 			return sess
 		},
@@ -538,6 +549,11 @@ func (s *defaultSupervisor) AllocateResources(ctx context.Context, inst *Workflo
 		s.taskExecutor,
 		infra.Core.Adapter,
 	)
+
+	// Set tracer for distributed tracing of coordinator MCP tool calls (if enabled)
+	if s.tracer != nil {
+		mcpCoordServer.SetTracer(s.tracer)
+	}
 
 	// Wire Fabric messaging tools to coordinator MCP server
 	if infra.Core.FabricService != nil {

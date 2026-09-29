@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/zjrosen/perles/communityworkflows"
 	"github.com/zjrosen/perles/frontend"
@@ -19,6 +20,7 @@ import (
 	"github.com/zjrosen/perles/internal/orchestration/controlplane"
 	"github.com/zjrosen/perles/internal/orchestration/controlplane/api"
 	"github.com/zjrosen/perles/internal/orchestration/session"
+	"github.com/zjrosen/perles/internal/orchestration/tracing"
 	"github.com/zjrosen/perles/internal/orchestration/workflow"
 	"github.com/zjrosen/perles/internal/paths"
 	appreg "github.com/zjrosen/perles/internal/registry/application"
@@ -143,8 +145,27 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 		workflowCreator = appreg.NewWorkflowCreator(registryService, taskExec, cfg.Orchestration.Templates)
 	}
 
+	// Create tracing provider when orchestration.tracing.enabled is true
+	// (nil when disabled). Shut down after the control plane to flush spans.
+	tracingProvider, err := tracing.NewProviderFromSettings(cfg.Orchestration.Tracing)
+	if err != nil {
+		return fmt.Errorf("creating tracing provider: %w", err)
+	}
+	var tracer trace.Tracer
+	if tracingProvider != nil {
+		tracer = tracingProvider.Tracer()
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := tracingProvider.Shutdown(ctx); err != nil {
+				log.Error(log.CatOrch, "Error shutting down tracing provider", "error", err)
+			}
+		}()
+		log.Info(log.CatOrch, "Tracing enabled", "exporter", cfg.Orchestration.Tracing.Exporter)
+	}
+
 	// Create control plane
-	cp, err := createDaemonControlPlane(&cfg, workDir, taskExec)
+	cp, err := createDaemonControlPlane(&cfg, workDir, taskExec, tracer)
 	if err != nil {
 		return fmt.Errorf("creating control plane: %w", err)
 	}
@@ -213,7 +234,7 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 	return nil
 }
 
-func createDaemonControlPlane(cfg *config.Config, _ string, taskExec taskpkg.TaskExecutor) (controlplane.ControlPlane, error) {
+func createDaemonControlPlane(cfg *config.Config, _ string, taskExec taskpkg.TaskExecutor, tracer trace.Tracer) (controlplane.ControlPlane, error) {
 	orchConfig := cfg.Orchestration
 
 	// Create workflow registry
@@ -241,6 +262,7 @@ func createDaemonControlPlane(cfg *config.Config, _ string, taskExec taskpkg.Tas
 		SoundService:     soundService,
 		BeadsDir:         cfg.ResolvedBeadsDir,
 		TaskExecutor:     taskExec,
+		Tracer:           tracer, // nil when tracing disabled
 		GitExecutorFactory: func(path string) appgit.GitExecutor {
 			return infragit.NewRealExecutor(path)
 		},

@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	zone "github.com/lrstanley/bubblezone"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/zjrosen/perles/frontend"
 	"github.com/zjrosen/perles/internal/config"
@@ -27,6 +28,7 @@ import (
 	"github.com/zjrosen/perles/internal/orchestration/controlplane"
 	"github.com/zjrosen/perles/internal/orchestration/controlplane/api"
 	"github.com/zjrosen/perles/internal/orchestration/session"
+	"github.com/zjrosen/perles/internal/orchestration/tracing"
 	v2 "github.com/zjrosen/perles/internal/orchestration/v2"
 	"github.com/zjrosen/perles/internal/orchestration/workflow"
 	"github.com/zjrosen/perles/internal/pubsub"
@@ -104,6 +106,10 @@ type Model struct {
 
 	// SQLite database for session persistence (owned by app, closed on shutdown)
 	db *sqlite.DB
+
+	// Tracing provider for orchestration.tracing (nil when tracing is disabled).
+	// Owned by app: created at startup, shut down in Close() to flush spans.
+	tracingProvider *tracing.Provider
 }
 
 // AppConfig holds all pre-constructed dependencies for the application.
@@ -145,6 +151,19 @@ func NewWithConfig(appCfg AppConfig) (Model, error) {
 				return Model{}, fmt.Errorf("database initialization failed: %w", err)
 			}
 		}
+	}
+
+	// Create tracing provider when orchestration.tracing.enabled is true.
+	// nil when disabled, which keeps all tracing code paths as pass-throughs.
+	tracingProvider, err := tracing.NewProviderFromSettings(cfg.Orchestration.Tracing)
+	if err != nil {
+		if db != nil {
+			_ = db.Close()
+		}
+		return Model{}, fmt.Errorf("creating tracing provider: %w", err)
+	}
+	if tracingProvider != nil {
+		log.Info(log.CatOrch, "Tracing enabled", "exporter", cfg.Orchestration.Tracing.Exporter)
 	}
 
 	// Initialize global zone manager for mouse click detection (bubblezone)
@@ -279,7 +298,8 @@ func NewWithConfig(appCfg AppConfig) (Model, error) {
 			Title:   "Exit Application?",
 			Message: "Are you sure you want to quit?",
 		}),
-		db: db,
+		db:              db,
+		tracingProvider: tracingProvider,
 	}, nil
 }
 
@@ -1251,6 +1271,16 @@ func (m *Model) Close() error {
 		}
 	}
 
+	// Shutdown tracing provider last (after the control plane) so all spans are flushed
+	if m.tracingProvider != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		if err := m.tracingProvider.Shutdown(ctx); err != nil {
+			log.Error(log.CatOrch, "Error shutting down tracing provider", "error", err)
+		}
+		cancel()
+		m.tracingProvider = nil
+	}
+
 	// Close SQLite database connection
 	if m.db != nil {
 		if err := m.db.Close(); err != nil {
@@ -1301,6 +1331,12 @@ func (m *Model) createControlPlane() controlplane.ControlPlane {
 		log.Debug(log.CatOrch, "Using in-memory registry (no SQLite database)")
 	}
 
+	// Tracer for distributed tracing (nil when orchestration.tracing is disabled)
+	var tracer trace.Tracer
+	if m.tracingProvider != nil {
+		tracer = m.tracingProvider.Tracer()
+	}
+
 	// Create supervisor with full configuration
 	supervisor, err := controlplane.NewSupervisor(controlplane.SupervisorConfig{
 		AgentProviders:     orchConfig.AgentProviders(),
@@ -1312,6 +1348,7 @@ func (m *Model) createControlPlane() controlplane.ControlPlane {
 		SoundService:       m.services.Sounds,
 		BeadsDir:           m.services.Config.ResolvedBeadsDir,
 		TaskExecutor:       m.services.TaskExecutor,
+		Tracer:             tracer,
 	})
 	if err != nil {
 		log.Error(log.CatMode, "Failed to create Supervisor", "error", err)

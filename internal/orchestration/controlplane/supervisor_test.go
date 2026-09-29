@@ -14,6 +14,7 @@ import (
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/zjrosen/perles/internal/flags"
 	appgit "github.com/zjrosen/perles/internal/git/application"
@@ -1535,6 +1536,58 @@ func TestSupervisor_Start_SessionUsesConfiguredApplicationName(t *testing.T) {
 	rel, err := filepath.Rel(sessionBaseDir, inst.Session.Dir)
 	require.NoError(t, err)
 	require.Equal(t, "configured-app", strings.Split(filepath.ToSlash(rel), "/")[0])
+}
+
+func TestSupervisor_AllocateResources_PassesTracerToInfrastructure(t *testing.T) {
+	cfg, mockProvider, mockFactory := newTestSupervisorConfig(t)
+
+	tracer := noop.NewTracerProvider().Tracer("test")
+	cfg.Tracer = tracer
+
+	supervisor, err := NewSupervisor(cfg)
+	require.NoError(t, err)
+
+	inst := newTestInstance(t, "test-workflow-tracer")
+	cleanupSessionOnTestEnd(t, inst)
+
+	infra := createMinimalInfrastructure(t)
+	mockFactory.On("Create", mock.MatchedBy(func(c v2.InfrastructureConfig) bool {
+		return c.Tracer == tracer
+	})).Return(infra, nil)
+	setupAgentProviderMock(t, mockProvider)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go infra.Core.Processor.Run(ctx)
+	require.NoError(t, infra.Core.Processor.WaitForReady(ctx))
+
+	require.NoError(t, supervisor.AllocateResources(ctx, inst))
+	mockFactory.AssertExpectations(t)
+}
+
+func TestSupervisor_AllocateResources_NilTracerWhenTracingDisabled(t *testing.T) {
+	cfg, mockProvider, mockFactory := newTestSupervisorConfig(t)
+	// cfg.Tracer intentionally left nil (tracing disabled)
+
+	supervisor, err := NewSupervisor(cfg)
+	require.NoError(t, err)
+
+	inst := newTestInstance(t, "test-workflow-no-tracer")
+	cleanupSessionOnTestEnd(t, inst)
+
+	infra := createMinimalInfrastructure(t)
+	mockFactory.On("Create", mock.MatchedBy(func(c v2.InfrastructureConfig) bool {
+		return c.Tracer == nil
+	})).Return(infra, nil)
+	setupAgentProviderMock(t, mockProvider)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go infra.Core.Processor.Run(ctx)
+	require.NoError(t, infra.Core.Processor.WaitForReady(ctx))
+
+	require.NoError(t, supervisor.AllocateResources(ctx, inst))
+	mockFactory.AssertExpectations(t)
 }
 
 func TestSupervisor_Shutdown_ClosesSession(t *testing.T) {

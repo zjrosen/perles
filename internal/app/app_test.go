@@ -2366,6 +2366,52 @@ func TestApp_ForwardsExternalEditorMessages(t *testing.T) {
 // Startup Configuration Tests (theme, tracing, session app name)
 // =====================================================
 
+func TestApp_TracingDisabled_NoProvider(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Orchestration.Tracing.Enabled = false
+
+	model, err := NewWithConfig(AppConfig{
+		Cfg:     cfg,
+		Backend: &noopBackend{},
+		WorkDir: t.TempDir(),
+	})
+	require.NoError(t, err)
+	require.Nil(t, model.tracingProvider, "disabled tracing must not create a provider")
+}
+
+func TestApp_TracingEnabled_CreatesProviderAndShutsDownOnClose(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Orchestration.Tracing.Enabled = true
+	cfg.Orchestration.Tracing.Exporter = "file"
+	cfg.Orchestration.Tracing.FilePath = filepath.Join(t.TempDir(), "traces.jsonl")
+
+	model, err := NewWithConfig(AppConfig{
+		Cfg:     cfg,
+		Backend: &noopBackend{},
+		WorkDir: t.TempDir(),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, model.tracingProvider, "enabled tracing should create a provider")
+	require.True(t, model.tracingProvider.Enabled())
+
+	require.NoError(t, model.Close())
+	require.Nil(t, model.tracingProvider, "Close should shut down and release the tracing provider")
+}
+
+func TestApp_TracingProviderError_FailsStartup(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Orchestration.Tracing.Enabled = true
+	cfg.Orchestration.Tracing.Exporter = "bogus"
+
+	_, err := NewWithConfig(AppConfig{
+		Cfg:     cfg,
+		Backend: &noopBackend{},
+		WorkDir: t.TempDir(),
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "creating tracing provider")
+}
+
 func TestApp_NewSessionFactory_ApplicationName(t *testing.T) {
 	newModel := func(t *testing.T, appName string) *Model {
 		t.Helper()
