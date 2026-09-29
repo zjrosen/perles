@@ -1,5 +1,7 @@
 # Custom Dark Theme Example
-# Build a completely custom theme by specifying all colors.
+# Build a completely custom theme by specifying every color token perles applies.
+# Left out: border.focus (an alias for border.highlight) and the form.* and
+# diff.* tokens (accepted but not applied yet).
 #
 # This example shows a custom dark theme with purple accents.
 # Use this as a starting point for your own color scheme.
@@ -20,13 +22,27 @@ theme:
 
     # Borders
     "border.default": "#505050"
-    "border.focus": "#9B59B6"
-    "border.highlight": "#8E44AD"
+    "border.highlight": "#8E44AD" # focused panes, inputs and form fields
 
     # Status indicators
     "status.success": "#2ECC71"
     "status.warning": "#F39C12"
     "status.error": "#E74C3C"
+
+    # Selection
+    "selection.indicator": "#BB8FCE"
+    "selection.background": "#4A235A"
+
+    # Modals, overlays and pane titles
+    "overlay.title": "#C39BD3"
+    "overlay.border": "#7D3C98"
+
+    # Issue status colors
+    "issue.status.open": "#2ECC71"
+    "issue.status.in_progress": "#3498DB"
+    "issue.status.closed": "#95A5A6"
+    "issue.status.deferred": "#BB8FCE"
+    "issue.status.blocked": "#E74C3C"
 
     # Priority colors (P0 through P4)
     "priority.critical": "#E74C3C"
@@ -41,6 +57,12 @@ theme:
     "type.task": "#3498DB"
     "type.epic": "#9B59B6"
     "type.chore": "#95A5A6"
+    "type.milestone": "#F1C40F"
+    "type.story": "#1ABC9C"
+    "type.spike": "#EC7063"
+    "type.molecule": "#D35400"
+    "type.convoy": "#7F8C8D"
+    "type.agent": "#5DADE2"
 
     # BQL syntax highlighting
     "bql.keyword": "#9B59B6"
@@ -59,6 +81,7 @@ theme:
     "button.secondary.focus": "#4A6278"
     "button.danger.bg": "#C0392B"
     "button.danger.focus": "#E74C3C"
+    "button.disabled.bg": "#2D2D2D"
 
     # Toast notifications
     "toast.success": "#2ECC71"
@@ -72,9 +95,12 @@ theme:
 # Tips for creating custom themes:
 #
 # 1. Start with a preset you like, then examine the colors
+#    (run `perles playground` and open Theme Tokens to see every preset's values)
 # 2. Use a color palette tool to ensure colors work together
 # 3. Test in both dark and light terminal backgrounds
 # 4. Ensure sufficient contrast for readability
 # 5. Use semantic colors (red=danger, green=success, etc.)
 #
-# Color format: Use hex colors (#RRGGBB or #RGB)
+# Color format: Use quoted hex colors ("#RRGGBB" or "#RGB"). Unquoted, YAML
+# treats #... as a comment. One invalid token or color makes perles ignore the
+# whole theme section and use the default theme.

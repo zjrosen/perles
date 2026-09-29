@@ -15,4 +15,4 @@ theme:
     "priority.critical": "#FF0000"
 
     # Use a different accent for focus states
-    "border.focus": "#00FFFF"
+    "border.highlight": "#00FFFF"
