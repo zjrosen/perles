@@ -24,9 +24,8 @@ func GetTokenColor(token styles.ColorToken) string {
 	// Borders
 	case styles.TokenBorderDefault:
 		return styles.BorderDefaultColor.Dark
-	case styles.TokenBorderFocus:
-		return styles.FormTextInputFocusedBorderColor.Dark
-	case styles.TokenBorderHighlight:
+	case styles.TokenBorderFocus, styles.TokenBorderHighlight:
+		// border.focus is an alias for border.highlight (see styles.ApplyTheme).
 		return styles.BorderHighlightFocusColor.Dark
 
 	// Status indicators

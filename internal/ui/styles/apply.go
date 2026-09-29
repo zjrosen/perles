@@ -32,7 +32,7 @@ type ThemeConfig struct {
 // Order of application:
 // 1. Start with default colors
 // 2. Apply preset (if specified)
-// 3. Apply individual color overrides
+// 3. Apply individual color overrides (border.focus aliases border.highlight)
 // 4. Rebuild all Style objects
 func ApplyTheme(cfg ThemeConfig) error {
 	// Step 1: Start with default preset
@@ -57,6 +57,17 @@ func ApplyTheme(cfg ThemeConfig) error {
 			return fmt.Errorf("invalid hex color for %s: %s", key, value)
 		}
 		colors[token] = value
+	}
+
+	// border.focus is a user-facing alias for border.highlight, which is the
+	// color focused panes, inputs, and modal fields actually render with. Only
+	// user overrides are aliased (presets define both tokens, so their
+	// border.focus never changes rendering), and border.highlight wins when the
+	// user sets both.
+	if focus, ok := cfg.Colors[string(TokenBorderFocus)]; ok {
+		if _, ok := cfg.Colors[string(TokenBorderHighlight)]; !ok {
+			colors[TokenBorderHighlight] = focus
+		}
 	}
 
 	// Step 4: Apply colors to variables
@@ -95,10 +106,8 @@ func applyColors(colors map[ColorToken]string) {
 	if c, ok := colors[TokenBorderDefault]; ok {
 		BorderDefaultColor = makeColor(c)
 	}
-	if c, ok := colors[TokenBorderFocus]; ok {
-		FormTextInputFocusedBorderColor = makeColor(c)
-		FormTextInputFocusedLabelColor = makeColor(c)
-	}
+	// TokenBorderFocus has no variable of its own: ApplyTheme folds a user's
+	// border.focus override into TokenBorderHighlight before this runs.
 	if c, ok := colors[TokenBorderHighlight]; ok {
 		BorderHighlightFocusColor = makeColor(c)
 	}

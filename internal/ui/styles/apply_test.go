@@ -233,3 +233,63 @@ func TestApplyTheme_PresetTypeBugMatchesStatusError(t *testing.T) {
 		})
 	}
 }
+
+func TestApplyTheme_BorderFocusAliasesBorderHighlight(t *testing.T) {
+	resetThemeAfter(t)
+
+	err := ApplyTheme(ThemeConfig{
+		Colors: map[string]string{"border.focus": "#ABCDEF"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, themeColor("#ABCDEF"), BorderHighlightFocusColor)
+	// Form focus colors keep coming from form.border.focus / form.label.focus.
+	require.Equal(t, DefaultPreset.Colors[TokenFormBorderFocus], FormTextInputFocusedBorderColor.Dark)
+	require.Equal(t, DefaultPreset.Colors[TokenFormLabelFocus], FormTextInputFocusedLabelColor.Dark)
+}
+
+func TestApplyTheme_BorderFocusOverridesPresetBorderHighlight(t *testing.T) {
+	resetThemeAfter(t)
+
+	err := ApplyTheme(ThemeConfig{
+		Preset: "nord",
+		Colors: map[string]string{"border.focus": "#ABCDEF"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, themeColor("#ABCDEF"), BorderHighlightFocusColor)
+}
+
+func TestApplyTheme_BorderHighlightWinsOverBorderFocus(t *testing.T) {
+	resetThemeAfter(t)
+
+	err := ApplyTheme(ThemeConfig{
+		Colors: map[string]string{
+			"border.focus":     "#ABCDEF",
+			"border.highlight": "#FEDCBA",
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, themeColor("#FEDCBA"), BorderHighlightFocusColor)
+}
+
+func TestApplyTheme_PresetBorderFocusDoesNotAffectRendering(t *testing.T) {
+	resetThemeAfter(t)
+
+	// Built-in presets define border.focus alongside border.highlight; only
+	// border.highlight should reach the focused border color.
+	for name, preset := range Presets {
+		t.Run(name, func(t *testing.T) {
+			require.NoError(t, ApplyTheme(ThemeConfig{Preset: name}))
+			require.Equal(t, themeColor(preset.Colors[TokenBorderHighlight]), BorderHighlightFocusColor)
+		})
+	}
+
+	// A preset that sets only border.focus is not aliased either.
+	Presets["test-border-focus"] = Preset{
+		Name:   "test-border-focus",
+		Colors: map[ColorToken]string{TokenBorderFocus: "#ABCDEF"},
+	}
+	defer delete(Presets, "test-border-focus")
+
+	require.NoError(t, ApplyTheme(ThemeConfig{Preset: "test-border-focus"}))
+	require.Equal(t, themeColor(DefaultPreset.Colors[TokenBorderHighlight]), BorderHighlightFocusColor)
+}

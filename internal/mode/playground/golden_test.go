@@ -234,6 +234,17 @@ func TestGetTokenColor(t *testing.T) {
 	}
 }
 
+func TestGetTokenColor_BorderFocusAliasesBorderHighlight(t *testing.T) {
+	t.Cleanup(func() { _ = styles.ApplyTheme(styles.ThemeConfig{}) })
+
+	err := styles.ApplyTheme(styles.ThemeConfig{
+		Colors: map[string]string{"border.focus": "#ABCDEF"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "#ABCDEF", GetTokenColor(styles.TokenBorderFocus))
+	require.Equal(t, "#ABCDEF", GetTokenColor(styles.TokenBorderHighlight))
+}
+
 func TestGetTokenCategories(t *testing.T) {
 	categories := GetTokenCategories()
 
