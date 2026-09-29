@@ -84,26 +84,53 @@ func bindConfigFlags() {
 	_ = viper.BindPFlag("ui.markdown_style", rootCmd.Flags().Lookup("markdown-style"))
 }
 
-func initConfig() {
+// setConfigDefaults registers a viper default for every config key that
+// config.Defaults() gives a non-zero value. cfg is unmarshalled from zero
+// values, so any key without a viper default silently becomes its zero value
+// when the config file omits it.
+//
+// orchestration.client, coordinator_client and worker_client intentionally have
+// no viper default: the CoordinatorClientType/WorkerClientType resolvers fall
+// back role-specific key > legacy client > "claude", and a default on the
+// role-specific keys would always shadow the legacy client key.
+//
+// views has no default either: Config.GetViews falls back to DefaultViews().
+func setConfigDefaults() {
 	defaults := config.Defaults()
+	viper.SetDefault("backend", defaults.Backend)
+
+	// UI defaults
 	viper.SetDefault("ui.show_counts", defaults.UI.ShowCounts)
+	viper.SetDefault("ui.show_status_bar", defaults.UI.ShowStatusBar)
 	viper.SetDefault("ui.markdown_style", defaults.UI.MarkdownStyle)
 	viper.SetDefault("theme.preset", defaults.Theme.Preset)
 
+	// Keybinding defaults
+	viper.SetDefault("ui.keybindings.search", defaults.UI.Keybindings.Search)
+	viper.SetDefault("ui.keybindings.dashboard", defaults.UI.Keybindings.Dashboard)
+
 	// Orchestration defaults
-	viper.SetDefault("orchestration.client", defaults.Orchestration.CoordinatorClient)
-	viper.SetDefault("orchestration.coordinator_client", defaults.Orchestration.CoordinatorClient)
-	viper.SetDefault("orchestration.worker_client", defaults.Orchestration.WorkerClient)
-	viper.SetDefault("orchestration.claude.model", defaults.Orchestration.Claude.Model)
-	viper.SetDefault("orchestration.amp.model", defaults.Orchestration.Amp.Model)
-	viper.SetDefault("orchestration.amp.mode", defaults.Orchestration.Amp.Mode)
+	orch := defaults.Orchestration
+	viper.SetDefault("orchestration.claude.model", orch.Claude.Model)
+	viper.SetDefault("orchestration.amp.model", orch.Amp.Model)
+	viper.SetDefault("orchestration.amp.mode", orch.Amp.Mode)
+	viper.SetDefault("orchestration.codex.model", orch.Codex.Model)
+	viper.SetDefault("orchestration.gemini.model", orch.Gemini.Model)
+	viper.SetDefault("orchestration.session_storage.base_dir", orch.SessionStorage.BaseDir)
+	viper.SetDefault("orchestration.timeouts.worktree_creation", orch.Timeouts.WorktreeCreation)
+
+	// Tracing defaults (tracing stays disabled unless enabled: true is set)
+	viper.SetDefault("orchestration.tracing.exporter", orch.Tracing.Exporter)
+	viper.SetDefault("orchestration.tracing.file_path", orch.Tracing.FilePath)
+	viper.SetDefault("orchestration.tracing.otlp_endpoint", orch.Tracing.OTLPEndpoint)
+	viper.SetDefault("orchestration.tracing.sample_rate", orch.Tracing.SampleRate)
 
 	// Sound defaults
 	viper.SetDefault("sound.events", defaults.Sound.Events)
+}
 
-	// Keybinding defaults
-	viper.SetDefault("ui.keybindings.search", "ctrl+space")
-	viper.SetDefault("ui.keybindings.dashboard", "ctrl+o")
+func initConfig() {
+	setConfigDefaults()
 
 	if cfgFile != "" {
 		viper.SetConfigFile(cfgFile)

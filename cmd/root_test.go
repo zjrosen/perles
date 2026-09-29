@@ -12,6 +12,7 @@ import (
 
 	"github.com/zjrosen/perles/internal/config"
 	"github.com/zjrosen/perles/internal/keys"
+	"github.com/zjrosen/perles/internal/orchestration/client"
 )
 
 // TestNoBeadsDirectory_BackendFails verifies that newBackend returns an error
@@ -296,6 +297,7 @@ func TestInitConfig_NoConfigFile_DoesNotCreateOne(t *testing.T) {
 	_, err := os.Stat(defaultConfigPath)
 	require.True(t, os.IsNotExist(err), "initConfig must not auto-create %s", defaultConfigPath)
 	require.True(t, configNotFound, "initConfig should record that no config file was found")
+	require.True(t, cfg.UI.ShowStatusBar, "defaults should still apply without a config file")
 }
 
 func TestWriteDefaultConfigIfMissing_CreatesAndLoadsDefaultConfig(t *testing.T) {
@@ -325,4 +327,90 @@ func TestWriteDefaultConfigIfMissing_ConfigFound_NoOp(t *testing.T) {
 	_, err := os.Stat(defaultConfigPath)
 	require.True(t, os.IsNotExist(err), "must not write a default config when one was loaded")
 	require.False(t, cfg.UI.ShowCounts)
+}
+
+func TestInitConfig_DefaultsMatchConfigDefaults(t *testing.T) {
+	isolateConfig(t)
+	loadConfigFile(t, "# empty config\n")
+
+	// Every non-zero field in config.Defaults() must have a viper default,
+	// except views (GetViews falls back to DefaultViews) and the role-specific
+	// clients (left unset so the legacy client key can take effect; the
+	// resolvers still default to claude).
+	expected := config.Defaults()
+	expected.Views = nil
+	expected.Orchestration.CoordinatorClient = ""
+	expected.Orchestration.WorkerClient = ""
+
+	require.Equal(t, expected, cfg)
+	require.Equal(t, client.ClientClaude, cfg.Orchestration.CoordinatorClientType())
+	require.Equal(t, client.ClientClaude, cfg.Orchestration.WorkerClientType())
+}
+
+func TestInitConfig_ShowStatusBarDefaultsToTrueWhenOmitted(t *testing.T) {
+	isolateConfig(t)
+	loadConfigFile(t, "ui:\n  show_counts: false\n")
+
+	require.True(t, cfg.UI.ShowStatusBar, "ui.show_status_bar should default to true")
+	require.False(t, cfg.UI.ShowCounts)
+}
+
+func TestInitConfig_TracingEnabledOnly_UsesDefaults(t *testing.T) {
+	home, _ := isolateConfig(t)
+	loadConfigFile(t, "orchestration:\n  tracing:\n    enabled: true\n")
+
+	tracing := cfg.Orchestration.Tracing
+	require.True(t, tracing.Enabled)
+	require.Equal(t, "file", tracing.Exporter)
+	require.Equal(t, filepath.Join(home, ".config", "perles", "traces", "traces.jsonl"), tracing.FilePath)
+	require.Equal(t, "localhost:4317", tracing.OTLPEndpoint)
+	require.InDelta(t, 1.0, tracing.SampleRate, 0)
+	require.NoError(t, config.ValidateOrchestration(cfg.Orchestration),
+		"enabled: true alone should be a valid tracing config")
+}
+
+func TestInitConfig_ClientResolution(t *testing.T) {
+	tests := []struct {
+		name            string
+		yaml            string
+		wantCoordinator client.ClientType
+		wantWorker      client.ClientType
+	}{
+		{
+			name:            "nothing set defaults to claude",
+			yaml:            "orchestration:\n  api_port: 0\n",
+			wantCoordinator: client.ClientClaude,
+			wantWorker:      client.ClientClaude,
+		},
+		{
+			name:            "legacy client applies to both roles",
+			yaml:            "orchestration:\n  client: amp\n",
+			wantCoordinator: client.ClientAmp,
+			wantWorker:      client.ClientAmp,
+		},
+		{
+			name:            "coordinator_client overrides client",
+			yaml:            "orchestration:\n  client: amp\n  coordinator_client: codex\n",
+			wantCoordinator: client.ClientCodex,
+			wantWorker:      client.ClientAmp,
+		},
+		{
+			name:            "worker_client overrides client",
+			yaml:            "orchestration:\n  client: gemini\n  worker_client: cursor\n",
+			wantCoordinator: client.ClientGemini,
+			wantWorker:      client.ClientCursor,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			isolateConfig(t)
+			loadConfigFile(t, tt.yaml)
+
+			require.Equal(t, tt.wantCoordinator, cfg.Orchestration.CoordinatorClientType())
+			require.Equal(t, tt.wantWorker, cfg.Orchestration.WorkerClientType())
+			require.Equal(t, tt.wantCoordinator, cfg.Orchestration.AgentProviders().Coordinator().Type())
+			require.Equal(t, tt.wantWorker, cfg.Orchestration.AgentProviders().Worker().Type())
+		})
+	}
 }

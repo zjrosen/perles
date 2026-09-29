@@ -248,7 +248,7 @@ func NewWithConfig(appCfg AppConfig) (Model, error) {
 	// Create chat panel with config from services
 	// Panel defaults to hidden (visible = false)
 	chatPanelCfg := chatpanel.Config{
-		ClientType:       cfg.Orchestration.Client,
+		ClientType:       string(cfg.Orchestration.CoordinatorClientType()),
 		WorkDir:          workDir,
 		SessionTimeout:   chatpanel.DefaultConfig().SessionTimeout,
 		WorkflowRegistry: workflowRegistry,

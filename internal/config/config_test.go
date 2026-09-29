@@ -840,7 +840,7 @@ func TestTracingConfig_Defaults(t *testing.T) {
 
 	require.False(t, tracing.Enabled, "Tracing should be disabled by default")
 	require.Equal(t, "file", tracing.Exporter, "Default exporter should be 'file'")
-	require.Empty(t, tracing.FilePath, "FilePath should be empty in defaults (derived at runtime)")
+	require.Equal(t, DefaultTracesFilePath(), tracing.FilePath, "Default FilePath should be the default traces file")
 	require.Equal(t, "localhost:4317", tracing.OTLPEndpoint, "Default OTLP endpoint should be localhost:4317")
 	require.Equal(t, 1.0, tracing.SampleRate, "Default sample rate should be 1.0")
 }

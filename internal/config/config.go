@@ -185,9 +185,9 @@ func DefaultTimeoutsConfig() TimeoutsConfig {
 
 // OrchestrationConfig holds orchestration mode configuration.
 type OrchestrationConfig struct {
-	Client             string               `mapstructure:"client"`             // "claude" (default), "amp", "codex", or "gemini" - backward compat
-	CoordinatorClient  string               `mapstructure:"coordinator_client"` // Client for coordinator (overrides Client)
-	WorkerClient       string               `mapstructure:"worker_client"`      // Client for workers (overrides Client)
+	Client             string               `mapstructure:"client"`             // Legacy: fallback for coordinator_client and worker_client when they are unset
+	CoordinatorClient  string               `mapstructure:"coordinator_client"` // Client for coordinator (overrides Client); read via CoordinatorClientType()
+	WorkerClient       string               `mapstructure:"worker_client"`      // Client for workers (overrides Client); read via WorkerClientType()
 	ObserverClient     string               `mapstructure:"observer_client"`    // Client for observer (default: "claude" with haiku model)
 	ObserverEnabled    bool                 `mapstructure:"observer_enabled"`   // Enable observer agent (default: false)
 	APIPort            int                  `mapstructure:"api_port"`           // HTTP API port (0 = auto-assign, default: 0)
@@ -1024,7 +1024,7 @@ func Defaults() Config {
 			Tracing: TracingConfig{
 				Enabled:      false,
 				Exporter:     "file",
-				FilePath:     "", // Derived from config dir at runtime
+				FilePath:     DefaultTracesFilePath(),
 				OTLPEndpoint: "localhost:4317",
 				SampleRate:   1.0,
 			},
