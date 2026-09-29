@@ -13,13 +13,13 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 
-	taskpkg "github.com/zjrosen/perles/internal/task"
 	"github.com/zjrosen/perles/internal/mocks"
 	"github.com/zjrosen/perles/internal/orchestration/events"
 	"github.com/zjrosen/perles/internal/orchestration/tracing"
 	"github.com/zjrosen/perles/internal/orchestration/v2/command"
 	"github.com/zjrosen/perles/internal/orchestration/v2/process"
 	"github.com/zjrosen/perles/internal/orchestration/v2/repository"
+	taskpkg "github.com/zjrosen/perles/internal/task"
 )
 
 // ===========================================================================

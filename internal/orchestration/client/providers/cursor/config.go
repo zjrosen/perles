@@ -9,13 +9,13 @@ import (
 // Config holds configuration for spawning a Cursor process.
 type Config struct {
 	WorkDir         string
-	BeadsDir        string        // Path to beads database directory for BEADS_DIR env var
-	Prompt          string        // Includes prepended system prompt (Cursor has no --append-system-prompt)
-	Model           string        // e.g., "composer-1"
-	SessionID       string        // For --resume to continue existing session
-	SkipPermissions bool          // Maps to --force flag
+	BeadsDir        string // Path to beads database directory for BEADS_DIR env var
+	Prompt          string // Includes prepended system prompt (Cursor has no --append-system-prompt)
+	Model           string // e.g., "composer-1"
+	SessionID       string // For --resume to continue existing session
+	SkipPermissions bool   // Maps to --force flag
 	Timeout         time.Duration
-	MCPConfig       string        // MCP config JSON; written to .cursor/mcp.json before spawn
+	MCPConfig       string // MCP config JSON; written to .cursor/mcp.json before spawn
 }
 
 // configFromClient converts a client.Config to a cursor.Config.

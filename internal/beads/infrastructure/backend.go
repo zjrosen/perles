@@ -20,7 +20,7 @@ const (
 
 // BeadsMetadata represents the .beads/metadata.json structure.
 type BeadsMetadata struct {
-	Backend  string `json:"backend"`            // "sqlite" or "dolt"
+	Backend  string `json:"backend"`             // "sqlite" or "dolt"
 	DoltMode string `json:"dolt_mode,omitempty"` // "embedded" (default) or "server"
 	// Dolt database name (default: "beads").
 	DoltDatabase string `json:"dolt_database,omitempty"`

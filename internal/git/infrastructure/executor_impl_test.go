@@ -10,9 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	appgit "github.com/zjrosen/perles/internal/git/application"
 	domain "github.com/zjrosen/perles/internal/git/domain"
-	"github.com/stretchr/testify/require"
 )
 
 // TestRealExecutor_NewRealExecutor tests the constructor.

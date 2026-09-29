@@ -153,4 +153,3 @@ func TestConfigFromClient(t *testing.T) {
 		})
 	}
 }
-

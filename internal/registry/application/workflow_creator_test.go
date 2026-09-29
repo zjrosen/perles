@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	taskpkg "github.com/zjrosen/perles/internal/task"
 	"github.com/zjrosen/perles/internal/config"
 	"github.com/zjrosen/perles/internal/mocks"
+	taskpkg "github.com/zjrosen/perles/internal/task"
 	"github.com/zjrosen/perles/internal/templates"
 )
 

@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	taskpkg "github.com/zjrosen/perles/internal/task"
+
 	"github.com/zjrosen/perles/internal/mocks"
 	"github.com/zjrosen/perles/internal/orchestration/client"
 	"github.com/zjrosen/perles/internal/orchestration/events"
@@ -27,6 +27,7 @@ import (
 	"github.com/zjrosen/perles/internal/orchestration/v2/processor"
 	"github.com/zjrosen/perles/internal/orchestration/v2/repository"
 	"github.com/zjrosen/perles/internal/pubsub"
+	taskpkg "github.com/zjrosen/perles/internal/task"
 )
 
 // ===========================================================================
