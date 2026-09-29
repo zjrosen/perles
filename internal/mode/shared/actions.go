@@ -19,23 +19,38 @@ import (
 // IssueContext provides template variables for user-defined actions.
 // Fields are exported for text/template access.
 type IssueContext struct {
-	ID    string // Issue ID (e.g., "PROJ-123")
-	Title string // Issue title (raw, not escaped - user handles quoting in command template)
+	ID        string // Issue ID (e.g., "PROJ-123"), inserted as-is
+	Title     string // Issue title (raw, not escaped - user handles quoting in command template)
+	TitleText string // Issue title shell-escaped as a single-quoted word; do not wrap in extra quotes
 }
 
 // NewIssueContext creates an IssueContext from a beads Issue.
 func NewIssueContext(issue *task.Issue) IssueContext {
 	if issue == nil {
 		return IssueContext{
-			ID:    "",
-			Title: "",
+			ID:        "",
+			Title:     "",
+			TitleText: shellQuote(""),
 		}
 	}
 
 	return IssueContext{
-		ID:    issue.ID,
-		Title: issue.TitleText,
+		ID:        issue.ID,
+		Title:     issue.TitleText,
+		TitleText: shellQuote(issue.TitleText),
 	}
+}
+
+// shellQuote returns s as a single POSIX shell word using single-quote escaping.
+// The value is wrapped in single quotes and each embedded single quote is
+// replaced with close-quote, escaped quote, reopen-quote:
+//
+//	'\''
+//
+// Nothing inside single quotes is interpreted by the shell, so $(...), backticks,
+// variables, and newlines are passed through literally.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // renderCommand renders a command template with the given IssueContext.
@@ -88,7 +103,7 @@ func ExecuteAction(action config.ActionConfig, issue *task.Issue, workDir string
 			"command", rendered,
 			"workDir", workDir)
 
-		// #nosec G204 -- command is user-configured, shell escaping protects issue content
+		// #nosec G204 -- command is user-configured; {{.TitleText}} is shell-escaped for issue content
 		cmd := exec.CommandContext(context.Background(), "sh", "-c", rendered)
 		cmd.Dir = workDir
 

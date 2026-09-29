@@ -1,6 +1,9 @@
 package shared
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -24,6 +27,7 @@ func TestNewIssueContext(t *testing.T) {
 
 	require.Equal(t, "ISSUE-123", ctx.ID)
 	require.Equal(t, "Fix the bug", ctx.Title)
+	require.Equal(t, "'Fix the bug'", ctx.TitleText)
 }
 
 func TestNewIssueContext_NilIssue(t *testing.T) {
@@ -31,6 +35,7 @@ func TestNewIssueContext_NilIssue(t *testing.T) {
 
 	require.Equal(t, "", ctx.ID)
 	require.Equal(t, "", ctx.Title)
+	require.Equal(t, "''", ctx.TitleText, "empty title escapes to an empty single-quoted word")
 }
 
 func TestNewIssueContext_TitleWithSpecialChars(t *testing.T) {
@@ -44,6 +49,79 @@ func TestNewIssueContext_TitleWithSpecialChars(t *testing.T) {
 	require.Equal(t, "TEST-1", ctx.ID)
 	// Title is raw, not escaped - user handles quoting in command template
 	require.Equal(t, "Fix bug with 'quotes'", ctx.Title)
+	// TitleText is shell-escaped with POSIX single-quote escaping
+	require.Equal(t, `'Fix bug with '\''quotes'\'''`, ctx.TitleText)
+}
+
+// =============================================================================
+// shellQuote Tests
+// =============================================================================
+
+func TestShellQuote(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{name: "empty", input: "", expected: `''`},
+		{name: "plain", input: "Fix login", expected: `'Fix login'`},
+		{name: "single quote", input: "Don't panic", expected: `'Don'\''t panic'`},
+		{name: "only single quote", input: "'", expected: `''\'''`},
+		{name: "double quotes", input: `Say "hi"`, expected: `'Say "hi"'`},
+		{name: "command substitution", input: "$(rm -rf ~)", expected: `'$(rm -rf ~)'`},
+		{name: "backticks", input: "`whoami`", expected: "'`whoami`'"},
+		{name: "variable", input: "$HOME", expected: `'$HOME'`},
+		{name: "newline", input: "line1\nline2", expected: "'line1\nline2'"},
+		{name: "backslash", input: `a\b\`, expected: `'a\b\'`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.expected, shellQuote(tt.input))
+		})
+	}
+}
+
+// TestTitleText_ShellRoundTrip renders {{.TitleText}} into a command, runs it
+// through sh -c (as ExecuteAction does), and verifies the shell receives the
+// exact raw title as a single argument without evaluating any of its content.
+func TestTitleText_ShellRoundTrip(t *testing.T) {
+	tests := []struct {
+		name  string
+		title string
+	}{
+		{name: "empty", title: ""},
+		{name: "plain", title: "Fix login"},
+		{name: "single quote", title: "Don't panic"},
+		{name: "quote breakout", title: "'; touch pwned; echo '"},
+		{name: "command substitution", title: "$(touch pwned)"},
+		{name: "backticks", title: "`touch pwned`"},
+		{name: "variables", title: "$HOME and ${PATH}"},
+		{name: "newline", title: "first line\ntouch pwned"},
+		{name: "separators", title: "a; touch pwned | cat && touch pwned"},
+		{name: "double quotes", title: `say "hi" \"there\"`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			ctx := NewIssueContext(&task.Issue{ID: "TEST-1", TitleText: tt.title})
+
+			// printf reuses its format for each argument, so word splitting
+			// would show up as extra "|" separators in the output.
+			rendered, err := renderCommand(`printf '%s|' {{.TitleText}}`, ctx)
+			require.NoError(t, err)
+
+			cmd := exec.Command("sh", "-c", rendered)
+			cmd.Dir = dir
+			out, err := cmd.CombinedOutput()
+			require.NoError(t, err, "command failed: %s", out)
+			require.Equal(t, tt.title+"|", string(out))
+
+			_, statErr := os.Stat(filepath.Join(dir, "pwned"))
+			require.True(t, os.IsNotExist(statErr), "title content must not be executed by the shell")
+		})
+	}
 }
 
 // =============================================================================
@@ -75,6 +153,12 @@ func TestRenderCommand(t *testing.T) {
 			tmpl:     "echo {{.Title}}",
 			ctx:      IssueContext{Title: "Hello World"},
 			expected: "echo Hello World",
+		},
+		{
+			name:     "template with TitleText",
+			tmpl:     "echo {{.TitleText}}",
+			ctx:      NewIssueContext(&task.Issue{TitleText: "It's done"}),
+			expected: `echo 'It'\''s done'`,
 		},
 		{
 			name:    "invalid template field",
@@ -121,6 +205,15 @@ func TestRenderCommand_TemplateVariables(t *testing.T) {
 				TitleText: "Fix login",
 			},
 			expected: `tmux split-window -h "claude 'Work on BUG-123: Fix login'"`,
+		},
+		{
+			name: "TitleText concatenated with a quoted prefix",
+			tmpl: `tmux split-window -h claude "Work on {{.ID}}: "{{.TitleText}}`,
+			issue: &task.Issue{
+				ID:        "BUG-123",
+				TitleText: "Fix user's login",
+			},
+			expected: `tmux split-window -h claude "Work on BUG-123: "'Fix user'\''s login'`,
 		},
 	}
 

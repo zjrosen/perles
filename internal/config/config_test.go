@@ -2665,7 +2665,7 @@ func TestValidateActions_AcceptsIssueActionKey(t *testing.T) {
 			},
 			"copy_title": {
 				Key:         "2",
-				Command:     "echo '{{.TitleText}}' | pbcopy",
+				Command:     "echo {{.TitleText}} | pbcopy",
 				Description: "Copy issue title",
 			},
 		},

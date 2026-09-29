@@ -1,0 +1,66 @@
+# User-Defined Actions Example
+# Bind number keys (0-9) to shell commands that receive the selected issue.
+#
+# Copy the `ui.actions` block into the config file perles loads (--config,
+# else .perles/config.yaml in the project, else ~/.config/perles/config.yaml;
+# only the first one found is read) and restart perles; config changes are not
+# picked up while it is running.
+#
+# How actions run:
+#   - Press the key while an issue is selected in kanban mode or search mode
+#     (results list or tree). Actions are not available in dashboard mode.
+#   - The command is rendered as a Go template, then run with `sh -c` in the
+#     perles working directory. It is fire-and-forget: perles does not wait,
+#     and stdout/stderr are discarded, so launch something that opens its own
+#     pane, window, or app.
+#   - `key` must be a single digit 0-9 (quote it so YAML keeps it a string).
+#     `key` and `command` are required; `description` is shown in the help
+#     overlay (?).
+#
+# Template variables:
+#   {{.ID}}         Issue ID (e.g. "perles-a1b2"), inserted as-is.
+#   {{.TitleText}}  Issue title, shell-escaped: it is ALREADY wrapped in single
+#                   quotes (embedded ' becomes '\''), so it is one safe shell
+#                   word. Use it bare. Do NOT put it inside '...' or "...";
+#                   that undoes the escaping and lets the title run as shell
+#                   code. To add fixed text, put the text in its own quotes
+#                   directly next to it: "Work on {{.ID}}: "{{.TitleText}}
+#   {{.Title}}      Issue title, raw and unescaped. Quotes, $(...), backticks,
+#                   or ; in a title can break or inject into the command.
+#                   Prefer {{.TitleText}}.
+#
+# tmux tip: when split-window/new-window gets the pane command as separate
+# arguments, tmux runs it directly without a second shell, so {{.TitleText}}
+# arrives intact. If you pass the pane command as ONE quoted string, tmux runs
+# it through `sh -c` again. Keep {{.TitleText}} out of such strings.
+
+ui:
+  actions:
+    issue_action:
+      # Start Claude Code in a pane to the right, prompted with the issue.
+      # Requires perles to be running inside tmux.
+      open-claude:
+        key: "1"
+        command: 'tmux split-window -h claude "Work on {{.ID}}: "{{.TitleText}}'
+        description: "Work on issue with Claude"
+
+      # Edit the issue description in $EDITOR in a pane below.
+      edit-description:
+        key: "2"
+        command: 'tmux split-window -v bd edit {{.ID}}'
+        description: "Edit description in $EDITOR"
+
+      # Show full issue details in a new tmux window named after the issue.
+      # The pane command is one string (run by sh inside tmux). That is fine
+      # here because it only uses {{.ID}}.
+      show-issue:
+        key: "3"
+        command: 'tmux new-window -n {{.ID}} "bd show {{.ID}} | less -R"'
+        description: "Show issue in new window"
+
+      # Copy "ID: title" to the clipboard (macOS). On Linux, replace pbcopy
+      # with `wl-copy` (Wayland) or `xclip -selection clipboard` (X11).
+      copy-reference:
+        key: "4"
+        command: 'printf "%s: %s" {{.ID}} {{.TitleText}} | pbcopy'
+        description: "Copy ID and title"
