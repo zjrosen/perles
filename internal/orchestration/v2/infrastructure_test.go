@@ -11,6 +11,10 @@ import (
 
 	"github.com/zjrosen/perles/internal/mocks"
 	"github.com/zjrosen/perles/internal/orchestration/client"
+	"github.com/zjrosen/perles/internal/orchestration/v2/command"
+	"github.com/zjrosen/perles/internal/orchestration/v2/handler"
+	"github.com/zjrosen/perles/internal/orchestration/v2/processor"
+	"github.com/zjrosen/perles/internal/orchestration/v2/repository"
 	"github.com/zjrosen/perles/internal/orchestration/workflow"
 )
 
@@ -370,6 +374,60 @@ func TestAllHandlersRegistered(t *testing.T) {
 
 	// Verify process registry is created
 	assert.NotNil(t, infra.Internal.ProcessRegistry)
+}
+
+func TestInfrastructure_BroadcastHandlerRegistered(t *testing.T) {
+	cfg := InfrastructureConfig{
+		Port: 8080,
+		AgentProviders: client.AgentProviders{
+			client.RoleCoordinator: createTestAgentProvider(t),
+		},
+		WorkDir:      "/tmp/test",
+		TaskExecutor: createTestTaskExecutor(t),
+	}
+
+	infra, err := NewInfrastructure(cfg)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, infra.Start(ctx))
+	defer infra.Drain()
+
+	// Two Working workers (messages are queued, not delivered) and one retired worker.
+	now := time.Now()
+	for _, p := range []*repository.Process{
+		{ID: "worker-1", Role: repository.RoleWorker, Status: repository.StatusWorking, CreatedAt: now},
+		{ID: "worker-2", Role: repository.RoleWorker, Status: repository.StatusWorking, CreatedAt: now},
+		{ID: "worker-3", Role: repository.RoleWorker, Status: repository.StatusRetired, CreatedAt: now},
+	} {
+		require.NoError(t, infra.Repositories.ProcessRepo.Save(p))
+	}
+
+	cmd := command.NewBroadcastCommand(command.SourceUser, "hello everyone", []string{"worker-2"})
+	result, err := infra.Core.Processor.SubmitAndWait(ctx, cmd)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotErrorIs(t, result.Error, processor.ErrUnknownCommandType)
+	require.True(t, result.Success, "broadcast should succeed: %v", result.Error)
+
+	broadcastResult, ok := result.Data.(*handler.BroadcastResult)
+	require.True(t, ok, "expected *handler.BroadcastResult, got %T", result.Data)
+	require.Equal(t, []string{"worker-1"}, broadcastResult.TargetWorkers)
+	require.Equal(t, 1, broadcastResult.MessagesSent)
+
+	// Barrier: follow-ups were enqueued before the result was returned, so a second
+	// command submitted now is processed after them (FIFO). Excluding every worker
+	// makes it a no-op. Once it returns, repositories are safe to read.
+	barrier := command.NewBroadcastCommand(command.SourceUser, "barrier", []string{"worker-1", "worker-2", "worker-3"})
+	barrierResult, err := infra.Core.Processor.SubmitAndWait(ctx, barrier)
+	require.NoError(t, err)
+	require.True(t, barrierResult.Success)
+
+	// The SendToProcess follow-up queued the message for the non-excluded active worker only.
+	require.Equal(t, 1, infra.Repositories.QueueRepo.Size("worker-1"))
+	require.Equal(t, 0, infra.Repositories.QueueRepo.Size("worker-2"))
+	require.Equal(t, 0, infra.Repositories.QueueRepo.Size("worker-3"))
 }
 
 // ===========================================================================

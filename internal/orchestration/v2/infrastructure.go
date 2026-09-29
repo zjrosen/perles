@@ -356,6 +356,7 @@ func (i *Infrastructure) Shutdown() {
 //   - BD Task Status (2): MarkTaskComplete, MarkTaskFailed
 //   - Process Management (7): SpawnProcess, SendToProcess, DeliverProcessQueued,
 //     RetireProcess, StopProcess, ReplaceProcess
+//   - Message Routing (1): Broadcast
 func registerHandlers(
 	cmdProcessor *processor.CommandProcessor,
 	processRepo repository.ProcessRepository,
@@ -497,6 +498,13 @@ func registerHandlers(
 			handler.WithPauseRegistry(processRegistry)))
 	cmdProcessor.RegisterHandler(command.CmdResumeProcess,
 		handler.NewResumeProcessHandler(processRepo, queueRepo))
+
+	// ============================================================
+	// Message Routing handlers (1)
+	// ============================================================
+	// Broadcast fans out to one SendToProcess follow-up per active worker.
+	cmdProcessor.RegisterHandler(command.CmdBroadcast,
+		handler.NewBroadcastHandler(processRepo))
 
 	// ============================================================
 	// Aggregation handlers (1)
