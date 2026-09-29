@@ -2885,3 +2885,95 @@ func TestExtensionsForObserver_Unknown(t *testing.T) {
 	ext := cfg.extensionsForObserver(client.ClientType("unknown"))
 	require.Empty(t, ext, "unknown client should return empty extensions")
 }
+
+// Tests for ExpandHome / ExpandPaths
+
+func TestExpandHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "bare tilde", in: "~", want: home},
+		{name: "tilde slash", in: "~/.perles/sessions", want: filepath.Join(home, ".perles", "sessions")},
+		{name: "tilde slash only", in: "~/", want: home},
+		{name: "empty unchanged", in: "", want: ""},
+		{name: "absolute unchanged", in: "/opt/perles/sessions", want: "/opt/perles/sessions"},
+		{name: "relative unchanged", in: "sessions/data", want: "sessions/data"},
+		{name: "tilde user unchanged", in: "~bob/sounds", want: "~bob/sounds"},
+		{name: "tilde later unchanged", in: "/tmp/~/x", want: "/tmp/~/x"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, ExpandHome(tt.in))
+		})
+	}
+}
+
+func TestConfig_ExpandPaths(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	overrides := []string{"~/.perles/sounds/a.wav", "/abs/b.wav"}
+	cfg := Config{
+		BeadsDir: "~/project",
+		Orchestration: OrchestrationConfig{
+			SessionStorage: SessionStorageConfig{BaseDir: "~/.perles/sessions"},
+			Tracing:        TracingConfig{FilePath: "~/traces/traces.jsonl"},
+			Templates:      TemplatesConfig{DocumentPath: "docs/proposals"},
+		},
+		Sound: SoundConfig{Events: map[string]SoundEventConfig{
+			"workflow_complete": {Enabled: true, OverrideSounds: overrides},
+			"user_notification": {Enabled: false},
+		}},
+	}
+
+	cfg.ExpandPaths()
+
+	require.Equal(t, filepath.Join(home, "project"), cfg.BeadsDir)
+	require.Equal(t, filepath.Join(home, ".perles", "sessions"), cfg.Orchestration.SessionStorage.BaseDir)
+	require.Equal(t, filepath.Join(home, "traces", "traces.jsonl"), cfg.Orchestration.Tracing.FilePath)
+	require.Equal(t, "docs/proposals", cfg.Orchestration.Templates.DocumentPath, "relative document_path is not a filesystem path to expand")
+	require.Equal(t, []string{filepath.Join(home, ".perles", "sounds", "a.wav"), "/abs/b.wav"},
+		cfg.Sound.Events["workflow_complete"].OverrideSounds)
+	require.True(t, cfg.Sound.Events["workflow_complete"].Enabled)
+	require.Equal(t, SoundEventConfig{Enabled: false}, cfg.Sound.Events["user_notification"])
+	require.Equal(t, []string{"~/.perles/sounds/a.wav", "/abs/b.wav"}, overrides,
+		"the original override slice must not be mutated")
+}
+
+func TestConfig_ExpandPaths_NilSoundEvents(t *testing.T) {
+	cfg := Config{}
+	cfg.ExpandPaths()
+	require.Nil(t, cfg.Sound.Events)
+}
+
+func TestConfig_ExpandPaths_TildePathsPassValidation(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	soundsDir := filepath.Join(home, ".perles", "sounds")
+	require.NoError(t, os.MkdirAll(soundsDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(soundsDir, "done.wav"), []byte("RIFF"), 0o600))
+
+	cfg := Config{
+		Orchestration: OrchestrationConfig{
+			SessionStorage: SessionStorageConfig{BaseDir: "~/.perles/sessions"},
+		},
+		Sound: SoundConfig{Events: map[string]SoundEventConfig{
+			"workflow_complete": {Enabled: true, OverrideSounds: []string{"~/.perles/sounds/done.wav"}},
+		}},
+	}
+
+	// Unexpanded "~" paths are rejected...
+	require.Error(t, ValidateSessionStorage(cfg.Orchestration.SessionStorage))
+	require.Error(t, ValidateSound(cfg.Sound))
+
+	// ...and accepted once expanded.
+	cfg.ExpandPaths()
+	require.NoError(t, ValidateSessionStorage(cfg.Orchestration.SessionStorage))
+	require.NoError(t, ValidateSound(cfg.Sound))
+}

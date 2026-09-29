@@ -137,6 +137,7 @@ func flattenColors(prefix string, m map[string]any, result map[string]string) {
 // SessionStorageConfig holds session storage location configuration.
 type SessionStorageConfig struct {
 	// BaseDir is the root directory for session storage.
+	// Must be absolute after a leading "~" is expanded (see Config.ExpandPaths).
 	// Default: ~/.perles/sessions
 	BaseDir string `mapstructure:"base_dir"`
 
@@ -412,6 +413,7 @@ type TracingConfig struct {
 	Exporter string `mapstructure:"exporter"`
 
 	// FilePath is the output file for "file" exporter.
+	// A leading "~" is expanded (see Config.ExpandPaths).
 	// Default: ~/.config/perles/traces/traces.jsonl
 	FilePath string `mapstructure:"file_path"`
 
@@ -438,7 +440,8 @@ type SoundEventConfig struct {
 	// OverrideSounds is a list of custom sound file paths to play instead of defaults.
 	// If empty or nil, uses the embedded default sound.
 	// Multiple paths enable random selection for variety.
-	// Paths must be under ~/.perles/sounds/
+	// Paths must be under ~/.perles/sounds/; a leading "~" is expanded
+	// (see Config.ExpandPaths).
 	OverrideSounds []string `mapstructure:"override_sounds"`
 }
 
@@ -483,6 +486,53 @@ func DefaultDatabasePath() string {
 		dbName = "perles-test.db"
 	}
 	return filepath.Join(home, ".perles", dbName)
+}
+
+// ExpandHome expands a leading "~" in path to the current user's home directory.
+// Only a bare "~" and paths starting with "~/" (or "~" followed by the OS path
+// separator) are expanded; "~user" forms and a "~" anywhere else are left as-is.
+// The path is also returned unchanged if the home directory cannot be determined.
+func ExpandHome(path string) string {
+	if path != "~" && !strings.HasPrefix(path, "~/") && !strings.HasPrefix(path, "~"+string(filepath.Separator)) {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return path
+	}
+	return filepath.Join(home, path[1:])
+}
+
+// ExpandPaths expands a leading "~" (see ExpandHome) in every user-supplied
+// filesystem path so that validation, session storage, tracing, and sound
+// playback all see the same absolute paths. It should run once, right after the
+// config is unmarshalled and before any Validate* call. Expanded fields:
+//   - beads_dir
+//   - orchestration.session_storage.base_dir
+//   - orchestration.tracing.file_path
+//   - sound.events.*.override_sounds
+func (c *Config) ExpandPaths() {
+	c.BeadsDir = ExpandHome(c.BeadsDir)
+	c.Orchestration.SessionStorage.BaseDir = ExpandHome(c.Orchestration.SessionStorage.BaseDir)
+	c.Orchestration.Tracing.FilePath = ExpandHome(c.Orchestration.Tracing.FilePath)
+
+	if c.Sound.Events == nil {
+		return
+	}
+	// Build fresh map and slices rather than mutating in place: the decoded
+	// values may share backing storage with viper's defaults.
+	events := make(map[string]SoundEventConfig, len(c.Sound.Events))
+	for name, event := range c.Sound.Events {
+		if len(event.OverrideSounds) > 0 {
+			expanded := make([]string, len(event.OverrideSounds))
+			for i, p := range event.OverrideSounds {
+				expanded[i] = ExpandHome(p)
+			}
+			event.OverrideSounds = expanded
+		}
+		events[name] = event
+	}
+	c.Sound.Events = events
 }
 
 // DefaultColumns returns the default column configuration matching current behavior.

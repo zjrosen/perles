@@ -164,10 +164,12 @@ func initConfig() {
 	unmarshalConfig()
 }
 
-// unmarshalConfig decodes viper's settings into a fresh cfg.
+// unmarshalConfig decodes viper's settings into cfg and expands a leading "~"
+// in path fields, so every later validation and consumer sees absolute paths.
 func unmarshalConfig() {
 	cfg = config.Config{}
 	_ = viper.Unmarshal(&cfg)
+	cfg.ExpandPaths()
 }
 
 // writeDefaultConfigIfMissing writes the default config template to

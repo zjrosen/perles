@@ -414,3 +414,34 @@ func TestInitConfig_ClientResolution(t *testing.T) {
 		})
 	}
 }
+
+func TestInitConfig_ExpandsTildePaths(t *testing.T) {
+	home, _ := isolateConfig(t)
+	soundsDir := filepath.Join(home, ".perles", "sounds")
+	require.NoError(t, os.MkdirAll(soundsDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(soundsDir, "done.wav"), []byte("RIFF"), 0o600))
+
+	loadConfigFile(t, `beads_dir: ~/project
+orchestration:
+  session_storage:
+    base_dir: ~/.perles/sessions
+  tracing:
+    file_path: ~/traces/traces.jsonl
+sound:
+  events:
+    workflow_complete:
+      enabled: true
+      override_sounds:
+        - ~/.perles/sounds/done.wav
+`)
+
+	require.Equal(t, filepath.Join(home, "project"), cfg.BeadsDir)
+	require.Equal(t, filepath.Join(home, ".perles", "sessions"), cfg.Orchestration.SessionStorage.BaseDir)
+	require.Equal(t, filepath.Join(home, "traces", "traces.jsonl"), cfg.Orchestration.Tracing.FilePath)
+	require.Equal(t, []string{filepath.Join(soundsDir, "done.wav")},
+		cfg.Sound.Events["workflow_complete"].OverrideSounds)
+
+	// Validation sees the expanded paths, so these no longer abort startup.
+	require.NoError(t, config.ValidateOrchestration(cfg.Orchestration))
+	require.NoError(t, config.ValidateSound(cfg.Sound))
+}
