@@ -247,6 +247,10 @@ func (c TreeColumn) HandleLoaded(msg tea.Msg) BoardColumn {
 	// Set column index for zone ID construction (enables mouse click zones)
 	c.tree.SetColumnIndex(c.columnIndex)
 
+	// Board tree columns are always down-direction and 'd' deletes the column
+	// in kanban, so don't suggest pressing 'd' to toggle direction.
+	c.tree.SetShowDirectionHint(false)
+
 	// Apply current size to tree
 	if c.width > 0 && c.height > 0 {
 		treeWidth := max(c.width-2, 1)

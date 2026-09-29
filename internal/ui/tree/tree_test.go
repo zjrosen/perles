@@ -375,6 +375,24 @@ func TestView_Golden_LeafNode(t *testing.T) {
 	teatest.RequireEqualOutput(t, []byte(view))
 }
 
+func TestView_LeafNode_DirectionHint(t *testing.T) {
+	issueMap := makeTestIssueMap()
+	m := New("task-1", issueMap, DirectionDown, ModeDeps, newTestClock(t))
+	m.SetSize(100, 30)
+
+	// Shown by default (search tree and dashboard epic tree bind 'd' to toggle direction)
+	require.Contains(t, m.View(), "Press 'd' to toggle direction")
+
+	// Hosts without a 'd' direction toggle can hide it
+	m.SetShowDirectionHint(false)
+	view := m.View()
+	require.NotContains(t, view, "Press 'd' to toggle direction")
+	require.Contains(t, view, "No child dependencies found.", "empty-state message should remain")
+
+	m.SetShowDirectionHint(true)
+	require.Contains(t, m.View(), "Press 'd' to toggle direction")
+}
+
 // TestView_Golden_NarrowWidth tests tree view with narrow width and long title.
 // At width 60, there's enough room for metadata.
 func TestView_Golden_NarrowWidth(t *testing.T) {

@@ -125,6 +125,28 @@ func TestTreeColumn_HandleLoaded_Success(t *testing.T) {
 	require.Nil(t, resultTC.loadError)
 }
 
+func TestTreeColumn_LeafRoot_NoDirectionToggleHint(t *testing.T) {
+	// Board tree columns are down-only and 'd' deletes the column in kanban,
+	// so the root-only empty state must not suggest pressing 'd'.
+	tc := NewTreeColumn("Deps", "bd-123", "deps", nil, nil)
+	tc = tc.SetColumnIndex(0)
+
+	msg := TreeColumnLoadedMsg{
+		ColumnIndex: 0,
+		ColumnTitle: "Deps",
+		RootID:      "bd-123",
+		IssueMap: map[string]*task.Issue{
+			"bd-123": {ID: "bd-123", TitleText: "Leaf Root"},
+		},
+	}
+
+	resultTC := tc.HandleLoaded(msg).SetSize(80, 20).(TreeColumn)
+	view := resultTC.View()
+
+	require.Contains(t, view, "No child dependencies found.")
+	require.NotContains(t, view, "toggle direction")
+}
+
 func TestTreeColumn_HandleLoaded_RootNotFound(t *testing.T) {
 	tc := NewTreeColumn("Deps", "bd-123", "deps", nil, nil)
 	tc = tc.SetColumnIndex(0)

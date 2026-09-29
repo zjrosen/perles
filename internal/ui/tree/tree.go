@@ -33,6 +33,8 @@ type Model struct {
 	scrollTop   int    // First visible line index (for viewport scrolling)
 	columnIndex int    // Column index for zone ID construction in tree columns (-1 = standalone)
 	zonePrefix  string // Custom zone prefix for issue zones (overrides columnIndex when set)
+
+	hideDirectionHint bool // Hide the "Press 'd' to toggle direction" hint (host has no 'd' toggle)
 }
 
 // New creates a new tree model with default mode (deps).
@@ -70,6 +72,13 @@ func (m *Model) SetSize(width, height int) {
 // A value of -1 (the default) disables zone marking for standalone tree usage.
 func (m *Model) SetColumnIndex(idx int) {
 	m.columnIndex = idx
+}
+
+// SetShowDirectionHint controls whether the root-only empty state suggests
+// pressing 'd' to toggle direction. Defaults to shown; hosts that don't bind
+// 'd' to a direction toggle (e.g. kanban tree columns) should disable it.
+func (m *Model) SetShowDirectionHint(show bool) {
+	m.hideDirectionHint = !show
 }
 
 // SetZonePrefix sets a custom zone prefix for issue zones.
@@ -322,8 +331,10 @@ func (m *Model) View() string {
 		} else {
 			sb.WriteString(mutedStyle.Render("No parent dependencies found."))
 		}
-		sb.WriteString("\n")
-		sb.WriteString(mutedStyle.Render("Press 'd' to toggle direction and check the other direction."))
+		if !m.hideDirectionHint {
+			sb.WriteString("\n")
+			sb.WriteString(mutedStyle.Render("Press 'd' to toggle direction and check the other direction."))
+		}
 		return sb.String()
 	}
 
