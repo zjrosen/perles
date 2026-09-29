@@ -5021,7 +5021,8 @@ func TestRenderEmptyWorkflowsState(t *testing.T) {
 
 	require.NotEmpty(t, output, "should render something")
 	require.Contains(t, output, "No workflows available", "should show no workflows message")
-	require.Contains(t, output, "~/.config/perles/workflows/", "should show guidance for adding workflows")
+	require.Contains(t, output, "~/.perles/workflows/", "should show guidance for adding workflows")
+	require.NotContains(t, output, "~/.config/perles/workflows/", "should not reference the legacy config path")
 }
 
 // ============================================================================

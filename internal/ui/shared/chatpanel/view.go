@@ -559,7 +559,7 @@ func (m Model) renderEmptyWorkflowsState(contentHeight int) string {
 	lines = append(lines, "")
 	lines = append(lines, messageStyle.Render("No workflows available"))
 	lines = append(lines, "")
-	lines = append(lines, messageStyle.Render("Add workflows to ~/.config/perles/workflows/"))
+	lines = append(lines, messageStyle.Render("Add workflows to ~/.perles/workflows/"))
 
 	content := strings.Join(lines, "\n")
 
