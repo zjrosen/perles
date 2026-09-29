@@ -61,6 +61,20 @@ func TestTreeColumn_Mode_Method(t *testing.T) {
 	require.Equal(t, "child", tc.Mode())
 }
 
+func TestTreeColumn_ChildrenAliasForChildMode(t *testing.T) {
+	// "children" is a backward-compatible alias for "child" (older search-mode
+	// tree saves wrote tree_mode: children).
+	tc := NewTreeColumn("Children", "bd-456", "children", nil, nil)
+	require.Equal(t, tree.ModeChildren, tc.mode)
+	require.Equal(t, "child", tc.Mode(), "alias should normalize to the canonical config value")
+	require.Equal(t, "Children (child)", tc.Title())
+}
+
+func TestTreeColumn_UnknownModeDefaultsToDeps(t *testing.T) {
+	tc := NewTreeColumn("Deps", "bd-123", "bogus", nil, nil)
+	require.Equal(t, tree.ModeDeps, tc.mode)
+}
+
 func TestTreeColumn_HandleLoaded_WrongMessageType(t *testing.T) {
 	tc := NewTreeColumn("Deps", "bd-123", "deps", nil, nil)
 	// Send a ColumnLoadedMsg instead of TreeColumnLoadedMsg

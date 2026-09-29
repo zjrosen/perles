@@ -774,6 +774,7 @@ func TestTreeModeToIndex(t *testing.T) {
 		expected int
 	}{
 		{"deps returns 0", "deps", 0},
+		{"child returns 1", "child", 1},
 		{"children returns 1", "children", 1},
 		{"empty string returns 0 (default)", "", 0},
 		{"unknown mode returns 0 (default)", "unknown", 0},
@@ -822,7 +823,7 @@ func TestMakeNewViewTreeFormConfig_Structure(t *testing.T) {
 	require.Equal(t, "Dependencies", cfg.Fields[3].Options[0].Label)
 	require.Equal(t, "deps", cfg.Fields[3].Options[0].Value)
 	require.Equal(t, "Parent-Child", cfg.Fields[3].Options[1].Label)
-	require.Equal(t, "children", cfg.Fields[3].Options[1].Value)
+	require.Equal(t, "child", cfg.Fields[3].Options[1].Value, "Parent-Child must persist the tree_mode value board tree columns recognize")
 	require.Equal(t, 0, cfg.Fields[3].InitialToggleIndex) // deps mode -> index 0
 }
 
@@ -898,7 +899,7 @@ func TestMakeNewViewTreeFormConfig_OnSubmit(t *testing.T) {
 		"viewName":   "  My View  ", // With whitespace
 		"columnName": "  My Column  ",
 		"color":      "#FF8787",
-		"treeMode":   "children",
+		"treeMode":   "child",
 	})
 
 	saveMsg, ok := msg.(treeNewViewSaveMsg)
@@ -907,7 +908,7 @@ func TestMakeNewViewTreeFormConfig_OnSubmit(t *testing.T) {
 	require.Equal(t, "My Column", saveMsg.ColumnName) // Trimmed
 	require.Equal(t, "#FF8787", saveMsg.Color)
 	require.Equal(t, "test-123", saveMsg.IssueID)
-	require.Equal(t, "children", saveMsg.TreeMode)
+	require.Equal(t, "child", saveMsg.TreeMode)
 }
 
 func TestMakeNewViewTreeFormConfig_OnSubmit_EmptyColumnName(t *testing.T) {
@@ -950,6 +951,9 @@ func TestMakeUpdateViewTreeFormConfig_Structure(t *testing.T) {
 	require.Equal(t, "treeMode", cfg.Fields[2].Key)
 	require.Equal(t, formmodal.FieldTypeToggle, cfg.Fields[2].Type)
 	require.Equal(t, 1, cfg.Fields[2].InitialToggleIndex) // children mode -> index 1
+	require.Len(t, cfg.Fields[2].Options, 2)
+	require.Equal(t, "deps", cfg.Fields[2].Options[0].Value)
+	require.Equal(t, "child", cfg.Fields[2].Options[1].Value, "Parent-Child must persist the tree_mode value board tree columns recognize")
 
 	// Field 3: views (list)
 	require.Equal(t, "views", cfg.Fields[3].Key)
@@ -1007,7 +1011,7 @@ func TestMakeUpdateViewTreeFormConfig_OnSubmit(t *testing.T) {
 	msg := cfg.OnSubmit(map[string]any{
 		"columnName": "  Tree: test-123  ",
 		"color":      "#FF8787",
-		"treeMode":   "children",
+		"treeMode":   "child",
 		"views":      []string{"0", "1"},
 	})
 
@@ -1016,7 +1020,7 @@ func TestMakeUpdateViewTreeFormConfig_OnSubmit(t *testing.T) {
 	require.Equal(t, "Tree: test-123", saveMsg.ColumnName) // Trimmed
 	require.Equal(t, "#FF8787", saveMsg.Color)
 	require.Equal(t, "test-123", saveMsg.IssueID)
-	require.Equal(t, "children", saveMsg.TreeMode)
+	require.Equal(t, "child", saveMsg.TreeMode)
 	require.Equal(t, []int{0, 1}, saveMsg.ViewIndices)
 }
 

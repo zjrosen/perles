@@ -350,7 +350,7 @@ func makeNewViewTreeFormConfig(existingViews []string, issueID, treeMode string)
 				Label: "Tree Mode",
 				Options: []formmodal.ListOption{
 					{Label: "Dependencies", Value: "deps"},
-					{Label: "Parent-Child", Value: "children"},
+					{Label: "Parent-Child", Value: "child"},
 				},
 				InitialToggleIndex: treeModeToIndex(treeMode),
 			},
@@ -422,7 +422,7 @@ func makeUpdateViewTreeFormConfig(views []string, issueID, treeMode string) form
 				Label: "Tree Mode",
 				Options: []formmodal.ListOption{
 					{Label: "Dependencies", Value: "deps"},
-					{Label: "Parent-Child", Value: "children"},
+					{Label: "Parent-Child", Value: "child"},
 				},
 				InitialToggleIndex: treeModeToIndex(treeMode),
 			},
@@ -472,8 +472,9 @@ func makeUpdateViewTreeFormConfig(views []string, issueID, treeMode string) form
 }
 
 // treeModeToIndex converts tree mode string to toggle index.
+// Accepts both the config value ("child") and the tree model value ("children").
 func treeModeToIndex(mode string) int {
-	if mode == "children" {
+	if mode == "child" || mode == string(tree.ModeChildren) {
 		return 1
 	}
 	return 0 // "deps" is default

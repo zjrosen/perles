@@ -42,13 +42,14 @@ type TreeColumnLoadedMsg struct {
 }
 
 // NewTreeColumn creates a new tree column.
-// treeMode can be "deps" (default) or "child".
+// treeMode can be "deps" (default) or "child". "children" is accepted as a
+// backward-compatible alias for "child" (older search-mode saves wrote it).
 func NewTreeColumn(title, rootID, treeMode string, executor task.QueryExecutor, clock shared.Clock) TreeColumn {
 	focused := new(bool)
 
 	// Convert string mode to tree.TreeMode
 	mode := tree.ModeDeps
-	if treeMode == "child" {
+	if treeMode == "child" || treeMode == string(tree.ModeChildren) {
 		mode = tree.ModeChildren
 	}
 

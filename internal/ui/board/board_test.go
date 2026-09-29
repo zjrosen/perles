@@ -667,6 +667,7 @@ func TestBoard_TreeColumn_Mode(t *testing.T) {
 	}{
 		{name: "deps mode", treeMode: "deps", expected: "deps"},
 		{name: "child mode", treeMode: "child", expected: "child"},
+		{name: "children alias loads child mode", treeMode: "children", expected: "child"},
 		{name: "empty defaults to deps", treeMode: "", expected: "deps"},
 	}
 
