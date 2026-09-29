@@ -16,10 +16,11 @@ Closes #(issue number)
 
 ## Checklist
 
-- [ ] I have read the [CONTRIBUTING](CONTRIBUTING.md) guidelines
+- [ ] I have read the [CONTRIBUTING](https://github.com/zjrosen/perles/blob/main/CONTRIBUTING.md) guidelines
 - [ ] My code follows the project's code style
 - [ ] I have added tests that prove my fix/feature works
 - [ ] All new and existing tests pass (`make test`)
+- [ ] Lint passes (`make lint`)
 - [ ] I have updated documentation as needed
 - [ ] I have updated golden files if UI changed (`make test-update`)
 

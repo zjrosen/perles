@@ -31,7 +31,9 @@ If applicable, add screenshots to help explain your problem.
 ## Environment
 
 - **Perles version**: (run `perles --version`)
-- **Go version**: (run `go version`)
+- **Task backend / version**: (beads or beads_rust; run `bd --version` or `br --version`; for beads, Dolt server or SQLite)
+- **AI provider** (orchestration issues only): (claude, amp, codex, cursor, gemini, or opencode)
+- **Go version** (only if built from source): (run `go version`)
 - **OS**: (e.g., macOS 14.0, Ubuntu 22.04)
 - **Terminal**: (e.g., iTerm2, Terminal.app, Alacritty)
 
@@ -39,5 +41,5 @@ If applicable, add screenshots to help explain your problem.
 
 Add any other context about the problem here, including:
 - Configuration file contents (if relevant)
-- Error messages or logs
+- Error messages or logs (run `perles -d` to write a debug log to `debug.log` in the current directory)
 - Whether this worked before
