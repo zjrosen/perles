@@ -90,9 +90,10 @@ const (
 
 // epicTreeLoadedMsg is sent when the epic tree data has been loaded.
 type epicTreeLoadedMsg struct {
-	Issues []task.Issue
-	RootID string
-	Err    error
+	Issues    []task.Issue
+	RootID    string
+	Direction tree.Direction // Direction the issues were fetched for (expand down/up)
+	Err       error
 }
 
 // Model holds the dashboard mode state.
@@ -2192,7 +2193,7 @@ func (m Model) handleIssueSaved(msg issueSavedMsg) (Model, tea.Cmd) {
 		}
 	}
 
-	return m, loadEpicTree(m.lastLoadedEpicID, m.services.QueryExecutor)
+	return m, loadEpicTree(m.lastLoadedEpicID, m.epicTreeDirection(), m.services.QueryExecutor)
 }
 
 // handleCommentAdded refreshes the selected epic issue after a successful comment creation.
@@ -2407,7 +2408,7 @@ func (m Model) HandleDBChanged() (Model, tea.Cmd) {
 	}
 
 	// Trigger a tree refresh by loading the epic tree again
-	return m, loadEpicTree(m.lastLoadedEpicID, m.services.QueryExecutor)
+	return m, loadEpicTree(m.lastLoadedEpicID, m.epicTreeDirection(), m.services.QueryExecutor)
 }
 
 // === Focus Management ===

@@ -130,7 +130,7 @@ func TestLoadEpicTreeReturnsCommand(t *testing.T) {
 		Maybe()
 
 	// Call loadEpicTree
-	cmd := loadEpicTree("epic-123", mockExecutor)
+	cmd := loadEpicTree("epic-123", tree.DirectionDown, mockExecutor)
 
 	// Verify command is returned
 	require.NotNil(t, cmd, "loadEpicTree should return a non-nil command")
@@ -140,13 +140,13 @@ func TestLoadEpicTreeReturnsNilForEmptyEpicID(t *testing.T) {
 	mockExecutor := mocks.NewMockQueryExecutor(t)
 
 	// Empty epic ID should return nil
-	cmd := loadEpicTree("", mockExecutor)
+	cmd := loadEpicTree("", tree.DirectionDown, mockExecutor)
 	require.Nil(t, cmd, "loadEpicTree should return nil for empty epic ID")
 }
 
 func TestLoadEpicTreeReturnsNilForNilExecutor(t *testing.T) {
 	// Nil executor should return nil
-	cmd := loadEpicTree("epic-123", nil)
+	cmd := loadEpicTree("epic-123", tree.DirectionDown, nil)
 	require.Nil(t, cmd, "loadEpicTree should return nil for nil executor")
 }
 
@@ -163,7 +163,7 @@ func TestLoadEpicTreeExecutesBQL(t *testing.T) {
 		Once()
 
 	// Call loadEpicTree and execute the command
-	cmd := loadEpicTree("epic-123", mockExecutor)
+	cmd := loadEpicTree("epic-123", tree.DirectionDown, mockExecutor)
 	require.NotNil(t, cmd)
 
 	// Execute the command
@@ -173,10 +173,26 @@ func TestLoadEpicTreeExecutesBQL(t *testing.T) {
 	loadedMsg, ok := msg.(epicTreeLoadedMsg)
 	require.True(t, ok, "command should return epicTreeLoadedMsg")
 	require.Equal(t, "epic-123", loadedMsg.RootID)
+	require.Equal(t, tree.DirectionDown, loadedMsg.Direction)
 	require.Len(t, loadedMsg.Issues, 2)
 	require.NoError(t, loadedMsg.Err)
 
 	mockExecutor.AssertExpectations(t)
+}
+
+func TestLoadEpicTreeExpandsUpForDirectionUp(t *testing.T) {
+	mockExecutor := mocks.NewMockQueryExecutor(t)
+	mockExecutor.EXPECT().
+		Execute(`id = "epic-123" expand up depth *`).
+		Return([]task.Issue{createTestIssue("epic-123", "Test Epic", "")}, nil).
+		Once()
+
+	cmd := loadEpicTree("epic-123", tree.DirectionUp, mockExecutor)
+	require.NotNil(t, cmd)
+
+	loadedMsg, ok := cmd().(epicTreeLoadedMsg)
+	require.True(t, ok, "command should return epicTreeLoadedMsg")
+	require.Equal(t, tree.DirectionUp, loadedMsg.Direction)
 }
 
 func TestLoadEpicTreeReturnsErrorInMsg(t *testing.T) {
@@ -189,7 +205,7 @@ func TestLoadEpicTreeReturnsErrorInMsg(t *testing.T) {
 		Once()
 
 	// Call loadEpicTree and execute the command
-	cmd := loadEpicTree("epic-123", mockExecutor)
+	cmd := loadEpicTree("epic-123", tree.DirectionDown, mockExecutor)
 	require.NotNil(t, cmd)
 
 	// Execute the command
@@ -609,6 +625,168 @@ func TestTreeModeToggle(t *testing.T) {
 	m = result.(Model)
 
 	require.Equal(t, tree.ModeDeps, m.epicTree.Mode(), "'m' should toggle mode back to deps")
+}
+
+func TestTreeDirectionToggle(t *testing.T) {
+	// Verify 'd' key toggles direction, persists it, and reloads the epic for the new direction
+	m := createEpicTreeTestModelWithTree(t)
+	m.lastLoadedEpicID = "epic-123"
+
+	parent := createTestIssue("parent-1", "Parent", "")
+	epic := createTestIssue("epic-123", "Test Epic", "parent-1")
+	epic.Type = task.TypeEpic
+
+	mockExecutor := mocks.NewMockQueryExecutor(t)
+	mockExecutor.EXPECT().
+		Execute(`id = "epic-123" expand up depth *`).
+		Return([]task.Issue{epic, parent}, nil).
+		Once()
+	mockExecutor.EXPECT().
+		Execute(`id = "epic-123" expand down depth *`).
+		Return([]task.Issue{epic}, nil).
+		Once()
+	m.services.QueryExecutor = mockExecutor
+
+	require.Equal(t, tree.DirectionDown, m.epicTree.Direction(), "initial direction should be down")
+
+	// Press 'd' to toggle to up
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m = result.(Model)
+
+	require.Equal(t, tree.DirectionUp, m.epicTree.Direction(), "'d' should toggle direction to up")
+	require.Equal(t, tree.DirectionUp, m.workflowUIState["wf-1"].TreeDirection, "direction should be saved in workflow UI state")
+	require.NotNil(t, cmd, "'d' should reload the epic tree")
+
+	loadedMsg, ok := cmd().(epicTreeLoadedMsg)
+	require.True(t, ok, "reload command should return epicTreeLoadedMsg")
+	require.Equal(t, "epic-123", loadedMsg.RootID)
+	require.Equal(t, tree.DirectionUp, loadedMsg.Direction)
+
+	// Apply the reload: tree is rebuilt upward (epic -> parent)
+	result, _ = m.Update(loadedMsg)
+	m = result.(Model)
+	require.Equal(t, tree.DirectionUp, m.epicTree.Direction())
+	require.Equal(t, "epic-123", m.epicTree.Root().Issue.ID)
+	require.Len(t, m.epicTree.Root().Children, 1, "up direction should show the epic's parent")
+	require.Equal(t, "parent-1", m.epicTree.Root().Children[0].Issue.ID)
+
+	// Press 'd' again to toggle back to down
+	result, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m = result.(Model)
+
+	require.Equal(t, tree.DirectionDown, m.epicTree.Direction(), "'d' should toggle direction back to down")
+	require.Equal(t, tree.DirectionDown, m.workflowUIState["wf-1"].TreeDirection)
+	require.NotNil(t, cmd)
+	loadedMsg = cmd().(epicTreeLoadedMsg)
+	require.Equal(t, tree.DirectionDown, loadedMsg.Direction)
+}
+
+func TestTreeDirectionToggle_NoTreeIsNoOp(t *testing.T) {
+	m := createEpicTreeTestModel(t)
+	m.epicTree = nil
+	m.focus = FocusEpicView
+	m.epicViewFocus = EpicFocusTree
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m = result.(Model)
+
+	require.Nil(t, m.epicTree)
+	require.Nil(t, cmd, "'d' without a tree should not trigger a load")
+}
+
+func TestTreeDirectionToggle_OnlyInTreePane(t *testing.T) {
+	// 'd' in the details pane must not toggle the tree direction
+	m := createEpicTreeTestModelWithTree(t)
+	m.lastLoadedEpicID = "epic-123"
+	m.epicViewFocus = EpicFocusDetails
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m = result.(Model)
+
+	require.Equal(t, tree.DirectionDown, m.epicTree.Direction())
+}
+
+func TestHandleEpicTreeLoadedRejectsStaleDirection(t *testing.T) {
+	// A response fetched for a direction the user has since toggled away from is dropped
+	m := createEpicTreeTestModelWithTree(t)
+	m.lastLoadedEpicID = "epic-123"
+	originalTree := m.epicTree
+
+	msg := epicTreeLoadedMsg{
+		Issues:    []task.Issue{createTestIssue("epic-123", "Test Epic", "")},
+		RootID:    "epic-123",
+		Direction: tree.DirectionUp, // current tree is DirectionDown
+	}
+	result, cmd := m.handleEpicTreeLoaded(msg)
+	m = result.(Model)
+
+	require.Same(t, originalTree, m.epicTree, "stale-direction response should not rebuild the tree")
+	require.Equal(t, tree.DirectionDown, m.epicTree.Direction())
+	require.Nil(t, cmd)
+}
+
+func TestHandleEpicTreeLoadedUsesMsgDirection(t *testing.T) {
+	// With no existing tree, the tree is built in the direction the data was fetched for
+	m := createEpicTreeTestModel(t)
+	m.lastLoadedEpicID = "epic-123"
+
+	msg := epicTreeLoadedMsg{
+		Issues: []task.Issue{
+			createTestIssue("epic-123", "Test Epic", "parent-1"),
+			createTestIssue("parent-1", "Parent", ""),
+		},
+		RootID:    "epic-123",
+		Direction: tree.DirectionUp,
+	}
+	result, _ := m.handleEpicTreeLoaded(msg)
+	m = result.(Model)
+
+	require.NotNil(t, m.epicTree)
+	require.Equal(t, tree.DirectionUp, m.epicTree.Direction())
+	require.Len(t, m.epicTree.Root().Children, 1)
+}
+
+func TestEpicTreeReloads_PreserveDirection(t *testing.T) {
+	// DB-change and post-save reloads fetch data for the tree's current direction
+	m := createEpicTreeTestModelWithTree(t)
+	m.lastLoadedEpicID = "epic-123"
+	m.epicTree.SetDirection(tree.DirectionUp)
+
+	mockExecutor := mocks.NewMockQueryExecutor(t)
+	mockExecutor.EXPECT().
+		Execute(`id = "epic-123" expand up depth *`).
+		Return([]task.Issue{createTestIssue("epic-123", "Test Epic", "")}, nil).
+		Twice()
+	m.services.QueryExecutor = mockExecutor
+
+	_, cmd := m.HandleDBChanged()
+	require.NotNil(t, cmd)
+	require.Equal(t, tree.DirectionUp, cmd().(epicTreeLoadedMsg).Direction)
+
+	_, cmd = m.handleIssueSaved(issueSavedMsg{})
+	require.NotNil(t, cmd)
+	require.Equal(t, tree.DirectionUp, cmd().(epicTreeLoadedMsg).Direction)
+}
+
+func TestTreeLoadOnWorkflowSelection_UsesCachedDirection(t *testing.T) {
+	// With no live tree, switching workflows loads using the target workflow's saved direction
+	m := createEpicTreeTestModelWithWorkflows(t)
+	m.selectedIndex = 0
+	m.epicTree = nil
+	m.getOrCreateUIState("wf-2").TreeDirection = tree.DirectionUp
+
+	mockExecutor := mocks.NewMockQueryExecutor(t)
+	mockExecutor.EXPECT().
+		Execute(`id = "epic-200" expand up depth *`).
+		Return([]task.Issue{createTestIssue("epic-200", "Epic 200", "")}, nil).
+		Once()
+	m.services.QueryExecutor = mockExecutor
+
+	cmd := m.handleWorkflowSelectionChange(1)
+	require.NotNil(t, cmd)
+	loadedMsg := cmd().(epicTreeLoadedMsg)
+	require.Equal(t, "epic-200", loadedMsg.RootID)
+	require.Equal(t, tree.DirectionUp, loadedMsg.Direction)
 }
 
 func TestCursorMoveTriggersDetailUpdate(t *testing.T) {

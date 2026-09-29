@@ -18,22 +18,43 @@ import (
 )
 
 // loadEpicTree creates a command to load the epic tree data for the given epic ID.
-// It executes a BQL query to fetch the epic and all its children using expand down depth *.
-func loadEpicTree(epicID string, executor task.QueryExecutor) tea.Cmd {
+// It executes a BQL query to fetch the epic and all related issues in the given
+// direction: expand down depth * (children + blocked issues) for DirectionDown,
+// expand up depth * (parents + blockers) for DirectionUp.
+func loadEpicTree(epicID string, dir tree.Direction, executor task.QueryExecutor) tea.Cmd {
 	if epicID == "" || executor == nil {
 		return nil
 	}
 
-	query := fmt.Sprintf(`id = "%s" expand down depth *`, epicID)
+	if dir != tree.DirectionUp {
+		dir = tree.DirectionDown
+	}
+	query := fmt.Sprintf(`id = "%s" expand %s depth *`, epicID, dir)
 
 	return func() tea.Msg {
 		issues, err := executor.Execute(query)
 		return epicTreeLoadedMsg{
-			Issues: issues,
-			RootID: epicID,
-			Err:    err,
+			Issues:    issues,
+			RootID:    epicID,
+			Direction: dir,
+			Err:       err,
 		}
 	}
+}
+
+// epicTreeDirection returns the direction to use when (re)loading the epic tree.
+// Mirrors the precedence in handleEpicTreeLoaded: the live tree's direction wins,
+// then the selected workflow's cached direction, then DirectionDown.
+func (m *Model) epicTreeDirection() tree.Direction {
+	if m.epicTree != nil {
+		return m.epicTree.Direction()
+	}
+	if wf := m.SelectedWorkflow(); wf != nil {
+		if state, exists := m.workflowUIState[wf.ID]; exists && state.TreeDirection != "" {
+			return state.TreeDirection
+		}
+	}
+	return tree.DirectionDown
 }
 
 // handleEpicTreeLoaded processes the epic tree loading result and builds the tree model.
@@ -41,6 +62,11 @@ func loadEpicTree(epicID string, executor task.QueryExecutor) tea.Cmd {
 func (m Model) handleEpicTreeLoaded(msg epicTreeLoadedMsg) (mode.Controller, tea.Cmd) {
 	// Reject stale responses (user may have navigated to different workflow)
 	if msg.RootID != m.lastLoadedEpicID {
+		return m, nil
+	}
+
+	// Reject responses loaded for a direction the user has since toggled away from
+	if msg.Direction != "" && m.epicTree != nil && msg.Direction != m.epicTree.Direction() {
 		return m, nil
 	}
 
@@ -92,6 +118,11 @@ func (m Model) handleEpicTreeLoaded(msg epicTreeLoadedMsg) (mode.Controller, tea
 		if node := m.epicTree.SelectedNode(); node != nil {
 			selectedID = node.Issue.ID
 		}
+	}
+
+	// The issues were fetched for msg.Direction (expand up vs down), so build with it
+	if msg.Direction != "" {
+		dir = msg.Direction
 	}
 
 	// Initialize tree model
@@ -198,7 +229,7 @@ func (m *Model) triggerEpicTreeLoad() tea.Cmd {
 	m.lastLoadedEpicID = epicID
 
 	// Load immediately - queries are fast enough that debouncing is unnecessary
-	return loadEpicTree(epicID, m.services.QueryExecutor)
+	return loadEpicTree(epicID, m.epicTreeDirection(), m.services.QueryExecutor)
 }
 
 // handleEpicTreeKeysFocusTree handles key events when the tree pane has focus within the epic view.
@@ -231,6 +262,10 @@ func (m Model) handleEpicTreeKeysFocusTree(msg tea.KeyMsg) (mode.Controller, tea
 			}
 		}
 		return m, nil
+
+	case "d":
+		// Toggle direction (down/up) and reload the tree for the new direction
+		return m.toggleEpicTreeDirection()
 
 	case "m":
 		// Toggle mode (deps/children)
@@ -319,6 +354,28 @@ func (m Model) handleEpicTreeKeysFocusDetails(msg tea.KeyMsg) (mode.Controller, 
 	}
 
 	return m, nil
+}
+
+// toggleEpicTreeDirection flips the epic tree between DirectionDown (children +
+// blocked issues) and DirectionUp (parent + blockers), saves the new direction in
+// the workflow's cached UI state, and reloads the epic's issues for that direction.
+// The reload is rooted at the workflow's epic, mirroring other epic tree reloads.
+func (m Model) toggleEpicTreeDirection() (mode.Controller, tea.Cmd) {
+	if m.epicTree == nil || m.lastLoadedEpicID == "" {
+		return m, nil
+	}
+
+	newDir := tree.DirectionDown
+	if m.epicTree.Direction() == tree.DirectionDown {
+		newDir = tree.DirectionUp
+	}
+	m.epicTree.SetDirection(newDir)
+
+	if wf := m.SelectedWorkflow(); wf != nil {
+		m.saveEpicTreeState(string(wf.ID))
+	}
+
+	return m, loadEpicTree(m.lastLoadedEpicID, newDir, m.services.QueryExecutor)
 }
 
 // saveEpicTreeState saves the current epic tree state to the UI state cache for the given workflow.
