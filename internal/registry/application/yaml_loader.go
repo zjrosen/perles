@@ -122,7 +122,29 @@ func LoadRegistryFromYAML(fsys fs.FS) ([]*registry.Registration, error) {
 // LoadRegistryFromYAMLWithSource loads workflow registrations with a specific source tag.
 // This allows distinguishing between built-in and user-defined workflows.
 // Includes validation for file size (1MB max), duplicate IDs, assignees, and template existence.
+// Any invalid workflow fails the whole load; templates are resolved within fsys only.
 func LoadRegistryFromYAMLWithSource(fsys fs.FS, source registry.Source) ([]*registry.Registration, error) {
+	return loadRegistryFromYAML(fsys, source, loadOptions{})
+}
+
+// loadOptions controls template resolution and error handling in loadRegistryFromYAML.
+type loadOptions struct {
+	// templateFS is used to resolve, validate, and later read templates. It may layer
+	// fallback templates (e.g. built-in shared templates) under the walked FS.
+	// Nil means templates are resolved within the walked FS only.
+	templateFS fs.FS
+	// skipInvalid logs and skips an invalid template.yaml or registration instead of
+	// failing the whole load, so one broken workflow doesn't hide the others.
+	skipInvalid bool
+}
+
+// loadRegistryFromYAML walks fsys for workflows/*/template.yaml files and builds registrations.
+func loadRegistryFromYAML(fsys fs.FS, source registry.Source, opts loadOptions) ([]*registry.Registration, error) {
+	templateFS := opts.templateFS
+	if templateFS == nil {
+		templateFS = fsys
+	}
+
 	var allRegistrations []*registry.Registration
 
 	// Track seen registrations for duplicate detection within this source
@@ -130,8 +152,22 @@ func LoadRegistryFromYAMLWithSource(fsys fs.FS, source registry.Source) ([]*regi
 
 	// Find all template.yaml files in workflows subdirectories
 	err := fs.WalkDir(fsys, "workflows", func(path string, d fs.DirEntry, err error) error {
+		// skip aborts the load, or logs and skips the invalid item when opts.skipInvalid is set.
+		skip := func(err error, fields ...any) error {
+			if !opts.skipInvalid {
+				return err
+			}
+			fields = append(fields, "path", path, "error", err.Error())
+			log.Warn(log.CatConfig, "skipping invalid workflow", fields...)
+			return nil
+		}
+
 		if err != nil {
-			return err
+			// The walk root itself must be readable; unreadable entries below it can be skipped.
+			if path == "workflows" {
+				return err
+			}
+			return skip(err)
 		}
 
 		// Only process template.yaml files
@@ -142,7 +178,7 @@ func LoadRegistryFromYAMLWithSource(fsys fs.FS, source registry.Source) ([]*regi
 		// Check file size limit
 		info, err := d.Info()
 		if err != nil {
-			return fmt.Errorf("stat %s: %w", path, err)
+			return skip(fmt.Errorf("stat %s: %w", path, err))
 		}
 		if info.Size() > maxYAMLSize {
 			log.Warn(log.CatConfig, "skipping oversized template.yaml",
@@ -154,12 +190,12 @@ func LoadRegistryFromYAMLWithSource(fsys fs.FS, source registry.Source) ([]*regi
 
 		content, err := fs.ReadFile(fsys, path)
 		if err != nil {
-			return fmt.Errorf("read %s: %w", path, err)
+			return skip(fmt.Errorf("read %s: %w", path, err))
 		}
 
 		var file RegistryFile
 		if err := yaml.Unmarshal(content, &file); err != nil {
-			return fmt.Errorf("parse %s: %w", path, err)
+			return skip(fmt.Errorf("parse %s: %w", path, err))
 		}
 
 		// Get the workflow directory for path resolution
@@ -177,38 +213,12 @@ func LoadRegistryFromYAMLWithSource(fsys fs.FS, source registry.Source) ([]*regi
 			}
 			seen[regKey] = path
 
-			// Set default system_prompt for orchestration workflows if not specified
-			if isOrchestrationWorkflow(&def) && def.SystemPrompt == "" {
-				def.SystemPrompt = defaultSystemPrompt
-			}
-
-			// Validate template paths before resolution
-			if err := validateTemplatePath(def.EpicTemplate); err != nil {
-				return fmt.Errorf("workflow %s/%s in %s: %w", def.Namespace, def.Key, path, err)
-			}
-			if err := validateTemplatePath(def.SystemPrompt); err != nil {
-				return fmt.Errorf("workflow %s/%s in %s: system_prompt: %w", def.Namespace, def.Key, path, err)
-			}
-			for i, node := range def.Nodes {
-				if err := validateTemplatePath(node.Template); err != nil {
-					return fmt.Errorf("workflow %s/%s node %d in %s: %w", def.Namespace, def.Key, i, path, err)
-				}
-				if err := validateAssignee(node.Assignee); err != nil {
-					return fmt.Errorf("workflow %s/%s node %d in %s: %w", def.Namespace, def.Key, i, path, err)
-				}
-			}
-
-			// Resolve template paths relative to the workflow directory
-			resolvedDef := resolveTemplatePaths(def, workflowDir, fsys)
-
-			// Validate template existence at load time
-			if err := validateTemplateExists(fsys, resolvedDef); err != nil {
-				return fmt.Errorf("workflow %s/%s in %s: %w", def.Namespace, def.Key, path, err)
-			}
-
-			reg, err := buildRegistrationFromDefWithSource(resolvedDef, source)
+			reg, err := buildRegistrationFromYAMLDef(def, path, workflowDir, fsys, templateFS, source)
 			if err != nil {
-				return fmt.Errorf("workflow %s in %s: %w", def.Key, path, err)
+				if err := skip(err, "key", regKey); err != nil {
+					return err
+				}
+				continue
 			}
 			allRegistrations = append(allRegistrations, reg)
 
@@ -229,6 +239,46 @@ func LoadRegistryFromYAMLWithSource(fsys fs.FS, source registry.Source) ([]*regi
 	}
 
 	return allRegistrations, nil
+}
+
+// buildRegistrationFromYAMLDef validates a workflow definition from the template.yaml at path,
+// resolves its template paths, and builds the registration.
+// Workflow-local templates are looked up in fsys; shared templates and existence checks use templateFS.
+func buildRegistrationFromYAMLDef(def WorkflowDef, path, workflowDir string, fsys, templateFS fs.FS, source registry.Source) (*registry.Registration, error) {
+	// Set default system_prompt for orchestration workflows if not specified
+	if isOrchestrationWorkflow(&def) && def.SystemPrompt == "" {
+		def.SystemPrompt = defaultSystemPrompt
+	}
+
+	// Validate template paths before resolution
+	if err := validateTemplatePath(def.EpicTemplate); err != nil {
+		return nil, fmt.Errorf("workflow %s/%s in %s: %w", def.Namespace, def.Key, path, err)
+	}
+	if err := validateTemplatePath(def.SystemPrompt); err != nil {
+		return nil, fmt.Errorf("workflow %s/%s in %s: system_prompt: %w", def.Namespace, def.Key, path, err)
+	}
+	for i, node := range def.Nodes {
+		if err := validateTemplatePath(node.Template); err != nil {
+			return nil, fmt.Errorf("workflow %s/%s node %d in %s: %w", def.Namespace, def.Key, i, path, err)
+		}
+		if err := validateAssignee(node.Assignee); err != nil {
+			return nil, fmt.Errorf("workflow %s/%s node %d in %s: %w", def.Namespace, def.Key, i, path, err)
+		}
+	}
+
+	// Resolve template paths relative to the workflow directory
+	resolvedDef := resolveTemplatePaths(def, workflowDir, fsys, templateFS)
+
+	// Validate template existence at load time
+	if err := validateTemplateExists(templateFS, resolvedDef); err != nil {
+		return nil, fmt.Errorf("workflow %s/%s in %s: %w", def.Namespace, def.Key, path, err)
+	}
+
+	reg, err := buildRegistrationFromDefWithSource(resolvedDef, source)
+	if err != nil {
+		return nil, fmt.Errorf("workflow %s in %s: %w", def.Key, path, err)
+	}
+	return reg, nil
 }
 
 // validateTemplateExists checks that all template files referenced in a workflow definition exist.
@@ -262,12 +312,12 @@ func validateTemplateExists(fsys fs.FS, def WorkflowDef) error {
 
 // resolveTemplatePaths resolves template paths to be relative to the workflows directory.
 // It first checks if the template exists in the workflow's directory, then falls back to workflows/.
-func resolveTemplatePaths(def WorkflowDef, workflowDir string, fsys fs.FS) WorkflowDef {
-	def.EpicTemplate = resolveTemplatePath(def.EpicTemplate, workflowDir, fsys)
-	def.SystemPrompt = resolveTemplatePath(def.SystemPrompt, workflowDir, fsys)
+func resolveTemplatePaths(def WorkflowDef, workflowDir string, fsys, templateFS fs.FS) WorkflowDef {
+	def.EpicTemplate = resolveTemplatePath(def.EpicTemplate, workflowDir, fsys, templateFS)
+	def.SystemPrompt = resolveTemplatePath(def.SystemPrompt, workflowDir, fsys, templateFS)
 
 	for i := range def.Nodes {
-		def.Nodes[i].Template = resolveTemplatePath(def.Nodes[i].Template, workflowDir, fsys)
+		def.Nodes[i].Template = resolveTemplatePath(def.Nodes[i].Template, workflowDir, fsys, templateFS)
 	}
 
 	return def
@@ -275,7 +325,10 @@ func resolveTemplatePaths(def WorkflowDef, workflowDir string, fsys fs.FS) Workf
 
 // resolveTemplatePath resolves a single template path.
 // Returns the path relative to the workflows directory.
-func resolveTemplatePath(template, workflowDir string, fsys fs.FS) string {
+// Bare filenames are looked up in the workflow's own directory in fsys, then in the
+// shared workflows/ directory of templateFS (fsys, possibly layered over built-in templates),
+// so workflow-local files always win over shared ones.
+func resolveTemplatePath(template, workflowDir string, fsys, templateFS fs.FS) string {
 	if template == "" {
 		return ""
 	}
@@ -294,11 +347,11 @@ func resolveTemplatePath(template, workflowDir string, fsys fs.FS) string {
 
 	// Fall back to shared templates in workflows/ directory
 	sharedPath := stdpath.Join("workflows", template)
-	if _, err := fs.Stat(fsys, sharedPath); err == nil {
+	if _, err := fs.Stat(templateFS, sharedPath); err == nil {
 		return sharedPath
 	}
 
-	// Return the workflow-local path as default (will error on load if not found)
+	// Return the workflow-local path as default (will error on load if not found in templateFS)
 	return workflowPath
 }
 

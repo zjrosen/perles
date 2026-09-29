@@ -41,13 +41,18 @@ type regKey struct {
 type RegistryService struct {
 	registry   *registry.Registry
 	templateFS fs.FS            // Primary FS (embedded templates from internal/templates)
-	userFS     fs.FS            // User FS (may be nil if no user workflows)
+	userFS     fs.FS            // User template FS layered over templateFS (may be nil if no user workflows)
 	regToFS    map[regKey]fs.FS // Per-registration FS tracking for template resolution
 }
 
 // NewRegistryService creates a registry service loading built-in, community,
 // and user-defined workflows. Each phase can shadow the previous:
 // built-in -> community -> user (user wins).
+//
+// Community and user workflows resolve templates in their own filesystem first and fall
+// back to embeddedFS, so they can reference built-in shared templates (for example the
+// default system prompt v1-epic-instructions.md, or v1-human-review.md) without copying them.
+// Invalid user workflows are logged and skipped without affecting other user workflows.
 //
 // Parameters:
 //   - embeddedFS: The embedded filesystem containing built-in workflows
@@ -69,7 +74,7 @@ func NewRegistryService(embeddedFS fs.FS, communitySource *CommunitySource, user
 	}
 
 	// Phase 1.5: Load community workflows (if source provided)
-	communityRegs, communityFS, err := LoadCommunityRegistryFromFS(communitySource)
+	communityRegs, communityFS, err := LoadCommunityRegistryFromFS(communitySource, embeddedFS)
 	if err != nil {
 		return nil, fmt.Errorf("load community registrations: %w", err)
 	}
@@ -90,7 +95,7 @@ func NewRegistryService(embeddedFS fs.FS, communitySource *CommunitySource, user
 
 	// Phase 2: Load user workflows (if directory exists)
 	if userBaseDir != "" {
-		userRegs, userFS, err := LoadUserRegistryFromDir(userBaseDir)
+		userRegs, userFS, err := LoadUserRegistryFromDir(userBaseDir, embeddedFS)
 		if err != nil {
 			return nil, fmt.Errorf("load user registrations: %w", err)
 		}

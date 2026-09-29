@@ -1751,3 +1751,140 @@ registry:
 	require.Error(t, err, "missing epic_template file should fail")
 	require.Contains(t, err.Error(), "not found")
 }
+
+func TestLoadRegistryFromYAML_InvalidWorkflowFailsWholeLoad(t *testing.T) {
+	// Built-in (strict) loading still fails on any invalid workflow, even alongside valid ones.
+	fsys := fstest.MapFS{
+		"workflows/good/template.yaml": {Data: []byte(`registry:
+  - namespace: "workflow"
+    key: "good"
+    version: "v1"
+    name: "Good"
+    description: ""
+    nodes:
+      - key: "step1"
+        name: "Step 1"
+        template: "step1.md"
+`)},
+		"workflows/good/step1.md": {Data: []byte("# Step 1")},
+		"workflows/bad/template.yaml": {Data: []byte(`registry:
+  - namespace: "workflow"
+    key: "bad"
+    version: "v1"
+    name: "Bad"
+    description: ""
+    nodes:
+      - key: "step1"
+        name: "Step 1"
+        template: "nonexistent.md"
+`)},
+	}
+
+	_, err := LoadRegistryFromYAML(fsys)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not found")
+}
+
+func TestLoadRegistryFromYAML_SkipInvalid(t *testing.T) {
+	validDef := func(key string) string {
+		return `
+  - namespace: "workflow"
+    key: "` + key + `"
+    version: "v1"
+    name: "` + key + `"
+    description: ""
+    nodes:
+      - key: "step1"
+        name: "Step 1"
+        template: "step1.md"
+`
+	}
+	fsys := fstest.MapFS{
+		"workflows/good/template.yaml":  {Data: []byte("registry:" + validDef("good"))},
+		"workflows/good/step1.md":       {Data: []byte("# Step 1")},
+		"workflows/parse/template.yaml": {Data: []byte("registry:\n  - key: [broken\n")},
+		"workflows/traversal/template.yaml": {Data: []byte(`registry:
+  - namespace: "workflow"
+    key: "traversal"
+    version: "v1"
+    name: "Traversal"
+    description: ""
+    epic_template: "../../etc/passwd"
+    nodes:
+      - key: "step1"
+        name: "Step 1"
+        template: "step1.md"
+`)},
+		"workflows/traversal/step1.md": {Data: []byte("# Step 1")},
+		"workflows/no-nodes/template.yaml": {Data: []byte(`registry:
+  - namespace: "workflow"
+    key: "no-nodes"
+    version: "v1"
+    name: "No Nodes"
+    description: ""
+`)},
+	}
+
+	regs, err := loadRegistryFromYAML(fsys, registry.SourceUser, loadOptions{skipInvalid: true})
+	require.NoError(t, err)
+	require.Len(t, regs, 1)
+	require.Equal(t, "good", regs[0].Key())
+	require.Equal(t, registry.SourceUser, regs[0].Source())
+
+	// All workflows invalid: nothing to load is still reported as an error
+	delete(fsys, "workflows/good/template.yaml")
+	_, err = loadRegistryFromYAML(fsys, registry.SourceUser, loadOptions{skipInvalid: true})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no workflow registrations found")
+}
+
+func TestLoadRegistryFromYAML_TemplateFSFallback(t *testing.T) {
+	primary := fstest.MapFS{
+		"workflows/wf/template.yaml": {Data: []byte(`registry:
+  - namespace: "workflow"
+    key: "wf"
+    version: "v1"
+    name: "WF"
+    description: ""
+    nodes:
+      - key: "local"
+        name: "Local"
+        template: "local.md"
+        assignee: "worker-1"
+      - key: "shared"
+        name: "Shared"
+        template: "shared.md"
+        assignee: "human"
+      - key: "explicit"
+        name: "Explicit"
+        template: "workflows/explicit.md"
+        assignee: "worker-2"
+`)},
+		"workflows/wf/local.md": {Data: []byte("# primary local")},
+	}
+	fallback := fstest.MapFS{
+		"workflows/v1-epic-instructions.md": {Data: []byte("# fallback instructions")},
+		"workflows/shared.md":               {Data: []byte("# fallback shared")},
+		"workflows/explicit.md":             {Data: []byte("# fallback explicit")},
+		"workflows/wf/local.md":             {Data: []byte("# fallback local (should not be used)")},
+	}
+
+	regs, err := loadRegistryFromYAML(primary, registry.SourceUser, loadOptions{templateFS: newLayeredFS(primary, fallback)})
+	require.NoError(t, err)
+	require.Len(t, regs, 1)
+	reg := regs[0]
+
+	require.Equal(t, "workflows/v1-epic-instructions.md", reg.SystemPrompt())
+	templatesByKey := make(map[string]string)
+	for _, node := range reg.DAG().Nodes() {
+		templatesByKey[node.Key()] = node.Template()
+	}
+	require.Equal(t, "workflows/wf/local.md", templatesByKey["local"])
+	require.Equal(t, "workflows/shared.md", templatesByKey["shared"])
+	require.Equal(t, "workflows/explicit.md", templatesByKey["explicit"])
+
+	// Without a fallback, the same workflow fails to load
+	_, err = loadRegistryFromYAML(primary, registry.SourceUser, loadOptions{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not found")
+}

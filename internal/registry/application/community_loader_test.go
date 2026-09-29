@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"io/fs"
 	"testing"
 	"testing/fstest"
 
@@ -46,7 +47,7 @@ func validCommunityYAML() string {
 }
 
 func TestLoadCommunityRegistryFromFS_NilSource(t *testing.T) {
-	regs, fsys, err := LoadCommunityRegistryFromFS(nil)
+	regs, fsys, err := LoadCommunityRegistryFromFS(nil, nil)
 
 	require.NoError(t, err)
 	require.Nil(t, regs)
@@ -63,7 +64,7 @@ func TestLoadCommunityRegistryFromFS_EmptyEnabledIDs(t *testing.T) {
 		EnabledIDs: []string{},
 	}
 
-	regs, fsys, err := LoadCommunityRegistryFromFS(source)
+	regs, fsys, err := LoadCommunityRegistryFromFS(source, nil)
 
 	require.NoError(t, err)
 	require.Nil(t, regs)
@@ -82,7 +83,7 @@ func TestLoadCommunityRegistryFromFS_LoadsFilteredRegistrations(t *testing.T) {
 		EnabledIDs: []string{"workflow/joke-contest"},
 	}
 
-	regs, fsys, err := LoadCommunityRegistryFromFS(source)
+	regs, fsys, err := LoadCommunityRegistryFromFS(source, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, fsys)
@@ -106,7 +107,7 @@ func TestLoadCommunityRegistryFromFS_UnmatchedIDWarns(t *testing.T) {
 		EnabledIDs: []string{"workflow/nonexistent"},
 	}
 
-	regs, fsys, err := LoadCommunityRegistryFromFS(source)
+	regs, fsys, err := LoadCommunityRegistryFromFS(source, nil)
 
 	// Should not error - WARN is logged instead
 	require.NoError(t, err)
@@ -125,7 +126,7 @@ func TestLoadCommunityRegistryFromFS_ZeroRegistrations(t *testing.T) {
 		EnabledIDs: []string{"workflow/something"},
 	}
 
-	regs, fsys, err := LoadCommunityRegistryFromFS(source)
+	regs, fsys, err := LoadCommunityRegistryFromFS(source, nil)
 
 	// Zero registrations triggers the "no workflow registrations found" error path
 	// which should be WARN+skip, never crash
@@ -147,7 +148,7 @@ func TestLoadCommunityRegistryFromFS_MalformedYAML(t *testing.T) {
 		EnabledIDs: []string{"workflow/broken"},
 	}
 
-	regs, fsys, err := LoadCommunityRegistryFromFS(source)
+	regs, fsys, err := LoadCommunityRegistryFromFS(source, nil)
 
 	// Malformed YAML should be WARN+skip, never crash
 	require.NoError(t, err)
@@ -168,7 +169,7 @@ func TestLoadCommunityRegistryFromFS_BareKeyNormalization(t *testing.T) {
 		EnabledIDs: []string{"joke-contest"}, // bare key, no "workflow/" prefix
 	}
 
-	regs, fsys, err := LoadCommunityRegistryFromFS(source)
+	regs, fsys, err := LoadCommunityRegistryFromFS(source, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, fsys)
@@ -193,7 +194,7 @@ func TestLoadCommunityRegistryFromFS_MixedBareAndQualifiedKeys(t *testing.T) {
 		EnabledIDs: []string{"joke-contest", "workflow/code-review"}, // mixed formats
 	}
 
-	regs, fsys, err := LoadCommunityRegistryFromFS(source)
+	regs, fsys, err := LoadCommunityRegistryFromFS(source, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, fsys)
@@ -237,7 +238,7 @@ func TestLoadCommunityRegistryFromFS_AllIDsMatch(t *testing.T) {
 		EnabledIDs: []string{"workflow/joke-contest", "workflow/code-review"},
 	}
 
-	regs, fsys, err := LoadCommunityRegistryFromFS(source)
+	regs, fsys, err := LoadCommunityRegistryFromFS(source, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, fsys)
@@ -251,4 +252,62 @@ func TestLoadCommunityRegistryFromFS_AllIDsMatch(t *testing.T) {
 	}
 	require.True(t, keys["joke-contest"], "joke-contest should be in results")
 	require.True(t, keys["code-review"], "code-review should be in results")
+}
+
+func TestLoadCommunityRegistryFromFS_FallsBackToBuiltinSharedTemplates(t *testing.T) {
+	// Community workflow references a shared template that only exists in the built-in FS
+	communityFS := fstest.MapFS{
+		"workflows/reviewed/template.yaml": &fstest.MapFile{Data: []byte(`registry:
+  - namespace: "workflow"
+    key: "reviewed"
+    version: "v1"
+    name: "Reviewed"
+    description: "Community workflow with a human review gate"
+    nodes:
+      - key: "work"
+        name: "Work"
+        template: "work.md"
+        assignee: "worker-1"
+      - key: "review"
+        name: "Human Review"
+        template: "v1-human-review.md"
+        assignee: "human"
+        after:
+          - "work"
+`)},
+		"workflows/reviewed/work.md": &fstest.MapFile{Data: []byte("# Work")},
+	}
+	builtinFS := fstest.MapFS{
+		"workflows/v1-epic-instructions.md": &fstest.MapFile{Data: []byte("# Built-in Epic Instructions")},
+		"workflows/v1-human-review.md":      &fstest.MapFile{Data: []byte("# Built-in Human Review")},
+	}
+	source := &CommunitySource{FS: communityFS, EnabledIDs: []string{"reviewed"}}
+
+	regs, fsys, err := LoadCommunityRegistryFromFS(source, builtinFS)
+
+	require.NoError(t, err)
+	require.Len(t, regs, 1)
+	reg := regs[0]
+	require.Equal(t, registry.SourceCommunity, reg.Source())
+	require.Equal(t, "workflows/v1-epic-instructions.md", reg.SystemPrompt())
+
+	content, err := fs.ReadFile(fsys, reg.SystemPrompt())
+	require.NoError(t, err)
+	require.Equal(t, "# Built-in Epic Instructions", string(content))
+
+	var reviewTemplate string
+	for _, node := range reg.DAG().Nodes() {
+		if node.Key() == "review" {
+			reviewTemplate = node.Template()
+		}
+	}
+	require.Equal(t, "workflows/v1-human-review.md", reviewTemplate)
+	content, err = fs.ReadFile(fsys, reviewTemplate)
+	require.NoError(t, err)
+	require.Equal(t, "# Built-in Human Review", string(content))
+
+	// Without the built-in fallback, the missing shared templates fail the load
+	regs, _, err = LoadCommunityRegistryFromFS(source, nil)
+	require.NoError(t, err)
+	require.Nil(t, regs)
 }

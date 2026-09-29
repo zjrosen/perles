@@ -34,8 +34,15 @@ func UserRegistryBaseDir() string {
 // LoadUserRegistryFromDir loads YAML registrations from a user directory.
 // baseDir should be the root directory (e.g., ~/.perles/) that contains a "workflows" subdirectory.
 // Returns nil, nil, nil if the directory doesn't exist (graceful fallback).
-// Invalid template.yaml files are logged and skipped.
-func LoadUserRegistryFromDir(baseDir string) ([]*registry.Registration, fs.FS, error) {
+// Invalid workflows are logged (with their template.yaml path and error) and skipped;
+// the remaining workflows still load.
+//
+// Templates referenced by user workflows are resolved in the user directory first. When
+// builtinFS is non-nil, templates not found there fall back to builtinFS (the embedded
+// built-in templates), so shared templates such as v1-epic-instructions.md and
+// v1-human-review.md don't need to be copied. The returned FS reads templates with the
+// same precedence and should be used to render the returned registrations.
+func LoadUserRegistryFromDir(baseDir string, builtinFS fs.FS) ([]*registry.Registration, fs.FS, error) {
 	if baseDir == "" {
 		return nil, nil, nil
 	}
@@ -68,17 +75,22 @@ func LoadUserRegistryFromDir(baseDir string) ([]*registry.Registration, fs.FS, e
 	}
 
 	// Create os.DirFS rooted at base directory
-	// This allows LoadRegistryFromYAML to walk "workflows" subdirectory
+	// This allows the YAML loader to walk the "workflows" subdirectory
 	userFS := os.DirFS(baseDir)
+	templateFS := newLayeredFS(userFS, builtinFS)
 
-	// Load registrations using the existing YAML loader with SourceUser
-	regs, err := LoadRegistryFromYAMLWithSource(userFS, registry.SourceUser)
+	// Load registrations using the existing YAML loader with SourceUser,
+	// skipping invalid workflows instead of dropping all of them
+	regs, err := loadRegistryFromYAML(userFS, registry.SourceUser, loadOptions{
+		templateFS:  templateFS,
+		skipInvalid: true,
+	})
 	if err != nil {
-		// Log warning but don't fail - user may have partial/invalid workflows
+		// Log warning but don't fail - e.g. no valid user workflows
 		log.Warn(log.CatConfig, "loading user registrations", "error", err.Error(), "dir", baseDir)
 		// Return the FS even if loading failed - allows caller to handle partial results
-		return nil, userFS, nil
+		return nil, templateFS, nil
 	}
 
-	return regs, userFS, nil
+	return regs, templateFS, nil
 }

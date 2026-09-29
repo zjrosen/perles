@@ -1770,6 +1770,99 @@ func TestNewRegistryService_UserOverridesCommunity(t *testing.T) {
 	require.Contains(t, content, "User Override Content")
 }
 
+func TestNewRegistryService_UserWorkflowUsesBuiltinSharedTemplates(t *testing.T) {
+	// Docs example layout (no system_prompt, v1-human-review.md not copied) against the real
+	// embedded templates: shared templates resolve from the built-in FS.
+	tmpDir := t.TempDir()
+	writeUserFiles(t, tmpDir, jokeContestUserFiles())
+
+	builtinFS := templates.RegistryFS()
+	svc, err := NewRegistryService(builtinFS, nil, tmpDir)
+	require.NoError(t, err)
+
+	reg, err := svc.GetByKey("workflow", "joke-contest")
+	require.NoError(t, err)
+	require.Equal(t, registry.SourceUser, reg.Source())
+
+	wantPrompt, err := fs.ReadFile(builtinFS, "workflows/v1-epic-instructions.md")
+	require.NoError(t, err)
+	prompt, err := svc.GetSystemPromptTemplate(reg)
+	require.NoError(t, err)
+	require.Equal(t, string(wantPrompt), prompt)
+
+	wantReview, err := fs.ReadFile(builtinFS, "workflows/v1-human-review.md")
+	require.NoError(t, err)
+	review, err := svc.GetTemplate("workflow::joke-contest::v1::review")
+	require.NoError(t, err)
+	require.Equal(t, string(wantReview), review)
+
+	joke, err := svc.GetTemplate("workflow::joke-contest::v1::joke-1")
+	require.NoError(t, err)
+	require.Equal(t, "# Joke 1", joke)
+
+	epic, err := svc.RenderEpicTemplate(reg, TemplateContext{Slug: "jokes"})
+	require.NoError(t, err)
+	require.Equal(t, "# Epic", epic)
+}
+
+func TestNewRegistryService_InvalidUserWorkflowDoesNotHideOthers(t *testing.T) {
+	builtinFS := fstest.MapFS{
+		"workflows/builtin/template.yaml": &fstest.MapFile{
+			Data: []byte(`registry:
+  - namespace: "workflow"
+    key: "builtin-wf"
+    version: "v1"
+    name: "Built-in Workflow"
+    description: "A built-in workflow"
+    nodes:
+      - key: "step1"
+        name: "Step 1"
+        template: "builtin-step1.md"
+`),
+		},
+		"workflows/builtin/builtin-step1.md": &fstest.MapFile{Data: []byte("# Built-in Step 1")},
+	}
+
+	tmpDir := t.TempDir()
+	writeUserFiles(t, tmpDir, map[string]string{
+		"workflows/good/template.yaml": `registry:
+  - namespace: "user-workflow"
+    key: "good"
+    version: "v1"
+    name: "Good"
+    description: "Valid user workflow"
+    nodes:
+      - key: "step1"
+        name: "Step 1"
+        template: "step1.md"
+`,
+		"workflows/good/step1.md": "# Good",
+		"workflows/bad/template.yaml": `registry:
+  - namespace: "user-workflow"
+    key: "bad"
+    version: "v1"
+    name: "Bad"
+    description: "References a missing template"
+    nodes:
+      - key: "step1"
+        name: "Step 1"
+        template: "nonexistent.md"
+`,
+	})
+
+	svc, err := NewRegistryService(builtinFS, nil, tmpDir)
+	require.NoError(t, err)
+
+	require.Len(t, svc.List(), 2, "built-in and valid user workflow should load")
+	_, err = svc.GetByKey("workflow", "builtin-wf")
+	require.NoError(t, err)
+	good, err := svc.GetByKey("user-workflow", "good")
+	require.NoError(t, err)
+	require.Equal(t, registry.SourceUser, good.Source())
+	_, err = svc.GetByKey("user-workflow", "bad")
+	require.Error(t, err)
+}
+
 // === Integration Tests with Real Embedded FSes ===
 
 func TestJokeContestLoadableWhenEnabled(t *testing.T) {

@@ -22,20 +22,26 @@ type CommunitySource struct {
 
 // LoadCommunityRegistryFromFS loads community workflow registrations from an embedded filesystem.
 // It follows the user loader pattern: nil source or empty EnabledIDs returns nil, nil, nil.
-// On any loading error (including zero registrations), it logs a WARN and returns nil, source.FS, nil
+// On any loading error (including zero registrations), it logs a WARN and returns nil, FS, nil
 // (never crashes startup). Only registrations matching EnabledIDs are returned.
 // Unmatched EnabledIDs produce WARN logs.
-func LoadCommunityRegistryFromFS(source *CommunitySource) ([]*registry.Registration, fs.FS, error) {
+//
+// Templates are resolved in source.FS first. When builtinFS is non-nil, templates not found
+// there fall back to builtinFS (the embedded built-in templates). The returned FS reads
+// templates with the same precedence and should be used to render the returned registrations.
+func LoadCommunityRegistryFromFS(source *CommunitySource, builtinFS fs.FS) ([]*registry.Registration, fs.FS, error) {
 	// Opt-in gate: nil source or empty EnabledIDs means nothing to load
 	if source == nil || len(source.EnabledIDs) == 0 {
 		return nil, nil, nil
 	}
 
+	templateFS := newLayeredFS(source.FS, builtinFS)
+
 	// Load all community registrations from the filesystem
-	regs, err := LoadRegistryFromYAMLWithSource(source.FS, registry.SourceCommunity)
+	regs, err := loadRegistryFromYAML(source.FS, registry.SourceCommunity, loadOptions{templateFS: templateFS})
 	if err != nil {
 		log.Warn(log.CatConfig, "loading community registrations", "error", err.Error())
-		return nil, source.FS, nil
+		return nil, templateFS, nil
 	}
 
 	// Build a lookup of available registrations by namespace/key
@@ -61,7 +67,7 @@ func LoadCommunityRegistryFromFS(source *CommunitySource) ([]*registry.Registrat
 		filtered = append(filtered, r)
 	}
 
-	return filtered, source.FS, nil
+	return filtered, templateFS, nil
 }
 
 // normalizeCommunityID ensures a community workflow ID is in namespace/key format.
