@@ -102,6 +102,11 @@ type defaultHealthMonitor struct {
 	onHealthEvent    HealthEventCallback
 	recoveryExecutor RecoveryExecutor
 
+	// recovering holds workflows with a recovery action in flight.
+	// Recovery actions for the same workflow must not overlap because they
+	// escalate (nudge -> replace -> pause -> fail) and mutate workflow state.
+	recovering map[WorkflowID]struct{}
+
 	// Lifecycle
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -129,6 +134,7 @@ func NewHealthMonitor(cfg HealthMonitorConfig) HealthMonitor {
 		eventBus:         cfg.EventBus,
 		onHealthEvent:    cfg.OnHealthEvent,
 		recoveryExecutor: cfg.RecoveryExecutor,
+		recovering:       make(map[WorkflowID]struct{}),
 	}
 }
 
@@ -175,7 +181,7 @@ func (m *defaultHealthMonitor) Stop() {
 	m.mu.Unlock()
 
 	cancel()
-	<-done // Wait for loops to finish
+	<-done // Wait for loops and in-flight recoveries to finish
 }
 
 // SetPolicy updates the health monitoring policy.
@@ -362,6 +368,12 @@ func (m *defaultHealthMonitor) triggerRecoveryIfNeeded(id WorkflowID, status *He
 		return
 	}
 
+	// Skip if the previous recovery for this workflow has not finished yet
+	if _, inFlight := m.recovering[id]; inFlight {
+		log.Debug(log.CatOrch, "Recovery skipped: previous recovery still in progress", "workflow_id", id)
+		return
+	}
+
 	// Check if recovery is needed based on status and policy (using our clock)
 	needsRecovery := status.NeedsRecoveryAt(policy, now)
 	var timeSinceLastRecovery time.Duration
@@ -407,15 +419,31 @@ func (m *defaultHealthMonitor) triggerRecoveryIfNeeded(id WorkflowID, status *He
 
 	// Record the recovery attempt (increment count and timestamp using our clock)
 	status.RecordRecoveryAttemptAt(now)
+	m.recovering[id] = struct{}{}
 
-	// Execute recovery asynchronously to avoid blocking the check loop (with panic recovery)
+	// Execute recovery asynchronously to avoid blocking the check loop (with panic recovery).
+	// The goroutine is tracked by wg and derives its context from the monitor's,
+	// so Stop cancels in-flight recoveries and waits for them to finish.
+	parent := m.ctx
+	m.wg.Add(1)
 	log.SafeGo("healthmonitor.executeRecovery", func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer m.wg.Done()
+		defer m.finishRecovery(id)
+
+		ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 		defer cancel()
 
 		// Recovery executor will emit its own events
 		_ = m.recoveryExecutor.ExecuteRecovery(ctx, id, action)
 	})
+}
+
+// finishRecovery marks the in-flight recovery for a workflow as done,
+// allowing the next health check to escalate if the workflow is still stuck.
+func (m *defaultHealthMonitor) finishRecovery(id WorkflowID) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.recovering, id)
 }
 
 // emitEvent emits a health event if a callback is configured.

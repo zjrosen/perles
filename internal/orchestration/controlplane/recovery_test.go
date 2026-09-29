@@ -726,10 +726,11 @@ func TestHealthMonitor_MaxRecoveriesLeadsToFailAction(t *testing.T) {
 		time.Sleep(30 * time.Millisecond)
 	}
 
+	// Stop waits for in-flight recoveries, so inst.State is safe to read afterwards
+	monitor.Stop()
+
 	// After max recoveries, the workflow should be in Failed state
 	require.Equal(t, WorkflowFailed, inst.State)
-
-	monitor.Stop()
 }
 
 func TestHealthMonitor_HealthEventsEmittedForEachRecoveryAction(t *testing.T) {
