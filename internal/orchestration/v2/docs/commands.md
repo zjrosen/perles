@@ -2,6 +2,8 @@
 
 This document describes all command types in the v2 orchestration system and their corresponding handlers.
 
+Every handler below is registered by `NewInfrastructure` (`v2/infrastructure.go`), which dashboard and daemon workflows use. The Kanban/Search chat panel uses `SimpleInfrastructure`, which registers only `SpawnProcess`, `SendToProcess`, `DeliverProcessQueued` and `ProcessTurnComplete`; any other command submitted there fails with `ErrUnknownCommandType`.
+
 ## Command Architecture
 
 ```mermaid
@@ -22,6 +24,7 @@ classDiagram
         -createdAt time.Time
         -source CommandSource
         -traceID string
+        -spanContext trace.SpanContext
     }
     
     class CommandResult {
@@ -48,7 +51,7 @@ classDiagram
 |--------|-------------|---------|
 | `mcp_tool` | From AI tool calls via MCP protocol | Coordinator calls `assign_task` |
 | `internal` | System-generated commands | Queue drain after status change |
-| `callback` | Worker state callbacks | `ProcessTurnComplete` after AI turn |
+| `callback` | Process event-loop callbacks (any role) | `ProcessTurnComplete` after AI turn |
 | `user` | Direct user input from TUI | Manual process control |
 
 ## Command Types by Category
@@ -69,17 +72,17 @@ flowchart LR
     Spawn -->|creates| Process
     Retire -->|terminates| Process
     StopProcess -->|graceful→force| Process
-    Replace -->|retire+spawn| Process
+    Replace -->|fresh context| Process
     Pause -->|suspends| Process
     Resume -->|continues| Process
 ```
 
 | Command | Handler | Purpose |
 |---------|---------|---------|
-| `CmdSpawnProcess` | `SpawnProcessHandler` | Creates new coordinator or worker process |
+| `CmdSpawnProcess` | `SpawnProcessHandler` | Creates new coordinator, worker, or observer process |
 | `CmdRetireProcess` | `RetireProcessHandler` | Gracefully terminates a process (terminal state) |
-| `CmdStopProcess` | `StopProcessHandler` | Stops process with tiered graceful→force escalation (resumable) |
-| `CmdReplaceProcess` | `ReplaceProcessHandler` | Retires then respawns a process (coordinator includes handoff prompt) |
+| `CmdStopProcess` | `StopWorkerHandler` | Stops process with tiered graceful→force escalation (resumable) |
+| `CmdReplaceProcess` | `ReplaceProcessHandler` | Replaces a process with fresh context: coordinator/observer use spawn-before-retire with a handoff/resume prompt; workers are retired and replaced by a new `worker-N` |
 | `CmdPauseProcess` | `PauseProcessHandler` | Pauses process (Ready/Working → Paused) |
 | `CmdResumeProcess` | `ResumeProcessHandler` | Resumes paused or stopped process (triggers queue drain) |
 
@@ -95,7 +98,7 @@ flowchart TB
     end
     
     Send -->|queue or deliver| Worker
-    Broadcast -->|fan-out| AllWorkers
+    Broadcast -->|SendToProcess per worker| AllWorkers
     Deliver -->|dequeue + send| Worker
     TurnComplete -->|Working→Ready| Worker
     TurnComplete -->|triggers| Deliver
@@ -103,10 +106,12 @@ flowchart TB
 
 | Command | Handler | Purpose |
 |---------|---------|---------|
-| `CmdSendToProcess` | `SendToProcessHandler` | Queue message (if working) or deliver (if ready) |
-| `CmdBroadcast` | `BroadcastHandler` | Fan-out message to all workers |
+| `CmdSendToProcess` | `SendToProcessHandler` | Queue message; deliver via follow-up unless the process is Working |
+| `CmdBroadcast` | `BroadcastHandler` | Fan-out message to all active workers (one `SendToProcess` follow-up each) |
 | `CmdDeliverProcessQueued` | `DeliverProcessQueuedHandler` | Dequeue and deliver message to process |
-| `CmdProcessTurnComplete` | `ProcessTurnCompleteHandler` | Transition Working→Ready, drain queue |
+| `CmdProcessTurnComplete` | `ProcessTurnCompleteHandler` | Transition Working→Ready (or Failed), enforce worker tools, drain queue |
+
+`CmdBroadcast` requires `Content` and accepts optional `ExcludeWorkers`. It targets every worker whose status is not Retired or Failed; the coordinator and observer never receive broadcasts. Follow-ups use `SourceInternal`, so the queued message's sender is `system`. The result is `BroadcastResult{TargetWorkers, ExcludedWorkers, MessagesSent}`. No MCP tool submits it; it is only available programmatically through the command processor.
 
 ### Task Assignment Commands
 
@@ -144,40 +149,54 @@ flowchart LR
 
 | Command | Handler | Purpose |
 |---------|---------|---------|
-| `CmdMarkTaskComplete` | `MarkTaskCompleteHandler` | Update BD task status to closed |
-| `CmdMarkTaskFailed` | `MarkTaskFailedHandler` | Mark BD task failed with reason |
+| `CmdMarkTaskComplete` | `MarkTaskCompleteHandler` | Close BD task, add "Task completed" comment, reset implementer/reviewer to Ready/Idle, delete assignment |
+| `CmdMarkTaskFailed` | `MarkTaskFailedHandler` | Add a `Task failed: <reason>` comment to the BD task (status, process state and assignment unchanged) |
+
+### Workflow & User Interaction Commands
+
+| Command | Handler | Purpose |
+|---------|---------|---------|
+| `CmdGenerateAccountabilitySummary` | `GenerateAccountabilitySummaryHandler` | Queue the aggregation prompt to an existing worker (`WorkerID` and `SessionDir` required); delivered via follow-up unless the worker is Working |
+| `CmdSignalWorkflowComplete` | `SignalWorkflowCompleteHandler` | Record workflow completion (`success`/`partial`/`aborted` + required summary) in session metadata, emit `ProcessWorkflowComplete` |
+| `CmdNotifyUser` | `NotifyUserHandler` | Request user attention (`Message` required), request the `user_notification` sound (silent unless `sound.events.user_notification.override_sounds` is set), emit `ProcessUserNotification` |
+
+These back the coordinator MCP tools `generate_accountability_summary`, `signal_workflow_complete` and `notify_user`. Repeated `signal_workflow_complete` calls keep the original completion timestamp and play the completion sound only once, but still emit the event.
 
 ## Handler Details
 
 ### SpawnProcessHandler
 
-Creates a new AI process (coordinator or worker).
+Creates a new AI process (coordinator, worker, or observer).
 
 **Input:**
 ```go
 type SpawnProcessCommand struct {
-    Role      ProcessRole  // RoleCoordinator or RoleWorker
-    ProcessID string       // Optional custom ID
+    *BaseCommand
+    Role           repository.ProcessRole // RoleCoordinator, RoleWorker, or RoleObserver
+    ProcessID      string                 // Optional custom ID (auto worker-N for workers)
+    AgentType      roles.AgentType        // Optional specialization (default: generic), set via WithAgentType
+    WorkflowConfig *roles.WorkflowConfig  // Optional workflow prompt customizations, set via WithWorkflowConfig
 }
 ```
 
 **Behavior:**
-1. Validates no duplicate coordinator exists
-2. Checks worker count limits
-3. Generates role-specific config (prompts, MCP tools)
-4. Spawns AI process via HeadlessClient
-5. Registers in ProcessRegistry
+1. Enforces singleton coordinator/observer (`ErrCoordinatorExists` / `ErrObserverExists`); workers get the next `worker-N` ID unless `ProcessID` is provided (no worker count limit is enforced)
+2. Saves a `Pending` process entity to ProcessRepository
+3. Spawns via UnifiedProcessSpawner (role-specific prompts, MCP config) and registers in ProcessRegistry
+4. Sets status to `Working` (first turn; becomes `Ready` when the turn completes)
+5. Marks process newly spawned (first-turn enforcement exemption)
 6. Emits `ProcessSpawned` event
 
 **Result Events:** `ProcessEvent{Type: ProcessSpawned}`
 
-### StopProcessHandler
+### StopWorkerHandler
 
-Stops a process (coordinator or worker) with tiered termination escalation.
+Handles `CmdStopProcess`. Stops a process (coordinator, worker, or observer) with tiered termination escalation. Constructed with `NewStopWorkerHandler`; the `WithFabricUnsubscriber` option enables observer channel cleanup.
 
 **Input:**
 ```go
 type StopProcessCommand struct {
+    *BaseCommand
     ProcessID string  // Process to stop (e.g., "coordinator", "worker-1")
     Force     bool    // Skip graceful shutdown, go straight to SIGKILL
     Reason    string  // Optional reason for stopping
@@ -188,12 +207,13 @@ type StopProcessCommand struct {
 1. Looks up process in repository
 2. If already stopped or retired, returns success (idempotent)
 3. If worker is in `Committing` phase and `Force=false`, returns warning without terminating
-4. Attempts graceful shutdown via `Cancel()` with 5s timeout
-5. If graceful timeout expires, escalates to `SIGKILL`
-6. Updates process status to `Stopped` (can be resumed later)
+4. Attempts graceful shutdown via `Cancel()` with 5s timeout (skipped when `Force=true`; if the process is not in the live registry, termination is skipped and it goes straight to steps 6-10)
+5. If the graceful timeout expires (or `Force=true`), sends `SIGKILL` (`TerminateProcess` on Windows). After a graceful or forced stop, the live process's event loop is stopped
+6. For observers, unsubscribes from all Fabric channels (best effort)
 7. Cleans up task assignment (clears implementer/reviewer)
 8. Drains any queued messages for the process
-9. Emits `ProcessStatusChange` event (and `ProcessQueueChanged` if messages were drained)
+9. Clears the process `TaskID` and updates status to `Stopped` (can be resumed later)
+10. Emits `ProcessStatusChange` event (and `ProcessQueueChanged` if messages were drained)
 
 **Phase-Aware Protection:**
 Workers in the `Committing` phase are protected from accidental termination. Use `Force=true` to override.
@@ -212,50 +232,53 @@ flowchart TD
     Send["SendToProcess"]
     
     Send --> Check{Process Status?}
+    Check -->|Not found / Retired| Error["ErrProcessNotFound / ErrProcessRetired"]
     Check -->|Working| Queue["Enqueue message"]
-    Check -->|Ready| QueueThenDeliver["Queue + FollowUp: Deliver"]
-    Check -->|Other| Error["Return error"]
+    Check -->|Any other status| QueueThenDeliver["Enqueue + FollowUp: Deliver"]
     
     Queue --> EmitQueueChanged["Emit QueueChanged"]
-    QueueThenDeliver --> EmitQueueChanged
     QueueThenDeliver --> DeliverCmd["DeliverProcessQueued"]
 ```
 
 **Logic:**
-- **Working**: Queue message, emit QueueChanged event
-- **Ready**: Queue message, return `DeliverProcessQueued` as follow-up
-- **Other**: Return error
+- **Not found / Retired**: Return `ErrProcessNotFound` / `ErrProcessRetired`
+- **Working**: Queue message, emit `ProcessQueueChanged` event (delivery happens when the turn completes)
+- **Any other status** (Ready, Pending, Paused, Stopped, Failed): Queue message, return `DeliverProcessQueued` as follow-up with no event of its own (a successful delivery emits `ProcessWorking`, `ProcessIncoming` and `ProcessQueueChanged`)
+
+The queued message's sender comes from the command source: `mcp_tool` → `coordinator`, `internal` → `system`, anything else → `user`.
 
 ### ProcessTurnCompleteHandler
 
 Called when AI process completes a turn.
 
 **Flow:**
-1. Transition status Working → Ready
-2. Update token metrics
-3. **[Workers only] Turn completion enforcement** (see below)
-4. Check message queue
-5. If queue not empty, return `DeliverProcessQueued` follow-up
-6. Emit `ProcessReady` event
+1. If the process is already Retired → no-op success
+2. **Context exhausted** (`ContextExceededError`):
+   - Coordinator/observer → `Failed`, emit `ProcessAutoRefreshRequired`, return a `ReplaceProcess` follow-up (reason `context_exceeded_auto_refresh`)
+   - Worker → `Failed`, queue an out-of-context notice to the coordinator and return a `DeliverProcessQueued` follow-up for the coordinator
+3. **[Workers only] Turn completion enforcement** (see below). When a reminder is sent, the process goes to `Ready` (metrics updated) with a `DeliverProcessQueued` follow-up, and the handler returns without emitting `ProcessReady`
+4. **Failed turn** → `Failed` + `ProcessError` event. A failure on the first turn is terminal; a failure after an earlier successful turn still returns a `DeliverProcessQueued` follow-up if messages are queued
+5. On the first successful turn, capture the session ref for resumption
+6. Otherwise → `Ready`, update token metrics, emit `ProcessReady`, and return a `DeliverProcessQueued` follow-up if the queue is not empty
 
 #### Turn Completion Enforcement (Workers Only)
 
 Workers must call one of the required MCP tools to properly complete their turn:
-- `post_message` - Send message to coordinator
+- `fabric_send` / `fabric_reply` / `fabric_ack` - Communicate via Fabric channels/threads
 - `report_implementation_complete` - Report task completion
 - `report_review_verdict` - Report review result
-- `signal_ready` - Signal ready for work (after startup)
+- `fabric_join` - Join Fabric and signal ready for task assignment (called once at boot)
 
 **Enforcement Flow:**
 ```mermaid
 flowchart TD
     TC["Turn Complete"]
     TC --> Role{Role?}
-    Role -->|Coordinator| Ready["→ Ready (no enforcement)"]
+    Role -->|Coordinator / Observer| Ready["→ Ready (no enforcement)"]
     Role -->|Worker| Check["Check required tools"]
     
     Check --> Exempt{Exempt?}
-    Exempt -->|Failed turn| Ready
+    Exempt -->|Failed turn| Failed["→ Failed (ProcessError event)"]
     Exempt -->|Newly spawned| Ready
     Exempt -->|No| ToolCheck["Check tool calls"]
     
@@ -270,15 +293,15 @@ flowchart TD
 ```
 
 **Sender Types:**
-- `SenderUser` - Message from TUI user
-- `SenderCoordinator` - Message from coordinator via MCP tool
-- `SenderSystem` - Enforcement reminder from the system
+- `SenderUser` - Message from the TUI user (any `SendToProcess` whose source is not `mcp_tool` or `internal`)
+- `SenderCoordinator` - Prompts the task-assignment and aggregation handlers queue on the coordinator's behalf (task, review, commit, feedback and aggregation prompts), plus any `SendToProcess` with source `mcp_tool`
+- `SenderSystem` - System-generated message: enforcement reminders, worker out-of-context notices, and every `SourceInternal` send (Fabric new-message nudges, broadcasts, health-recovery nudges, workflow-resume context messages)
 
 **Key Behavior:**
-- System reminders (`SenderSystem`) preserve the retry count across delivery
-- Normal messages (`SenderUser`, `SenderCoordinator`) reset the turn state
+- Delivering a system message (`SenderSystem`) does not reset turn tracking: recorded tool calls, the retry count and the first-turn exemption carry over
+- Delivering a normal message (`SenderUser`, `SenderCoordinator`) starts a fresh turn and clears all three
 - Maximum 2 enforcement retries before allowing turn to complete
-- First turn after spawn is exempt (workers call `signal_ready`)
+- First turn after spawn is exempt (workers call `fabric_join`)
 
 ### AssignTaskHandler
 
@@ -288,14 +311,15 @@ Assigns a BD task to an idle worker.
 - Worker must be in Ready status
 - Worker must be in Idle phase
 - Worker must not already have a task
+- The BD issue must exist (checked with `ShowIssue`)
 
 **Actions:**
-1. Validate worker state
+1. Validate worker state and that the BD issue exists
 2. Create TaskAssignment in repository
-3. Transition phase Idle → Implementing
-4. Queue task prompt to worker
-5. Call `BDExecutor.UpdateTaskStatus("in_progress")`
-6. Emit `ProcessPhaseChange` event
+3. Transition phase Idle → Implementing (status stays Ready until delivery)
+4. Call `TaskExecutor.UpdateStatus(taskID, task.StatusInProgress)`
+5. Queue task prompt to worker
+6. Emit `ProcessStatusChange` event (with `Phase=implementing`)
 7. Return `DeliverProcessQueued` follow-up
 
 ## Command Validation
@@ -322,40 +346,49 @@ func (c *AssignTaskCommand) Validate() error {
 Handlers can return additional commands in `CommandResult.FollowUp`:
 
 ```go
-// Example: ReplaceProcessHandler returns 2 follow-ups
-return &CommandResult{
-    Success: true,
-    FollowUp: []Command{
-        NewRetireProcessCommand(processID),
-        NewSpawnProcessCommand(role),
-    },
-}, nil
+// Example: SendToProcessHandler returns a delivery follow-up
+deliverCmd := command.NewDeliverProcessQueuedCommand(command.SourceInternal, sendCmd.ProcessID)
+return SuccessWithFollowUp(result, deliverCmd), nil
 ```
 
-Follow-ups are submitted to the processor queue (FIFO ordering maintained).
+Helpers in `v2/handler/handler.go` build results: `SuccessResult`, `SuccessWithEvents`, `SuccessWithFollowUp`, `SuccessWithEventsAndFollowUp` and `ErrorResult`. Not every multi-step handler uses follow-ups: `ReplaceProcessHandler` retires and spawns inline and returns `SuccessWithEvents`.
+
+Follow-ups are appended to the end of the processor queue (FIFO) with a non-blocking send; if the queue is full they are dropped.
 
 ## Error Handling
 
 ### Sentinel Errors
 
+Sentinels live in `v2/types/errors.go`. `ErrProcessNotFound`, `ErrTaskNotFound` and `ErrQueueFull` are defined in `v2/repository` to avoid import cycles; `v2/handler/errors.go` and `v2/processor/errors.go` re-export subsets. The most common ones:
+
 ```go
 var (
     // Process lifecycle
-    ErrProcessNotFound     = errors.New("process not found")
-    ErrProcessRetired      = errors.New("process is retired")
-    ErrCoordinatorExists   = errors.New("coordinator already exists")
-    ErrMaxProcessesReached = errors.New("maximum processes reached")
-    
+    ErrProcessNotFound   = errors.New("process not found") // repository
+    ErrProcessRetired    = errors.New("process is retired")
+    ErrCoordinatorExists = errors.New("coordinator already exists")
+    ErrObserverExists    = errors.New("observer already exists")
+
     // Queue
     ErrQueueEmpty = errors.New("message queue is empty")
-    
-    // State transitions
-    ErrInvalidPhase        = errors.New("invalid phase transition")
-    ErrProcessNotReady     = errors.New("process not in ready status")
-    ErrProcessNotIdle      = errors.New("process not in idle phase")
-    ErrProcessAlreadyAssigned = errors.New("process already has task")
+    ErrQueueFull  = errors.New("message queue is full") // repository
+
+    // Process state and task workflow
+    ErrInvalidPhaseTransition   = errors.New("invalid phase transition") // handler.ErrInvalidPhase
+    ErrProcessNotReady          = errors.New("process is not ready")
+    ErrProcessNotIdle           = errors.New("process is not in idle phase")
+    ErrProcessAlreadyAssigned   = errors.New("process already has a task assigned")
+    ErrProcessNotAwaitingReview = errors.New("process is not awaiting review")
+    ErrProcessNotImplementer    = errors.New("process is not the implementer of the task")
+    ErrReviewerIsImplementer    = errors.New("reviewer cannot be the same as implementer")
+    ErrTaskNotApproved          = errors.New("task has not been approved")
+
+    // Processor
+    ErrUnknownCommandType = errors.New("unknown command type")
 )
 ```
+
+`ErrMaxProcessesReached` is still defined but never returned, because no worker count limit is enforced.
 
 ### Error Flow
 
@@ -368,5 +401,7 @@ flowchart TD
     
     Handler -->|success| Result["CommandResult{Success: true}"]
     Result --> Events["Publish Events"]
-    Events --> FollowUp["Execute FollowUps"]
+    Events --> FollowUp["Enqueue FollowUps"]
 ```
+
+`Validate()` failures and unregistered command types (`ErrUnknownCommandType`) take the same error path before any handler runs.

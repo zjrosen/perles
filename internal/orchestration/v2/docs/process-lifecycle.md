@@ -1,55 +1,67 @@
 # Process Lifecycle and State Management
 
-This document describes the lifecycle of processes (coordinator and workers) in the v2 orchestration system, including status transitions, worker phases, and event emission.
+This document describes the lifecycle of processes (coordinator, workers, and the optional observer) in the v2 orchestration system, including status transitions, worker phases, and event emission.
 
 ## Process Types
 
-The v2 system manages two types of processes:
+The v2 system manages three types of processes:
 
 | Type | Count | Purpose |
 |------|-------|---------|
-| **Coordinator** | 1 (singleton) | Orchestrates work, doesn't write code |
-| **Worker** | 1-N | Executes tasks, writes code, performs reviews |
+| **Coordinator** | 1 (singleton, ID `coordinator`) | Orchestrates work, doesn't write code |
+| **Worker** | 1-N (IDs `worker-1`, `worker-2`, ...) | Executes tasks, writes code, performs reviews |
+| **Observer** | 0-1 (singleton, ID `observer`; enabled by `orchestration.observer_enabled`, default false) | Passive monitor that reads all Fabric channels and writes only to #observer |
 
-Both types use the same `Process` struct with role-based differentiation.
+All roles use the same `Process` struct with role-based differentiation (`RoleCoordinator`, `RoleWorker`, `RoleObserver`). The observer has its own MCP server, and spawning a second one fails with `ErrObserverExists`. Like the coordinator, it is replaced spawn-before-retire and is auto-refreshed when its context is exhausted.
 
 ## Process Status State Machine
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Pending : New()
-    Pending --> Starting : Start()
-    Starting --> Ready : AI initialized
-    Ready --> Working : Message delivered
+    [*] --> Pending : SpawnProcess (saved to repo)
+    Pending --> Working : Live process spawned (running first turn)
     Working --> Ready : Turn complete
+    Ready --> Working : Message delivered
+    Working --> Failed : Turn failed / error
+    Failed --> Working : Next message delivered (mid-session failure)
     Ready --> Paused : Pause()
     Working --> Paused : Pause()
     Paused --> Ready : Resume()
     Ready --> Stopped : Stop()
     Working --> Stopped : Stop()
+    Failed --> Stopped : Stop()
     Stopped --> Ready : Resume()
+    Ready --> Retiring : Replace() (coordinator/observer)
+    Working --> Retiring : Replace() (coordinator/observer)
+    Failed --> Retiring : Auto-refresh on context exhaustion
+    Retiring --> Retired : Replacement spawned
+    Retiring --> Ready : Replacement spawn failed
     Ready --> Retired : Retire()
     Working --> Retired : Retire()
     Paused --> Retired : Retire()
     Stopped --> Retired : Retire()
-    Starting --> Failed : Error
-    Working --> Failed : Error
+    Failed --> Retired : Retire() / worker Replace()
     Retired --> [*]
-    Failed --> [*]
+    Failed --> [*] : Startup (first-turn) failure
 ```
+
+The diagram shows the common paths. `Stop()` accepts any status except `Stopped`/`Retired` (a worker in the `Committing` phase also needs `Force`), and `Retire()` any status except `Retired`. Worker replacement retires the old worker directly (no `Retiring`). Replacement processes skip `Working`: a new coordinator/observer is saved directly as `Ready`, and a replacement worker goes `Pending` -> `Ready`. With no spawner configured (tests), `SpawnProcess` saves `Ready` instead of `Working`.
 
 ### Status Definitions
 
 | Status | Description | Terminal? |
 |--------|-------------|-----------|
-| `Pending` | Process created but not started | No |
-| `Starting` | AI process initializing | No |
+| `Pending` | Saved to the repository by `SpawnProcess`; live process not yet spawned | No |
+| `Starting` | Defined, but never set by v2 handlers; only handled in UI rendering and adapter status mapping | No |
 | `Ready` | Idle, waiting for input | No |
-| `Working` | Actively processing AI turn | No |
-| `Paused` | Temporarily suspended by user | No |
-| `Stopped` | Stopped by user, can be resumed | No |
+| `Working` | Actively processing an AI turn (including the first turn right after spawn) | No |
+| `Paused` | Temporarily suspended by user; AI subprocess stopped | No |
+| `Stopped` | Stopped via `Stop()` (queue drained, task cleared), can be resumed | No |
+| `Retiring` | Coordinator/observer being replaced (spawn-before-retire); still live until the replacement spawns | No |
 | `Retired` | Gracefully shut down | Yes |
-| `Failed` | Encountered unrecoverable error | Yes |
+| `Failed` | Turn failed. Startup (first-turn) failures and context-exhausted processes are effectively unrecoverable. Mid-session failures (`HasCompletedTurn=true`) recover when the next queued message is delivered | Treated as terminal by `IsTerminal()` and Pause/Resume, but not by Send/Deliver/Stop |
+
+On a mid-session failure the repository status is `Failed`, but the emitted `ProcessError` event carries status `Ready`, and a `DeliverProcessQueued` follow-up delivers any messages queued during the failed turn. A context-exhausted coordinator or observer is auto-replaced; a context-exhausted worker stays `Failed` and the coordinator is sent an out-of-context message.
 
 ## Worker Phase State Machine
 
@@ -74,7 +86,7 @@ stateDiagram-v2
     
     Reviewing --> Idle : ReportVerdict
     
-    Committing --> Idle : Commit complete
+    Committing --> Idle : MarkTaskComplete
 ```
 
 ### Phase Definitions
@@ -103,20 +115,26 @@ var ValidTransitions = map[ProcessPhase][]ProcessPhase{
 
 ## Process Struct
 
+`repository.Process` is the persisted entity that handlers read and save (the source of truth for status and phase):
+
 ```go
 type Process struct {
-    ID             string              // "coordinator", "worker-1", etc.
-    Role           ProcessRole         // RoleCoordinator or RoleWorker
-    Status         ProcessStatus       // Current lifecycle status
-    SessionID      string              // Claude/Amp session ID
-    Metrics        *TokenMetrics       // Token usage and costs
-    CreatedAt      time.Time
-    LastActivityAt time.Time
-    Phase          *ProcessPhase       // Worker-only: task phase
-    TaskID         string              // Worker-only: current task
-    RetiredAt      time.Time           // Zero if active
+    ID               string              // "coordinator", "observer", "worker-1", etc.
+    Role             ProcessRole         // RoleCoordinator, RoleWorker, or RoleObserver
+    Status           ProcessStatus       // Current lifecycle status
+    SessionID        string              // Claude/Amp session ID
+    Metrics          *TokenMetrics       // Token usage and costs
+    CreatedAt        time.Time
+    LastActivityAt   time.Time
+    HasCompletedTurn bool                // Distinguishes startup vs mid-session failures
+    Phase            *ProcessPhase       // Worker-only: task phase
+    TaskID           string              // Worker-only: current task
+    RetiredAt        time.Time           // Zero if active
+    AgentType        roles.AgentType     // Worker specialization: generic (""), implementer, reviewer, researcher
 }
 ```
+
+The live runtime object is `process.Process` (`v2/process/process.go`), which owns the AI subprocess, output buffer, and event loop. It is tracked in the [Process Registry](#process-registry).
 
 ## Event Types
 
@@ -134,6 +152,9 @@ flowchart TB
         QueueChanged["ProcessQueueChanged<br/>Queue modified"]
         Ready["ProcessReady<br/>Ready for input"]
         Working["ProcessWorking<br/>Started processing"]
+        WorkflowComplete["ProcessWorkflowComplete<br/>Workflow signaled complete"]
+        AutoRefresh["ProcessAutoRefreshRequired<br/>Context exhausted, auto replace"]
+        UserNotify["ProcessUserNotification<br/>Coordinator requests user attention"]
     end
 ```
 
@@ -143,18 +164,23 @@ flowchart TB
 type ProcessEvent struct {
     Type       ProcessEventType    // Event type enum
     ProcessID  string              // Which process
-    Role       ProcessRole         // Coordinator or Worker
+    Role       ProcessRole         // Coordinator, Worker, or Observer
+    Timestamp  time.Time           // Set by NewProcessEvent
     Output     string              // For output events
+    Delta      bool                // Streaming chunk to merge with the previous output
     Status     ProcessStatus       // For status changes
     Phase      *ProcessPhase       // Worker phase (if applicable)
     TaskID     string              // Worker task (if applicable)
     Metrics    *TokenMetrics       // For token usage events
     Message    string              // For incoming events
+    Sender     string              // For ProcessIncoming: "user", "coordinator", or "system"
     Error      error               // For error events
     RawJSON    []byte              // Raw API response
     QueueCount int                 // Pending queue messages
 }
 ```
+
+Events are built with `events.NewProcessEvent(type, processID, role)`, which sets `Timestamp`, followed by chained `WithX(...)` builders (`WithOutput`, `WithStatus`, `WithSender`, ...).
 
 ## Process Event Loop
 
@@ -184,7 +210,7 @@ sequenceDiagram
         TE-->>CP: Missing tools
         CP->>CP: Enqueue reminder (SenderSystem)
         CP->>CP: Return DeliverProcessQueued
-    else Compliant or Coordinator
+    else Compliant, coordinator, or observer
         CP->>CP: Working → Ready
         CP->>EB: Publish ProcessReady
     end
@@ -195,24 +221,44 @@ sequenceDiagram
 ```go
 func (p *Process) eventLoop() {
     defer close(p.eventDone)
-    
-    for {
+
+    p.mu.Lock()
+    proc := p.proc
+    p.sessionIDAtTurnStart = p.sessionID // Restored if the AI process exits unsuccessfully
+    p.mu.Unlock()
+    if proc == nil {
+        return
+    }
+
+    procEvents := proc.Events()
+    procErrors := proc.Errors()
+
+    // Wait for BOTH channels to close so every error is processed
+    var eventsClosed, errorsClosed bool
+    for !eventsClosed || !errorsClosed {
         select {
         case <-p.ctx.Done():
             return
-            
+
         case event, ok := <-procEvents:
             if !ok {
-                p.handleProcessComplete()
-                return
+                eventsClosed = true
+                procEvents = nil // Nil channel blocks; prevents busy loop
+                continue
             }
             p.handleOutputEvent(&event)
-            
+
         case err, ok := <-procErrors:
-            if !ok { continue }
+            if !ok {
+                errorsClosed = true
+                procErrors = nil
+                continue
+            }
             p.handleError(err)
         }
     }
+
+    p.handleProcessComplete() // Submits ProcessTurnCompleteCommand
 }
 ```
 
@@ -224,41 +270,50 @@ Workers are required to call specific MCP tools to properly complete their turn.
 
 | Tool | Purpose |
 |------|---------|
-| `post_message` | General communication with coordinator |
+| `fabric_send` | Post a message to a Fabric channel |
+| `fabric_reply` | Reply in a Fabric thread |
+| `fabric_ack` | Acknowledge a Fabric message |
+| `fabric_join` | Join Fabric and signal ready (called on the first turn after spawn) |
 | `report_implementation_complete` | Report task implementation done |
 | `report_review_verdict` | Report code review result |
-| `signal_ready` | Signal worker is ready (after startup) |
+
+Calling any one of these satisfies the turn (`handler.RequiredTools`). Only workers are enforced; the coordinator and observer are not. See [Fabric Messaging Integration](./message-flow.md#fabric-messaging-integration) for the Fabric tools.
 
 ### Enforcement Mechanism
 
-The `TurnCompletionEnforcer` tracks tool calls during each turn:
+The `TurnCompletionEnforcer` (implemented by `TurnCompletionTracker`) tracks tool calls during each turn:
 
 ```go
 type TurnCompletionEnforcer interface {
-    RecordToolCall(processID, toolName string)   // Called from MCP handlers
-    ResetTurn(processID string)                  // Clear state for new turn
-    CheckTurnCompletion(id, role) []string       // Returns missing tools
-    ShouldRetry(processID string) bool           // Check retry limit
-    IncrementRetry(processID string)             // Increment retry count
+    RecordToolCall(processID, toolName string)                                  // Called from worker MCP handlers
+    ResetTurn(processID string)                                                 // Clear state for new turn
+    MarkAsNewlySpawned(processID string)                                        // Called by SpawnProcessHandler
+    CheckTurnCompletion(processID string, role repository.ProcessRole) []string // Returns missing tools
+    IsNewlySpawned(processID string) bool                                       // First turn after spawn is exempt
+    ShouldRetry(processID string) bool                                          // Check retry limit
+    IncrementRetry(processID string)                                            // Increment retry count
+    GetReminderMessage(processID string, missingTools []string) string          // Build reminder prompt
+    OnMaxRetriesExceeded(processID string, missingTools []string)               // Hook; logs only if a logger is set
+    CleanupProcess(processID string)                                            // Called by RetireProcessHandler
 }
 ```
 
 ### Enforcement Flow
 
 1. **Turn completes** without required tool call
-2. **Check exemptions**: Failed turns and newly spawned workers are exempt
-3. **Retry check**: If retries < 2, enqueue system reminder
+2. **Check exemptions**: Failed turns and newly spawned workers (`IsNewlySpawned`) are exempt. Only `SpawnProcess` marks a worker as newly spawned; a replacement worker's first turn is enforced, which its startup `fabric_join` call normally satisfies
+3. **Retry check**: If retries < 2, enqueue the `GetReminderMessage` reminder as `SenderSystem` and set the worker `Ready`
 4. **Delivery**: Reminder delivered via `DeliverProcessQueuedHandler`
-5. **Preserve state**: `SenderSystem` messages don't reset retry count
-6. **Max exceeded**: After 2 retries, allow turn to complete (log warning)
+5. **Preserve state**: Delivering a `SenderSystem` message doesn't reset turn tracking (recorded tool calls, retry count, first-turn exemption)
+6. **Max exceeded**: After 2 retries, `OnMaxRetriesExceeded` is called and the turn completes normally. It logs a warning only when the tracker was built with `WithLogger`; the production tracker (`NewTurnCompletionTracker()`) has no logger, so nothing is logged
 
 ### Sender Types
 
 | Type | Description | Resets Turn? |
 |------|-------------|--------------|
 | `SenderUser` | Message from TUI user | Yes |
-| `SenderCoordinator` | Message from coordinator | Yes |
-| `SenderSystem` | Enforcement reminder | No |
+| `SenderCoordinator` | Prompts queued on the coordinator's behalf (task, review, commit, feedback, aggregation) | Yes |
+| `SenderSystem` | System-generated: enforcement reminders, worker out-of-context notices, and every `SourceInternal` send (Fabric nudges, broadcasts, health-recovery nudges) | No |
 
 ## Output Buffer
 
@@ -307,13 +362,16 @@ flowchart TB
 
 **Registry Methods:**
 ```go
-Register(p *Process)         // Add/replace process
-Unregister(id string)        // Remove process
-Get(id string) *Process      // Get by ID
-GetCoordinator() *Process    // Get coordinator
-Workers() []*Process         // All workers (copy)
-ActiveCount() int            // Non-retired workers
-ResumeProcess(id, proc)      // Resume with new AI process
+Register(p *Process)                                               // Add/replace process
+Unregister(id string) bool                                         // Remove process; true if removed
+Get(id string) *Process                                            // Get by ID
+GetCoordinator() *Process                                          // Get coordinator
+Workers() []*Process                                               // All workers (copy)
+ActiveCount() int                                                  // Non-retired workers
+All() []*Process                                                   // All processes (copy)
+IDs() []string                                                     // All registered process IDs
+StopAll()                                                          // Stop every registered process (shutdown)
+ResumeProcess(processID string, proc client.HeadlessProcess) error // Resume with new AI process
 ```
 
 ## Token Metrics
@@ -321,18 +379,16 @@ ResumeProcess(id, proc)      // Resume with new AI process
 Each process tracks token usage across turns:
 
 ```go
-type TokenMetrics struct {
-    InputTokens              int
-    CacheReadInputTokens     int
-    CacheCreationInputTokens int
-    OutputTokens             int
-    ContextTokens            int       // Current context window usage
-    ContextWindow            int       // Max context size
-    TurnCostUSD              float64   // This turn's cost
-    TotalCostUSD             float64   // Session total
-    CumulativeCostUSD        float64   // Running total across turns
-    LastUpdatedAt            time.Time
+type TokenMetrics struct { // internal/orchestration/metrics
+    TokensUsed        int       // Cumulative context tokens (input + cache_read + cache_create)
+    TotalTokens       int       // Context window size
+    OutputTokens      int       // Tokens generated this turn
+    TurnCostUSD       float64   // This turn's cost
+    TotalCostUSD      float64   // Published as the turn cost; the session accumulates its own total
+    CumulativeCostUSD float64   // Running total across turns
+    LastUpdatedAt     time.Time
 }
+// Helpers: ContextUsage(), FormatContextDisplay(), FormatCostDisplay()
 ```
 
 ### Cumulative Cost Tracking
@@ -341,9 +397,12 @@ type TokenMetrics struct {
 func (p *Process) setMetrics(m *TokenMetrics) {
     p.cumulativeCostUSD += m.TurnCostUSD
     m.CumulativeCostUSD = p.cumulativeCostUSD
-    m.TotalCostUSD = p.cumulativeCostUSD
+    m.TotalCostUSD = m.TurnCostUSD // Publish turn cost; session accumulates its own total
+    p.metrics = m
 }
 ```
+
+`TotalCostUSD` deliberately carries the turn cost, not the cumulative cost, so the session doesn't count costs twice; only `CumulativeCostUSD` holds the running total. Cost-only result events (`Usage == nil`, `TotalCostUSD > 0`) take a separate path: `addTurnCost` adds to the cumulative total and `publishCostEvent` emits a cost-only `ProcessTokenUsage` event.
 
 ## Complete Task Workflow Example
 
@@ -372,11 +431,13 @@ sequenceDiagram
     CP->>W2: Transition to Idle
     Note over W2: Phase: Idle
     
-    CP->>W1: ApproveCommit triggered
+    Coord->>CP: ApproveCommit(W1, task-123)
+    CP->>W1: Transition to Committing (commit prompt queued)
     Note over W1: Phase: Committing
     
-    W1->>CP: Commit complete
-    CP->>W1: Transition to Idle
+    W1-->>Coord: (Fabric) commit done
+    Coord->>CP: MarkTaskComplete(task-123)
+    CP->>W1: Reset to Idle (Ready, TaskID cleared)
     Note over W1: Phase: Idle
 ```
 
@@ -405,9 +466,13 @@ defer close(p.eventDone)
 ### 4. Copy-on-Read
 Registry returns slice copies to prevent data races:
 ```go
-func (r *ProcessRegistry) Workers() []*Process {
+func (r *ProcessRegistry) All() []*Process {
+    r.mu.RLock()
+    defer r.mu.RUnlock()
     result := make([]*Process, 0, len(r.processes))
-    // Copy to result
+    for _, p := range r.processes {
+        result = append(result, p)
+    }
     return result
 }
 ```
