@@ -81,11 +81,13 @@ type ActionsConfig struct {
 type ThemeConfig struct {
 	// Preset loads a built-in theme as the base (optional).
 	// Valid values: "default", "catppuccin-mocha", "catppuccin-latte",
-	// "dracula", "nord", "high-contrast"
+	// "dracula", "nord", "high-contrast", "gruvbox"
 	Preset string `mapstructure:"preset"`
 
-	// Mode forces light or dark mode. If empty, uses terminal detection.
-	// Valid values: "light", "dark", ""
+	// Mode is currently ignored: themes do not switch between light and dark
+	// variants. It is still parsed so existing configs that set it keep loading
+	// (kept for backward compatibility). Use a light preset such as
+	// "catppuccin-latte" for light terminals.
 	Mode string `mapstructure:"mode"`
 
 	// Colors allows overriding individual color tokens.
@@ -1129,6 +1131,7 @@ theme:
   #   dracula           - Dark theme with vibrant colors
   #   nord              - Arctic, north-bluish palette
   #   high-contrast     - High contrast for accessibility
+  #   gruvbox           - Retro groove color scheme
   #
   # Override specific colors (works with or without preset):
   # colors:
@@ -1136,10 +1139,10 @@ theme:
   #   status.error: "#FF0000"
   #   priority.critical: "#FF5555"
   #
-  # See all available color tokens with 'perles themes --help' or docs
+  # See all available color tokens in the theming docs, or browse them with 'perles playground'
 
 # Board views - each view is a named collection of columns
-# Cycle through views with Shift+J (next) and Shift+K (previous)
+# Cycle through views with ctrl+j/ctrl+n (next) and ctrl+k/ctrl+p (previous)
 views:
   - name: Default
     columns:
@@ -1190,13 +1193,12 @@ views:
 #     label in (urgent, critical)
 #     title ~ auth
 
-# Orchestration mode settings
-# Configure which AI client to use when entering orchestration mode
+# Orchestration settings (dashboard workflows and the chat panel)
 orchestration:
-  # AI client provider for the coordinator: "claude" (default), "amp", "codex", "opencode", or "cursor"
+  # AI client provider for the coordinator: "claude" (default), "amp", "codex", "gemini", "opencode", or "cursor"
   coordinator_client: claude
 
-  # AI client provider for the workers: "claude" (default), "amp", "codex", "opencode", or "cursor"
+  # AI client provider for the workers: "claude" (default), "amp", "codex", "gemini", "opencode", or "cursor"
   worker_client: claude
 
   # Claude-specific settings (only used when client: claude)
@@ -1220,59 +1222,52 @@ orchestration:
   # cursor:
   #   model: composer-1  # Model selection (uses Cursor's default if empty)
 
-  # Workflow templates (Ctrl+P to open picker in orchestration mode)
-  # User workflows are loaded from ~/.perles/workflows/*.md
+  # Chat panel workflow overrides (run 'perles workflows' to list workflows)
+  # User chat panel workflows are loaded from ~/.perles/workflows/*.md
+  # Entries match an existing workflow by name (case-insensitive).
   # workflows:
-  #   # Define a user workflow (loaded from ~/.perles/workflows/)
-  #   - name: "Code Review"
-  #     description: "Multi-perspective code review"
-  #     file: "code_review.md"
-  #
-  #   # Disable a built-in workflow
-  #   - name: "Debate"
+  #   # Disable a workflow
+  #   - name: "Create Workflow Template"
   #     enabled: false
   #
-  #   # Override name/description of a built-in workflow
-  #   - name: "Research Proposal"
-  #     description: "Custom description for research workflow"
+  #   # Override the description of a workflow
+  #   - name: "My Workflow"
+  #     description: "Custom description for the chat panel Workflows tab"
 
   # Timeouts for orchestration initialization phases
   # All values use Go duration format (e.g., "30s", "2m", "1m30s")
   # timeouts:
   #   worktree_creation: 30s    # Git worktree creation timeout (default: 30s)
-  #   coordinator_start: 60s    # Coordinator startup timeout (default: 60s)
-  #   workspace_setup: 30s      # MCP server and infrastructure setup (default: 30s)
-  #   max_total: 120s           # Maximum total initialization time (default: 120s)
 
-  # Sound Notifications
-  # Audio feedback for orchestration events. All events are enabled by default.
-  # To override the default sounds use the override_sounds for each event.
-  # Custom sounds must be WAV files located in ~/.perles/sounds/
-  sound:
-    events:
-      # Plays when a workflow completes successfully
-      workflow_complete:
-        enabled: true
+# Sound Notifications
+# Audio feedback for orchestration events. All events are enabled by default.
+# To override the default sounds use the override_sounds for each event.
+# Custom sounds must be WAV files located in ~/.perles/sounds/
+sound:
+  events:
+    # Plays when a workflow completes successfully
+    workflow_complete:
+      enabled: true
 
-      # Plays when a review is approved
-      review_verdict_approve:
-        enabled: true
+    # Plays when a review is approved
+    review_verdict_approve:
+      enabled: true
 
-      # Plays when a review is denied
-      review_verdict_deny:
-        enabled: true
+    # Plays when a review is denied
+    review_verdict_deny:
+      enabled: true
 
-      # Plays when a worker runs out of context
-      worker_out_of_context:
-        enabled: true
+    # Plays when a worker runs out of context
+    worker_out_of_context:
+      enabled: true
 
-      # Plays when the coordinator runs out of context
-      coordinator_out_of_context:
-        enabled: true
+    # Plays when the coordinator runs out of context
+    coordinator_out_of_context:
+      enabled: true
 
-      # Plays for general user notifications
-      user_notification:
-        enabled: true
+    # Plays for general user notifications
+    user_notification:
+      enabled: true
 `
 }
 

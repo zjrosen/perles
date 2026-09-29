@@ -6,9 +6,11 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
 
 	"github.com/zjrosen/perles/internal/orchestration/client"
@@ -2976,4 +2978,119 @@ func TestConfig_ExpandPaths_TildePathsPassValidation(t *testing.T) {
 	cfg.ExpandPaths()
 	require.NoError(t, ValidateSessionStorage(cfg.Orchestration.SessionStorage))
 	require.NoError(t, ValidateSound(cfg.Sound))
+}
+
+// Tests for DefaultConfigTemplate structure
+
+// unmarshalTemplateExact decodes YAML into a Config, failing on any key that
+// does not map to a Config field (for example a misplaced sound: block).
+func unmarshalTemplateExact(t *testing.T, yamlText string) Config {
+	t.Helper()
+	v := viper.New()
+	v.SetConfigType("yaml")
+	require.NoError(t, v.ReadConfig(strings.NewReader(yamlText)))
+	var cfg Config
+	require.NoError(t, v.UnmarshalExact(&cfg), "YAML must only contain keys that map to Config fields")
+	return cfg
+}
+
+// uncommentBlock extracts the commented-out YAML block that starts at the line
+// equal to header (for example "  # timeouts:") and strips its comment markers,
+// so example keys in the template can be checked against the Config schema.
+func uncommentBlock(t *testing.T, template, header string) string {
+	t.Helper()
+	indent := header[:strings.Index(header, "#")]
+	lines := strings.Split(template, "\n")
+	for i, line := range lines {
+		if line != header {
+			continue
+		}
+		block := []string{indent + strings.TrimPrefix(line, indent+"# ")}
+		for _, next := range lines[i+1:] {
+			if next == indent+"#" {
+				block = append(block, "")
+				continue
+			}
+			if !strings.HasPrefix(next, indent+"#   ") {
+				break
+			}
+			block = append(block, indent+strings.TrimPrefix(next, indent+"# "))
+		}
+		return strings.Join(block, "\n") + "\n"
+	}
+	t.Fatalf("commented block %q not found in template", header)
+	return ""
+}
+
+func TestDefaultConfigTemplate_UnmarshalsWithoutUnknownKeys(t *testing.T) {
+	cfg := unmarshalTemplateExact(t, DefaultConfigTemplate())
+
+	// sound: must be top-level (it was nested under orchestration: and ignored).
+	require.Len(t, cfg.Sound.Events, 6, "template sound events must populate Config.Sound")
+	for _, name := range []string{
+		"workflow_complete",
+		"review_verdict_approve",
+		"review_verdict_deny",
+		"worker_out_of_context",
+		"coordinator_out_of_context",
+		"user_notification",
+	} {
+		require.True(t, cfg.Sound.Events[name].Enabled, "sound event %q should be enabled", name)
+	}
+
+	require.True(t, cfg.UI.ShowCounts)
+	require.True(t, cfg.UI.ShowStatusBar)
+	require.Equal(t, "claude", cfg.Orchestration.CoordinatorClient)
+	require.Equal(t, "claude", cfg.Orchestration.WorkerClient)
+	require.Len(t, cfg.Views, 1)
+	require.Len(t, cfg.Views[0].Columns, len(DefaultColumns()))
+	for i, col := range DefaultColumns() {
+		require.Equal(t, col.Name, cfg.Views[0].Columns[i].Name)
+		require.Equal(t, col.Query, cfg.Views[0].Columns[i].Query)
+	}
+
+	require.NoError(t, ValidateViews(cfg.Views))
+	require.NoError(t, ValidateOrchestration(cfg.Orchestration))
+	require.NoError(t, ValidateSound(cfg.Sound))
+}
+
+func TestDefaultConfigTemplate_CommentedExamplesUseKnownKeys(t *testing.T) {
+	template := DefaultConfigTemplate()
+
+	t.Run("ui.keybindings", func(t *testing.T) {
+		cfg := unmarshalTemplateExact(t, "ui:\n"+uncommentBlock(t, template, "  # keybindings:"))
+		require.Equal(t, KeybindingsConfig{Search: "ctrl+space", Dashboard: "ctrl+o"}, cfg.UI.Keybindings)
+	})
+
+	t.Run("orchestration.cursor", func(t *testing.T) {
+		cfg := unmarshalTemplateExact(t, "orchestration:\n"+uncommentBlock(t, template, "  # cursor:"))
+		require.Equal(t, "composer-1", cfg.Orchestration.Cursor.Model)
+	})
+
+	t.Run("orchestration.workflows", func(t *testing.T) {
+		cfg := unmarshalTemplateExact(t, "orchestration:\n"+uncommentBlock(t, template, "  # workflows:"))
+		require.Len(t, cfg.Orchestration.Workflows, 2)
+		require.False(t, cfg.Orchestration.Workflows[0].IsEnabled())
+		require.NotEmpty(t, cfg.Orchestration.Workflows[1].Description)
+	})
+
+	t.Run("orchestration.timeouts", func(t *testing.T) {
+		cfg := unmarshalTemplateExact(t, "orchestration:\n"+uncommentBlock(t, template, "  # timeouts:"))
+		require.Equal(t, TimeoutsConfig{WorktreeCreation: 30 * time.Second}, cfg.Orchestration.Timeouts)
+	})
+}
+
+func TestDefaultConfigTemplate_Comments(t *testing.T) {
+	template := DefaultConfigTemplate()
+
+	require.Contains(t, template, "#   gruvbox           - Retro groove color scheme")
+	require.Contains(t, template, "# Cycle through views with ctrl+j/ctrl+n (next) and ctrl+k/ctrl+p (previous)")
+	require.Contains(t, template,
+		`# AI client provider for the coordinator: "claude" (default), "amp", "codex", "gemini", "opencode", or "cursor"`)
+	require.Contains(t, template,
+		`# AI client provider for the workers: "claude" (default), "amp", "codex", "gemini", "opencode", or "cursor"`)
+
+	for _, stale := range []string{"Shift+J", "Ctrl+P", "file:", "coordinator_start", "workspace_setup", "max_total"} {
+		require.NotContains(t, template, stale)
+	}
 }
