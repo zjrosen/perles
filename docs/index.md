@@ -98,6 +98,9 @@ perles
 
 ## Requirements
 
-- A beads-enabled project (`.beads/` directory)
+- A beads (`bd`) project with a `.beads/` directory, using SQLite or Dolt in server mode (`bd init --server`, or `"dolt_mode": "server"` in `.beads/metadata.json`) with the Dolt server running (`bd dolt start`). Embedded Dolt mode, the beads v0.63+ default, is not supported.
 - Minimum beads database version v0.62.0 (run `bd migrate` to upgrade)
-- Go 1.27+ (if building from source)
+- Or a beads_rust (`br`) project: set `backend: beads_rust` in your perles [config](configuration/index.md) and have `br` on your `PATH`
+- Go 1.27+ and Node.js/npm (needed by `make build`/`make install` for the frontend) if building from source. `go install` and `make build-go` need only Go.
+
+See [Getting Started](getting-started.md#requirements) for the full list.
