@@ -440,3 +440,28 @@ func TestHandler_ListTemplates_NoRegistryService(t *testing.T) {
 	assert.Equal(t, 0, resp.Total)
 	assert.Empty(t, resp.Templates)
 }
+
+func TestNewServer_FrontendSessionsUseSessionBaseDir(t *testing.T) {
+	baseDir := t.TempDir()
+	frontendFS := fstest.MapFS{"dist/index.html": &fstest.MapFile{Data: []byte("<html></html>")}}
+
+	server, err := NewServer(ServerConfig{
+		Addr:           "localhost:0",
+		ControlPlane:   mocks.NewMockControlPlane(t),
+		FrontendFS:     frontendFS,
+		SessionBaseDir: baseDir,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = server.listener.Close() })
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	rec := httptest.NewRecorder()
+	server.server.Handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp struct {
+		BasePath string `json:"basePath"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, baseDir, resp.BasePath)
+}

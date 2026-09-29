@@ -581,6 +581,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				WorkflowCreator: m.workflowCreator,
 				RegistryService: m.registryService,
 				FrontendFS:      frontend.DistFS(),
+				SessionBaseDir:  m.services.Config.Orchestration.SessionStorage.BaseDir,
 			})
 			if err != nil {
 				log.Error(log.CatOrch, "Failed to create API server", "error", err)

@@ -16,7 +16,6 @@ import (
 	"github.com/zjrosen/perles/internal/frontend"
 	"github.com/zjrosen/perles/internal/log"
 	"github.com/zjrosen/perles/internal/orchestration/controlplane"
-	"github.com/zjrosen/perles/internal/orchestration/session"
 	appreg "github.com/zjrosen/perles/internal/registry/application"
 )
 
@@ -701,6 +700,9 @@ type ServerConfig struct {
 	// FrontendFS provides the embedded frontend assets filesystem.
 	// When set, the embedded frontend SPA is served at / with session APIs.
 	FrontendFS fs.FS
+	// SessionBaseDir is the session storage root the frontend session APIs read
+	// (orchestration.session_storage.base_dir). Empty uses session.DefaultBaseDir().
+	SessionBaseDir string
 	// ReadTimeout is the maximum duration for reading the entire request.
 	ReadTimeout time.Duration
 	// WriteTimeout is the maximum duration before timing out writes of the response.
@@ -753,7 +755,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 			_ = listener.Close()
 			return nil, fmt.Errorf("creating frontend sub-filesystem: %w", err)
 		}
-		frontendHandler := frontend.NewHandler(session.DefaultBaseDir(), spaFS, cfg.ControlPlane)
+		frontendHandler := frontend.NewHandler(cfg.SessionBaseDir, spaFS, cfg.ControlPlane)
 		frontendHandler.RegisterAPIRoutes(mux)
 		frontendHandler.RegisterSPAHandler(mux)
 

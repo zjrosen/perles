@@ -185,6 +185,7 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 		WorkflowCreator: workflowCreator,
 		RegistryService: registryService,
 		FrontendFS:      frontend.DistFS(),
+		SessionBaseDir:  cfg.Orchestration.SessionStorage.BaseDir,
 	})
 	if err != nil {
 		return fmt.Errorf("creating API server: %w", err)
