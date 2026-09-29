@@ -3265,3 +3265,69 @@ func TestExecutor_MetadataQueries(t *testing.T) {
 		require.False(t, ids["meta-1"], "should NOT include meta-1 (has effort)")
 	})
 }
+
+// TestExecutor_MetadataValueComparisons runs metadata value comparisons against
+// real SQLite, which has no JSON_UNQUOTE and whose json_extract returns
+// INTEGER/REAL for numbers and 1/0 for booleans. Values must compare as the
+// same text MySQL/Dolt's JSON_UNQUOTE(JSON_EXTRACT(...)) produces.
+func TestExecutor_MetadataValueComparisons(t *testing.T) {
+	db := setupDB(t, func(b *testutil.Builder) *testutil.Builder {
+		return b.
+			WithIssue("mv-1", testutil.Metadata(`{"team":"backend","points":5,"estimate":1.5,"flaky":true,"owner":null}`)).
+			WithIssue("mv-2", testutil.Metadata(`{"team":"Frontend","points":13,"estimate":2,"flaky":false}`)).
+			WithIssue("mv-3", testutil.Metadata(`{"team":"backend-infra","points":"5"}`)).
+			WithIssue("mv-4", testutil.Metadata(`{}`)).
+			WithIssue("mv-5", testutil.Metadata(`{"jira":{"sprint":"Q1-2026"}}`))
+	})
+	defer func() { _ = db.Close() }()
+
+	executor := newTestExecutor(t, db)
+
+	tests := []struct {
+		name  string
+		query string
+		want  []string
+	}{
+		// Strings compare as unquoted text; = is case-sensitive, ~ is not.
+		{"string equals", `metadata.team = "backend"`, []string{"mv-1"}},
+		{"string equals is case-sensitive", `metadata.team = "frontend"`, nil},
+		{"string not equals excludes missing keys", `metadata.team != "backend"`, []string{"mv-2", "mv-3"}},
+		{"string contains is case-insensitive", `metadata.team ~ BACKEND`, []string{"mv-1", "mv-3"}},
+		{"string not contains", `metadata.team !~ back`, []string{"mv-2"}},
+		{"nested string equals", `metadata.jira.sprint = "Q1-2026"`, []string{"mv-5"}},
+
+		// Numbers compare as their JSON text, matching a string "5" too.
+		{"integer equals", `metadata.points = "5"`, []string{"mv-1", "mv-3"}},
+		{"integer not equals", `metadata.points != "5"`, []string{"mv-2"}},
+		{"integer contains", `metadata.points ~ "3"`, []string{"mv-2"}},
+		{"integer not contains", `metadata.points !~ "3"`, []string{"mv-1", "mv-3"}},
+		{"real equals", `metadata.estimate = "1.5"`, []string{"mv-1"}},
+		{"real contains", `metadata.estimate ~ ".5"`, []string{"mv-1"}},
+
+		// Booleans compare as true/false, not SQLite's 1/0.
+		{"boolean equals true", `metadata.flaky = "true"`, []string{"mv-1"}},
+		{"boolean equals false", `metadata.flaky = "false"`, []string{"mv-2"}},
+		{"boolean not equals", `metadata.flaky != "true"`, []string{"mv-2"}},
+		{"boolean contains is case-insensitive", `metadata.flaky ~ "TRU"`, []string{"mv-1"}},
+		{"boolean not contains", `metadata.flaky !~ "true"`, []string{"mv-2"}},
+		{"boolean does not equal 1", `metadata.flaky = "1"`, nil},
+
+		// JSON null is a present key whose value renders as null.
+		{"json null key exists", `metadata.owner != nil`, []string{"mv-1"}},
+		{"json null key not exists", `metadata.owner = nil`, []string{"mv-2", "mv-3", "mv-4", "mv-5"}},
+		{"json null equals null text", `metadata.owner = "null"`, []string{"mv-1"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			issues, err := executor.Execute(tt.query)
+			require.NoError(t, err)
+
+			got := make([]string, 0, len(issues))
+			for _, issue := range issues {
+				got = append(got, issue.ID)
+			}
+			require.ElementsMatch(t, tt.want, got)
+		})
+	}
+}

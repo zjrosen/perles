@@ -152,20 +152,15 @@ func (b *SQLBuilder) buildCompare(e *CompareExpr) string {
 		path := jsonMetadataPath(key)
 
 		if e.Value.Type == ValueNull {
-			b.params = append(b.params, path)
-			if e.Op == TokenEq {
-				return "JSON_EXTRACT(i.metadata, ?) IS NULL"
-			}
-			return "JSON_EXTRACT(i.metadata, ?) IS NOT NULL"
+			return b.metadataKeySQL(path, e.Op == TokenNeq)
 		}
 
-		extracted := "JSON_UNQUOTE(JSON_EXTRACT(i.metadata, ?))"
+		extracted := b.metadataValueSQL(path)
 		switch e.Op {
 		case TokenContains, TokenNotContains:
-			b.params = append(b.params, path)
 			return b.likeSQL(extracted, e.Op, e.Value.String)
 		default:
-			b.params = append(b.params, path, e.Value.String)
+			b.params = append(b.params, e.Value.String)
 			return fmt.Sprintf("%s %s ?", extracted, b.opToSQL(e.Op))
 		}
 	}
@@ -262,6 +257,40 @@ func (b *SQLBuilder) fieldToColumn(field string) string {
 		return col
 	}
 	return "i." + field
+}
+
+// metadataKeySQL builds the metadata key existence check for "= nil" and
+// "!= nil" and appends the path param. A key that holds JSON null counts as
+// present on both dialects: MySQL/Dolt's JSON_EXTRACT returns a JSON null
+// (not SQL NULL) for it, and SQLite's json_type returns 'null', whereas
+// SQLite's json_extract would return SQL NULL.
+func (b *SQLBuilder) metadataKeySQL(path string, exists bool) string {
+	b.params = append(b.params, path)
+	expr := "JSON_TYPE(i.metadata, ?)"
+	if b.dialect == appbeads.DialectMySQL {
+		expr = "JSON_EXTRACT(i.metadata, ?)"
+	}
+	if exists {
+		return expr + " IS NOT NULL"
+	}
+	return expr + " IS NULL"
+}
+
+// metadataValueSQL returns a text expression for the metadata value at path
+// and appends the path params it references. On MySQL/Dolt this is
+// JSON_UNQUOTE(JSON_EXTRACT(...)): strings are unquoted, every other JSON value
+// (numbers, true/false, null, objects, arrays) becomes its JSON text, and a
+// missing key yields NULL. SQLite has no JSON_UNQUOTE, and its json_extract
+// returns INTEGER/REAL for numbers and 1/0 for booleans, which never equal a
+// string param, so there only text values are read with json_extract and
+// everything else is read as JSON text with the -> operator.
+func (b *SQLBuilder) metadataValueSQL(path string) string {
+	if b.dialect == appbeads.DialectMySQL {
+		b.params = append(b.params, path)
+		return "JSON_UNQUOTE(JSON_EXTRACT(i.metadata, ?))"
+	}
+	b.params = append(b.params, path, path, path)
+	return "CASE JSON_TYPE(i.metadata, ?) WHEN 'text' THEN JSON_EXTRACT(i.metadata, ?) ELSE i.metadata -> ? END"
 }
 
 // likeSQL builds a case-insensitive substring match for the ~ and !~ operators

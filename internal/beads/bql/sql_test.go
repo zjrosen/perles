@@ -673,99 +673,98 @@ func TestSQLBuilder_MySQLDialect_ReadyField(t *testing.T) {
 }
 
 func TestSQLBuilder_MetadataField(t *testing.T) {
-	t.Run("metadata equals string", func(t *testing.T) {
-		parser := NewParser(`metadata.team = "backend"`)
-		query, err := parser.Parse()
-		require.NoError(t, err)
+	// SQLite has no JSON_UNQUOTE, so value comparisons unquote text values
+	// via json_extract and render everything else as JSON text via ->.
+	const sqliteValue = "CASE JSON_TYPE(i.metadata, ?) WHEN 'text' THEN JSON_EXTRACT(i.metadata, ?) ELSE i.metadata -> ? END"
+	const mysqlValue = "JSON_UNQUOTE(JSON_EXTRACT(i.metadata, ?))"
 
-		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
-		where, _, params := builder.Build()
+	tests := []struct {
+		name        string
+		input       string
+		sqliteWhere string
+		sqliteArgs  []interface{}
+		mysqlWhere  string
+		mysqlArgs   []interface{}
+	}{
+		{
+			name:        "metadata equals string",
+			input:       `metadata.team = "backend"`,
+			sqliteWhere: sqliteValue + " = ?",
+			sqliteArgs:  []interface{}{"$.team", "$.team", "$.team", "backend"},
+			mysqlWhere:  mysqlValue + " = ?",
+			mysqlArgs:   []interface{}{"$.team", "backend"},
+		},
+		{
+			name:        "metadata not equals string",
+			input:       `metadata.team != "backend"`,
+			sqliteWhere: sqliteValue + " != ?",
+			sqliteArgs:  []interface{}{"$.team", "$.team", "$.team", "backend"},
+			mysqlWhere:  mysqlValue + " != ?",
+			mysqlArgs:   []interface{}{"$.team", "backend"},
+		},
+		{
+			name:        "metadata contains pattern",
+			input:       `metadata.team ~ Auth`,
+			sqliteWhere: sqliteValue + " LIKE ?",
+			sqliteArgs:  []interface{}{"$.team", "$.team", "$.team", "%Auth%"},
+			mysqlWhere:  "LOWER(" + mysqlValue + ") LIKE ?",
+			mysqlArgs:   []interface{}{"$.team", "%auth%"},
+		},
+		{
+			name:        "metadata not contains pattern",
+			input:       `metadata.team !~ legacy`,
+			sqliteWhere: sqliteValue + " NOT LIKE ?",
+			sqliteArgs:  []interface{}{"$.team", "$.team", "$.team", "%legacy%"},
+			mysqlWhere:  "LOWER(" + mysqlValue + ") NOT LIKE ?",
+			mysqlArgs:   []interface{}{"$.team", "%legacy%"},
+		},
+		{
+			name:        "metadata key exists",
+			input:       "metadata.team != nil",
+			sqliteWhere: "JSON_TYPE(i.metadata, ?) IS NOT NULL",
+			sqliteArgs:  []interface{}{"$.team"},
+			mysqlWhere:  "JSON_EXTRACT(i.metadata, ?) IS NOT NULL",
+			mysqlArgs:   []interface{}{"$.team"},
+		},
+		{
+			name:        "metadata key not exists",
+			input:       "metadata.team = nil",
+			sqliteWhere: "JSON_TYPE(i.metadata, ?) IS NULL",
+			sqliteArgs:  []interface{}{"$.team"},
+			mysqlWhere:  "JSON_EXTRACT(i.metadata, ?) IS NULL",
+			mysqlArgs:   []interface{}{"$.team"},
+		},
+		{
+			name:        "metadata with nested key",
+			input:       `metadata.jira.sprint = "Q1-2026"`,
+			sqliteWhere: sqliteValue + " = ?",
+			sqliteArgs:  []interface{}{"$.jira.sprint", "$.jira.sprint", "$.jira.sprint", "Q1-2026"},
+			mysqlWhere:  mysqlValue + " = ?",
+			mysqlArgs:   []interface{}{"$.jira.sprint", "Q1-2026"},
+		},
+		{
+			name:        "metadata combined with other filters",
+			input:       `type = task and metadata.team = "backend"`,
+			sqliteWhere: "(i.issue_type = ? AND " + sqliteValue + " = ?)",
+			sqliteArgs:  []interface{}{"task", "$.team", "$.team", "$.team", "backend"},
+			mysqlWhere:  "(i.issue_type = ? AND " + mysqlValue + " = ?)",
+			mysqlArgs:   []interface{}{"task", "$.team", "backend"},
+		},
+	}
 
-		require.Equal(t, "JSON_UNQUOTE(JSON_EXTRACT(i.metadata, ?)) = ?", where)
-		require.Equal(t, []interface{}{"$.team", "backend"}, params)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			query, err := NewParser(tt.input).Parse()
+			require.NoError(t, err)
 
-	t.Run("metadata not equals string", func(t *testing.T) {
-		parser := NewParser(`metadata.team != "backend"`)
-		query, err := parser.Parse()
-		require.NoError(t, err)
+			where, _, params := NewSQLBuilder(query, appbeads.DialectSQLite).Build()
+			require.Equal(t, tt.sqliteWhere, where)
+			require.Equal(t, tt.sqliteArgs, params)
+			require.NotContains(t, where, "JSON_UNQUOTE", "SQLite has no JSON_UNQUOTE function")
 
-		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
-		where, _, params := builder.Build()
-
-		require.Equal(t, "JSON_UNQUOTE(JSON_EXTRACT(i.metadata, ?)) != ?", where)
-		require.Equal(t, []interface{}{"$.team", "backend"}, params)
-	})
-
-	t.Run("metadata contains pattern", func(t *testing.T) {
-		parser := NewParser(`metadata.team ~ auth`)
-		query, err := parser.Parse()
-		require.NoError(t, err)
-
-		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
-		where, _, params := builder.Build()
-
-		require.Equal(t, "JSON_UNQUOTE(JSON_EXTRACT(i.metadata, ?)) LIKE ?", where)
-		require.Equal(t, []interface{}{"$.team", "%auth%"}, params)
-	})
-
-	t.Run("metadata not contains pattern", func(t *testing.T) {
-		parser := NewParser(`metadata.team !~ legacy`)
-		query, err := parser.Parse()
-		require.NoError(t, err)
-
-		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
-		where, _, params := builder.Build()
-
-		require.Equal(t, "JSON_UNQUOTE(JSON_EXTRACT(i.metadata, ?)) NOT LIKE ?", where)
-		require.Equal(t, []interface{}{"$.team", "%legacy%"}, params)
-	})
-
-	t.Run("metadata key exists", func(t *testing.T) {
-		parser := NewParser("metadata.team != nil")
-		query, err := parser.Parse()
-		require.NoError(t, err)
-
-		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
-		where, _, params := builder.Build()
-
-		require.Equal(t, "JSON_EXTRACT(i.metadata, ?) IS NOT NULL", where)
-		require.Equal(t, []interface{}{"$.team"}, params)
-	})
-
-	t.Run("metadata key not exists", func(t *testing.T) {
-		parser := NewParser("metadata.team = nil")
-		query, err := parser.Parse()
-		require.NoError(t, err)
-
-		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
-		where, _, params := builder.Build()
-
-		require.Equal(t, "JSON_EXTRACT(i.metadata, ?) IS NULL", where)
-		require.Equal(t, []interface{}{"$.team"}, params)
-	})
-
-	t.Run("metadata with nested key", func(t *testing.T) {
-		parser := NewParser(`metadata.jira.sprint = "Q1-2026"`)
-		query, err := parser.Parse()
-		require.NoError(t, err)
-
-		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
-		where, _, params := builder.Build()
-
-		require.Equal(t, "JSON_UNQUOTE(JSON_EXTRACT(i.metadata, ?)) = ?", where)
-		require.Equal(t, []interface{}{"$.jira.sprint", "Q1-2026"}, params)
-	})
-
-	t.Run("metadata combined with other filters", func(t *testing.T) {
-		parser := NewParser(`type = task and metadata.team = "backend"`)
-		query, err := parser.Parse()
-		require.NoError(t, err)
-
-		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
-		where, _, params := builder.Build()
-
-		require.Equal(t, "(i.issue_type = ? AND JSON_UNQUOTE(JSON_EXTRACT(i.metadata, ?)) = ?)", where)
-		require.Equal(t, []interface{}{"task", "$.team", "backend"}, params)
-	})
+			where, _, params = NewSQLBuilder(query, appbeads.DialectMySQL).Build()
+			require.Equal(t, tt.mysqlWhere, where)
+			require.Equal(t, tt.mysqlArgs, params)
+		})
+	}
 }
