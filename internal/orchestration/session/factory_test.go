@@ -61,6 +61,85 @@ func TestFactory_Create_WithApplicationName(t *testing.T) {
 	_ = sess.Close(StatusCompleted)
 }
 
+func TestFactory_Create_UsesConfiguredApplicationName(t *testing.T) {
+	baseDir := t.TempDir()
+
+	// The configured override wins over the git remote and WorkDir basename.
+	factory := NewFactory(FactoryConfig{
+		BaseDir:         baseDir,
+		ApplicationName: "  configured-app  ",
+		GitExecutor:     &mockGitRemoteGetter{url: "git@github.com:user/remote-repo.git"},
+	})
+
+	workDir := t.TempDir()
+	sess, err := factory.Create(CreateOptions{
+		SessionID: "test-session-configured",
+		WorkDir:   workDir,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sess.Close(StatusCompleted) })
+
+	date := time.Now().Format("2006-01-02")
+	require.Equal(t, filepath.Join(baseDir, "configured-app", date, "test-session-configured"), sess.Dir)
+}
+
+func TestFactory_Create_PerCallApplicationNameOverridesConfigured(t *testing.T) {
+	factory := NewFactory(FactoryConfig{
+		BaseDir:         t.TempDir(),
+		ApplicationName: "configured-app",
+	})
+
+	sess, err := factory.Create(CreateOptions{
+		SessionID:       "test-session-per-call",
+		WorkDir:         t.TempDir(),
+		ApplicationName: "per-call-app",
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sess.Close(StatusCompleted) })
+
+	require.Contains(t, sess.Dir, "per-call-app")
+	require.NotContains(t, sess.Dir, "configured-app")
+}
+
+func TestFactory_ResolveApplicationName(t *testing.T) {
+	workDir := filepath.Join(t.TempDir(), "my-workdir")
+
+	tests := []struct {
+		name     string
+		cfg      FactoryConfig
+		expected string
+	}{
+		{
+			name:     "configured override wins",
+			cfg:      FactoryConfig{ApplicationName: "configured-app", GitExecutor: &mockGitRemoteGetter{url: "https://github.com/user/remote-repo.git"}},
+			expected: "configured-app",
+		},
+		{
+			name:     "whitespace-only override is ignored",
+			cfg:      FactoryConfig{ApplicationName: "   ", GitExecutor: &mockGitRemoteGetter{url: "https://github.com/user/remote-repo.git"}},
+			expected: "remote-repo",
+		},
+		{
+			name:     "git remote when no override",
+			cfg:      FactoryConfig{GitExecutor: &mockGitRemoteGetter{url: "https://github.com/user/remote-repo.git"}},
+			expected: "remote-repo",
+		},
+		{
+			name:     "workdir basename when no override or git executor",
+			cfg:      FactoryConfig{},
+			expected: "my-workdir",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.cfg.BaseDir = t.TempDir()
+			factory := NewFactory(tt.cfg)
+			require.Equal(t, tt.expected, factory.ResolveApplicationName(workDir))
+		})
+	}
+}
+
 func TestFactory_Create_RequiresSessionID(t *testing.T) {
 	factory := NewFactory(FactoryConfig{
 		BaseDir: t.TempDir(),

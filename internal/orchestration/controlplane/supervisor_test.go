@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1501,6 +1502,39 @@ func TestSupervisor_Start_CreatesSessionWhenFactoryConfigured(t *testing.T) {
 	require.Equal(t, inst.ID.String(), inst.Session.ID, "Session ID should match workflow ID")
 
 	mockFactory.AssertExpectations(t)
+}
+
+func TestSupervisor_Start_SessionUsesConfiguredApplicationName(t *testing.T) {
+	cfg, mockProvider, mockFactory := newTestSupervisorConfig(t)
+
+	sessionBaseDir := t.TempDir()
+	cfg.SessionFactory = session.NewFactory(session.FactoryConfig{
+		BaseDir:         sessionBaseDir,
+		ApplicationName: "configured-app",
+	})
+
+	supervisor, err := NewSupervisor(cfg)
+	require.NoError(t, err)
+
+	inst := newTestInstance(t, "test-workflow-app-name")
+	cleanupSessionOnTestEnd(t, inst) // Close session before TempDir cleanup (Windows)
+
+	infra := createMinimalInfrastructure(t)
+	mockFactory.On("Create", mock.AnythingOfType("v2.InfrastructureConfig")).Return(infra, nil)
+	setupAgentProviderMock(t, mockProvider)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go infra.Core.Processor.Run(ctx)
+	require.NoError(t, infra.Core.Processor.WaitForReady(ctx))
+
+	require.NoError(t, startWorkflow(ctx, supervisor, inst))
+
+	// Session path is {base}/{application_name}/{date}/{id}
+	require.NotNil(t, inst.Session)
+	rel, err := filepath.Rel(sessionBaseDir, inst.Session.Dir)
+	require.NoError(t, err)
+	require.Equal(t, "configured-app", strings.Split(filepath.ToSlash(rel), "/")[0])
 }
 
 func TestSupervisor_Shutdown_ClosesSession(t *testing.T) {

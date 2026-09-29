@@ -1262,17 +1262,33 @@ func (m *Model) Close() error {
 	return nil
 }
 
+// newSessionFactory creates the session factory for dashboard workflow sessions.
+// orchestration.session_storage.application_name (when set) overrides the
+// application name derived from the git remote / directory basename.
+func (m *Model) newSessionFactory() *session.Factory {
+	storage := m.services.Config.Orchestration.SessionStorage
+	return session.NewFactory(session.FactoryConfig{
+		BaseDir:         storage.BaseDir,
+		ApplicationName: storage.ApplicationName,
+		GitExecutor:     m.services.GitExecutorFactory(m.services.WorkDir),
+	})
+}
+
 // createControlPlane creates a ControlPlane for the dashboard.
 // Uses DurableRegistry for SQLite-backed persistence when database is available,
 // falling back to in-memory registry when not.
 func (m *Model) createControlPlane() controlplane.ControlPlane {
 	eventBus := controlplane.NewCrossWorkflowEventBus()
 
-	// Derive project name for registry (matches session factory pattern)
-	project := session.DeriveApplicationName(
-		m.services.WorkDir,
-		m.services.GitExecutorFactory(m.services.WorkDir),
-	)
+	// Get orchestration config for agent providers
+	orchConfig := m.services.Config.Orchestration
+
+	// Create session factory for workflow session tracking
+	sessionFactory := m.newSessionFactory()
+
+	// Project name for the registry uses the same resolution as session paths
+	// (configured application_name, then git remote, then directory basename)
+	project := sessionFactory.ResolveApplicationName(m.services.WorkDir)
 
 	// Use DurableRegistry when SQLite is available, else fall back to in-memory
 	var registry controlplane.Registry
@@ -1284,15 +1300,6 @@ func (m *Model) createControlPlane() controlplane.ControlPlane {
 		registry = controlplane.NewInMemoryRegistry()
 		log.Debug(log.CatOrch, "Using in-memory registry (no SQLite database)")
 	}
-
-	// Get orchestration config for agent providers
-	orchConfig := m.services.Config.Orchestration
-
-	// Create session factory for workflow session tracking
-	sessionFactory := session.NewFactory(session.FactoryConfig{
-		BaseDir:     orchConfig.SessionStorage.BaseDir,
-		GitExecutor: m.services.GitExecutorFactory(m.services.WorkDir),
-	})
 
 	// Create supervisor with full configuration
 	supervisor, err := controlplane.NewSupervisor(controlplane.SupervisorConfig{

@@ -225,7 +225,10 @@ func createDaemonControlPlane(cfg *config.Config, _ string, taskExec taskpkg.Tas
 
 	sessionFactory := session.NewFactory(session.FactoryConfig{
 		BaseDir: orchConfig.SessionStorage.BaseDir,
-		// Note: GitExecutor not available in daemon mode without git context
+		// application_name (when set) overrides the derived name for all sessions
+		ApplicationName: orchConfig.SessionStorage.ApplicationName,
+		// Note: GitExecutor not available in daemon mode without git context,
+		// so the derived name falls back to the workflow work directory basename
 	})
 
 	soundService := sound.NewSystemSoundService(cfg.Sound.Events)

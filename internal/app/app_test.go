@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/zjrosen/perles/internal/config"
 	"github.com/zjrosen/perles/internal/flags"
+	appgit "github.com/zjrosen/perles/internal/git/application"
 	"github.com/zjrosen/perles/internal/mocks"
 	"github.com/zjrosen/perles/internal/mode"
 	"github.com/zjrosen/perles/internal/mode/dashboard"
@@ -2358,4 +2360,38 @@ func TestApp_ForwardsExternalEditorMessages(t *testing.T) {
 	// We can't easily verify this without exposing internals, but at least
 	// verify the update didn't panic and the model is still valid
 	require.True(t, m.chatPanel.Visible(), "panel should still be visible after editor message")
+}
+
+// =====================================================
+// Startup Configuration Tests (theme, tracing, session app name)
+// =====================================================
+
+func TestApp_NewSessionFactory_ApplicationName(t *testing.T) {
+	newModel := func(t *testing.T, appName string) *Model {
+		t.Helper()
+		cfg := config.Defaults()
+		cfg.Orchestration.SessionStorage.BaseDir = t.TempDir()
+		cfg.Orchestration.SessionStorage.ApplicationName = appName
+
+		gitExec := mocks.NewMockGitExecutor(t)
+		gitExec.EXPECT().GetRemoteURL("origin").Return("git@github.com:user/remote-repo.git", nil).Maybe()
+
+		return &Model{services: mode.Services{
+			Config:  &cfg,
+			WorkDir: filepath.Join(t.TempDir(), "workdir-name"),
+			GitExecutorFactory: func(string) appgit.GitExecutor {
+				return gitExec
+			},
+		}}
+	}
+
+	t.Run("configured application_name overrides derived name", func(t *testing.T) {
+		m := newModel(t, "my-custom-app")
+		require.Equal(t, "my-custom-app", m.newSessionFactory().ResolveApplicationName(m.services.WorkDir))
+	})
+
+	t.Run("empty application_name derives from git remote", func(t *testing.T) {
+		m := newModel(t, "")
+		require.Equal(t, "remote-repo", m.newSessionFactory().ResolveApplicationName(m.services.WorkDir))
+	})
 }

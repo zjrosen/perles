@@ -2,6 +2,7 @@ package session
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -9,8 +10,9 @@ import (
 // It is shared between mode/orchestration.Initializer and controlplane.Supervisor
 // to ensure sessions are created with the same directory structure and options.
 type Factory struct {
-	baseDir     string
-	gitExecutor GitRemoteGetter
+	baseDir         string
+	applicationName string
+	gitExecutor     GitRemoteGetter
 }
 
 // FactoryConfig holds configuration for creating a Factory.
@@ -18,6 +20,12 @@ type FactoryConfig struct {
 	// BaseDir is the root directory for session storage.
 	// If empty, DefaultBaseDir() (~/.perles/sessions) is used.
 	BaseDir string
+
+	// ApplicationName overrides the derived application name for every session
+	// created by this factory (orchestration.session_storage.application_name).
+	// Surrounding whitespace is trimmed. If empty, the name is derived from the
+	// git remote or the work directory basename.
+	ApplicationName string
 
 	// GitExecutor is used to derive the application name from git remote.
 	// If nil, the application name falls back to the work directory basename.
@@ -31,9 +39,22 @@ func NewFactory(cfg FactoryConfig) *Factory {
 		baseDir = DefaultBaseDir()
 	}
 	return &Factory{
-		baseDir:     baseDir,
-		gitExecutor: cfg.GitExecutor,
+		baseDir:         baseDir,
+		applicationName: strings.TrimSpace(cfg.ApplicationName),
+		gitExecutor:     cfg.GitExecutor,
 	}
+}
+
+// ResolveApplicationName returns the application name used for sessions rooted at workDir.
+// Resolution order:
+//  1. FactoryConfig.ApplicationName (the configured override), if non-empty
+//  2. Git remote "origin" repository name (when a GitExecutor is configured)
+//  3. Basename of workDir
+func (f *Factory) ResolveApplicationName(workDir string) string {
+	if f.applicationName != "" {
+		return f.applicationName
+	}
+	return DeriveApplicationName(workDir, f.gitExecutor)
 }
 
 // CreateOptions holds options for creating a new session.
@@ -45,8 +66,9 @@ type CreateOptions struct {
 	// Used for deriving application name if not explicitly set.
 	WorkDir string
 
-	// ApplicationName overrides the derived application name.
-	// If empty, it's derived from git remote or WorkDir basename.
+	// ApplicationName overrides the application name for this session only.
+	// If empty, the factory's ResolveApplicationName is used (configured
+	// override, then git remote, then WorkDir basename).
 	ApplicationName string
 
 	// WorkflowID is the ID of the workflow this session belongs to.
@@ -65,10 +87,10 @@ func (f *Factory) Create(opts CreateOptions) (*Session, error) {
 		return nil, fmt.Errorf("WorkDir is required")
 	}
 
-	// Derive application name
+	// Resolve application name (per-call override, then factory override, then derived)
 	appName := opts.ApplicationName
 	if appName == "" {
-		appName = DeriveApplicationName(opts.WorkDir, f.gitExecutor)
+		appName = f.ResolveApplicationName(opts.WorkDir)
 	}
 
 	// Build session path
@@ -102,10 +124,10 @@ func (f *Factory) Reopen(opts CreateOptions, existingDir string) (*Session, erro
 		return nil, fmt.Errorf("existingDir is required")
 	}
 
-	// Derive application name
+	// Resolve application name (per-call override, then factory override, then derived)
 	appName := opts.ApplicationName
 	if appName == "" {
-		appName = DeriveApplicationName(opts.WorkDir, f.gitExecutor)
+		appName = f.ResolveApplicationName(opts.WorkDir)
 	}
 
 	// Build path builder for consistency (needed for index updates)
