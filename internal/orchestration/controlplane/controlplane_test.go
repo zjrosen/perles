@@ -347,6 +347,88 @@ func TestControlPlane_Start_ReturnsErrorForNonExistentWorkflow(t *testing.T) {
 	require.ErrorIs(t, err, ErrWorkflowNotFound)
 }
 
+func TestControlPlane_Start_EmitsWorkflowStartedEvent(t *testing.T) {
+	cp, mockFactory, mockProvider := newTestControlPlane(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	spec := WorkflowSpec{
+		TemplateID:    "test-template",
+		InitialPrompt: "Build a feature",
+		Name:          "Started Workflow",
+	}
+	id, err := cp.Create(ctx, spec)
+	require.NoError(t, err)
+	cleanupWorkflowSessionOnTestEnd(t, cp, id) // Close session before TempDir cleanup (Windows)
+
+	infra := createTestInfrastructure(t)
+	mockFactory.On("Create", mock.AnythingOfType("v2.InfrastructureConfig")).Return(infra, nil)
+	setupTestAgentProviderMock(t, mockProvider)
+
+	go infra.Core.Processor.Run(ctx)
+	require.NoError(t, infra.Core.Processor.WaitForReady(ctx))
+
+	// Subscribe after Create so only Start-related events are observed
+	eventCh, unsubscribe := cp.Subscribe(ctx)
+	defer unsubscribe()
+
+	require.NoError(t, cp.Start(ctx, id))
+
+	inst, err := cp.Get(ctx, id)
+	require.NoError(t, err)
+	require.NotNil(t, inst.StartedAt)
+
+	// Other events (e.g., forwarded process events) may interleave; wait for the started event.
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case received := <-eventCh:
+			if received.Type != EventWorkflowStarted {
+				continue
+			}
+			require.Equal(t, id, received.WorkflowID)
+			require.Equal(t, "Started Workflow", received.WorkflowName)
+			require.Equal(t, "test-template", received.TemplateID)
+			require.Equal(t, WorkflowRunning, received.State)
+			require.True(t, received.Timestamp.Equal(*inst.StartedAt), "timestamp should match StartedAt")
+			require.True(t, received.Type.IsLifecycleEvent())
+			return
+		case <-deadline:
+			t.Fatal("timeout waiting for EventWorkflowStarted event")
+		}
+	}
+}
+
+func TestControlPlane_Start_DoesNotEmitWorkflowStartedOnError(t *testing.T) {
+	cp, mockFactory, _ := newTestControlPlane(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	id, err := cp.Create(ctx, WorkflowSpec{
+		TemplateID:    "test-template",
+		InitialPrompt: "Build a feature",
+	})
+	require.NoError(t, err)
+	cleanupWorkflowSessionOnTestEnd(t, cp, id)
+
+	mockFactory.On("Create", mock.AnythingOfType("v2.InfrastructureConfig")).
+		Return(nil, errors.New("infrastructure creation failed"))
+
+	eventCh, unsubscribe := cp.Subscribe(ctx)
+	defer unsubscribe()
+
+	require.Error(t, cp.Start(ctx, id))
+
+	select {
+	case received := <-eventCh:
+		require.NotEqual(t, EventWorkflowStarted, received.Type, "failed Start must not emit EventWorkflowStarted")
+	case <-time.After(100 * time.Millisecond):
+		// No event - expected
+	}
+}
+
 // === Unit Tests: Pause ===
 
 func TestControlPlane_Pause_DelegatesToSupervisor(t *testing.T) {

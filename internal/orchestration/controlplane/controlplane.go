@@ -232,6 +232,21 @@ func (cp *defaultControlPlane) Start(ctx context.Context, id WorkflowID) error {
 		// Log but don't fail - the in-memory state is already updated
 	}
 
+	// Emit workflow started event now that resources are allocated and the coordinator is spawned.
+	// Note: EventCoordinatorSpawned (forwarded from the workflow's event bus) may arrive before this.
+	startedAt := time.Now()
+	if inst.StartedAt != nil {
+		startedAt = *inst.StartedAt
+	}
+	cp.eventBus.Publish(ControlPlaneEvent{
+		Type:         EventWorkflowStarted,
+		WorkflowID:   inst.ID,
+		WorkflowName: inst.Name,
+		TemplateID:   inst.TemplateID,
+		State:        inst.State,
+		Timestamp:    startedAt,
+	})
+
 	return nil
 }
 
