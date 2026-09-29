@@ -57,7 +57,7 @@ The default view includes these columns (all configurable via BQL):
 | `l` / `<right>` | Move to right column |
 | `j` / `<down>` | Move down in column |
 | `k` / `<up>` | Move up in column |
-| `Enter` | View issue details |
+| `Enter` | Open the selected issue in the [Dependency Explorer](dependency-explorer.md) (tree view with details panel) |
 
 ### Views
 
@@ -78,17 +78,26 @@ The default view includes these columns (all configurable via BQL):
 | `ctrl+h` | Move column left |
 | `ctrl+l` | Move column right |
 | `/` | Open search with column's BQL query |
+| `m` | Toggle tree mode (deps/child) on a focused tree column |
 
 ### Issues
 
 | Key | Action |
 |-----|--------|
+| `n` | Create new issue |
 | `y` | Copy issue ID to clipboard |
 | `r` | Refresh issues |
-| `s` | Change status |
-| `p` | Change priority |
-| `ctrl+e` | Edit issue |
+| `ctrl+e` | Edit issue (title, priority, parent, status, labels, description, notes) |
 | `ctrl+d` | Delete issue |
+
+### General
+
+| Key | Action |
+|-----|--------|
+| `ctrl+g` | Open git diff viewer |
+| `0`-`9` | Run a [user-defined action](../configuration/index.md#user-defined-actions) on the selected issue |
+
+See [Common Keybindings](index.md#common-keybindings) for mode switching, the chat panel, help, and quit.
 
 ---
 
@@ -96,14 +105,16 @@ The default view includes these columns (all configurable via BQL):
 
 ### BQL Columns
 
-BQL columns filter issues using [BQL queries](../bql/index.md). Any valid BQL expression can define a column:
+BQL columns filter issues using [BQL queries](../bql/index.md). Any valid BQL expression can define a column. Columns are defined inside a view (see [Configuring Views](#configuring-views)):
 
 ```yaml
-columns:
-  - name: "Critical Bugs"
-    type: bql
-    query: "type = bug and priority = P0"
-    color: "#FF8787"
+views:
+  - name: Default
+    columns:
+      - name: "Critical Bugs"
+        type: bql
+        query: "type = bug and priority = P0"
+        color: "#FF8787"
 ```
 
 ### Tree Columns
@@ -111,18 +122,22 @@ columns:
 Tree columns display dependency trees or child hierarchies rooted at a specific issue:
 
 ```yaml
-columns:
-  - name: "Current Work"
-    type: tree
-    issue_id: bd-123
-    tree_mode: child    # or "deps"
-    color: "#EF4444"
+views:
+  - name: Default
+    columns:
+      - name: "Current Work"
+        type: tree
+        issue_id: bd-123
+        tree_mode: child    # or "deps"
+        color: "#EF4444"
 ```
 
 | Tree Mode | Description |
 |-----------|-------------|
-| `child` | Show child issues of the root issue |
-| `deps` | Show dependency chain of the root issue |
+| `deps` (default) | Show the root issue's children plus the issues it blocks or that were discovered from it, recursively |
+| `child` | Show only the parent/child hierarchy below the root issue |
+
+Tree columns always show the downward direction. Press `m` on a focused tree column to toggle between modes (the toggle isn't saved to your config). `children` is accepted as an alias for `child`. You can also save a tree from the [Dependency Explorer](dependency-explorer.md) as a tree column with `ctrl+s`.
 
 ---
 
