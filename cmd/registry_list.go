@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"os"
+	"fmt"
 
 	"github.com/spf13/cobra"
 
@@ -45,6 +45,13 @@ Examples:
   perles registry:list | jq '.[].namespace'
   perles registry:list | jq '.[].labels'`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Build the registry service here: the package-level registryService is
+		// only initialized by the root TUI command (runApp).
+		svc, err := newRegistryService(cfg.Orchestration)
+		if err != nil {
+			return fmt.Errorf("initializing registry service: %w", err)
+		}
+
 		var registrations []*registry.Registration
 
 		hasNamespace := cmd.Flags().Changed("namespace")
@@ -53,17 +60,17 @@ Examples:
 		switch {
 		case hasNamespace && hasLabels:
 			// Combined filter: namespace first, then labels
-			byNamespace := registryService.GetByNamespace(regNamespace)
+			byNamespace := svc.GetByNamespace(regNamespace)
 			registrations = filterByLabels(byNamespace, regLabels)
 		case hasNamespace:
-			registrations = registryService.GetByNamespace(regNamespace)
+			registrations = svc.GetByNamespace(regNamespace)
 		case hasLabels:
-			registrations = registryService.GetByLabels(regLabels...)
+			registrations = svc.GetByLabels(regLabels...)
 		default:
-			registrations = registryService.List()
+			registrations = svc.List()
 		}
 
-		formatter := presentation.NewFormatter(os.Stdout)
+		formatter := presentation.NewFormatter(cmd.OutOrStdout())
 		dtos := presentation.FromDomainRegistrations(registrations)
 
 		return formatter.FormatRegistrations(dtos)

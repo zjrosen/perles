@@ -194,25 +194,30 @@ func writeDefaultConfigIfMissing() bool {
 	return true
 }
 
-func initServices() {
-	// Initialize registry service with embedded templates, community, and user-defined workflows
-	// templates.RegistryFS() contains template.yaml, workflow templates, and coordinator instructions
-	// Community workflows are loaded from communityworkflows.RegistryFS(), filtered by config
-	// User workflows are loaded from ~/.perles/workflows/*/template.yaml
+// newRegistryService builds the workflow registry service used by the
+// dashboard's New Workflow dialog: built-in templates (templates.RegistryFS()),
+// community workflows enabled in orchestration.community_workflows
+// (communityworkflows.RegistryFS()), and user workflows from
+// ~/.perles/workflows/*/template.yaml.
+func newRegistryService(orch config.OrchestrationConfig) (*appreg.RegistryService, error) {
 	var communitySource *appreg.CommunitySource
-	if len(cfg.Orchestration.CommunityWorkflows) > 0 {
+	if len(orch.CommunityWorkflows) > 0 {
 		communitySource = &appreg.CommunitySource{
 			FS:         communityworkflows.RegistryFS(),
-			EnabledIDs: cfg.Orchestration.CommunityWorkflows,
+			EnabledIDs: orch.CommunityWorkflows,
 		}
 	}
 
-	var err error
-	registryService, err = appreg.NewRegistryService(
+	return appreg.NewRegistryService(
 		templates.RegistryFS(),
 		communitySource,
 		appreg.UserRegistryBaseDir(),
 	)
+}
+
+func initServices() {
+	var err error
+	registryService, err = newRegistryService(cfg.Orchestration)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error initializing registry service:", err)
 		os.Exit(1)
