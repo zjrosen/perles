@@ -574,6 +574,35 @@ func TestMemoryQueueRepository_ConcurrentReadWrite(t *testing.T) {
 	wg.Wait()
 }
 
+// TestMemoryQueueRepository_ConcurrentSizeDuringQueueMutation verifies that
+// reading a queue's size through the repository (as read-only queries like
+// query_worker_state do) is safe while handlers mutate the same queue.
+func TestMemoryQueueRepository_ConcurrentSizeDuringQueueMutation(t *testing.T) {
+	repo := NewMemoryQueueRepository(0)
+	queue := repo.GetOrCreate("shared-worker")
+	var wg sync.WaitGroup
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			_ = queue.Enqueue("message", SenderUser)
+			queue.Dequeue()
+		}
+		queue.Drain()
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			repo.Size("shared-worker")
+			queue.IsEmpty()
+		}
+	}()
+
+	wg.Wait()
+	assert.Equal(t, 0, repo.Size("shared-worker"))
+}
+
 // TestMemoryQueueRepository_ConcurrentGetOrCreate verifies that concurrent
 // GetOrCreate calls for the same worker ID return the same queue instance.
 func TestMemoryQueueRepository_ConcurrentGetOrCreate(t *testing.T) {

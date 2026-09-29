@@ -5,6 +5,7 @@ package repository
 
 import (
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/zjrosen/perles/internal/orchestration/events"
@@ -193,9 +194,13 @@ type QueueEntry struct {
 // MessageQueue is a domain entity representing a worker's message queue.
 // The QueueRepository provides access to these entities.
 // MessageQueue maintains FIFO ordering and bounded capacity.
+// It is safe for concurrent use: handlers mutate queues on the processor
+// goroutine while read-only queries (e.g. query_worker_state) read sizes directly.
 type MessageQueue struct {
 	// WorkerID identifies which worker this queue belongs to.
 	WorkerID string
+	// mu guards entries.
+	mu sync.RWMutex
 	// entries holds the queued messages in FIFO order.
 	entries []QueueEntry
 	// maxSize is the maximum number of entries allowed (0 means unlimited).
@@ -215,6 +220,9 @@ func NewMessageQueue(workerID string, maxSize int) *MessageQueue {
 // Enqueue adds a message to the end of the queue with the specified sender.
 // Returns ErrQueueFull if the queue has reached maxSize (and maxSize > 0).
 func (q *MessageQueue) Enqueue(content string, sender SenderType) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
 	if q.maxSize > 0 && len(q.entries) >= q.maxSize {
 		return ErrQueueFull
 	}
@@ -229,6 +237,9 @@ func (q *MessageQueue) Enqueue(content string, sender SenderType) error {
 // Dequeue removes and returns the first message from the queue.
 // Returns the entry and true if the queue had a message, or an empty entry and false if empty.
 func (q *MessageQueue) Dequeue() (*QueueEntry, bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
 	if len(q.entries) == 0 {
 		return nil, false
 	}
@@ -240,6 +251,9 @@ func (q *MessageQueue) Dequeue() (*QueueEntry, bool) {
 // Drain removes and returns all messages from the queue, emptying it.
 // Returns an empty slice if the queue was already empty.
 func (q *MessageQueue) Drain() []QueueEntry {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
 	entries := q.entries
 	q.entries = make([]QueueEntry, 0)
 	return entries
@@ -247,11 +261,17 @@ func (q *MessageQueue) Drain() []QueueEntry {
 
 // Size returns the current number of messages in the queue.
 func (q *MessageQueue) Size() int {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
 	return len(q.entries)
 }
 
 // IsEmpty returns true if the queue has no messages.
 func (q *MessageQueue) IsEmpty() bool {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
 	return len(q.entries) == 0
 }
 

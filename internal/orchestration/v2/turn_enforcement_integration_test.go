@@ -436,9 +436,7 @@ func TestTurnEnforcement_SharedEnforcerAcrossHandlers(t *testing.T) {
 // TestTurnEnforcement_AnyRequiredToolSuffices verifies that calling any one of
 // the required tools satisfies the enforcement requirement.
 func TestTurnEnforcement_AnyRequiredToolSuffices(t *testing.T) {
-	requiredTools := []string{"fabric_send", "fabric_reply", "report_implementation_complete", "report_review_verdict", "signal_ready"}
-
-	for _, tool := range requiredTools {
+	for _, tool := range handler.RequiredTools {
 		t.Run(tool, func(t *testing.T) {
 			stack := newEnforcementTestStack(t)
 			defer stack.shutdown(t)
@@ -457,7 +455,12 @@ func TestTurnEnforcement_AnyRequiredToolSuffices(t *testing.T) {
 			stack.processor.Submit(turnCompleteCmd)
 			time.Sleep(50 * time.Millisecond)
 
-			// Verify no enforcement
+			// Verify no enforcement: a delivered reminder would leave the process Working
+			proc, err := stack.processRepo.Get(workerID)
+			require.NoError(t, err)
+			assert.Equal(t, repository.StatusReady, proc.Status,
+				"Calling %s should complete the turn without an enforcement reminder", tool)
+
 			depth := stack.getQueueSize(workerID)
 			assert.Equal(t, 0, depth, "Calling %s should satisfy enforcement requirement", tool)
 		})
