@@ -30,6 +30,7 @@ import (
 	"github.com/zjrosen/perles/internal/ui/shared/chatpanel"
 	"github.com/zjrosen/perles/internal/ui/shared/diffviewer"
 	"github.com/zjrosen/perles/internal/ui/shared/editor"
+	"github.com/zjrosen/perles/internal/ui/shared/toaster"
 )
 
 // TestMain initializes the global zone manager for all tests in this package.
@@ -2365,6 +2366,40 @@ func TestApp_ForwardsExternalEditorMessages(t *testing.T) {
 // =====================================================
 // Startup Configuration Tests (theme, tracing, session app name)
 // =====================================================
+
+func TestApp_InvalidTheme_SetsStartupWarningToast(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Theme.Preset = "no-such-preset"
+
+	model, err := NewWithConfig(AppConfig{
+		Cfg:     cfg,
+		Backend: &noopBackend{},
+		WorkDir: t.TempDir(),
+	})
+	require.NoError(t, err, "invalid theme must not be fatal")
+	require.Contains(t, model.startupWarning, "unknown theme preset: no-such-preset")
+
+	cmd := model.startupWarningCmd()
+	require.NotNil(t, cmd, "invalid theme should produce a startup toast")
+	msg, ok := cmd().(mode.ShowToastMsg)
+	require.True(t, ok, "startup warning should be a ShowToastMsg")
+	require.Equal(t, toaster.StyleWarn, msg.Style)
+	require.Contains(t, msg.Message, "Theme config ignored")
+	require.Contains(t, msg.Message, "no-such-preset")
+}
+
+func TestApp_ValidTheme_NoStartupWarning(t *testing.T) {
+	cfg := config.Defaults()
+
+	model, err := NewWithConfig(AppConfig{
+		Cfg:     cfg,
+		Backend: &noopBackend{},
+		WorkDir: t.TempDir(),
+	})
+	require.NoError(t, err)
+	require.Empty(t, model.startupWarning)
+	require.Nil(t, model.startupWarningCmd())
+}
 
 func TestApp_TracingDisabled_NoProvider(t *testing.T) {
 	cfg := config.Defaults()

@@ -110,6 +110,10 @@ type Model struct {
 	// Tracing provider for orchestration.tracing (nil when tracing is disabled).
 	// Owned by app: created at startup, shut down in Close() to flush spans.
 	tracingProvider *tracing.Provider
+
+	// startupWarning is a non-fatal configuration problem detected during
+	// NewWithConfig (e.g., an invalid theme). Shown as a warning toast on Init.
+	startupWarning string
 }
 
 // AppConfig holds all pre-constructed dependencies for the application.
@@ -206,7 +210,14 @@ func NewWithConfig(appCfg AppConfig) (Model, error) {
 		Mode:   cfg.Theme.Mode,
 		Colors: cfg.Theme.FlattenedColors(),
 	}
-	_ = styles.ApplyTheme(themeCfg)
+	// ApplyTheme validates everything before applying anything, so a single invalid
+	// preset, token, or color rejects the whole theme section. Keep startup
+	// non-fatal: log the error, keep the default theme, and surface a warning toast.
+	var startupWarning string
+	if err := styles.ApplyTheme(themeCfg); err != nil {
+		log.Warn(log.CatConfig, "Invalid theme configuration; theme section ignored, using default theme", "error", err)
+		startupWarning = "Theme config ignored: " + err.Error()
+	}
 
 	flagService := flags.New(cfg.Flags)
 
@@ -300,6 +311,7 @@ func NewWithConfig(appCfg AppConfig) (Model, error) {
 		}),
 		db:              db,
 		tracingProvider: tracingProvider,
+		startupWarning:  startupWarning,
 	}, nil
 }
 
@@ -318,7 +330,27 @@ func (m Model) Init() tea.Cmd {
 	if m.logListenCmd != nil {
 		cmds = append(cmds, m.logListenCmd)
 	}
+
+	// Surface non-fatal startup configuration problems (e.g., invalid theme)
+	if cmd := m.startupWarningCmd(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
 	return tea.Batch(cmds...)
+}
+
+// startupWarningCmd returns a command that shows the startup warning as a toast,
+// or nil when there is no warning.
+func (m Model) startupWarningCmd() tea.Cmd {
+	if m.startupWarning == "" {
+		return nil
+	}
+	warning := m.startupWarning
+	return func() tea.Msg {
+		return mode.ShowToastMsg{
+			Message: warning,
+			Style:   toaster.StyleWarn,
+		}
+	}
 }
 
 // Update implements tea.Model.
