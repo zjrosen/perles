@@ -6,8 +6,8 @@
 │  h          focus results     enter      open tree view    ctrl+space switch mode                           │
 │  l          focus details     y          copy issue ID     ?          toggle help                           │
 │  k/↑        move up           ctrl+s     save to view      q          quit                                  │
-│  j/↓        move down                                                                                       │
-│  /          focus search                                                                                    │
+│  j/↓        move down         ctrl+e     edit issue                                                         │
+│  /          focus search      ctrl+d     delete issue                                                       │
 │  esc        exit to kanban                                                                                  │
 │                                                                                                             │
 │                                                                                                             │

@@ -78,11 +78,8 @@ var Common = struct {
 // Kanban contains keybindings specific to kanban mode.
 var Kanban = struct {
 	Enter            key.Binding // Kanban-specific enter (open tree view)
-	Escape           key.Binding // Kanban-specific escape (go back)
 	Refresh          key.Binding
 	Yank             key.Binding
-	Status           key.Binding
-	Priority         key.Binding
 	AddColumn        key.Binding
 	EditColumn       key.Binding
 	MoveColumnLeft   key.Binding
@@ -102,10 +99,6 @@ var Kanban = struct {
 		key.WithKeys("enter"),
 		key.WithHelp("enter", "open tree view"),
 	),
-	Escape: key.NewBinding(
-		key.WithKeys("esc"),
-		key.WithHelp("esc", "go back"),
-	),
 	Refresh: key.NewBinding(
 		key.WithKeys("r"),
 		key.WithHelp("r", "refresh issues"),
@@ -113,14 +106,6 @@ var Kanban = struct {
 	Yank: key.NewBinding(
 		key.WithKeys("y"),
 		key.WithHelp("y", "copy issue ID"),
-	),
-	Status: key.NewBinding(
-		key.WithKeys("s"),
-		key.WithHelp("s", "change status"),
-	),
-	Priority: key.NewBinding(
-		key.WithKeys("p"),
-		key.WithHelp("p", "change priority"),
 	),
 	AddColumn: key.NewBinding(
 		key.WithKeys("a"),
@@ -191,8 +176,6 @@ var Search = struct {
 	Blur        key.Binding
 	OpenTree    key.Binding
 	Edit        key.Binding
-	Priority    key.Binding
-	Status      key.Binding
 	Yank        key.Binding
 	SaveColumn  key.Binding
 	SwitchMode  key.Binding
@@ -235,14 +218,6 @@ var Search = struct {
 	Edit: key.NewBinding(
 		key.WithKeys("enter"),
 		key.WithHelp("enter", "edit field"),
-	),
-	Priority: key.NewBinding(
-		key.WithKeys("p"),
-		key.WithHelp("p", "change priority"),
-	),
-	Status: key.NewBinding(
-		key.WithKeys("s"),
-		key.WithHelp("s", "change status"),
 	),
 	Yank: key.NewBinding(
 		key.WithKeys("y"),
@@ -519,9 +494,9 @@ func ShortHelp() []key.Binding {
 func FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{Common.Up, Common.Down, Common.Left, Common.Right},
-		{Common.Enter, Kanban.Refresh, Kanban.Yank, Kanban.Status, Kanban.Priority, Kanban.NewIssue, Kanban.AddColumn, Kanban.EditColumn, Kanban.MoveColumnLeft, Kanban.MoveColumnRight},
+		{Kanban.Enter, Kanban.Refresh, Kanban.Yank, Kanban.NewIssue, Component.EditAction, Component.DelAction, Kanban.AddColumn, Kanban.EditColumn, Kanban.MoveColumnLeft, Kanban.MoveColumnRight},
 		{Kanban.NextView, Kanban.PrevView, Kanban.ViewMenu, Kanban.DeleteColumn},
-		{Common.Help, Kanban.ToggleStatus, Common.Escape, Kanban.QuitConfirm},
+		{Common.Help, Kanban.ToggleStatus, Kanban.QuitConfirm},
 	}
 }
 
@@ -576,7 +551,7 @@ var Dashboard = struct {
 	),
 	Enter: key.NewBinding(
 		key.WithKeys("enter"),
-		key.WithHelp("enter", "view details"),
+		key.WithHelp("enter", "focus coordinator chat"),
 	),
 	Start: key.NewBinding(
 		key.WithKeys("s"),

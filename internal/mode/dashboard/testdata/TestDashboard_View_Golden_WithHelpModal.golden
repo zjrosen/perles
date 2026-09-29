@@ -7,22 +7,22 @@
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
-│                                                                                                                      │
-│       ╭─────────────────────────────────────────────────────────────────────────────────────────────────────╮        │
-│       │  Dashboard Help                                                                                     │        │
-│       │─────────────────────────────────────────────────────────────────────────────────────────────────────│        │
-╰───────│                                                                                                     │────────╯
- No epic│  Navigation                     Workflow Actions                    Epic Tree                       │         
-╭───────│  k/↑        move up             s          start/resume workflow    ctrl+e     edit issue           │────────╮
-│j/k nav│  j/↓        move down           x          pause workflow           y          copy ID/description  │        │
-╰───────│  g          go to first         n          new workflow             h/l        tree ↔ details       │────────╯
-        │  G          go to last          ?          toggle help              d          toggle direction     │         
-        │  Tab        cycle focus zone    q          quit                     m          toggle mode          │         
-        │                                                                                                     │         
-        │                                                                                                     │         
-        │  Press ? or Esc to close                                                                            │         
-        ╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯         
-                                                                                                                        
+│      ╭───────────────────────────────────────────────────────────────────────────────────────────────────────╮       │
+│      │  Dashboard Help                                                                                       │       │
+│      │───────────────────────────────────────────────────────────────────────────────────────────────────────│       │
+│      │                                                                                                       │       │
+╰──────│  Navigation                     Workflow Actions                    Epic Tree                         │───────╯
+ No epi│  k/↑        move up             s          start/resume workflow    ctrl+e     edit issue             │        
+╭──────│  j/↓        move down           x          pause workflow           c          add comment (details)  │───────╮
+│j/k na│  g          go to first         n          new workflow             y          copy ID/description    │       │
+╰──────│  G          go to last          ?          toggle help              h/l        tree ↔ details         │───────╯
+       │  Tab        cycle focus zone    q          quit                     enter      refocus on node        │        
+       │                                                                     d          toggle direction       │        
+       │                                                                     m          toggle mode            │        
+       │                                                                                                       │        
+       │                                                                                                       │        
+       │  Press ? or Esc to close                                                                              │        
+       ╰───────────────────────────────────────────────────────────────────────────────────────────────────────╯        
                                                                                                                         
                                                                                                                         
                                                                                                                         

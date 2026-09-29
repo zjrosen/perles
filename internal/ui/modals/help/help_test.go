@@ -68,7 +68,20 @@ func TestHelp_View_ContainsKeybindings(t *testing.T) {
 	// General keys
 	require.Contains(t, view, "?", "expected view to contain help key")
 	require.Contains(t, view, "q", "expected view to contain quit key")
-	require.Contains(t, view, "esc", "expected view to contain escape key")
+
+	// Issue editing goes through the unified issue editor
+	require.Contains(t, view, "ctrl+e", "expected view to contain issue editor key")
+	require.Contains(t, view, "edit issue", "expected view to describe issue editor")
+}
+
+func TestHelp_View_OmitsUnhandledKeys(t *testing.T) {
+	m := New().SetSize(120, 40)
+	view := m.View()
+
+	// s/p pickers were replaced by the ctrl+e issue editor; esc has no board handler.
+	require.NotContains(t, view, "change status", "kanban help should not advertise s (change status)")
+	require.NotContains(t, view, "change priority", "kanban help should not advertise p (change priority)")
+	require.NotContains(t, view, "go back", "kanban help should not advertise esc (go back)")
 }
 
 func TestHelp_View_ContainsFooter(t *testing.T) {
@@ -289,6 +302,11 @@ func TestHelp_SearchView_ContainsKeybindings(t *testing.T) {
 	// Actions
 	require.Contains(t, view, "y", "expected y for copy issue ID")
 	require.Contains(t, view, "ctrl+s", "expected ctrl+s for save as column")
+	require.Contains(t, view, "ctrl+e", "expected ctrl+e for edit issue")
+	require.Contains(t, view, "edit issue", "expected edit issue description")
+	require.Contains(t, view, "ctrl+d", "expected ctrl+d for delete issue")
+	require.NotContains(t, view, "change status", "search help should not advertise s (change status)")
+	require.NotContains(t, view, "change priority", "search help should not advertise p (change priority)")
 }
 
 func TestHelp_SearchView_ContainsExamples(t *testing.T) {
@@ -341,6 +359,29 @@ func TestHelp_TreeView_Golden(t *testing.T) {
 	view := m.View()
 
 	teatest.RequireEqualOutput(t, []byte(view))
+}
+
+func TestHelp_TreeView_ContainsIssueActions(t *testing.T) {
+	m := New().SetMode(ModeSearchTree).SetSize(120, 40)
+	view := m.View()
+
+	require.Contains(t, view, "toggle direction", "expected d for toggle direction")
+	require.Contains(t, view, "ctrl+s", "expected ctrl+s for save to view")
+	require.Contains(t, view, "ctrl+e", "expected ctrl+e for edit issue")
+	require.Contains(t, view, "ctrl+d", "expected ctrl+d for delete issue")
+}
+
+func TestHelp_DashboardView_EpicTreeKeys(t *testing.T) {
+	m := NewDashboard().SetSize(120, 40)
+	view := m.View()
+
+	require.Contains(t, view, "Epic Tree", "expected Epic Tree section")
+	require.Contains(t, view, "ctrl+e", "expected ctrl+e for edit issue")
+	require.Contains(t, view, "add comment", "expected c for add comment")
+	require.Contains(t, view, "copy ID/description", "expected y for copy")
+	require.Contains(t, view, "refocus on node", "expected enter for refocus")
+	require.Contains(t, view, "toggle direction", "expected d for toggle direction")
+	require.Contains(t, view, "toggle mode", "expected m for toggle mode")
 }
 
 // TestHelpOverlay_ShowsCustomKeys verifies help displays configured key bindings, not hardcoded defaults

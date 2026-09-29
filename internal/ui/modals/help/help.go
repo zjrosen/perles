@@ -271,7 +271,6 @@ func (m Model) renderKanbanContent() string {
 	generalCol.WriteString("\n")
 	generalCol.WriteString(renderBinding(keys.Common.Help))
 	generalCol.WriteString(renderBinding(keys.Kanban.ToggleStatus))
-	generalCol.WriteString(renderBinding(keys.Kanban.Escape))
 	generalCol.WriteString(renderBinding(keys.Common.Quit))
 
 	// User Actions below General (only if user has configured actions)
@@ -346,6 +345,8 @@ func (m Model) renderSearchContent() string {
 	actionsCol.WriteString(renderBinding(keys.Search.OpenTree))
 	actionsCol.WriteString(renderBinding(keys.Search.Yank))
 	actionsCol.WriteString(renderBinding(keys.Search.SaveColumn))
+	actionsCol.WriteString(renderBinding(keys.Component.EditAction))
+	actionsCol.WriteString(renderBinding(keys.Component.DelAction))
 
 	// General column
 	var generalCol strings.Builder
@@ -509,6 +510,9 @@ func (m Model) renderTreeContent() string {
 	actionsCol.WriteString(renderKeyDesc("d", "toggle direction"))
 	actionsCol.WriteString(renderKeyDesc("m", "toggle mode (deps/children)"))
 	actionsCol.WriteString(renderKeyDesc("y", "copy issue ID"))
+	actionsCol.WriteString(renderBinding(keys.Search.SaveColumn))
+	actionsCol.WriteString(renderBinding(keys.Component.EditAction))
+	actionsCol.WriteString(renderBinding(keys.Component.DelAction))
 
 	// General column
 	var generalCol strings.Builder
@@ -578,8 +582,10 @@ func (m Model) renderDashboardContent() string {
 	treeCol.WriteString(sectionStyle.Render("Epic Tree"))
 	treeCol.WriteString("\n")
 	treeCol.WriteString(renderBinding(keys.Component.EditAction))
+	treeCol.WriteString(renderKeyDesc("c", "add comment (details)"))
 	treeCol.WriteString(renderKeyDesc("y", "copy ID/description"))
 	treeCol.WriteString(renderKeyDesc("h/l", "tree ↔ details"))
+	treeCol.WriteString(renderKeyDesc("enter", "refocus on node"))
 	treeCol.WriteString(renderKeyDesc("d", "toggle direction"))
 	treeCol.WriteString(renderKeyDesc("m", "toggle mode"))
 

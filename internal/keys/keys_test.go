@@ -44,6 +44,36 @@ func TestDashboardFullHelp_IncludesRename(t *testing.T) {
 	require.Contains(t, help[2], Dashboard.Rename)
 }
 
+// ============================================================================
+// Kanban Full Help Tests
+// ============================================================================
+
+func TestFullHelp_DoesNotAdvertiseUnhandledKeys(t *testing.T) {
+	// s/p (status/priority pickers) were replaced by the unified issue editor
+	// (ctrl+e), and esc has no board-level handler, so help must not list them.
+	for _, row := range FullHelp() {
+		for _, b := range row {
+			for _, k := range b.Keys() {
+				require.NotContains(t, []string{"s", "p", "esc"}, k,
+					"kanban full help should not advertise %q (%s)", k, b.Help().Desc)
+			}
+		}
+	}
+}
+
+func TestFullHelp_IncludesIssueEditor(t *testing.T) {
+	help := FullHelp()
+	require.Len(t, help, 4, "full help should contain 4 rows")
+	require.Contains(t, help[1], Kanban.Enter)
+	require.Contains(t, help[1], Component.EditAction)
+	require.Contains(t, help[1], Component.DelAction)
+}
+
+func TestComponent_EditAction_KeyAssignment(t *testing.T) {
+	require.Equal(t, []string{"ctrl+e"}, Component.EditAction.Keys())
+	require.Equal(t, "edit issue", Component.EditAction.Help().Desc)
+}
+
 func TestComponent_CommentAction_KeyAssignment(t *testing.T) {
 	keys := Component.CommentAction.Keys()
 	require.Equal(t, []string{"c"}, keys, "CommentAction should be bound to c")
