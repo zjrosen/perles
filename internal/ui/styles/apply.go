@@ -330,7 +330,7 @@ func rebuildStyles() {
 	PriorityBacklogStyle = lipgloss.NewStyle().Foreground(PriorityBacklogColor)
 
 	// Type styles
-	TypeBugStyle = lipgloss.NewStyle().Foreground(StatusErrorColor)
+	TypeBugStyle = lipgloss.NewStyle().Foreground(IssueBugColor)
 	TypeFeatureStyle = lipgloss.NewStyle().Foreground(IssueFeatureColor)
 	TypeTaskStyle = lipgloss.NewStyle().Foreground(IssueTaskColor)
 	TypeEpicStyle = lipgloss.NewStyle().Foreground(IssueEpicColor)

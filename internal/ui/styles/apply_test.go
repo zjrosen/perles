@@ -3,8 +3,23 @@ package styles
 import (
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/stretchr/testify/require"
+
+	"github.com/zjrosen/perles/internal/task"
 )
+
+// resetThemeAfter restores the default theme once the test finishes so
+// global color state doesn't leak between tests.
+func resetThemeAfter(t *testing.T) {
+	t.Helper()
+	t.Cleanup(func() { _ = ApplyTheme(ThemeConfig{}) })
+}
+
+// themeColor mirrors how ApplyTheme builds colors from a hex value.
+func themeColor(hex string) lipgloss.AdaptiveColor {
+	return lipgloss.AdaptiveColor{Light: hex, Dark: hex}
+}
 
 func TestApplyTheme_Default(t *testing.T) {
 	err := ApplyTheme(ThemeConfig{})
@@ -182,6 +197,39 @@ func TestIsValidHexColor(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.color, func(t *testing.T) {
 			require.Equal(t, tt.valid, isValidHexColor(tt.color))
+		})
+	}
+}
+
+func TestApplyTheme_TypeBugDrivesTypeBugStyle(t *testing.T) {
+	resetThemeAfter(t)
+
+	err := ApplyTheme(ThemeConfig{
+		Colors: map[string]string{
+			"type.bug":     "#123456",
+			"status.error": "#654321",
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, themeColor("#123456"), IssueBugColor)
+	require.Equal(t, themeColor("#123456"), TypeBugStyle.GetForeground(),
+		"type.bug should color bug type badges")
+	require.Equal(t, themeColor("#654321"), ErrorStyle.GetForeground(),
+		"status.error should still drive error display")
+	require.Equal(t, themeColor("#123456"), GetTypeStyle(task.TypeBug).GetForeground())
+}
+
+func TestApplyTheme_PresetTypeBugMatchesStatusError(t *testing.T) {
+	// Every built-in preset sets type.bug to its status.error color, so moving
+	// TypeBugStyle onto type.bug must not change how bug badges render.
+	resetThemeAfter(t)
+
+	for name, preset := range Presets {
+		t.Run(name, func(t *testing.T) {
+			require.Equal(t, preset.Colors[TokenStatusError], preset.Colors[TokenTypeBug])
+
+			require.NoError(t, ApplyTheme(ThemeConfig{Preset: name}))
+			require.Equal(t, themeColor(preset.Colors[TokenStatusError]), TypeBugStyle.GetForeground())
 		})
 	}
 }
