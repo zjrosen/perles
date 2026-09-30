@@ -2,12 +2,15 @@ package session
 
 import (
 	"context"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
 	"github.com/zjrosen/perles/internal/orchestration/client"
 	"github.com/zjrosen/perles/internal/orchestration/client/providers/amp"
 	"github.com/zjrosen/perles/internal/orchestration/client/providers/claude"
@@ -41,9 +44,6 @@ func TestCostFlowEndToEnd_Claude(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	session.AttachV2EventBus(ctx, v2EventBus)
-
-	// Give goroutine time to start
-	time.Sleep(10 * time.Millisecond)
 
 	// Load and parse Claude testdata
 	testdataPath := filepath.Join("..", "client", "providers", "claude", "testdata", "events.jsonl")
@@ -97,8 +97,7 @@ func TestCostFlowEndToEnd_Claude(t *testing.T) {
 		}
 	}
 
-	// Give time for events to be processed
-	time.Sleep(50 * time.Millisecond)
+	waitForTokenUsage(t, session, expectedCost, expectedOutputTokens)
 
 	// Close session to flush buffers
 	err = session.Close(StatusCompleted)
@@ -154,9 +153,6 @@ func TestCostFlowEndToEnd_Amp(t *testing.T) {
 	defer cancel()
 	session.AttachV2EventBus(ctx, v2EventBus)
 
-	// Give goroutine time to start
-	time.Sleep(10 * time.Millisecond)
-
 	// Load and parse Amp testdata
 	testdataPath := filepath.Join("..", "client", "providers", "amp", "testdata", "events.jsonl")
 	data, err := os.ReadFile(testdataPath)
@@ -205,8 +201,7 @@ func TestCostFlowEndToEnd_Amp(t *testing.T) {
 		}
 	}
 
-	// Give time for events to be processed
-	time.Sleep(50 * time.Millisecond)
+	waitForTokenUsage(t, session, expectedCost, expectedOutputTokens)
 
 	// Close session to flush buffers
 	err = session.Close(StatusCompleted)
@@ -258,9 +253,6 @@ func TestMultiProcessCostAggregation(t *testing.T) {
 	defer cancel()
 	session.AttachV2EventBus(ctx, v2EventBus)
 
-	// Give goroutine time to start
-	time.Sleep(10 * time.Millisecond)
-
 	// Add workers to the session first (workers must exist before their token usage can be tracked)
 	now := time.Now()
 	session.addWorker("worker-1", now, "/project")
@@ -296,8 +288,7 @@ func TestMultiProcessCostAggregation(t *testing.T) {
 			TotalCostUSD: worker2Cost,
 		}))
 
-	// Give time for events to be processed
-	time.Sleep(50 * time.Millisecond)
+	waitForTokenUsage(t, session, expectedTotalCost, 500+300+400)
 
 	// Close session to flush buffers
 	err = session.Close(StatusCompleted)
@@ -349,9 +340,6 @@ func TestMultiProcessCostAggregation_MultiTurn(t *testing.T) {
 	defer cancel()
 	session.AttachV2EventBus(ctx, v2EventBus)
 
-	// Give goroutine time to start
-	time.Sleep(10 * time.Millisecond)
-
 	// Simulate 5 turns with known costs
 	turnCosts := []float64{0.01, 0.02, 0.015, 0.01, 0.025}
 	expectedTotalCost := 0.0
@@ -370,8 +358,7 @@ func TestMultiProcessCostAggregation_MultiTurn(t *testing.T) {
 			}))
 	}
 
-	// Give time for events to be processed
-	time.Sleep(50 * time.Millisecond)
+	waitForTokenUsage(t, session, expectedTotalCost, len(turnCosts)*100)
 
 	// Close session to flush buffers
 	err = session.Close(StatusCompleted)
@@ -401,6 +388,22 @@ func TestMultiProcessCostAggregation_MultiTurn(t *testing.T) {
 	// Verify output tokens accumulated correctly (5 turns * 100 = 500)
 	require.Equal(t, 500, meta.TokenUsage.TotalOutputTokens,
 		"Output tokens should be sum of all turns")
+}
+
+// waitForTokenUsage waits until the session has applied the published token
+// usage events, i.e. its running totals reach the expected cost and output
+// tokens. AttachV2EventBus applies events on its own goroutine and Close drops
+// any that arrive after it, so asserting right after publishing is racy. The
+// wait is non-fatal: if the totals never converge (a real aggregation bug),
+// the test still fails, and the metadata assertions report the actual values.
+func waitForTokenUsage(t *testing.T, s *Session, wantCostUSD float64, wantOutputTokens int) {
+	t.Helper()
+	assert.Eventually(t, func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.tokenUsage.TotalOutputTokens == wantOutputTokens &&
+			math.Abs(s.tokenUsage.TotalCostUSD-wantCostUSD) < 1e-9
+	}, 10*time.Second, time.Millisecond, "session did not apply all published token usage events")
 }
 
 // splitJSONL splits a byte slice into lines, handling JSONL format.
