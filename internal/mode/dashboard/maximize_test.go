@@ -2,28 +2,39 @@ package dashboard
 
 import (
 	"testing"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
 	"github.com/stretchr/testify/require"
 
 	"github.com/zjrosen/perles/internal/orchestration/controlplane"
+	"github.com/zjrosen/perles/internal/testutil/zonetest"
 )
 
-func requireDashboardActionZoneInfo(t *testing.T, zoneID string, render func()) *zone.ZoneInfo {
+// dashboardActionZoneIDs are the pane header action ([+]/[-]) zones that
+// handleMouseMsg hit-tests. Maximizing a pane stops rendering the others.
+var dashboardActionZoneIDs = []string{
+	zoneWorkflowAction,
+	zoneEpicTreeAction,
+	zoneEpicDetailsAction,
+	zoneCoordinatorContentAction,
+	zoneCoordinatorInputAction,
+}
+
+// requireDashboardActionZoneInfo renders m, waits until bubblezone has stored
+// the zones of that render, and returns the bounds of zoneID in it.
+func requireDashboardActionZoneInfo(t *testing.T, m Model, zoneID string) *zone.ZoneInfo {
 	t.Helper()
 
-	var z *zone.ZoneInfo
-	for retries := 0; retries < 10; retries++ {
-		render()
-		z = zone.Get(zoneID)
-		if z != nil && !z.IsZero() {
-			return z
-		}
-		time.Sleep(time.Millisecond)
-	}
+	// With no modal open, View() is zone.Scan(m.renderView()). Scanning that
+	// render through zonetest waits for its zones to be stored, so the bounds
+	// read here and by the click handler come from this layout, not the
+	// previous one. Action zones from an earlier layout (or subtest) that this
+	// render doesn't draw are cleared first, so the click can't match one of
+	// them at the same position.
+	zonetest.ScanAndWait(t, m.renderView(), dashboardActionZoneIDs...)
 
+	z := zone.Get(zoneID)
 	require.NotNil(t, z, "zone %q should be registered", zoneID)
 	require.False(t, z.IsZero(), "zone %q should not be zero", zoneID)
 	return z
@@ -131,8 +142,7 @@ func TestDashboard_MouseClick_HeaderActionsMaximizeAndRestorePanes(t *testing.T)
 		t.Run(tt.name, func(t *testing.T) {
 			m := tt.build(t)
 
-			_ = m.View()
-			z := requireDashboardActionZoneInfo(t, tt.zoneID, func() { _ = m.View() })
+			z := requireDashboardActionZoneInfo(t, m, tt.zoneID)
 
 			controller, cmd := m.Update(tea.MouseMsg{
 				X:      z.StartX + 1,
@@ -146,8 +156,7 @@ func TestDashboard_MouseClick_HeaderActionsMaximizeAndRestorePanes(t *testing.T)
 			require.Equal(t, tt.pane, m.maximizedPane, "clicked pane should become fullscreen")
 			tt.assertPane(t, m)
 
-			_ = m.View()
-			z = requireDashboardActionZoneInfo(t, tt.zoneID, func() { _ = m.View() })
+			z = requireDashboardActionZoneInfo(t, m, tt.zoneID)
 
 			controller, cmd = m.Update(tea.MouseMsg{
 				X:      z.StartX + 1,
