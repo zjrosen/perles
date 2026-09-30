@@ -238,14 +238,16 @@ func TestStartup_PartialKeybindings(t *testing.T) {
 // Config Loading Tests
 // ============================================================================
 
-// isolateConfig gives a test a clean global config state: HOME and the working
-// directory point at fresh temp dirs (so no real config file is found), and
+// isolateConfig gives a test a clean global config state: the home directory
+// (HOME, and USERPROFILE for Windows) and the working directory point at fresh
+// temp dirs (so no real config file is found), and
 // viper, cfg, cfgFile and configNotFound are reset before and after the test.
 func isolateConfig(t *testing.T) (home, workDir string) {
 	t.Helper()
 	home = t.TempDir()
 	workDir = t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir reads USERPROFILE on Windows
 	t.Chdir(workDir)
 
 	origCfg, origCfgFile := cfg, cfgFile

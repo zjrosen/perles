@@ -2890,9 +2890,17 @@ func TestExtensionsForObserver_Unknown(t *testing.T) {
 
 // Tests for ExpandHome / ExpandPaths
 
+// setTestHome points os.UserHomeDir at dir on every platform: it reads HOME on
+// Unix and USERPROFILE on Windows.
+func setTestHome(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+}
+
 func TestExpandHome(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 
 	tests := []struct {
 		name string
@@ -2918,7 +2926,7 @@ func TestExpandHome(t *testing.T) {
 
 func TestConfig_ExpandPaths(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 
 	overrides := []string{"~/.perles/sounds/a.wav", "/abs/b.wav"}
 	cfg := Config{
@@ -2956,7 +2964,7 @@ func TestConfig_ExpandPaths_NilSoundEvents(t *testing.T) {
 
 func TestConfig_ExpandPaths_TildePathsPassValidation(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	soundsDir := filepath.Join(home, ".perles", "sounds")
 	require.NoError(t, os.MkdirAll(soundsDir, 0o750))
 	require.NoError(t, os.WriteFile(filepath.Join(soundsDir, "done.wav"), []byte("RIFF"), 0o600))
