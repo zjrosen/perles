@@ -1,6 +1,8 @@
 package fabric
 
 import (
+	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -40,6 +42,170 @@ func (m *mockSlugLookup) GetChannelSlug(channelID string) string {
 	return m.slugs[channelID]
 }
 
+// The broker handles events on its own goroutine and only sends notifications
+// once a debounce timer fires. Sleeping a fixed time and then asserting is racy:
+// on a slow or loaded runner (Windows CI in particular, where timer and
+// goroutine wakeups are coarse) the timer can fire after the test has looked,
+// and a stalled loop can let the timer fire between events that should batch.
+// testBroker removes both races: its timers only fire when the test fires them,
+// and a barrier event tells the test when the loop has handled everything sent
+// before it.
+
+// settleTimeout bounds each wait on the broker loop. It is only reached if the
+// broker is broken, so it is generous enough to survive a heavily starved
+// runner.
+const settleTimeout = 30 * time.Second
+
+// barrierChannelPrefix marks the channel ID of testBroker barrier events.
+const barrierChannelPrefix = "test-barrier-"
+
+// fakeClock is a Clock whose timers only fire when the test fires them.
+type fakeClock struct {
+	mu     sync.Mutex
+	timers []*fakeTimer
+}
+
+func (c *fakeClock) Now() time.Time { return time.Unix(0, 0) }
+
+func (c *fakeClock) NewTimer(d time.Duration) Timer {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	tm := &fakeTimer{ch: make(chan time.Time), d: d}
+	c.timers = append(c.timers, tm)
+	return tm
+}
+
+// durations returns the duration of every timer created so far, oldest first.
+func (c *fakeClock) durations() []time.Duration {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ds := make([]time.Duration, len(c.timers))
+	for i, tm := range c.timers {
+		ds[i] = tm.d
+	}
+	return ds
+}
+
+// takeActiveTimer marks the most recently created timer fired and returns it,
+// or returns nil if there is none or it was already stopped or fired.
+func (c *fakeClock) takeActiveTimer() *fakeTimer {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.timers) == 0 {
+		return nil
+	}
+	tm := c.timers[len(c.timers)-1]
+	if !tm.markDone() {
+		return nil
+	}
+	return tm
+}
+
+// fakeTimer has an unbuffered channel, so a completed send means the broker
+// loop has received the tick.
+type fakeTimer struct {
+	ch   chan time.Time
+	d    time.Duration
+	mu   sync.Mutex
+	done bool // stopped or fired
+}
+
+func (t *fakeTimer) C() <-chan time.Time { return t.ch }
+
+func (t *fakeTimer) Stop() bool { return t.markDone() }
+
+// markDone marks the timer stopped or fired and reports whether it was active.
+func (t *fakeTimer) markDone() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	wasActive := !t.done
+	t.done = true
+	return wasActive
+}
+
+// barrierSubscriptions reports barrier events as the broker loop handles them.
+// Every message event looks up its channel's subscribers, so a lookup for a
+// barrier channel means the loop has finished every event queued before it.
+type barrierSubscriptions struct {
+	repository.SubscriptionRepository
+	reached chan<- string
+}
+
+func (s *barrierSubscriptions) ListForChannel(channelID string) ([]domain.Subscription, error) {
+	if strings.HasPrefix(channelID, barrierChannelPrefix) {
+		s.reached <- channelID
+		return nil, nil
+	}
+	return s.SubscriptionRepository.ListForChannel(channelID)
+}
+
+// testBroker is a Broker driven by a fakeClock, with helpers to wait for its
+// event loop instead of sleeping.
+type testBroker struct {
+	*Broker
+	t           *testing.T
+	clock       *fakeClock
+	barriers    chan string
+	barrierSeen int
+}
+
+// newTestBroker creates (but does not start) a Broker from cfg, replacing its
+// clock with a fakeClock and wrapping its subscriptions to detect barriers.
+func newTestBroker(t *testing.T, cfg BrokerConfig) *testBroker {
+	t.Helper()
+	require.Nil(t, cfg.Clock, "newTestBroker installs its own clock")
+
+	clock := &fakeClock{}
+	barriers := make(chan string, 1)
+	cfg.Clock = clock
+	cfg.Subscriptions = &barrierSubscriptions{
+		SubscriptionRepository: cfg.Subscriptions,
+		reached:                barriers,
+	}
+	return &testBroker{Broker: NewBroker(cfg), t: t, clock: clock, barriers: barriers}
+}
+
+// drain blocks until the broker loop has handled every event sent so far. The
+// barrier event it sends has no subscribers or mentions, so it notifies no one.
+func (b *testBroker) drain() {
+	b.t.Helper()
+	b.barrierSeen++
+	id := fmt.Sprintf("%s%d", barrierChannelPrefix, b.barrierSeen)
+	b.HandleEvent(Event{
+		Type:      EventMessagePosted,
+		ChannelID: id,
+		Thread:    &domain.Thread{ID: id, Type: domain.ThreadMessage, CreatedBy: "test-barrier"},
+	})
+
+	select {
+	case got := <-b.barriers:
+		require.Equal(b.t, id, got, "broker loop reached barriers out of order")
+	case <-time.After(settleTimeout):
+		b.t.Fatalf("broker loop did not handle barrier %s within %s", id, settleTimeout)
+	}
+}
+
+// settle ends the debounce window: it waits for the broker loop to handle every
+// event sent so far, fires the debounce timer if one is running, and waits for
+// the resulting flush to finish, so all notifications have been submitted.
+func (b *testBroker) settle() {
+	b.t.Helper()
+	b.drain()
+
+	tm := b.clock.takeActiveTimer()
+	if tm == nil {
+		return // nothing pending, so nothing to flush
+	}
+	select {
+	case tm.ch <- b.clock.Now():
+	case <-time.After(settleTimeout):
+		b.t.Fatalf("broker loop did not receive the debounce timer within %s", settleTimeout)
+	}
+	// The loop flushes right after receiving the tick, before it can read the
+	// next event, so handling another barrier means the flush has finished.
+	b.drain()
+}
+
 func TestBroker_New(t *testing.T) {
 	subs := repository.NewMemorySubscriptionRepository()
 	submitter := &mockCommandSubmitter{}
@@ -57,7 +223,7 @@ func TestBroker_MentionBasedNotification(t *testing.T) {
 	subs := repository.NewMemorySubscriptionRepository()
 	submitter := &mockCommandSubmitter{}
 
-	broker := NewBroker(BrokerConfig{
+	broker := newTestBroker(t, BrokerConfig{
 		CmdSubmitter:  submitter,
 		Subscriptions: subs,
 		Debounce:      10 * time.Millisecond,
@@ -87,7 +253,7 @@ func TestBroker_MentionBasedNotification(t *testing.T) {
 	broker.HandleEvent(event)
 
 	// Wait for debounce to flush
-	time.Sleep(50 * time.Millisecond)
+	broker.settle()
 
 	cmds := submitter.getCommands()
 	require.Len(t, cmds, 1)
@@ -103,7 +269,7 @@ func TestBroker_SubscriptionModeAll(t *testing.T) {
 	subs := repository.NewMemorySubscriptionRepository()
 	submitter := &mockCommandSubmitter{}
 
-	broker := NewBroker(BrokerConfig{
+	broker := newTestBroker(t, BrokerConfig{
 		CmdSubmitter:  submitter,
 		Subscriptions: subs,
 		Debounce:      10 * time.Millisecond,
@@ -130,7 +296,7 @@ func TestBroker_SubscriptionModeAll(t *testing.T) {
 	}
 
 	broker.HandleEvent(event)
-	time.Sleep(50 * time.Millisecond)
+	broker.settle()
 
 	// WORKER.2 should still be notified (mode=all)
 	cmds := submitter.getCommands()
@@ -145,7 +311,7 @@ func TestBroker_SubscriptionModeNone(t *testing.T) {
 	subs := repository.NewMemorySubscriptionRepository()
 	submitter := &mockCommandSubmitter{}
 
-	broker := NewBroker(BrokerConfig{
+	broker := newTestBroker(t, BrokerConfig{
 		CmdSubmitter:  submitter,
 		Subscriptions: subs,
 		Debounce:      10 * time.Millisecond,
@@ -172,7 +338,7 @@ func TestBroker_SubscriptionModeNone(t *testing.T) {
 	}
 
 	broker.HandleEvent(event)
-	time.Sleep(50 * time.Millisecond)
+	broker.settle()
 
 	// WORKER.2 should be notified via explicit mention even with mode=none
 	cmds := submitter.getCommands()
@@ -183,7 +349,7 @@ func TestBroker_NoSelfNotification(t *testing.T) {
 	subs := repository.NewMemorySubscriptionRepository()
 	submitter := &mockCommandSubmitter{}
 
-	broker := NewBroker(BrokerConfig{
+	broker := newTestBroker(t, BrokerConfig{
 		CmdSubmitter:  submitter,
 		Subscriptions: subs,
 		Debounce:      10 * time.Millisecond,
@@ -210,7 +376,7 @@ func TestBroker_NoSelfNotification(t *testing.T) {
 	}
 
 	broker.HandleEvent(event)
-	time.Sleep(50 * time.Millisecond)
+	broker.settle()
 
 	// No notification - sender is excluded
 	cmds := submitter.getCommands()
@@ -221,7 +387,7 @@ func TestBroker_BatchMultipleSenders(t *testing.T) {
 	subs := repository.NewMemorySubscriptionRepository()
 	submitter := &mockCommandSubmitter{}
 
-	broker := NewBroker(BrokerConfig{
+	broker := newTestBroker(t, BrokerConfig{
 		CmdSubmitter:  submitter,
 		Subscriptions: subs,
 		Debounce:      10 * time.Millisecond,
@@ -248,7 +414,16 @@ func TestBroker_BatchMultipleSenders(t *testing.T) {
 		broker.HandleEvent(event)
 	}
 
-	time.Sleep(50 * time.Millisecond)
+	// All three messages are handled but the debounce window is still open.
+	broker.drain()
+	require.Empty(t, submitter.getCommands(), "no notification before the debounce timer fires")
+	timers := broker.clock.durations()
+	require.NotEmpty(t, timers, "handling a message should start the debounce timer")
+	for _, d := range timers {
+		require.Equal(t, 10*time.Millisecond, d, "debounce timer should use the configured duration")
+	}
+
+	broker.settle()
 
 	// Single batched notification to coordinator
 	cmds := submitter.getCommands()
@@ -263,6 +438,49 @@ func TestBroker_BatchMultipleSenders(t *testing.T) {
 	assert.Contains(t, sendCmd.Content, "WORKER.3")
 }
 
+// TestBroker_RealClockFlush covers the RealClock timer that the other tests
+// replace with fakeClock. It waits for the notification rather than sleeping a
+// fixed time, so a slow runner only makes it take longer.
+func TestBroker_RealClockFlush(t *testing.T) {
+	subs := repository.NewMemorySubscriptionRepository()
+	submitter := &mockCommandSubmitter{}
+
+	broker := NewBroker(BrokerConfig{
+		CmdSubmitter:  submitter,
+		Subscriptions: subs,
+		Debounce:      10 * time.Millisecond,
+	})
+
+	channelID := "channel-tasks"
+	_, err := subs.Subscribe(channelID, "COORDINATOR", domain.ModeAll)
+	require.NoError(t, err)
+
+	broker.Start()
+	defer broker.Stop()
+
+	broker.HandleEvent(Event{
+		Type:      EventMessagePosted,
+		ChannelID: channelID,
+		Thread: &domain.Thread{
+			ID:        "msg-1",
+			Type:      domain.ThreadMessage,
+			CreatedBy: "WORKER.1",
+		},
+	})
+
+	// One message for one recipient produces exactly one notification.
+	require.Eventually(t, func() bool {
+		return len(submitter.getCommands()) > 0
+	}, settleTimeout, time.Millisecond, "debounce timer never flushed the notification")
+
+	cmds := submitter.getCommands()
+	require.Len(t, cmds, 1)
+	sendCmd, ok := cmds[0].(*command.SendToProcessCommand)
+	require.True(t, ok)
+	assert.Equal(t, "COORDINATOR", sendCmd.ProcessID)
+	assert.Contains(t, sendCmd.Content, "WORKER.1")
+}
+
 func TestBroker_ChannelSlugLookup(t *testing.T) {
 	subs := repository.NewMemorySubscriptionRepository()
 	submitter := &mockCommandSubmitter{}
@@ -272,7 +490,7 @@ func TestBroker_ChannelSlugLookup(t *testing.T) {
 		},
 	}
 
-	broker := NewBroker(BrokerConfig{
+	broker := newTestBroker(t, BrokerConfig{
 		CmdSubmitter:  submitter,
 		Subscriptions: subs,
 		Debounce:      10 * time.Millisecond,
@@ -297,7 +515,7 @@ func TestBroker_ChannelSlugLookup(t *testing.T) {
 	}
 
 	broker.HandleEvent(event)
-	time.Sleep(50 * time.Millisecond)
+	broker.settle()
 
 	cmds := submitter.getCommands()
 	require.Len(t, cmds, 1)
@@ -311,7 +529,7 @@ func TestBroker_ReplyEventNotification(t *testing.T) {
 	subs := repository.NewMemorySubscriptionRepository()
 	submitter := &mockCommandSubmitter{}
 
-	broker := NewBroker(BrokerConfig{
+	broker := newTestBroker(t, BrokerConfig{
 		CmdSubmitter:  submitter,
 		Subscriptions: subs,
 		Debounce:      10 * time.Millisecond,
@@ -338,7 +556,7 @@ func TestBroker_ReplyEventNotification(t *testing.T) {
 	}
 
 	broker.HandleEvent(event)
-	time.Sleep(50 * time.Millisecond)
+	broker.settle()
 
 	cmds := submitter.getCommands()
 	require.Len(t, cmds, 1)
@@ -352,7 +570,7 @@ func TestBroker_IgnoresNonMessageEvents(t *testing.T) {
 	subs := repository.NewMemorySubscriptionRepository()
 	submitter := &mockCommandSubmitter{}
 
-	broker := NewBroker(BrokerConfig{
+	broker := newTestBroker(t, BrokerConfig{
 		CmdSubmitter:  submitter,
 		Subscriptions: subs,
 		Debounce:      10 * time.Millisecond,
@@ -376,7 +594,7 @@ func TestBroker_IgnoresNonMessageEvents(t *testing.T) {
 	}
 
 	broker.HandleEvent(event)
-	time.Sleep(50 * time.Millisecond)
+	broker.settle()
 
 	cmds := submitter.getCommands()
 	assert.Len(t, cmds, 0)
@@ -431,7 +649,7 @@ func TestBroker_ParticipantNotification(t *testing.T) {
 		slugs: map[string]string{"channel-planning": "planning"},
 	}
 
-	broker := NewBroker(BrokerConfig{
+	broker := newTestBroker(t, BrokerConfig{
 		CmdSubmitter:  submitter,
 		Subscriptions: subs,
 		SlugLookup:    slugLookup,
@@ -459,7 +677,7 @@ func TestBroker_ParticipantNotification(t *testing.T) {
 	broker.HandleEvent(event)
 
 	// Wait for debounce
-	time.Sleep(100 * time.Millisecond)
+	broker.settle()
 
 	// Should have notified COORDINATOR, WORKER.2, WORKER.3 (not WORKER.1 - the sender)
 	cmds := submitter.getCommands()
@@ -533,7 +751,7 @@ func TestBroker_ObserverChannel_SuppressesMentionNotifications(t *testing.T) {
 		slugs: map[string]string{"channel-observer": domain.SlugObserver},
 	}
 
-	broker := NewBroker(BrokerConfig{
+	broker := newTestBroker(t, BrokerConfig{
 		CmdSubmitter:  submitter,
 		Subscriptions: subs,
 		SlugLookup:    slugLookup,
@@ -560,7 +778,7 @@ func TestBroker_ObserverChannel_SuppressesMentionNotifications(t *testing.T) {
 	broker.HandleEvent(event)
 
 	// Wait for debounce to flush
-	time.Sleep(50 * time.Millisecond)
+	broker.settle()
 
 	// worker-1 should NOT be notified - observer channel suppresses all notifications
 	cmds := submitter.getCommands()
@@ -575,7 +793,7 @@ func TestBroker_ObserverChannel_SuppressesSubscriptionNotifications(t *testing.T
 		slugs: map[string]string{"channel-observer": domain.SlugObserver},
 	}
 
-	broker := NewBroker(BrokerConfig{
+	broker := newTestBroker(t, BrokerConfig{
 		CmdSubmitter:  submitter,
 		Subscriptions: subs,
 		SlugLookup:    slugLookup,
@@ -606,7 +824,7 @@ func TestBroker_ObserverChannel_SuppressesSubscriptionNotifications(t *testing.T
 	broker.HandleEvent(event)
 
 	// Wait for debounce to flush
-	time.Sleep(50 * time.Millisecond)
+	broker.settle()
 
 	// worker-1 should NOT be notified - observer channel suppresses all notifications
 	cmds := submitter.getCommands()
@@ -621,7 +839,7 @@ func TestBroker_ObserverChannel_SuppressesThreadParticipantNotifications(t *test
 		slugs: map[string]string{"channel-observer": domain.SlugObserver},
 	}
 
-	broker := NewBroker(BrokerConfig{
+	broker := newTestBroker(t, BrokerConfig{
 		CmdSubmitter:  submitter,
 		Subscriptions: subs,
 		SlugLookup:    slugLookup,
@@ -650,7 +868,7 @@ func TestBroker_ObserverChannel_SuppressesThreadParticipantNotifications(t *test
 	broker.HandleEvent(event)
 
 	// Wait for debounce to flush
-	time.Sleep(50 * time.Millisecond)
+	broker.settle()
 
 	// worker-1 should NOT be notified - they're not the channel owner
 	// user is also not notified (not an agent)
@@ -666,7 +884,7 @@ func TestBroker_ObserverChannel_NotifiesObserverOnUserReply(t *testing.T) {
 		slugs: map[string]string{"channel-observer": domain.SlugObserver},
 	}
 
-	broker := NewBroker(BrokerConfig{
+	broker := newTestBroker(t, BrokerConfig{
 		CmdSubmitter:  submitter,
 		Subscriptions: subs,
 		SlugLookup:    slugLookup,
@@ -695,7 +913,7 @@ func TestBroker_ObserverChannel_NotifiesObserverOnUserReply(t *testing.T) {
 	broker.HandleEvent(event)
 
 	// Wait for debounce to flush
-	time.Sleep(50 * time.Millisecond)
+	broker.settle()
 
 	// OBSERVER should be notified since they own the #observer channel
 	cmds := submitter.getCommands()
@@ -717,7 +935,7 @@ func TestBroker_OtherChannels_NotificationsWork(t *testing.T) {
 		},
 	}
 
-	broker := NewBroker(BrokerConfig{
+	broker := newTestBroker(t, BrokerConfig{
 		CmdSubmitter:  submitter,
 		Subscriptions: subs,
 		SlugLookup:    slugLookup,
@@ -743,7 +961,7 @@ func TestBroker_OtherChannels_NotificationsWork(t *testing.T) {
 	broker.HandleEvent(event1)
 
 	// Wait for debounce to flush
-	time.Sleep(50 * time.Millisecond)
+	broker.settle()
 
 	cmds := submitter.getCommands()
 	require.Len(t, cmds, 1, "#tasks should still send mention notifications")
@@ -763,7 +981,7 @@ func TestBroker_HereMention_RequiresParticipantRegistry(t *testing.T) {
 	channelID := "channel-tasks"
 	slugLookup := &mockSlugLookup{slugs: map[string]string{channelID: "tasks"}}
 
-	broker := NewBroker(BrokerConfig{
+	broker := newTestBroker(t, BrokerConfig{
 		CmdSubmitter:  submitter,
 		Subscriptions: subs,
 		// Participants NOT set - @here should not work
@@ -798,7 +1016,7 @@ func TestBroker_HereMention_RequiresParticipantRegistry(t *testing.T) {
 	broker.HandleEvent(event)
 
 	// Wait for debounce
-	time.Sleep(50 * time.Millisecond)
+	broker.settle()
 
 	cmds := submitter.getCommands()
 	// @here should NOT notify anyone when participant registry is not configured
@@ -813,7 +1031,7 @@ func TestBroker_HereMention_ObserverChannelSuppressed(t *testing.T) {
 	channelID := "channel-observer"
 	slugLookup := &mockSlugLookup{slugs: map[string]string{channelID: domain.SlugObserver}}
 
-	broker := NewBroker(BrokerConfig{
+	broker := newTestBroker(t, BrokerConfig{
 		CmdSubmitter:  submitter,
 		Subscriptions: subs,
 		Debounce:      10 * time.Millisecond,
@@ -843,7 +1061,7 @@ func TestBroker_HereMention_ObserverChannelSuppressed(t *testing.T) {
 	}
 	broker.HandleEvent(event)
 
-	time.Sleep(50 * time.Millisecond)
+	broker.settle()
 
 	cmds := submitter.getCommands()
 	require.Len(t, cmds, 1, "@here in #observer should only notify OBSERVER")
@@ -861,7 +1079,7 @@ func TestBroker_HereMention_UsesParticipantRegistry(t *testing.T) {
 	channelID := "channel-general"
 	slugLookup := &mockSlugLookup{slugs: map[string]string{channelID: "general"}}
 
-	broker := NewBroker(BrokerConfig{
+	broker := newTestBroker(t, BrokerConfig{
 		CmdSubmitter:  submitter,
 		Subscriptions: subs,
 		Participants:  participants,
@@ -903,7 +1121,7 @@ func TestBroker_HereMention_UsesParticipantRegistry(t *testing.T) {
 	}
 	broker.HandleEvent(event)
 
-	time.Sleep(50 * time.Millisecond)
+	broker.settle()
 
 	cmds := submitter.getCommands()
 	// Should notify worker-1 and worker-2 (participants, excluding sender)
