@@ -154,13 +154,17 @@ type ResolveOptions struct {
 // ResolveConnection finds the Dolt SQL server for the workspace at beadsDir.
 //
 // It refuses workspaces perles cannot read with *UnsupportedWorkspaceError
-// (graph formats, historical SQLite, non-Dolt backends, embedded and
-// proxied-server Dolt) and returns ErrWorkspaceNotFound when beadsDir holds no
-// workspace. Otherwise it asks `bd context --json` for the effective mode,
-// host, port and database, and falls back to resolving them from bd's config
-// files and environment the way bd does when bd is missing, too old, or fails.
-// The socket, TLS, user and password always come from bd's configuration
-// (bd context does not report them).
+// (graph formats, historical SQLite, non-Dolt backends, proxied-server Dolt)
+// and returns ErrWorkspaceNotFound when beadsDir holds no workspace.
+// Otherwise it asks `bd context --json` for the effective mode, host, port and
+// database, and falls back to resolving them from bd's config files and
+// environment the way bd does when bd is missing, too old, or fails. The
+// socket, TLS, user and password always come from bd's configuration (bd
+// context does not report them).
+//
+// An embedded Dolt workspace has no server to connect to; ResolveConnection
+// classifies it with *EmbeddedWorkspaceError, which carries the database name
+// and what bd context reported (its bd version, or why it was not used).
 func ResolveConnection(beadsDir string, opts ResolveOptions) (*Connection, error) {
 	if !dirExists(beadsDir) {
 		return nil, fmt.Errorf("%w: %s does not exist", ErrWorkspaceNotFound, beadsDir)
@@ -205,7 +209,7 @@ func ResolveConnection(beadsDir string, opts ResolveOptions) (*Connection, error
 	case doltModeProxiedServer:
 		return nil, &UnsupportedWorkspaceError{Kind: WorkspaceProxiedServer, BeadsDir: beadsDir}
 	case doltModeEmbedded:
-		return nil, &UnsupportedWorkspaceError{Kind: WorkspaceEmbeddedDolt, BeadsDir: beadsDir}
+		return nil, newEmbeddedWorkspaceError(beadsDir, w.meta, bdCtx, ctxErr)
 	}
 
 	conn := &Connection{

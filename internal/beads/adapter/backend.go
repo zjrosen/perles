@@ -151,6 +151,14 @@ func doltWatcherConfig() task.WatcherConfig {
 // translateClientError maps infrastructure connection errors to the
 // task-layer errors the startup screens dispatch on.
 func translateClientError(err error) error {
+	if ew, ok := errors.AsType[*infrabeads.EmbeddedWorkspaceError](err); ok {
+		// Embedded workspaces are not read yet: show the embedded
+		// unsupported screen, whose empty Detail renders the default body.
+		return &task.UnsupportedWorkspaceError{
+			Kind:     task.WorkspaceEmbeddedDolt,
+			BeadsDir: ew.BeadsDir,
+		}
+	}
 	if uw, ok := errors.AsType[*infrabeads.UnsupportedWorkspaceError](err); ok {
 		return &task.UnsupportedWorkspaceError{
 			Kind:     workspaceKind(uw.Kind),

@@ -20,15 +20,30 @@ func closedPort(t *testing.T) int {
 	return port
 }
 
+func TestNewClient_EmbeddedWorkspace(t *testing.T) {
+	isolateBeadsEnv(t)
+	beadsDir := newBeadsDir(t)
+	writeMetadata(t, beadsDir, `{"backend":"dolt","dolt_mode":"embedded","dolt_database":"meta"}`)
+	opts := ResolveOptions{BDContext: bdContextJSON(`{"backend":"dolt","dolt_mode":"embedded","database":"perles","bd_version":"1.3.2"}`)}
+
+	_, err := NewClient(beadsDir, opts)
+	ew, ok := errors.AsType[*EmbeddedWorkspaceError](err)
+	require.True(t, ok, "got %v", err)
+	require.Equal(t, &EmbeddedWorkspaceError{BeadsDir: beadsDir, Database: "perles", BDVersion: "1.3.2"}, ew)
+	require.NoError(t, ew.BDContextErr)
+	_, isUnsupported := errors.AsType[*UnsupportedWorkspaceError](err)
+	require.False(t, isUnsupported, "embedded is classified, not refused")
+}
+
 func TestNewClient_UnsupportedWorkspace(t *testing.T) {
 	isolateBeadsEnv(t)
 	beadsDir := newBeadsDir(t)
-	writeMetadata(t, beadsDir, `{"backend":"dolt","dolt_mode":"embedded"}`)
+	writeMetadata(t, beadsDir, `{"backend":"dolt","dolt_mode":"proxied-server"}`)
 
 	_, err := NewClient(beadsDir, fallbackOpts)
 	var uw *UnsupportedWorkspaceError
 	require.ErrorAs(t, err, &uw)
-	require.Equal(t, WorkspaceEmbeddedDolt, uw.Kind)
+	require.Equal(t, WorkspaceProxiedServer, uw.Kind)
 }
 
 func TestNewClient_NoWorkspace(t *testing.T) {

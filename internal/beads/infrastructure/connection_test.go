@@ -13,11 +13,15 @@ import (
 const serverMetadata = `{"backend":"dolt","dolt_mode":"server"}`
 
 // resolveKind resolves beadsDir without bd and returns the unsupported kind,
-// or "server" when the workspace resolves to a connection.
+// "embedded" for an embedded workspace, or "server" when the workspace
+// resolves to a connection.
 func resolveKind(t *testing.T, beadsDir string) string {
 	t.Helper()
 	conn, err := ResolveConnection(beadsDir, fallbackOpts)
 	if err != nil {
+		if _, ok := errors.AsType[*EmbeddedWorkspaceError](err); ok {
+			return doltModeEmbedded
+		}
 		var uw *UnsupportedWorkspaceError
 		require.True(t, errors.As(err, &uw), "unexpected error: %v", err)
 		return string(uw.Kind)
@@ -29,7 +33,7 @@ func resolveKind(t *testing.T, beadsDir string) string {
 func TestResolveConnection_Mode(t *testing.T) {
 	const (
 		server   = doltModeServer
-		embedded = string(WorkspaceEmbeddedDolt)
+		embedded = doltModeEmbedded
 		proxied  = string(WorkspaceProxiedServer)
 	)
 	tests := []struct {
@@ -457,7 +461,9 @@ func TestResolveConnection_BDContext(t *testing.T) {
 		files    map[string]string
 		ctx      string
 		wantKind WorkspaceKind // "" when a connection is expected
-		check    func(t *testing.T, c *Connection)
+		// wantEmbedded is the expected classification, BeadsDir aside.
+		wantEmbedded *EmbeddedWorkspaceError
+		check        func(t *testing.T, c *Connection)
 	}{
 		{
 			name: "bd context supplies host, port and database", metadata: serverMetadata,
@@ -501,8 +507,8 @@ func TestResolveConnection_BDContext(t *testing.T) {
 		},
 		{
 			name: "bd context embedded wins over local server guess", metadata: serverMetadata,
-			ctx:      `{"backend":"dolt","dolt_mode":"embedded","database":"beads","bd_version":"1.3.2"}`,
-			wantKind: WorkspaceEmbeddedDolt,
+			ctx:          `{"backend":"dolt","dolt_mode":"embedded","database":"beads","bd_version":"1.3.2"}`,
+			wantEmbedded: &EmbeddedWorkspaceError{Database: "beads", BDVersion: "1.3.2"},
 		},
 		{
 			name: "bd context server wins over embedded metadata", metadata: `{"dolt_mode":"embedded"}`,
@@ -563,6 +569,14 @@ func TestResolveConnection_BDContext(t *testing.T) {
 			}
 
 			conn, err := ResolveConnection(beadsDir, ResolveOptions{WorkDir: "/work", BDContext: bdContextJSON(tt.ctx)})
+			if tt.wantEmbedded != nil {
+				ew, ok := errors.AsType[*EmbeddedWorkspaceError](err)
+				require.True(t, ok, "got %v", err)
+				want := *tt.wantEmbedded
+				want.BeadsDir = beadsDir
+				require.Equal(t, &want, ew)
+				return
+			}
 			if tt.wantKind != "" {
 				var uw *UnsupportedWorkspaceError
 				require.ErrorAs(t, err, &uw)

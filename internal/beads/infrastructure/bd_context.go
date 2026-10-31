@@ -95,9 +95,23 @@ func bdContextEnv(env []string, beadsDir string) []string {
 	return append(out, "BEADS_DIR="+beadsDir)
 }
 
+// bdContextTooOldError rejects a bd context answer whose bd_version is empty
+// or older than minBDContextVersion. Version is the raw bd_version.
+type bdContextTooOldError struct {
+	Version string
+}
+
+func (e *bdContextTooOldError) Error() string {
+	if e.Version == "" {
+		return fmt.Sprintf("bd context reported no bd_version (need bd %s or later)", minBDContextVersion)
+	}
+	return fmt.Sprintf("bd %s is older than %s", e.Version, minBDContextVersion)
+}
+
 // queryBDContext runs runner and parses its output. It returns an error when
-// bd fails, reports an error, or is older than minBDContextVersion; callers
-// then resolve the connection from config files themselves.
+// bd fails (the runner's error, unchanged), reports an error, or is older than
+// minBDContextVersion (a *bdContextTooOldError carrying the raw version);
+// callers then resolve the connection from config files themselves.
 func queryBDContext(runner BDContextRunner, beadsDir, workDir string) (*BDContext, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), bdContextTimeout)
 	defer cancel()
@@ -111,7 +125,7 @@ func queryBDContext(runner BDContextRunner, beadsDir, workDir string) (*BDContex
 		return nil, err
 	}
 	if v := bdCtx.BdVersion; v == "" || domain.CompareVersions(baseVersion(v), minBDContextVersion) < 0 {
-		return nil, fmt.Errorf("bd %s is older than %s", v, minBDContextVersion)
+		return nil, &bdContextTooOldError{Version: v}
 	}
 	return bdCtx, nil
 }

@@ -2,8 +2,9 @@ package infrastructure
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -52,9 +53,10 @@ func writeMetadata(t *testing.T, beadsDir, content string) {
 	writeFile(t, beadsDir, "metadata.json", content)
 }
 
-// noBDContext is a runner for a machine without a usable bd.
+// noBDContext is a runner for a machine without bd on PATH: it fails the way
+// runBDContextCommand does, wrapping exec.ErrNotFound.
 func noBDContext(context.Context, string, string) ([]byte, error) {
-	return nil, errors.New("bd: executable file not found in $PATH")
+	return nil, fmt.Errorf("bd context: %w", &exec.Error{Name: "bd", Err: exec.ErrNotFound})
 }
 
 // bdContextJSON is a runner that prints out.

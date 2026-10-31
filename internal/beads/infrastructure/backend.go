@@ -11,11 +11,13 @@ import (
 // directory). Beads stores issues in Dolt, and perles reads them through the
 // workspace's Dolt SQL server.
 //
-// It returns *UnsupportedWorkspaceError for workspaces perles cannot read
-// (embedded or proxied-server Dolt, the http backend, graph formats,
-// historical SQLite), an error wrapping ErrWorkspaceNotFound when beadsDir
-// holds no workspace, and *ServerUnreachableError when the workspace is in
-// server mode but its server cannot be reached.
+// It returns *EmbeddedWorkspaceError for an embedded Dolt workspace, which has
+// no server to connect to and must be read another way,
+// *UnsupportedWorkspaceError for workspaces perles cannot read
+// (proxied-server Dolt, the http backend, graph formats, historical SQLite),
+// an error wrapping ErrWorkspaceNotFound when beadsDir holds no workspace, and
+// *ServerUnreachableError when the workspace is in server mode but its server
+// cannot be reached.
 func NewClient(beadsDir string, opts ResolveOptions) (appbeads.DBClient, error) {
 	conn, err := ResolveConnection(beadsDir, opts)
 	if err != nil {

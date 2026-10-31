@@ -36,6 +36,20 @@ func TestTranslateClientError_UnsupportedWorkspace(t *testing.T) {
 	}
 }
 
+func TestTranslateClientError_EmbeddedWorkspace(t *testing.T) {
+	err := translateClientError(&infrabeads.EmbeddedWorkspaceError{
+		BeadsDir:     "/p/.beads",
+		Database:     "beads",
+		BDVersion:    "1.3.2",
+		BDContextErr: errors.New("unused"),
+	})
+
+	uw, ok := errors.AsType[*task.UnsupportedWorkspaceError](err)
+	require.True(t, ok, "got %v", err)
+	require.Equal(t, &task.UnsupportedWorkspaceError{Kind: task.WorkspaceEmbeddedDolt, BeadsDir: "/p/.beads"}, uw,
+		"embedded keeps today's unsupported screen: empty Detail")
+}
+
 func TestTranslateClientError_ServerDown(t *testing.T) {
 	cause := errors.New("connection refused")
 	err := translateClientError(&infrabeads.ServerUnreachableError{
@@ -88,6 +102,8 @@ func TestNewBeadsBackend_EmbeddedWorkspace(t *testing.T) {
 	uw, ok := errors.AsType[*task.UnsupportedWorkspaceError](err)
 	require.True(t, ok, "got %v", err)
 	require.Equal(t, task.WorkspaceEmbeddedDolt, uw.Kind)
+	require.Equal(t, beadsDir, uw.BeadsDir)
+	require.Empty(t, uw.Detail)
 }
 
 func TestNewBeadsBackend_ServerDown(t *testing.T) {

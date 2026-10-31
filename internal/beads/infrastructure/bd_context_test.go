@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -81,16 +82,30 @@ func TestQueryBDContext(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	for _, version := range []string{"0.62.0", "0.60.0", ""} {
+	for _, version := range []string{"0.62.0", "0.60.0", "0.59.0 (abc1234: main@abc1234)"} {
 		t.Run("old bd "+version, func(t *testing.T) {
-			_, err := queryBDContext(bdContextJSON(`{"backend":"dolt","dolt_mode":"server","server_port":3307,"bd_version":"`+version+`"}`), "/b", "")
+			got, err := queryBDContext(bdContextJSON(`{"backend":"dolt","dolt_mode":"server","server_port":3307,"bd_version":"`+version+`"}`), "/b", "")
+			require.Nil(t, got)
 			require.ErrorContains(t, err, "older than 1.0.0")
+			tooOld, ok := errors.AsType[*bdContextTooOldError](err)
+			require.True(t, ok, "got %v", err)
+			require.Equal(t, version, tooOld.Version, "the raw version is kept")
 		})
 	}
+
+	t.Run("empty bd_version", func(t *testing.T) {
+		got, err := queryBDContext(bdContextJSON(`{"backend":"dolt","dolt_mode":"server","server_port":3307,"bd_version":""}`), "/b", "")
+		require.Nil(t, got)
+		require.EqualError(t, err, "bd context reported no bd_version (need bd 1.0.0 or later)")
+		tooOld, ok := errors.AsType[*bdContextTooOldError](err)
+		require.True(t, ok, "got %v", err)
+		require.Empty(t, tooOld.Version)
+	})
 
 	t.Run("runner error", func(t *testing.T) {
 		_, err := queryBDContext(noBDContext, "/b", "")
 		require.ErrorContains(t, err, "not found")
+		require.ErrorIs(t, err, exec.ErrNotFound, "the runner's error is returned unchanged")
 	})
 
 	t.Run("passes beads dir, work dir and a deadline", func(t *testing.T) {
@@ -170,6 +185,13 @@ func TestRunBDContextCommand_FailureIncludesStderr(t *testing.T) {
 	_, err = runBDContextCommand(context.Background(), filepath.Join(t.TempDir(), "missing-bd"), t.TempDir(), "")
 	require.Error(t, err)
 	require.False(t, errors.Is(err, errBDContextDisabled))
+}
+
+func TestRunBDContextCommand_NotOnPathWrapsErrNotFound(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+
+	_, err := runBDContextCommand(context.Background(), "bd", t.TempDir(), "")
+	require.ErrorIs(t, err, exec.ErrNotFound)
 }
 
 func mustGetwd(t *testing.T) string {
