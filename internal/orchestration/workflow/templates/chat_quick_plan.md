@@ -193,8 +193,8 @@ bd dep add perles-abc.3 perles-abc.2  # Visual feedback depends on copy keybindi
 
 **Verify dependencies:**
 ```bash
-bd show {epic-id} --json  # Shows all linked tasks
-bd ready --json           # Shows which tasks are unblocked
+bd list --parent {epic-id} --all --json  # Shows all linked tasks
+bd ready --parent {epic-id} --json       # Shows which tasks are unblocked
 ```
 
 **Critical Rules:**
@@ -224,7 +224,7 @@ Before completing, review your tasks against these checklists:
 **Dependencies:**
 - [ ] Dependencies between tasks are logical?
 - [ ] No circular dependencies?
-- [ ] `bd ready` shows correct starting tasks?
+- [ ] `bd ready --parent {epic-id}` shows correct starting tasks?
 - [ ] Dependency chain makes sense?
 
 **Proposal Alignment:**

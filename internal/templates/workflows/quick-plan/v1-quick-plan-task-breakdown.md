@@ -89,8 +89,8 @@ bd dep add perles-abc.3 perles-abc.2  # Visual feedback depends on copy keybindi
 ## Verify Dependencies
 
 ```bash
-bd show {epic-id} --json  # Shows all linked tasks
-bd ready --json           # Shows which tasks are unblocked
+bd list --parent {epic-id} --all --json  # Shows all linked tasks
+bd ready --parent {epic-id} --json       # Shows which tasks are unblocked
 ```
 
 ## Completion

@@ -164,7 +164,7 @@ bd dep add {epic}.5 {epic}.4
 
 **Verify dependencies were created:**
 ```bash
-bd list --parent {epic-id} --json | jq -r '.[] | "\(.id): deps=\(.dependencies | map(select(.dependency_type == \"blocks\")) | length)"'
+bd list --parent {epic-id} --all --json | jq -r '.[] | "\(.id): deps=\([.dependencies[]? | select(.type == "blocks")] | length)"'
 ```
 
 Starting tasks should show `deps=0`, dependent tasks should show `deps>=1`.
@@ -205,7 +205,7 @@ Before completing, review your work against these checklists:
 After creating all tasks, update the plan document with:
 
 1. **Epic ID** and all task IDs
-2. **Dependency verification results** (output from `bd list` command)
+2. **Dependency verification results** (output from the `bd list --parent {epic-id} --all --json | jq ...` check)
 3. **Final task summary table**
 4. **Any decisions made during planning**
 
@@ -271,7 +271,7 @@ AI: Creates 4 tasks with test requirements:
 [Phase 5: Set Dependencies]
 AI: Sets dependencies between tasks
 - perles-xyz.4 depends on perles-xyz.2
-AI: Verifies with bd list command
+AI: Verifies with the bd list --parent --json | jq dependency check
 
 [Phase 6: Self-Review]
 AI: Reviews against checklists, fixes issues:

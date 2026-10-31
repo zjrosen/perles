@@ -314,20 +314,20 @@ bd dep add perles-abc.2 perles-abc.1  # Copy keybinding depends on clipboard pac
 bd dep add perles-abc.3 perles-abc.2  # Visual feedback depends on copy keybinding
 ```
 
-**Note:** Using `--parent` creates the correct parent-child relationship where the epic shows tasks in its `dependents` array. Do NOT use `bd dep add {epic-id} {task-id}` as this creates the wrong "blocks" relationship.
+**Note:** Using `--parent` creates the correct parent-child relationship that links each task to the epic (`bd list --parent {epic-id}` lists them). Do NOT use `bd dep add` between the epic and its tasks: `bd dep add {epic-id} {task-id}` creates the wrong "blocks" relationship (not parent-child), and `bd dep add {task-id} {epic-id}` is refused because it would deadlock.
 
 **Verify dependencies:**
 ```bash
-bd show {epic-id} --json  # Shows all linked tasks
-bd ready --json           # Shows which tasks are unblocked
+bd list --parent {epic-id} --all --json  # Shows all linked tasks
+bd ready --parent {epic-id} --json       # Shows which tasks are unblocked
 ```
 
 **Task Guidelines:**
 - Include test requirements IN the task, not as separate tasks
 - Use proposal's implementation steps as guide
 - Make tasks independently verifiable
-- **Always set dependencies** - epic blocked by tasks, tasks ordered by logical sequence
-- Run `bd ready` to verify dependency chain is correct
+- **Always set dependencies** - tasks linked to the epic via `--parent`, tasks ordered by logical sequence via `bd dep add`
+- Run `bd ready --parent {epic-id}` to verify dependency chain is correct
 
 Begin task breakdown now.
 ```
@@ -347,7 +347,7 @@ You are the **Task Reviewer** for a quick planning workflow.
 
 **Your Task:**
 1. Read the proposal to understand the full scope
-2. List all tasks: `bd show {epic-id} --json`
+2. List all tasks: `bd list --parent {epic-id} --all --json`
 3. Review each task for:
    - Clear scope and instructions
    - Tests included (not deferred)

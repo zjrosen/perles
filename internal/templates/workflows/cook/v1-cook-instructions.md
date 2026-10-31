@@ -25,8 +25,9 @@ This workflow coordinates multiple AI workers to complete all tasks from a **sin
 
 1. **Validate the epic**: The epic ID has been provided. Validate it exists and get the tasks:
    ```bash
-   bd show <epic-id> --json
-   bd ready --json
+   bd show <epic-id> --json                 # Epic details
+   bd list --parent <epic-id> --all --json  # All tasks in the epic (including closed)
+   bd ready --parent <epic-id> --json       # Unblocked tasks in the epic
    ```
 
 2. **Present execution plan**: Show user the task sequence and then start working immediately you do not need approval.
@@ -296,9 +297,9 @@ you when they are done.
 
 When all tasks in the epic are complete and accountability summaries are collected YOU MUST do all of the follow steps:
 
-1. **Verify all tasks are closed**: Check that every subtask has been completed
+1. **Verify all tasks are closed**: Check that every subtask has been completed (each task should show `status: closed`)
    ```bash
-   bd show <epic-id> --json
+   bd list --parent <epic-id> --all --json
    ```
 
 2. **Close the epic**: Mark the epic itself as complete
@@ -583,7 +584,7 @@ Coordinator: mark_task_complete(task_id="perles-abc1.2"), replace workers
 [Continue pattern for remaining tasks...]
 
 [Epic Completion]
-Coordinator: Verifies all 7 tasks are closed via bd show perles-abc1 --json
+Coordinator: Verifies all 7 tasks are closed via bd list --parent perles-abc1 --all --json
 Coordinator: bd close perles-abc1 --reason "All tasks completed"
 Coordinator: "Epic perles-abc1 is now complete. All 7 tasks implemented and reviewed."
 Coordinator: signal_workflow_complete(
@@ -677,7 +678,7 @@ Coordinator: signal_workflow_complete(
 ### BD Commands
 
 - `bd show <task-id> --json` - Get task details
-- `bd ready --json` - Find unblocked tasks
+- `bd ready --parent <epic-id> --json` - Find unblocked tasks in the epic
 - `bd update <task-id> --status in_progress` - Mark task as in progress (usually done automatically by `assign_task`)
 - `bd close <epic-id>` - Close epic (use `mark_task_complete` MCP tool for tasks)
 

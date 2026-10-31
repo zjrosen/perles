@@ -839,7 +839,8 @@ func TestBuildAssistantInitialPrompt(t *testing.T) {
 	// Verify prompt contains key elements
 	require.Contains(t, prompt, "Perles")
 	require.Contains(t, prompt, "bd ready")
-	require.Contains(t, prompt, "bd activity")
+	require.Contains(t, prompt, "bd list --all --sort updated")
+	require.NotContains(t, prompt, "bd activity", "bd activity was removed from bd")
 }
 
 // ============================================================================

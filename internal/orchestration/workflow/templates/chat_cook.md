@@ -41,8 +41,9 @@ Which epic would you like me to work on? Please provide the epic ID (e.g., perle
 
 Once the user provides the epic ID, validate and show the tasks:
 ```bash
-bd show <epic-id> --json
-bd ready --json
+bd show <epic-id> --json                 # Epic details
+bd list --parent <epic-id> --all --json  # All tasks in the epic (including closed)
+bd ready --parent <epic-id> --json       # Unblocked tasks in the epic
 ```
 
 ---
@@ -68,7 +69,7 @@ bd ready --json
 
 3. **Identify task order:**
    ```bash
-   bd ready --json  # Shows unblocked tasks
+   bd ready --parent <epic-id> --json  # Shows unblocked tasks in the epic
    ```
 
 4. **Present execution plan to user:**
@@ -220,7 +221,7 @@ If self-review identified issues:
 
 4. **Check for next task:**
    ```bash
-   bd ready --json
+   bd ready --parent <epic-id> --json
    ```
 
 5. **Proceed to next task or Phase 3 if epic complete.**
@@ -233,7 +234,7 @@ When all tasks are done:
 
 1. **Verify all tasks closed:**
    ```bash
-   bd show <epic-id> --json
+   bd list --parent <epic-id> --all --json
    ```
    - All subtasks should show `status: closed`
 

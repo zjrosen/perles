@@ -253,7 +253,7 @@ bd dep add {epic}.5 {epic}.4
 
 **After adding all dependencies, verify with:**
 ```bash
-bd list --parent {epic-id} --json | jq -r '.[] | "\(.id): \(.status), deps: \(.dependencies | map(select(.dependency_type == \"blocks\")) | length)"'
+bd list --parent {epic-id} --all --json | jq -r '.[] | "\(.id): \(.status), deps: \([.dependencies[]? | select(.type == "blocks")] | length)"'
 ```
 This lists all tasks under the epic with their blocking dependency count. Starting tasks should have 0 blocking deps, dependent tasks should have 1+. If ALL tasks show 0 blocking deps, inter-task dependencies were not set correctly.
 
@@ -323,7 +323,7 @@ Do NOT just read the plan document - verify dependencies were created in bd:
 
 1. List tasks with dependency counts:
    ```bash
-   bd list --parent {epic-id} --json | jq -r '.[] | "\(.id): deps=\(.dependencies | map(select(.dependency_type == \"blocks\")) | length)"'
+   bd list --parent {epic-id} --all --json | jq -r '.[] | "\(.id): deps=\([.dependencies[]? | select(.type == "blocks")] | length)"'
    ```
 2. Starting tasks should show `deps=0`, dependent tasks should show `deps=1` or more
 3. If ALL tasks show `deps=0`, inter-task dependencies are MISSING - this is a blocker
@@ -353,7 +353,7 @@ If dependencies are missing, your verdict MUST be **CHANGES NEEDED** with specif
 [Repeat for each task]
 
 ### Dependency Verification
-**Command run:** `bd list --parent {epic-id} --json | jq ...`
+**Command run:** `bd list --parent {epic-id} --all --json | jq ...`
 **Tasks with deps=0 (starting tasks):** [List task IDs]
 **Tasks with deps>=1 (dependent tasks):** [List task IDs]
 **Dependency check:** [PASS - mix of 0 and 1+ deps / FAIL - all tasks show deps=0]
@@ -735,7 +735,7 @@ The plan document is shared across all workers. To prevent conflicts:
 3. **Oversized tasks** - If it can't be done in one session, split it
 4. **Missing dependencies** - Tasks that need prior work but don't declare it
 5. **Orphan tests** - Tests without corresponding implementation
-6. **Flat task structure** - Using only `--parent` creates parent-child links, NOT inter-task dependencies. You MUST use `bd dep add` for task ordering. Verify with `bd list --parent {epic-id}` - if all tasks show deps=0, inter-task dependencies are missing.
+6. **Flat task structure** - Using only `--parent` creates parent-child links, NOT inter-task dependencies. You MUST use `bd dep add` for task ordering. Verify with the `bd list --parent {epic-id} --all --json | jq ...` dependency check - if all tasks show deps=0, inter-task dependencies are missing.
 
 ### Process Pitfalls
 1. **Skipping reviews** - Both reviewers must approve

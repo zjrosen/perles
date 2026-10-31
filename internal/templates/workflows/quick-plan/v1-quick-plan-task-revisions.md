@@ -54,8 +54,8 @@ Create additional tasks to cover the gap.
 
 After making changes:
 ```bash
-bd show {epic-id} --json  # Verify task descriptions
-bd ready --json           # Verify dependency chain
+bd list --parent {epic-id} --all --json  # Verify task descriptions
+bd ready --parent {epic-id} --json       # Verify dependency chain
 ```
 
 ## Completion

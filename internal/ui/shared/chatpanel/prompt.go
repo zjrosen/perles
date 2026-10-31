@@ -7,8 +7,8 @@ func BuildAssistantInitialPrompt() string {
 	return `You are now active in the Perles chat panel.
 
 Before greeting the user, run these commands to get context:
-1. bd ready -n 5              (work available to start)
-2. bd activity --limit 10     (recent activity)
+1. bd ready -n 5                         (work available to start)
+2. bd list --all --sort updated -n 10    (recently updated issues)
 
 Then greet the user and summarize what you found. Let them know you can help with:
 - bd (beads) CLI commands and workflows
@@ -32,7 +32,7 @@ bd is the command-line tool for beads issue tracking.
 ### Core Commands
 - bd ready                    Show unblocked work ready to start
 - bd show <id>                Show issue details (use --json for structured output)
-- bd list                     List all issues
+- bd list                     List issues (closed are hidden; add --all to include them)
 - bd search "query"           Search issues by text
 
 ### Creating Issues
@@ -49,15 +49,16 @@ Priorities: -p 0 (critical) through -p 4 (backlog)
 - bd close <id>                           Close an issue
 
 ### Dependencies (Critical for Task Ordering)
-- bd dep add <child> <parent>             Make child depend on parent
-- bd dep add <id> --blocks <other>        Alternative: id blocks other
+- bd dep add <issue> <depends-on>         <issue> is blocked by <depends-on>
+- bd dep <blocker> --blocks <blocked>     Alternative: <blocker> blocks <blocked>
 - bd graph <id>                           Visualize dependency graph
 
 Note: --parent only creates hierarchy, NOT execution dependencies. Use bd dep add for task ordering.
 
 ### Epics & Subtasks
-- bd epic list                List all epics
-- bd list --parent <epic-id>  List tasks under an epic
+- bd list --type epic         List epics (add --all to include closed)
+- bd epic status              Show epic completion progress
+- bd list --parent <epic-id>  List tasks under an epic (add --all to include closed)
 - Subtask IDs are hierarchical: epic-id.1, epic-id.2, etc.
 
 ### Common Workflows
@@ -73,7 +74,7 @@ Note: --parent only creates hierarchy, NOT execution dependencies. Use bd dep ad
 ## BQL Quick Reference
 BQL filters issues in Perles search. Key syntax:
 
-Fields: id, type, status, priority, title, body, created, updated, parent_id, blocked, blocks, ready, label, assignee, metadata.$key
+Fields: id, type, status, priority, title, description, design, acceptance_criteria, notes, close_reason, created, updated, started, closed, due, defer_until, blocked, ready, pinned, is_template, label, assignee, owner, sender, created_by, mol_type, metadata.$key
 
 Operators:
 - Comparison: =, !=, <, >, <=, >=

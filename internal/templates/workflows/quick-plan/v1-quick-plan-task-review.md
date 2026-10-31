@@ -15,7 +15,8 @@ Read the proposal at: `{{.Inputs.proposal}}`
 
 List the epic and tasks:
 ```bash
-bd show {epic-id} --json
+bd show {epic-id} --json                 # Epic details
+bd list --parent {epic-id} --all --json  # All tasks in the epic
 ```
 
 ## Review Criteria

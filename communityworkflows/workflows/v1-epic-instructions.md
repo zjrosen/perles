@@ -161,7 +161,7 @@ bd ready --parent <epic-id> --json
 
 This shows tasks within the epic that are:
 - Not blocked by incomplete dependencies
-- Status is `open` or `in_progress`
+- Status is `open` (tasks that are `in_progress`, `blocked`, `deferred` or `hooked` are not listed)
 
 **Follow task ordering**: Tasks are numbered sequentially (e.g., `.1`, `.2`, `.3`). This numbering often reflects the intended execution order. If task `.3` is a human review gate, you must complete it before proceeding to task `.4`, even if `.4` appears ready.
 
@@ -191,9 +191,9 @@ If the epic doesn't provide clear instructions for a phase or task:
 
 1. **Check current task status** - First, see what's still open:
    ```bash
-   bd show <epic-id> --json
+   bd list --parent <epic-id> --all --json
    ```
-   Review the `dependents` array to see which tasks are already `closed` vs still `open`.
+   Review each task's `status` to see which tasks are already `closed` vs still open (`--all` includes closed tasks).
 
 2. **Close only remaining open tasks** - Only call `mark_task_complete` for tasks that are still open:
    ```

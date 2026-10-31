@@ -80,6 +80,11 @@ bd dep add {epic}.4 {epic}.3
 bd dep add {epic}.5 {epic}.4
 ```
 
+Verify the dependencies were created (starting tasks show `deps=0`, dependent tasks show `deps>=1`):
+```bash
+bd list --parent {epic-id} --all --json | jq -r '.[] | "\(.id): deps=\([.dependencies[]? | select(.type == "blocks")] | length)"'
+```
+
 ### Step 4: Document in Plan
 
 Use the Edit tool to update the plan document:

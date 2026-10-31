@@ -10,9 +10,10 @@ Summarize the completed planning workflow for the user.
 
 Read the proposal at: `{{.Inputs.proposal}}`
 
-Get the epic details:
+Get the epic and its tasks:
 ```bash
-bd show {epic-id} --json
+bd show {epic-id} --json                 # Epic details
+bd list --parent {epic-id} --all --json  # All tasks in the epic
 ```
 
 ## Summary Format
