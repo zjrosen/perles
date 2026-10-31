@@ -50,6 +50,8 @@ debug.log
 
 # Beads
 .beads/
+# Workspace gate locks bd creates beside .beads (bd ignores *.gate.lock* in projects it manages)
+*.gate.lock*
 
 # Perles remove apps own perles config
 .perles/
