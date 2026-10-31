@@ -344,15 +344,20 @@ func (e *BDExecutor) SetLabels(issueID string, labels []string) error {
 	return nil
 }
 
-// ShowIssue executes 'bd show <id> --json' and maps bd's issue shape
-// (issue_type, parent, dependencies) onto domain.Issue.
+// ShowIssue executes 'bd --readonly show <id> --json' and maps bd's issue
+// shape (issue_type, parent, dependencies) onto domain.Issue.
+//
+// --readonly is a bd global flag, so it goes before the subcommand. Plain
+// 'show --json' rewrites .beads/last-touched, which perles watches, so each
+// read would trigger a needless refresh. Read-only bd also skips migrations
+// and gate files.
 func (e *BDExecutor) ShowIssue(issueID string) (*domain.Issue, error) {
 	start := time.Now()
 	defer func() {
 		log.Debug(log.CatBeads, "ShowIssue completed", "issueID", issueID, "duration", time.Since(start))
 	}()
 
-	output, err := e.runBeads("show", issueID, "--json")
+	output, err := e.runBeads("--readonly", "show", issueID, "--json")
 	if err != nil {
 		log.Error(log.CatBeads, "ShowIssue failed", "issueID", issueID, "error", err)
 		return nil, err
@@ -374,14 +379,17 @@ func (e *BDExecutor) ShowIssue(issueID string) (*domain.Issue, error) {
 	return &issues[0], nil
 }
 
-// GetComments executes 'bd comments <id> --json' and parses the JSON output.
+// GetComments executes 'bd --readonly comments <id> --json' and parses the
+// JSON output. Like ShowIssue, it passes --readonly (before the subcommand)
+// so the read does not touch .beads/last-touched, run migrations or create
+// gate files.
 func (e *BDExecutor) GetComments(issueID string) ([]domain.Comment, error) {
 	start := time.Now()
 	defer func() {
 		log.Debug(log.CatBeads, "GetComments completed", "issueID", issueID, "duration", time.Since(start))
 	}()
 
-	output, err := e.runBeads("comments", issueID, "--json")
+	output, err := e.runBeads("--readonly", "comments", issueID, "--json")
 	if err != nil {
 		log.Error(log.CatBeads, "GetComments failed", "issueID", issueID, "error", err)
 		return nil, err

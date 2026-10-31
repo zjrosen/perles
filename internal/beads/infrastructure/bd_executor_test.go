@@ -112,6 +112,11 @@ func hasArg(args []string, want string) bool {
 	return false
 }
 
+// isShowCall reports whether args is ShowIssue's `bd --readonly show` run.
+func isShowCall(args []string) bool {
+	return len(args) > 1 && args[0] == "--readonly" && args[1] == "show"
+}
+
 // TestBDExecutor_UpdateIssue_SingleField verifies correct CLI args when only Title is set.
 func TestBDExecutor_UpdateIssue_SingleField(t *testing.T) {
 	var captured []string
@@ -183,7 +188,7 @@ func TestBDExecutor_SingleFieldUpdates_UseFlagEqualsValue(t *testing.T) {
 
 func TestBDExecutor_GetComments(t *testing.T) {
 	executor := newTestExecutor(func(args ...string) (string, error) {
-		require.Equal(t, []string{"comments", "PROJ-1", "--json"}, args)
+		require.Equal(t, []string{"--readonly", "comments", "PROJ-1", "--json"}, args)
 		return `[
 			{"id":"c-1","author":"alice","text":"First","created_at":"2026-04-16T12:00:00Z"},
 			{"id":"c-2","author":"bob","text":"Second","created_at":"2026-04-16T12:01:00Z"}
@@ -356,7 +361,7 @@ func TestBDExecutor_UpdateIssue_MultilineDescription(t *testing.T) {
 func TestBDExecutor_UpdateIssue_EmptyLabels(t *testing.T) {
 	var calls [][]string
 	executor := newRawTestExecutor(recordCalls(&calls, func(args []string) bdOutput {
-		if args[0] == "show" {
+		if isShowCall(args) {
 			return bdOutput{Stdout: `[{"id":"PROJ-7","title":"T","labels":["bug","urgent"]}]`}
 		}
 		return bdOutput{}
@@ -366,7 +371,7 @@ func TestBDExecutor_UpdateIssue_EmptyLabels(t *testing.T) {
 	err := executor.UpdateIssue("PROJ-7", domain.UpdateIssueOptions{Labels: &emptyLabels})
 	require.NoError(t, err)
 	require.Equal(t, [][]string{
-		{"show", "PROJ-7", "--json"},
+		{"--readonly", "show", "PROJ-7", "--json"},
 		{"update", "PROJ-7", "--remove-label=bug", "--remove-label=urgent", "--json"},
 	}, calls)
 }
@@ -376,7 +381,7 @@ func TestBDExecutor_UpdateIssue_EmptyLabels(t *testing.T) {
 func TestBDExecutor_UpdateIssue_EmptyLabels_AlreadyClear(t *testing.T) {
 	var calls [][]string
 	executor := newRawTestExecutor(recordCalls(&calls, func(args []string) bdOutput {
-		if args[0] == "show" {
+		if isShowCall(args) {
 			return bdOutput{Stdout: `[{"id":"PROJ-7b","title":"T"}]`}
 		}
 		return bdOutput{}
@@ -385,7 +390,7 @@ func TestBDExecutor_UpdateIssue_EmptyLabels_AlreadyClear(t *testing.T) {
 	emptyLabels := []string{}
 	err := executor.UpdateIssue("PROJ-7b", domain.UpdateIssueOptions{Labels: &emptyLabels})
 	require.NoError(t, err)
-	require.Equal(t, [][]string{{"show", "PROJ-7b", "--json"}}, calls, "expected only show call, no update needed")
+	require.Equal(t, [][]string{{"--readonly", "show", "PROJ-7b", "--json"}}, calls, "expected only show call, no update needed")
 }
 
 // TestBDExecutor_UpdateIssue_LabelsOnly verifies that when only labels are set,
@@ -425,7 +430,7 @@ func TestBDExecutor_UpdateIssue_LabelsErrorReturned(t *testing.T) {
 func TestBDExecutor_UpdateIssue_NilLabels_ClearsAll(t *testing.T) {
 	var calls [][]string
 	executor := newRawTestExecutor(recordCalls(&calls, func(args []string) bdOutput {
-		if args[0] == "show" {
+		if isShowCall(args) {
 			return bdOutput{Stdout: `[{"id":"PROJ-10","title":"T","labels":["old"]}]`}
 		}
 		return bdOutput{}
@@ -435,7 +440,7 @@ func TestBDExecutor_UpdateIssue_NilLabels_ClearsAll(t *testing.T) {
 	err := executor.UpdateIssue("PROJ-10", domain.UpdateIssueOptions{Labels: &nilLabels})
 	require.NoError(t, err)
 	require.Equal(t, [][]string{
-		{"show", "PROJ-10", "--json"},
+		{"--readonly", "show", "PROJ-10", "--json"},
 		{"update", "PROJ-10", "--remove-label=old", "--json"},
 	}, calls)
 }
@@ -468,7 +473,7 @@ func TestBDExecutor_UpdateIssue_NotesForcedWhenUnchangedSinceRead(t *testing.T) 
 	var calls [][]string
 	executor := newRawTestExecutor(recordCalls(&calls, func(args []string) bdOutput {
 		switch {
-		case args[0] == "show":
+		case isShowCall(args):
 			return bdOutput{Stdout: `[{"id":"PROJ-1","title":"T","notes":"old notes"}]`}
 		case !hasArg(args, "--force"):
 			return notesOverwriteRefusal("PROJ-1")
@@ -482,7 +487,7 @@ func TestBDExecutor_UpdateIssue_NotesForcedWhenUnchangedSinceRead(t *testing.T) 
 	require.NoError(t, err)
 	require.Equal(t, [][]string{
 		{"update", "PROJ-1", "--notes=new notes", "--json"},
-		{"show", "PROJ-1", "--json"},
+		{"--readonly", "show", "PROJ-1", "--json"},
 		{"update", "PROJ-1", "--notes=new notes", "--force", "--json"},
 	}, calls)
 }
@@ -490,7 +495,7 @@ func TestBDExecutor_UpdateIssue_NotesForcedWhenUnchangedSinceRead(t *testing.T) 
 func TestBDExecutor_UpdateIssue_NotesNotForcedWhenChangedSinceRead(t *testing.T) {
 	var calls [][]string
 	executor := newRawTestExecutor(recordCalls(&calls, func(args []string) bdOutput {
-		if args[0] == "show" {
+		if isShowCall(args) {
 			// An agent appended to the notes after the editor opened.
 			return bdOutput{Stdout: `[{"id":"PROJ-1","title":"T","notes":"old notes\nagent handoff"}]`}
 		}
@@ -716,7 +721,7 @@ func TestBDExecutor_Create_ParseErrors(t *testing.T) {
 
 func TestBDExecutor_ShowIssue_MapsBDShape(t *testing.T) {
 	executor := newTestExecutor(func(args ...string) (string, error) {
-		require.Equal(t, []string{"show", "PROJ-20", "--json"}, args)
+		require.Equal(t, []string{"--readonly", "show", "PROJ-20", "--json"}, args)
 		return showFixtureCurrent, nil
 	})
 
@@ -735,6 +740,30 @@ func TestBDExecutor_ShowIssue_NotFound(t *testing.T) {
 	executor := newTestExecutor(func(args ...string) (string, error) { return "[]", nil })
 	_, err := executor.ShowIssue("PROJ-404")
 	require.ErrorContains(t, err, "issue not found: PROJ-404")
+}
+
+// TestBDExecutor_ReadonlyReads_RefusalCarriesBDReason verifies that a bd
+// refusal of the --readonly reads goes through newBDError, so the error
+// carries bd's own explanation.
+func TestBDExecutor_ReadonlyReads_RefusalCarriesBDReason(t *testing.T) {
+	var calls [][]string
+	executor := newRawTestExecutor(recordCalls(&calls, func(args []string) bdOutput {
+		return bdFailed(1, "", "Error: no issue found matching \"PROJ-404\"\n")
+	}))
+
+	_, err := executor.ShowIssue("PROJ-404")
+	var bdErr *bdError
+	require.ErrorAs(t, err, &bdErr)
+	require.ErrorContains(t, err, `no issue found matching "PROJ-404"`)
+
+	_, err = executor.GetComments("PROJ-404")
+	require.ErrorAs(t, err, &bdErr)
+	require.ErrorContains(t, err, `no issue found matching "PROJ-404"`)
+
+	require.Equal(t, [][]string{
+		{"--readonly", "show", "PROJ-404", "--json"},
+		{"--readonly", "comments", "PROJ-404", "--json"},
+	}, calls)
 }
 
 // TestUpdateIssueOptions_ZeroValue verifies that the zero value has all nil fields.
