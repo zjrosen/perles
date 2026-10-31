@@ -8,7 +8,11 @@ import (
 
 // MinBeadsVersion is the minimum beads database version required by perles.
 // Update this when perles starts using features from newer beads versions.
-const MinBeadsVersion = "0.62.0"
+//
+// 1.0.0 is the first release of the current Dolt era: current bd refuses
+// server workspaces last touched by bd 0.55.4 through 0.62.0 until they are
+// migrated explicitly (bd's cmd/bd/legacy_upgrade_guard.go).
+const MinBeadsVersion = "1.0.0"
 
 // CheckVersion returns nil if current >= MinBeadsVersion, error otherwise.
 func CheckVersion(current string) error {
