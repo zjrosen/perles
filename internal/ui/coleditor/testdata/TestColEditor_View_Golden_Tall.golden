@@ -23,34 +23,37 @@
                                                                                 │  │                                                 │  
 BQL Query Help                                                                  │  │                                                 │  
                                                                                 │  │                                                 │  
-BQL Fields                                                              BQL     │  ╰─────────────────────────────────────────────────╯  
-Operators                                                                       │                                                       
-status      open, in_progress, closed, blocked, deferred                =  !=   │                                                       
-equality                                                                        │                                                       
-type        bug, feature, task, epic, chore, milestone, story, spike    <  >    │                                                       
-comparison                                                                      │                                                       
-priority    p0, p1, p2, p3, p4                                          ~  !~   │                                                       
-contains                                                                        │                                                       
-blocked     true, false                                                 in      │                                                       
-match any                                                                       │                                                       
-ready       true, false                                                 and or  │                                                       
-logical                                                                         │                                                       
-pinned      true, false                                                 not     │                                                       
-negation                                                                        │                                                       
-is_template true, false                                                         │                                                       
-label       string (use ~ for contains)                                         │                                                       
-title       string (use ~ for contains)                                         │                                                       
-description string (use ~ for contains)                                         │                                                       
-design      string (use ~ for contains)                                         │                                                       
-notes       string (use ~ for contains)                                         │                                                       
-id          string                                                              │                                                       
-assignee    string                                                              │                                                       
-sender      string                                                              │                                                       
-created_by  string                                                              │                                                       
-mol_type    string                                                              │                                                       
-created     date (now, today, yesterday, -7d)                                                                                           
-updated     date (now, today, yesterday, -7d)                                                                                           
-defer_until date (now, today, yesterday, -7d)                                                                                           
+BQL Fields                                                  BQL Operators       │  ╰─────────────────────────────────────────────────╯  
+status              open, in_progress, blocked,             =  !=   equality    │                                                       
+                    deferred, closed, pinned, hooked,       <  >    comparison  │                                                       
+                    custom                                  ~  !~   contains    │                                                       
+type                bug, feature, task, epic, chore,        in      match any   │                                                       
+                    decision, spike, story, milestone,      and or  logical     │                                                       
+                    custom                                  not     negation    │                                                       
+priority            p0, p1, p2, p3, p4                                          │                                                       
+blocked             true, false                                                 │                                                       
+ready               true, false                                                 │                                                       
+pinned              true, false                                                 │                                                       
+is_template         true, false                                                 │                                                       
+label               string (use ~ for contains)                                 │                                                       
+title               string (use ~ for contains)                                 │                                                       
+description         string (use ~ for contains)                                 │                                                       
+design              string (use ~ for contains)                                 │                                                       
+notes               string (use ~ for contains)                                 │                                                       
+acceptance_criteria string (use ~ for contains)                                 │                                                       
+close_reason        string (use ~ for contains)                                 │                                                       
+id                  string                                                      │                                                       
+assignee            string                                                      │                                                       
+owner               string                                                      │                                                       
+sender              string                                                      │                                                       
+created_by          string                                                      │                                                       
+mol_type            string                                                      │                                                       
+created             date (now, today, yesterday, -7d)                                                                                   
+updated             date (now, today, yesterday, -7d)                                                                                   
+started             date (now, today, yesterday, -7d)                                                                                   
+closed              date (now, today, yesterday, -7d)                                                                                   
+due                 date (now, today, yesterday, -7d)                                                                                   
+defer_until         date (now, today, yesterday, -7d)                                                                                   
                                                                                                                                         
 Examples                                                                                                                                
 status = open                                                                                                                           

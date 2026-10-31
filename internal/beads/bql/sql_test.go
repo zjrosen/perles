@@ -1,11 +1,27 @@
 package bql
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	appbeads "github.com/zjrosen/perles/internal/beads/application"
 )
+
+// readyExcludedTypesSQL is bd's ready-work type exclusion as a SQL list.
+const readyExcludedTypesSQL = "'merge-request', 'gate', 'molecule', 'rig', 'agent', 'role', 'message'"
+
+// sqliteReadyExpr is the ready predicate for the default (unprobed) SQLite
+// schema: blocked_issues_cache and the legacy depends_on_id target.
+const sqliteReadyExpr = "i.status = 'open'" +
+	" AND (i.pinned = 0 OR i.pinned IS NULL)" +
+	" AND (i.ephemeral = 0 OR i.ephemeral IS NULL)" +
+	" AND i.issue_type NOT IN (" + readyExcludedTypesSQL + ")" +
+	" AND (i.defer_until IS NULL OR datetime(i.defer_until) <= datetime('now'))" +
+	" AND i.id NOT IN (SELECT issue_id FROM blocked_issues_cache)" +
+	" AND NOT EXISTS (\n  SELECT 1 FROM dependencies dp\n  JOIN issues parent ON parent.id = dp.depends_on_id\n" +
+	"  WHERE dp.issue_id = i.id AND dp.type = 'parent-child'\n" +
+	"  AND parent.defer_until IS NOT NULL AND datetime(parent.defer_until) > datetime('now')\n)"
 
 func TestSQLBuilder_SimpleComparison(t *testing.T) {
 	tests := []struct {
@@ -107,7 +123,7 @@ func TestSQLBuilder_SpecialFields(t *testing.T) {
 		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 		where, _, _ := builder.Build()
 
-		require.Equal(t, "i.status = 'open' AND (i.defer_until IS NULL OR datetime(i.defer_until) <= datetime('now')) AND i.id NOT IN (SELECT issue_id FROM blocked_issues_cache)", where)
+		require.Equal(t, "("+sqliteReadyExpr+")", where)
 	})
 
 	t.Run("ready false", func(t *testing.T) {
@@ -118,7 +134,7 @@ func TestSQLBuilder_SpecialFields(t *testing.T) {
 		builder := NewSQLBuilder(query, appbeads.DialectSQLite)
 		where, _, _ := builder.Build()
 
-		require.Equal(t, "NOT (i.status = 'open' AND (i.defer_until IS NULL OR datetime(i.defer_until) <= datetime('now')) AND i.id NOT IN (SELECT issue_id FROM blocked_issues_cache))", where)
+		require.Equal(t, "NOT ("+sqliteReadyExpr+")", where)
 	})
 
 	t.Run("pinned true", func(t *testing.T) {
@@ -485,7 +501,7 @@ func TestSQLBuilder_MySQLDialect_ContainsIsCaseInsensitive(t *testing.T) {
 		{
 			input:      "metadata.team ~ Backend",
 			wantWhere:  "LOWER(JSON_UNQUOTE(JSON_EXTRACT(i.metadata, ?))) LIKE ?",
-			wantParams: []interface{}{"$.team", "%backend%"},
+			wantParams: []interface{}{`$."team"`, "%backend%"},
 		},
 	}
 
@@ -510,8 +526,8 @@ func TestSQLBuilder_MySQLDialect_DateToday(t *testing.T) {
 	builder := NewSQLBuilder(query, appbeads.DialectMySQL)
 	where, _, _ := builder.Build()
 
-	// MySQL: no datetime() wrapper, uses CURDATE()
-	require.Equal(t, "i.created_at > CURDATE()", where)
+	// MySQL: no datetime() wrapper; dates are UTC like bd and SQLite
+	require.Equal(t, "i.created_at > DATE(UTC_TIMESTAMP())", where)
 }
 
 func TestSQLBuilder_MySQLDialect_DateYesterday(t *testing.T) {
@@ -522,7 +538,7 @@ func TestSQLBuilder_MySQLDialect_DateYesterday(t *testing.T) {
 	builder := NewSQLBuilder(query, appbeads.DialectMySQL)
 	where, _, _ := builder.Build()
 
-	require.Equal(t, "i.updated_at >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)", where)
+	require.Equal(t, "i.updated_at >= DATE_SUB(DATE(UTC_TIMESTAMP()), INTERVAL 1 DAY)", where)
 }
 
 func TestSQLBuilder_MySQLDialect_RelativeDays(t *testing.T) {
@@ -533,7 +549,7 @@ func TestSQLBuilder_MySQLDialect_RelativeDays(t *testing.T) {
 	builder := NewSQLBuilder(query, appbeads.DialectMySQL)
 	where, _, _ := builder.Build()
 
-	require.Equal(t, "i.created_at > DATE_SUB(CURDATE(), INTERVAL 7 DAY)", where)
+	require.Equal(t, "i.created_at > DATE_SUB(DATE(UTC_TIMESTAMP()), INTERVAL 7 DAY)", where)
 }
 
 func TestSQLBuilder_MySQLDialect_RelativeHours(t *testing.T) {
@@ -544,7 +560,7 @@ func TestSQLBuilder_MySQLDialect_RelativeHours(t *testing.T) {
 	builder := NewSQLBuilder(query, appbeads.DialectMySQL)
 	where, _, _ := builder.Build()
 
-	require.Equal(t, "i.updated_at > DATE_SUB(NOW(), INTERVAL 5 HOUR)", where)
+	require.Equal(t, "i.updated_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL 5 HOUR)", where)
 }
 
 func TestSQLBuilder_MySQLDialect_RelativeMonths(t *testing.T) {
@@ -555,7 +571,7 @@ func TestSQLBuilder_MySQLDialect_RelativeMonths(t *testing.T) {
 	builder := NewSQLBuilder(query, appbeads.DialectMySQL)
 	where, _, _ := builder.Build()
 
-	require.Equal(t, "i.created_at > DATE_SUB(CURDATE(), INTERVAL 3 MONTH)", where)
+	require.Equal(t, "i.created_at > DATE_SUB(DATE(UTC_TIMESTAMP()), INTERVAL 3 MONTH)", where)
 }
 
 func TestSQLBuilder_MySQLDialect_ISODate(t *testing.T) {
@@ -662,14 +678,309 @@ func TestSQLBuilder_MySQLDialect_ReadyField(t *testing.T) {
 	// SQLite inlines readiness so defer_until is always honored.
 	sqliteBuilder := NewSQLBuilder(query, appbeads.DialectSQLite)
 	sqliteWhere, _, _ := sqliteBuilder.Build()
-	require.Equal(t, "i.status = 'open' AND (i.defer_until IS NULL OR datetime(i.defer_until) <= datetime('now')) AND i.id NOT IN (SELECT issue_id FROM blocked_issues_cache)", sqliteWhere)
+	require.Equal(t, "("+sqliteReadyExpr+")", sqliteWhere)
 
-	// Dolt also inlines readiness to bypass views and honor defer_until.
+	// Dolt also inlines readiness to bypass views and honor defer_until,
+	// comparing against UTC_TIMESTAMP() as bd ready does.
 	mysqlBuilder := NewSQLBuilder(query, appbeads.DialectMySQL)
-	mysqlWhere, _, _ := mysqlBuilder.Build()
-	require.Contains(t, mysqlWhere, "i.status = 'open'")
-	require.Contains(t, mysqlWhere, "i.defer_until IS NULL OR i.defer_until <= CURRENT_TIMESTAMP")
-	require.Contains(t, mysqlWhere, "NOT IN (SELECT bi.id FROM issues bi")
+	mysqlWhere, _, params := mysqlBuilder.Build()
+	require.Equal(t, "("+mysqlFallbackReadyExpr+")", mysqlWhere)
+	require.Empty(t, params)
+}
+
+// mysqlFallbackBlockedSubquery is the inlined blocked_issues view for a Dolt
+// schema without is_blocked, depends_on_external or custom_statuses.
+const mysqlFallbackBlockedSubquery = `SELECT bi.id FROM issues bi
+WHERE bi.status NOT IN ('closed', 'pinned')
+AND EXISTS (
+  SELECT 1 FROM dependencies d
+  WHERE d.issue_id = bi.id AND d.type = 'blocks'
+  AND EXISTS (
+    SELECT 1 FROM issues blocker
+    WHERE blocker.id = d.depends_on_issue_id
+    AND blocker.status NOT IN ('closed', 'pinned')
+  )
+)`
+
+// mysqlFallbackReadyExpr is the ready predicate for the same schema.
+const mysqlFallbackReadyExpr = "i.status = 'open'" +
+	" AND (i.pinned = 0 OR i.pinned IS NULL)" +
+	" AND (i.ephemeral = 0 OR i.ephemeral IS NULL)" +
+	" AND i.issue_type NOT IN (" + readyExcludedTypesSQL + ")" +
+	" AND (i.defer_until IS NULL OR i.defer_until <= UTC_TIMESTAMP())" +
+	" AND i.id NOT IN (" + mysqlFallbackBlockedSubquery + ")" +
+	" AND NOT EXISTS (\n  SELECT 1 FROM dependencies dp\n  JOIN issues parent ON parent.id = dp.depends_on_issue_id\n" +
+	"  WHERE dp.issue_id = i.id AND dp.type = 'parent-child'\n" +
+	"  AND parent.defer_until IS NOT NULL AND parent.defer_until > UTC_TIMESTAMP()\n)"
+
+// TestSQLBuilder_SchemaProbeStates checks blocked and ready SQL for each
+// combination of optional schema features the executor probes for.
+func TestSQLBuilder_SchemaProbeStates(t *testing.T) {
+	const isBlockedExpr = "(i.is_blocked = 1 AND i.status NOT IN ('closed', 'pinned'))"
+
+	// Dolt with custom_statuses and depends_on_external but no is_blocked
+	// (beads migrations 0041-0045): the blocked_issues view from 0045 with
+	// cross-prefix targets.
+	const customExternalBlockedSubquery = `SELECT bi.id FROM issues bi
+WHERE bi.status NOT IN ('closed', 'pinned') AND bi.status NOT IN (SELECT name FROM custom_statuses WHERE category IN ('done', 'frozen'))
+AND EXISTS (
+  SELECT 1 FROM dependencies d
+  WHERE d.issue_id = bi.id AND d.type = 'blocks'
+  AND EXISTS (
+    SELECT 1 FROM issues blocker
+    WHERE blocker.id = COALESCE(d.depends_on_issue_id, d.depends_on_external)
+    AND blocker.status NOT IN ('closed', 'pinned') AND blocker.status NOT IN (SELECT name FROM custom_statuses WHERE category IN ('done', 'frozen'))
+  )
+)`
+	const externalDeferredParent = " AND NOT EXISTS (\n  SELECT 1 FROM dependencies dp\n" +
+		"  JOIN issues parent ON parent.id = COALESCE(dp.depends_on_issue_id, dp.depends_on_external)\n" +
+		"  WHERE dp.issue_id = i.id AND dp.type = 'parent-child'\n" +
+		"  AND parent.defer_until IS NOT NULL AND parent.defer_until > UTC_TIMESTAMP()\n)"
+	const customOpenStatus = "(i.status = 'open' OR i.status IN (SELECT name FROM custom_statuses WHERE category = 'active'))"
+	const mysqlCommonReady = " AND (i.pinned = 0 OR i.pinned IS NULL)" +
+		" AND (i.ephemeral = 0 OR i.ephemeral IS NULL)" +
+		" AND i.issue_type NOT IN (" + readyExcludedTypesSQL + ")" +
+		" AND (i.defer_until IS NULL OR i.defer_until <= UTC_TIMESTAMP())"
+
+	tests := []struct {
+		name        string
+		dialect     appbeads.SQLDialect
+		schema      *Schema
+		wantBlocked string
+		wantReady   string
+	}{
+		{
+			name:        "mysql unprobed falls back to inlined blocked_issues view",
+			dialect:     appbeads.DialectMySQL,
+			schema:      nil,
+			wantBlocked: "i.id IN (" + mysqlFallbackBlockedSubquery + ")",
+			wantReady:   "(" + mysqlFallbackReadyExpr + ")",
+		},
+		{
+			name:    "mysql with custom statuses and depends_on_external, no is_blocked",
+			dialect: appbeads.DialectMySQL,
+			schema: &Schema{
+				DependencyTarget:     issueDependencyTargetColumn,
+				HasDependsOnExternal: true,
+				HasCustomStatuses:    true,
+			},
+			wantBlocked: "i.id IN (" + customExternalBlockedSubquery + ")",
+			wantReady: "(" + customOpenStatus + mysqlCommonReady +
+				" AND i.id NOT IN (" + customExternalBlockedSubquery + ")" + externalDeferredParent + ")",
+		},
+		{
+			name:    "mysql current beads schema uses is_blocked",
+			dialect: appbeads.DialectMySQL,
+			schema: &Schema{
+				DependencyTarget:     issueDependencyTargetColumn,
+				HasDependsOnExternal: true,
+				HasIsBlocked:         true,
+				HasCustomStatuses:    true,
+				HasCustomTypes:       true,
+			},
+			wantBlocked: isBlockedExpr,
+			wantReady:   "(" + customOpenStatus + mysqlCommonReady + " AND i.is_blocked = 0" + externalDeferredParent + ")",
+		},
+		{
+			name:    "mysql is_blocked without custom statuses or external",
+			dialect: appbeads.DialectMySQL,
+			schema: &Schema{
+				DependencyTarget: issueDependencyTargetColumn,
+				HasIsBlocked:     true,
+			},
+			wantBlocked: isBlockedExpr,
+			wantReady: "(i.status = 'open'" + mysqlCommonReady + " AND i.is_blocked = 0" +
+				" AND NOT EXISTS (\n  SELECT 1 FROM dependencies dp\n  JOIN issues parent ON parent.id = dp.depends_on_issue_id\n" +
+				"  WHERE dp.issue_id = i.id AND dp.type = 'parent-child'\n" +
+				"  AND parent.defer_until IS NOT NULL AND parent.defer_until > UTC_TIMESTAMP()\n))",
+		},
+		{
+			name:        "sqlite unprobed uses blocked_issues_cache",
+			dialect:     appbeads.DialectSQLite,
+			schema:      nil,
+			wantBlocked: "i.id IN (SELECT issue_id FROM blocked_issues_cache)",
+			wantReady:   "(" + sqliteReadyExpr + ")",
+		},
+		{
+			name:    "sqlite with is_blocked and custom statuses",
+			dialect: appbeads.DialectSQLite,
+			schema: &Schema{
+				DependencyTarget:  legacyDependencyTargetColumn,
+				HasIsBlocked:      true,
+				HasCustomStatuses: true,
+			},
+			wantBlocked: isBlockedExpr,
+			wantReady: "(" + customOpenStatus +
+				" AND (i.pinned = 0 OR i.pinned IS NULL)" +
+				" AND (i.ephemeral = 0 OR i.ephemeral IS NULL)" +
+				" AND i.issue_type NOT IN (" + readyExcludedTypesSQL + ")" +
+				" AND (i.defer_until IS NULL OR datetime(i.defer_until) <= datetime('now'))" +
+				" AND i.is_blocked = 0" +
+				" AND NOT EXISTS (\n  SELECT 1 FROM dependencies dp\n  JOIN issues parent ON parent.id = dp.depends_on_id\n" +
+				"  WHERE dp.issue_id = i.id AND dp.type = 'parent-child'\n" +
+				"  AND parent.defer_until IS NOT NULL AND datetime(parent.defer_until) > datetime('now')\n))",
+		},
+		{
+			name:    "sqlite without pinned and ephemeral columns skips those predicates",
+			dialect: appbeads.DialectSQLite,
+			schema: &Schema{
+				DependencyTarget: legacyDependencyTargetColumn,
+				IssueColumns:     map[string]bool{"id": true, "status": true, "issue_type": true, "defer_until": true},
+			},
+			wantBlocked: "i.id IN (SELECT issue_id FROM blocked_issues_cache)",
+			wantReady: "(i.status = 'open'" +
+				" AND i.issue_type NOT IN (" + readyExcludedTypesSQL + ")" +
+				" AND (i.defer_until IS NULL OR datetime(i.defer_until) <= datetime('now'))" +
+				" AND i.id NOT IN (SELECT issue_id FROM blocked_issues_cache)" +
+				" AND NOT EXISTS (\n  SELECT 1 FROM dependencies dp\n  JOIN issues parent ON parent.id = dp.depends_on_id\n" +
+				"  WHERE dp.issue_id = i.id AND dp.type = 'parent-child'\n" +
+				"  AND parent.defer_until IS NOT NULL AND datetime(parent.defer_until) > datetime('now')\n))",
+		},
+	}
+
+	build := func(t *testing.T, input string, dialect appbeads.SQLDialect, schema *Schema) string {
+		t.Helper()
+		query, err := NewParser(input).Parse()
+		require.NoError(t, err)
+		where, _, params := NewSQLBuilder(query, dialect, WithSchema(schema)).Build()
+		require.Empty(t, params, "blocked/ready SQL must not bind params")
+		return where
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.wantBlocked, build(t, "blocked = true", tt.dialect, tt.schema))
+			require.Equal(t, tt.wantReady, build(t, "ready = true", tt.dialect, tt.schema))
+
+			// false is the exact negation of true.
+			wantNotBlocked := "NOT " + tt.wantBlocked
+			if strings.HasPrefix(tt.wantBlocked, "i.id IN (") {
+				wantNotBlocked = "i.id NOT IN (" + strings.TrimPrefix(tt.wantBlocked, "i.id IN (")
+			}
+			require.Equal(t, wantNotBlocked, build(t, "blocked = false", tt.dialect, tt.schema))
+			require.Equal(t, "NOT "+tt.wantReady, build(t, "ready = false", tt.dialect, tt.schema))
+		})
+	}
+}
+
+func TestSchema_DependencyTargetExpr(t *testing.T) {
+	require.Equal(t, "d.depends_on_issue_id",
+		(&Schema{DependencyTarget: issueDependencyTargetColumn}).DependencyTargetExpr("d"))
+	require.Equal(t, "d.depends_on_id",
+		(&Schema{DependencyTarget: legacyDependencyTargetColumn}).DependencyTargetExpr("d"))
+	require.Equal(t, "COALESCE(dp.depends_on_issue_id, dp.depends_on_external)",
+		(&Schema{DependencyTarget: issueDependencyTargetColumn, HasDependsOnExternal: true}).DependencyTargetExpr("dp"))
+}
+
+func TestSchema_HasIssueColumn(t *testing.T) {
+	var unknown *Schema
+	require.True(t, unknown.HasIssueColumn("started_at"), "nil schema assumes every column exists")
+	require.True(t, (&Schema{}).HasIssueColumn("started_at"), "nil column set assumes every column exists")
+
+	s := &Schema{IssueColumns: map[string]bool{"closed_at": true}}
+	require.True(t, s.HasIssueColumn("closed_at"))
+	require.False(t, s.HasIssueColumn("started_at"))
+}
+
+func TestSQLBuilder_NewFields(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		dialect     appbeads.SQLDialect
+		wantWhere   string
+		wantParams  []interface{}
+		wantOrderBy string
+	}{
+		{
+			name:       "owner equals uses COALESCE",
+			input:      "owner = alice",
+			dialect:    appbeads.DialectSQLite,
+			wantWhere:  "COALESCE(i.owner, '') = ?",
+			wantParams: []interface{}{"alice"},
+		},
+		{
+			name:       "owner contains on mysql lowercases",
+			input:      "owner ~ Alice",
+			dialect:    appbeads.DialectMySQL,
+			wantWhere:  "LOWER(COALESCE(i.owner, '')) LIKE ?",
+			wantParams: []interface{}{"%alice%"},
+		},
+		{
+			name:       "close_reason contains",
+			input:      `close_reason ~ "duplicate"`,
+			dialect:    appbeads.DialectSQLite,
+			wantWhere:  "COALESCE(i.close_reason, '') LIKE ?",
+			wantParams: []interface{}{"%duplicate%"},
+		},
+		{
+			name:       "acceptance_criteria not contains",
+			input:      `acceptance_criteria !~ "tests"`,
+			dialect:    appbeads.DialectSQLite,
+			wantWhere:  "COALESCE(i.acceptance_criteria, '') NOT LIKE ?",
+			wantParams: []interface{}{"%tests%"},
+		},
+		{
+			name:      "started maps to started_at on sqlite",
+			input:     "started >= -7d",
+			dialect:   appbeads.DialectSQLite,
+			wantWhere: "datetime(i.started_at) >= date('now', '-7 days')",
+		},
+		{
+			name:      "closed maps to closed_at on mysql",
+			input:     "closed > -24h",
+			dialect:   appbeads.DialectMySQL,
+			wantWhere: "i.closed_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL 24 HOUR)",
+		},
+		{
+			name:      "due maps to due_at",
+			input:     "due < now",
+			dialect:   appbeads.DialectMySQL,
+			wantWhere: "i.due_at < UTC_TIMESTAMP()",
+		},
+		{
+			name:        "order by new date fields",
+			input:       "type = task order by due asc, started desc, closed",
+			dialect:     appbeads.DialectSQLite,
+			wantWhere:   "i.issue_type = ?",
+			wantParams:  []interface{}{"task"},
+			wantOrderBy: "i.due_at ASC, i.started_at DESC, i.closed_at ASC",
+		},
+		{
+			name:       "custom type values are accepted",
+			input:      "type in (decision, gate, convoy)",
+			dialect:    appbeads.DialectSQLite,
+			wantWhere:  "i.issue_type IN (?, ?, ?)",
+			wantParams: []interface{}{"decision", "gate", "convoy"},
+		},
+		{
+			name:       "metadata slash key is quoted",
+			input:      `metadata.jira/sprint = "Q1"`,
+			dialect:    appbeads.DialectMySQL,
+			wantWhere:  "JSON_UNQUOTE(JSON_EXTRACT(i.metadata, ?)) = ?",
+			wantParams: []interface{}{`$."jira/sprint"`, "Q1"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			query, err := NewParser(tt.input).Parse()
+			require.NoError(t, err)
+			require.NoError(t, Validate(query))
+
+			where, orderBy, params := NewSQLBuilder(query, tt.dialect).Build()
+			require.Equal(t, tt.wantWhere, where)
+			require.Equal(t, tt.wantParams, params)
+			require.Equal(t, tt.wantOrderBy, orderBy)
+		})
+	}
+}
+
+func TestJSONMetadataPath(t *testing.T) {
+	require.Equal(t, `$."team"`, jsonMetadataPath("team"))
+	require.Equal(t, `$."gc.routed_to"`, jsonMetadataPath("gc.routed_to"))
+	require.Equal(t, `$."jira/sprint"`, jsonMetadataPath("jira/sprint"))
+	// Defense in depth: quotes and backslashes are escaped.
+	require.Equal(t, `$."a\"b\\c"`, jsonMetadataPath(`a"b\c`))
 }
 
 func TestSQLBuilder_MetadataField(t *testing.T) {
@@ -690,65 +1001,65 @@ func TestSQLBuilder_MetadataField(t *testing.T) {
 			name:        "metadata equals string",
 			input:       `metadata.team = "backend"`,
 			sqliteWhere: sqliteValue + " = ?",
-			sqliteArgs:  []interface{}{"$.team", "$.team", "$.team", "backend"},
+			sqliteArgs:  []interface{}{`$."team"`, `$."team"`, `$."team"`, "backend"},
 			mysqlWhere:  mysqlValue + " = ?",
-			mysqlArgs:   []interface{}{"$.team", "backend"},
+			mysqlArgs:   []interface{}{`$."team"`, "backend"},
 		},
 		{
 			name:        "metadata not equals string",
 			input:       `metadata.team != "backend"`,
 			sqliteWhere: sqliteValue + " != ?",
-			sqliteArgs:  []interface{}{"$.team", "$.team", "$.team", "backend"},
+			sqliteArgs:  []interface{}{`$."team"`, `$."team"`, `$."team"`, "backend"},
 			mysqlWhere:  mysqlValue + " != ?",
-			mysqlArgs:   []interface{}{"$.team", "backend"},
+			mysqlArgs:   []interface{}{`$."team"`, "backend"},
 		},
 		{
 			name:        "metadata contains pattern",
 			input:       `metadata.team ~ Auth`,
 			sqliteWhere: sqliteValue + " LIKE ?",
-			sqliteArgs:  []interface{}{"$.team", "$.team", "$.team", "%Auth%"},
+			sqliteArgs:  []interface{}{`$."team"`, `$."team"`, `$."team"`, "%Auth%"},
 			mysqlWhere:  "LOWER(" + mysqlValue + ") LIKE ?",
-			mysqlArgs:   []interface{}{"$.team", "%auth%"},
+			mysqlArgs:   []interface{}{`$."team"`, "%auth%"},
 		},
 		{
 			name:        "metadata not contains pattern",
 			input:       `metadata.team !~ legacy`,
 			sqliteWhere: sqliteValue + " NOT LIKE ?",
-			sqliteArgs:  []interface{}{"$.team", "$.team", "$.team", "%legacy%"},
+			sqliteArgs:  []interface{}{`$."team"`, `$."team"`, `$."team"`, "%legacy%"},
 			mysqlWhere:  "LOWER(" + mysqlValue + ") NOT LIKE ?",
-			mysqlArgs:   []interface{}{"$.team", "%legacy%"},
+			mysqlArgs:   []interface{}{`$."team"`, "%legacy%"},
 		},
 		{
 			name:        "metadata key exists",
 			input:       "metadata.team != nil",
 			sqliteWhere: "JSON_TYPE(i.metadata, ?) IS NOT NULL",
-			sqliteArgs:  []interface{}{"$.team"},
+			sqliteArgs:  []interface{}{`$."team"`},
 			mysqlWhere:  "JSON_EXTRACT(i.metadata, ?) IS NOT NULL",
-			mysqlArgs:   []interface{}{"$.team"},
+			mysqlArgs:   []interface{}{`$."team"`},
 		},
 		{
 			name:        "metadata key not exists",
 			input:       "metadata.team = nil",
 			sqliteWhere: "JSON_TYPE(i.metadata, ?) IS NULL",
-			sqliteArgs:  []interface{}{"$.team"},
+			sqliteArgs:  []interface{}{`$."team"`},
 			mysqlWhere:  "JSON_EXTRACT(i.metadata, ?) IS NULL",
-			mysqlArgs:   []interface{}{"$.team"},
+			mysqlArgs:   []interface{}{`$."team"`},
 		},
 		{
-			name:        "metadata with nested key",
+			name:        "metadata dotted key is a literal key",
 			input:       `metadata.jira.sprint = "Q1-2026"`,
 			sqliteWhere: sqliteValue + " = ?",
-			sqliteArgs:  []interface{}{"$.jira.sprint", "$.jira.sprint", "$.jira.sprint", "Q1-2026"},
+			sqliteArgs:  []interface{}{`$."jira.sprint"`, `$."jira.sprint"`, `$."jira.sprint"`, "Q1-2026"},
 			mysqlWhere:  mysqlValue + " = ?",
-			mysqlArgs:   []interface{}{"$.jira.sprint", "Q1-2026"},
+			mysqlArgs:   []interface{}{`$."jira.sprint"`, "Q1-2026"},
 		},
 		{
 			name:        "metadata combined with other filters",
 			input:       `type = task and metadata.team = "backend"`,
 			sqliteWhere: "(i.issue_type = ? AND " + sqliteValue + " = ?)",
-			sqliteArgs:  []interface{}{"task", "$.team", "$.team", "$.team", "backend"},
+			sqliteArgs:  []interface{}{"task", `$."team"`, `$."team"`, `$."team"`, "backend"},
 			mysqlWhere:  "(i.issue_type = ? AND " + mysqlValue + " = ?)",
-			mysqlArgs:   []interface{}{"task", "$.team", "backend"},
+			mysqlArgs:   []interface{}{"task", `$."team"`, "backend"},
 		},
 	}
 

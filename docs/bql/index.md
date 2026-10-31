@@ -50,29 +50,44 @@ type = epic expand down depth *
 
 | Field | Description | Example Values |
 |-------|-------------|----------------|
-| `status` | Issue status | `open`, `in_progress`, `blocked`, `deferred`, `closed` |
-| `type` | Issue type | `bug`, `feature`, `task`, `epic`, `chore`, `milestone`, `story`, `spike` |
+| `status` | Issue status | `open`, `in_progress`, `blocked`, `deferred`, `closed`, `pinned`, `hooked`, or a custom status |
+| `type` | Issue type | `bug`, `feature`, `task`, `epic`, `chore`, `decision`, `spike`, `story`, `milestone`, `message`, `molecule`, `gate`, `event`, or a custom type |
 | `priority` | Priority level | `P0`, `P1`, `P2`, `P3`, `P4` (or `0`-`4`) |
-| `blocked` | Has blockers | `true`, `false` |
-| `ready` | Open, unblocked, and not future-deferred | `true`, `false` |
+| `blocked` | Blocked by open work (see [Blocked and Ready](#blocked-and-ready)) | `true`, `false` |
+| `ready` | Ready to work on, as `bd ready` (see [Blocked and Ready](#blocked-and-ready)) | `true`, `false` |
 | `pinned` | Is pinned | `true`, `false` |
 | `is_template` | Is a template | `true`, `false` |
 | `label` | Issue labels | any label string |
 | `title` | Issue title | any text (use `~` for contains) |
 | `description` | Issue description | any text (use `~` for contains) |
 | `design` | Design notes | any text (use `~` for contains) |
+| `acceptance_criteria` | Acceptance criteria (not available with `backend: beads_rust`) | any text (use `~` for contains) |
 | `notes` | Issue notes | any text (use `~` for contains) |
+| `close_reason` | Reason given when the issue was closed (not available with `backend: beads_rust`) | any text (use `~` for contains) |
 | `id` | Issue ID | e.g., `bd-123` |
 | `assignee` | Assigned user | username |
+| `owner` | Issue owner | username |
 | `sender` | Issue sender | username |
 | `created_by` | Issue creator | username |
 | `mol_type` | Molecule type (not available with `backend: beads_rust`) | string |
-| `owner` | Issue owner (`backend: beads_rust` only) | username |
 | `created` | Creation date | `today`, `yesterday`, `-7d`, `-3m` |
 | `updated` | Last update | `today`, `-24h` |
+| `started` | When work started (not available with `backend: beads_rust`) | `today`, `-7d` |
+| `closed` | When the issue was closed (not available with `backend: beads_rust`) | `today`, `-7d` |
+| `due` | Due date (not available with `backend: beads_rust`) | `now`, `today` |
 | `defer_until` | Deferred-until date | `now`, `today`, `-7d` |
 
+`status` and `type` accept any name, so custom statuses and types configured with `bd config set status.custom` / `types.custom` (for example `type = convoy`) can be queried. A missing `assignee`, `owner`, `close_reason` or `acceptance_criteria` compares as an empty string, so `owner = ""` finds issues without an owner.
+
+Older beads databases may lack some columns (for example `started` arrived around bd v1.0.1). A query that uses such a field fails with `field "started" is not available in this beads database (upgrade beads)`.
+
 The `backend` option is described in [Configuration](../configuration/index.md#general).
+
+### Blocked and Ready
+
+BQL follows bd's own definitions. `blocked = true` matches the issues `bd blocked` lists: on current beads databases that is bd's maintained `is_blocked` flag (which includes issues blocked through a blocked parent), excluding closed and pinned issues. On older databases without that flag it means an issue that is not closed, pinned or in a custom `done`/`frozen` status and has a `blocks` dependency on an issue that is not in one of those statuses either.
+
+`ready = true` matches `bd ready`: status `open` (or a custom status with category `active`), not blocked, not pinned, not ephemeral, not deferred into the future, no parent deferred into the future, and not one of bd's internal types (`gate`, `molecule`, `message`, `merge-request`, `rig`, `agent`, `role`). With `backend: beads_rust`, `ready` means open, unblocked and not deferred into the future, and `blocked` means having a `blocks` dependency on an open, in-progress, blocked or deferred issue.
 
 ### Metadata Fields
 
@@ -83,7 +98,7 @@ Issues can have custom metadata stored as JSON key-value pairs. Use the `metadat
 | `metadata.<key>` | Custom metadata field | any string value, or `nil` |
 
 - **Values must be strings or `nil`.** Quote values that would otherwise parse as a priority, number, boolean, or date, e.g. `metadata.level = "P1"`, `metadata.points = "5"`, `metadata.flaky = "true"`. Unquoted words such as `metadata.team = backend` are strings.
-- **Values compare as text.** Strings compare without their JSON quotes. Numbers compare as their JSON text, so `{"points": 5}` and `{"points": "5"}` both match `metadata.points = "5"`. Booleans compare as `true` or `false` (not `1`), and a JSON `null` compares as `null`. Dolt-backed databases normalize numbers first (`1.0` compares as `1`, `1e3` as `1000`), while SQLite compares them exactly as stored.
+- **Values compare as text.** Strings compare without their JSON quotes. Numbers compare as their JSON text, so `{"points": 5}` and `{"points": "5"}` both match `metadata.points = "5"`. Booleans compare as `true` or `false` (not `1`), and a JSON `null` compares as `null`. Dolt-backed databases normalize numbers first (`1.0` compares as `1`, `1e3` as `1000`), while beads_rust (SQLite) compares them exactly as stored.
 - `=` and `!=` are case-sensitive. `~` and `!~` are case-insensitive substring matches.
 - `!=` and `!~` only match issues that have the key. Issues without the key are left out.
 - `in` / `not in` are not supported on metadata fields. Combine conditions with `or` instead.
@@ -138,15 +153,15 @@ Critical bugs, plus any issue owned by the security team (`and` binds tighter th
 type = bug and metadata.severity = "critical" or metadata.team = "security"
 ```
 
-#### Nested Metadata
+#### Dotted and Slashed Keys
 
-Use dots to reach into nested JSON objects. `metadata.jira.sprint` reads the `sprint` field inside a `jira` object, as in `{"jira": {"sprint": "Q1-2026", "priority": "high"}}`:
+Like bd, BQL treats everything after `metadata.` as one literal top-level key. `metadata.jira.sprint` matches the key `jira.sprint`, as written by `bd update --set-metadata jira.sprint=Q1-2026` (`{"jira.sprint": "Q1-2026"}`), and `metadata.jira/sprint` matches the key `jira/sprint`:
 
 ```bql
-metadata.jira.sprint = "Q1-2026" and metadata.jira.priority = "high"
+metadata.jira.sprint = "Q1-2026" and metadata.jira/epic = "auth"
 ```
 
-A top-level key that literally contains a dot (such as `{"jira.sprint": "Q1-2026"}`) cannot be matched. Keys must start with a letter or `_` and may contain only letters, digits, `_`, and `.`, so a key like `story-points` cannot be queried.
+Dots do not reach into nested JSON objects, so `{"jira": {"sprint": "Q1-2026"}}` is not matched by `metadata.jira.sprint` (only `metadata.jira != nil` finds it). Keys follow bd's rules: they must start with a letter or `_` and may contain only letters, digits, `_`, `.` and `/`, so a key like `story-points` cannot be queried.
 
 ---
 
@@ -165,13 +180,13 @@ A top-level key that literally contains a dot (such as `{"jira.sprint": "Q1-2026
 | `in` | In list | `status in (open, in_progress)` |
 | `not in` | Not in list | `label not in (backlog)` |
 
-`~` and `!~` match a substring anywhere in the value. `%` and `_` in the search text act as SQL `LIKE` wildcards (any run of characters, and any single character). On SQLite databases, `~` and `!~` ignore case only for ASCII letters.
+`~` and `!~` match a substring anywhere in the value. `%` and `_` in the search text act as SQL `LIKE` wildcards (any run of characters, and any single character). With `backend: beads_rust` (SQLite), `~` and `!~` ignore case only for ASCII letters.
 
 Operators are checked against the field type, so a query such as `status ~ open` fails validation. The supported combinations are:
 
-- `<`, `>`, `<=`, `>=`: `priority` and date fields (`created`, `updated`, `defer_until`) only.
-- `~`, `!~`: text fields (`title`, `description`, `design`, `notes`, `label`, `id`, `assignee`, `sender`, `created_by`, `mol_type`, `owner`) and metadata fields.
-- `status`, `type`: `=`, `!=`, `in`, `not in`.
+- `<`, `>`, `<=`, `>=`: `priority` and date fields (`created`, `updated`, `started`, `closed`, `due`, `defer_until`) only.
+- `~`, `!~`: text fields (`title`, `description`, `design`, `acceptance_criteria`, `notes`, `close_reason`, `label`, `id`, `assignee`, `owner`, `sender`, `created_by`, `mol_type`) and metadata fields.
+- `status`, `type`: `=`, `!=`, `in`, `not in`, with any name (numbers, `true`/`false` and `nil` are rejected).
 - Boolean fields (`blocked`, `ready`, `pinned`, `is_template`): `=` and `!=` only. `!=` currently behaves like `=` on these fields (`blocked != true` returns blocked issues), so write `blocked = false` or `not blocked = true` instead.
 - `in` / `not in` are not valid on boolean or date fields.
 
@@ -225,6 +240,8 @@ BQL supports relative dates and named dates:
 Relative offsets must be negative. Future offsets and absolute dates are not supported: `+7d`, `2026-01-01` and `"2026-01-01"` are rejected, and a bare `7d` is compared as the literal text `7d`, which silently matches the wrong issues. To compare against the present, use `now` or `today`, e.g. `defer_until > now`.
 
 Each value is a single point in time, so compare with `>=`, `>`, `<`, or `<=`. `created = today` does not mean "created today"; use `created >= today`.
+
+Times are in UTC, the time zone bd stores timestamps in, so `today` starts at midnight UTC.
 
 ---
 

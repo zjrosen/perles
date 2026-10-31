@@ -11,7 +11,11 @@ import (
 )
 
 // Schema contains the unified test database schema combining all tables
-// from executor_test.go and client_test.go.
+// from executor_test.go and client_test.go. It is a SQLite beads schema with
+// the legacy dependencies.depends_on_id target and blocked_issues_cache, plus
+// the newer issues columns BQL can filter on (owner, started_at, due_at).
+// Tests that need current-beads tables or columns (is_blocked,
+// custom_statuses) add them with ALTER TABLE / CREATE TABLE.
 const Schema = `
 CREATE TABLE issues (
 	id TEXT PRIMARY KEY,
@@ -24,6 +28,7 @@ CREATE TABLE issues (
 	priority INTEGER NOT NULL DEFAULT 2,
 	issue_type TEXT NOT NULL DEFAULT 'task',
 	assignee TEXT,
+	owner TEXT DEFAULT '',
 	sender TEXT,
 	ephemeral INTEGER,
 	pinned INTEGER,
@@ -31,7 +36,9 @@ CREATE TABLE issues (
 	created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	created_by TEXT DEFAULT '',
 	updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	started_at DATETIME,
 	closed_at DATETIME,
+	due_at DATETIME,
 	defer_until DATETIME,
 	close_reason TEXT DEFAULT '',
 	deleted_at DATETIME,

@@ -3,6 +3,7 @@ package bql
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -36,8 +37,10 @@ type Executor struct {
 	cacheManager  cachemanager.CacheManager[string, []beads.Issue]
 	depGraphCache cachemanager.CacheManager[string, *DependencyGraph]
 
-	depTargetMu     sync.Mutex
-	depTargetColumn string
+	// schema is the probed database schema, cached after the first query and
+	// reset when a query fails in a way that suggests the schema changed.
+	schemaMu sync.Mutex
+	schema   *Schema
 }
 
 // depGraphCacheKey is the static key for caching the dependency graph.
@@ -158,6 +161,19 @@ func (e *Executor) Execute(input string) ([]beads.Issue, error) {
 		return issues, nil
 	}
 
+	// executeWithSchemaRefresh re-probes the schema and retries once when a
+	// query fails in a way that suggests the cached schema is stale (bd
+	// migrated the database while perles was running).
+	executeWithSchemaRefresh := func() ([]beads.Issue, error) {
+		issues, err := executeWithSnapshot()
+		if err == nil || !isStaleSchemaError(err) {
+			return issues, err
+		}
+		log.Debug(log.CatBQL, "Query failed on a possibly stale schema, re-probing", "error", err, "query", input)
+		e.resetSchema()
+		return executeWithSnapshot()
+	}
+
 	// Wrap with retry for transient Dolt errors. Each retry opens a fresh
 	// transaction so the snapshot advances past the inconsistency.
 	executeWithRetry := func() ([]beads.Issue, error) {
@@ -167,7 +183,7 @@ func (e *Executor) Execute(input string) ([]beads.Issue, error) {
 		}
 		var lastErr error
 		for i := range attempts {
-			issues, err := executeWithSnapshot()
+			issues, err := executeWithSchemaRefresh()
 			if err == nil {
 				return issues, nil
 			}
@@ -201,45 +217,184 @@ func (e *Executor) Execute(input string) ([]beads.Issue, error) {
 	return issues, nil
 }
 
-func (e *Executor) resolveDependencyTargetColumn(q querier) (string, error) {
-	if e.dialect != appbeads.DialectMySQL {
-		return legacyDependencyTargetColumn, nil
+// FieldUnavailableError reports a BQL field whose column the probed beads
+// database does not have (its schema predates the column).
+type FieldUnavailableError struct {
+	Field string
+}
+
+func (e *FieldUnavailableError) Error() string {
+	return fmt.Sprintf("field %q is not available in this beads database (upgrade beads)", e.Field)
+}
+
+// checkFieldsAvailable returns a *FieldUnavailableError for the first field
+// in the query's filter or ORDER BY whose issues column the schema lacks.
+func checkFieldsAvailable(query *Query, schema *Schema) error {
+	check := func(field string) error {
+		column, ok := issueColumnForField(field)
+		if ok && !schema.HasIssueColumn(column) {
+			return &FieldUnavailableError{Field: field}
+		}
+		return nil
 	}
 
-	e.depTargetMu.Lock()
-	defer e.depTargetMu.Unlock()
-	if e.depTargetColumn != "" {
-		return e.depTargetColumn, nil
+	var walk func(Expr) error
+	walk = func(expr Expr) error {
+		switch e := expr.(type) {
+		case *BinaryExpr:
+			if err := walk(e.Left); err != nil {
+				return err
+			}
+			return walk(e.Right)
+		case *NotExpr:
+			return walk(e.Expr)
+		case *CompareExpr:
+			return check(e.Field)
+		case *InExpr:
+			return check(e.Field)
+		}
+		return nil
 	}
 
-	rows, err := q.Query("SELECT * FROM dependencies LIMIT 0")
+	if query.Filter != nil {
+		if err := walk(query.Filter); err != nil {
+			return err
+		}
+	}
+	for _, term := range query.OrderBy {
+		if err := check(term.Field); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// resolveSchema returns the cached schema, probing the database on first use.
+// The probe runs on q so it sees the same snapshot (and, for SQLite in-memory
+// test databases, the same connection) as the query.
+func (e *Executor) resolveSchema(q querier) (*Schema, error) {
+	e.schemaMu.Lock()
+	defer e.schemaMu.Unlock()
+	if e.schema != nil {
+		return e.schema, nil
+	}
+
+	schema, err := probeSchema(q)
 	if err != nil {
-		return "", fmt.Errorf("inspect dependencies schema: %w", err)
+		return nil, err
+	}
+	log.Debug(log.CatBQL, "Probed beads schema",
+		"dependencyTarget", schema.DependencyTarget,
+		"dependsOnExternal", schema.HasDependsOnExternal,
+		"isBlocked", schema.HasIsBlocked,
+		"customStatuses", schema.HasCustomStatuses,
+		"customTypes", schema.HasCustomTypes)
+	e.schema = schema
+	return schema, nil
+}
+
+// resetSchema drops the cached schema so the next query probes again.
+func (e *Executor) resetSchema() {
+	e.schemaMu.Lock()
+	defer e.schemaMu.Unlock()
+	e.schema = nil
+}
+
+// probeSchema inspects the issues and dependencies columns and whether the
+// custom_statuses and custom_types tables exist. It only uses
+// SELECT * ... LIMIT 0, which works on both MySQL/Dolt and SQLite.
+func probeSchema(q querier) (*Schema, error) {
+	issueColumns, err := tableColumns(q, "issues")
+	if err != nil {
+		return nil, err
+	}
+	dependencyColumns, err := tableColumns(q, "dependencies")
+	if err != nil {
+		return nil, err
+	}
+
+	schema := &Schema{
+		IssueColumns:         issueColumns,
+		HasIsBlocked:         issueColumns["is_blocked"],
+		HasDependsOnExternal: dependencyColumns[externalDependencyTargetColumn],
+	}
+	switch {
+	case dependencyColumns[issueDependencyTargetColumn]:
+		schema.DependencyTarget = issueDependencyTargetColumn
+	case dependencyColumns[legacyDependencyTargetColumn]:
+		schema.DependencyTarget = legacyDependencyTargetColumn
+	default:
+		return nil, fmt.Errorf("dependencies table has no supported target column (%s or %s)",
+			issueDependencyTargetColumn, legacyDependencyTargetColumn)
+	}
+
+	if schema.HasCustomStatuses, err = tableExists(q, "custom_statuses"); err != nil {
+		return nil, err
+	}
+	if schema.HasCustomTypes, err = tableExists(q, "custom_types"); err != nil {
+		return nil, err
+	}
+	return schema, nil
+}
+
+// tableColumns returns the set of column names of a table.
+func tableColumns(q querier, table string) (map[string]bool, error) {
+	rows, err := q.Query("SELECT * FROM " + table + " LIMIT 0") //nolint:gosec // G202: table is a hardcoded name
+	if err != nil {
+		return nil, fmt.Errorf("inspect %s schema: %w", table, err)
 	}
 	defer func() { _ = rows.Close() }()
 
 	columns, err := rows.Columns()
 	if err != nil {
-		return "", fmt.Errorf("read dependencies columns: %w", err)
+		return nil, fmt.Errorf("read %s columns: %w", table, err)
 	}
-
-	hasLegacyTarget := false
+	set := make(map[string]bool, len(columns))
 	for _, column := range columns {
-		switch column {
-		case issueDependencyTargetColumn:
-			e.depTargetColumn = issueDependencyTargetColumn
-			return e.depTargetColumn, nil
-		case legacyDependencyTargetColumn:
-			hasLegacyTarget = true
-		}
+		set[strings.ToLower(column)] = true
 	}
-	if hasLegacyTarget {
-		e.depTargetColumn = legacyDependencyTargetColumn
-		return e.depTargetColumn, nil
-	}
+	return set, nil
+}
 
-	return "", fmt.Errorf("dependencies table has no supported target column (%s or %s)",
-		issueDependencyTargetColumn, legacyDependencyTargetColumn)
+// tableExists reports whether a table exists. Errors other than a missing
+// table are returned so a transient failure is not cached as "absent".
+func tableExists(q querier, table string) (bool, error) {
+	rows, err := q.Query("SELECT * FROM " + table + " LIMIT 0") //nolint:gosec // G202: table is a hardcoded name
+	if err != nil {
+		if isMissingTableError(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("inspect %s table: %w", table, err)
+	}
+	_ = rows.Close()
+	return true, nil
+}
+
+// isMissingTableError matches "table does not exist" errors from SQLite
+// ("no such table"), MySQL (error 1146, "Table 'db.t' doesn't exist") and
+// Dolt ("table not found: t").
+func isMissingTableError(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "no such table") ||
+		strings.Contains(msg, "doesn't exist") ||
+		strings.Contains(msg, "table not found")
+}
+
+// isStaleSchemaError reports errors that a schema change could explain: a
+// field the cached schema lacks, or SQL that references a missing column or
+// table.
+func isStaleSchemaError(err error) bool {
+	var unavailable *FieldUnavailableError
+	if errors.As(err, &unavailable) {
+		return true
+	}
+	if isMissingTableError(err) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "no such column") ||
+		strings.Contains(msg, "unknown column") ||
+		(strings.Contains(msg, "column") && strings.Contains(msg, "could not be found"))
 }
 
 // IssueDeps holds all dependency data for an issue, grouped by type.
@@ -272,12 +427,15 @@ func (e *Executor) softDeleteFilter(alias string) string {
 // 3. Batch load labels for all result IDs
 // 4. Batch load comment counts for all result IDs
 func (e *Executor) executeBaseQuery(query *Query, q querier) ([]beads.Issue, error) {
-	// Build SQL
-	dependencyTarget, err := e.resolveDependencyTargetColumn(q)
+	// Build SQL for the probed schema
+	schema, err := e.resolveSchema(q)
 	if err != nil {
 		return nil, err
 	}
-	builder := NewSQLBuilder(query, e.dialect, WithDependencyTargetColumn(dependencyTarget))
+	if err := checkFieldsAvailable(query, schema); err != nil {
+		return nil, err
+	}
+	builder := NewSQLBuilder(query, e.dialect, WithSchema(schema))
 	whereClause, orderBy, params := builder.Build()
 
 	// Construct main query WITHOUT dependency subqueries
@@ -507,12 +665,15 @@ func (e *Executor) loadDependenciesForIssues(ids []string, q querier) (map[strin
 	// Single query to get all dependencies for all issues (both directions)
 	// Filter out deleted issues on the related side
 	softDelete := e.softDeleteFilter("i")
-	dependencyTargetColumn, err := e.resolveDependencyTargetColumn(q)
+	schema, err := e.resolveSchema(q)
 	if err != nil {
 		return nil, err
 	}
-	dependencyTarget := qualifiedDependencyTargetColumn("d", dependencyTargetColumn)
-	//nolint:gosec // G201: inClause contains only "?" placeholders and dependencyTarget is dialect-selected.
+	// The target expression includes depends_on_external when it exists, so
+	// cross-prefix edges to local issues load too; the JOIN to issues keeps
+	// only targets that are local issues.
+	dependencyTarget := schema.DependencyTargetExpr("d")
+	//nolint:gosec // G201: inClause contains only "?" placeholders and dependencyTarget is built from probed column names.
 	query := fmt.Sprintf(`
 		SELECT d.issue_id, %s, d.type
 		FROM dependencies d
@@ -822,11 +983,12 @@ func (e *Executor) loadDependencyGraph(q querier) (*DependencyGraph, error) {
 func (e *Executor) loadDependencyGraphFromDB(q querier) (*DependencyGraph, error) {
 	log.Debug(log.CatBQL, "Loading dependency graph from database")
 
-	dependencyTargetColumn, err := e.resolveDependencyTargetColumn(q)
+	schema, err := e.resolveSchema(q)
 	if err != nil {
 		return nil, err
 	}
-	dependencyTarget := qualifiedDependencyTargetColumn("d", dependencyTargetColumn)
+	// Includes depends_on_external when present; the JOIN keeps local targets only.
+	dependencyTarget := schema.DependencyTargetExpr("d")
 	//nolint:gosec // G201: dependencyTarget and softDeleteFilter return hardcoded SQL fragments.
 	query := fmt.Sprintf(`
 		SELECT d.issue_id, %s, d.type

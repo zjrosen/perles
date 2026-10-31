@@ -28,8 +28,8 @@ type BQLOperator struct {
 // BQLFields returns the list of BQL fields for help text.
 func BQLFields() []BQLField {
 	return []BQLField{
-		{Name: "status", Values: "open, in_progress, closed, blocked, deferred"},
-		{Name: "type", Values: "bug, feature, task, epic, chore, milestone, story, spike"},
+		{Name: "status", Values: "open, in_progress, blocked, deferred, closed, pinned, hooked, custom"},
+		{Name: "type", Values: "bug, feature, task, epic, chore, decision, spike, story, milestone, custom"},
 		{Name: "priority", Values: "p0, p1, p2, p3, p4"},
 		{Name: "blocked", Values: "true, false"},
 		{Name: "ready", Values: "true, false"},
@@ -40,15 +40,43 @@ func BQLFields() []BQLField {
 		{Name: "description", Values: "string (use ~ for contains)"},
 		{Name: "design", Values: "string (use ~ for contains)"},
 		{Name: "notes", Values: "string (use ~ for contains)"},
+		{Name: "acceptance_criteria", Values: "string (use ~ for contains)"},
+		{Name: "close_reason", Values: "string (use ~ for contains)"},
 		{Name: "id", Values: "string"},
 		{Name: "assignee", Values: "string"},
+		{Name: "owner", Values: "string"},
 		{Name: "sender", Values: "string"},
 		{Name: "created_by", Values: "string"},
 		{Name: "mol_type", Values: "string"},
 		{Name: "created", Values: "date (now, today, yesterday, -7d)"},
 		{Name: "updated", Values: "date (now, today, yesterday, -7d)"},
+		{Name: "started", Values: "date (now, today, yesterday, -7d)"},
+		{Name: "closed", Values: "date (now, today, yesterday, -7d)"},
+		{Name: "due", Values: "date (now, today, yesterday, -7d)"},
 		{Name: "defer_until", Values: "date (now, today, yesterday, -7d)"},
 	}
+}
+
+// BQLFieldLabelWidth returns the label column width that fits the longest
+// BQL field name plus one space of padding.
+func BQLFieldLabelWidth() int {
+	width := 0
+	for _, f := range BQLFields() {
+		width = max(width, lipgloss.Width(f.Name))
+	}
+	return width + 1
+}
+
+// RenderBQLFieldRow renders one field row as a fixed-width label followed by
+// its values, wrapping the values onto continuation lines (aligned under the
+// first value) when they are wider than valueWidth. A valueWidth <= 0
+// disables wrapping.
+func RenderBQLFieldRow(labelStyle, valueStyle lipgloss.Style, labelWidth, valueWidth int, name, values string) string {
+	label := labelStyle.Width(labelWidth).Render(name)
+	if valueWidth > 0 {
+		valueStyle = valueStyle.Width(valueWidth)
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, label, valueStyle.Render(values))
 }
 
 // BQLOperators returns the list of BQL operators for help text.
@@ -389,6 +417,10 @@ func (m Model) renderSearchContent() string {
 	bqlStyle := lipgloss.NewStyle().Foreground(styles.TextMutedColor)
 	bqlLabelStyle := lipgloss.NewStyle().Foreground(styles.TextSecondaryColor).Width(12)
 	bqlValueStyle := lipgloss.NewStyle().Foreground(styles.TextMutedColor)
+	// Field names get a label column wide enough for the longest one; long
+	// value lists (status, type) wrap so the overlay stays the same width.
+	const bqlFieldValueWidth = 48
+	fieldLabelWidth := BQLFieldLabelWidth()
 
 	// Fields column - use shared BQL data
 	var fieldsCol strings.Builder
@@ -398,12 +430,12 @@ func (m Model) renderSearchContent() string {
 		// For compact display in overlay, use shorter values for some fields
 		values := f.Values
 		switch f.Name {
-		case "label", "title":
+		case "label", "title", "acceptance_criteria", "close_reason":
 			values = "string (~ for contains)"
-		case "created", "updated":
+		case "created", "updated", "started", "closed", "due":
 			values = "today, -7d"
 		}
-		fieldsCol.WriteString(bqlLabelStyle.Render(f.Name) + bqlValueStyle.Render(values) + "\n")
+		fieldsCol.WriteString(RenderBQLFieldRow(bqlLabelStyle, bqlValueStyle, fieldLabelWidth, bqlFieldValueWidth, f.Name, values) + "\n")
 	}
 
 	// Operators column - use shared BQL data

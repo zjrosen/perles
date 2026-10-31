@@ -863,7 +863,7 @@ func (m Model) renderConfigForm(width int) string {
 		titleStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.TextSecondaryColor)
 		title := titleStyle.Render("BQL Query Help")
 
-		helpRows := m.buildBQLHelpRows()
+		helpRows := m.buildBQLHelpRows(sectionWidth)
 		helpContent := divider + "\n\n" + title + "\n\n" + strings.Join(helpRows, "\n")
 		sections = append(sections, helpContent)
 	}
@@ -1206,8 +1206,9 @@ func (m Model) ShowDeleteModal() bool {
 
 // buildBQLHelpRows builds the BQL syntax help rows using shared help data.
 // Returns a two-column layout (Fields | Operators) with Examples below.
-func (m Model) buildBQLHelpRows() []string {
-	labelStyle := lipgloss.NewStyle().Foreground(styles.TextSecondaryColor).Width(12)
+// Field values wrap so that both columns fit within width.
+func (m Model) buildBQLHelpRows(width int) []string {
+	labelStyle := lipgloss.NewStyle().Foreground(styles.TextSecondaryColor)
 	valueStyle := lipgloss.NewStyle().Foreground(styles.TextMutedColor)
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.TextSecondaryColor)
 	columnStyle := lipgloss.NewStyle().MarginRight(4)
@@ -1219,8 +1220,14 @@ func (m Model) buildBQLHelpRows() []string {
 	var fieldsCol strings.Builder
 	fieldsCol.WriteString(headerStyle.Render("BQL Fields"))
 	fieldsCol.WriteString("\n")
+	// The operators column is the 8-wide symbol plus its longest description,
+	// and columnStyle adds a 4-wide gap between the columns.
+	const opsColumnWidth = 8 + len("comparison")
+	const minFieldValueWidth = 20
+	fieldLabelWidth := help.BQLFieldLabelWidth()
+	fieldValueWidth := max(minFieldValueWidth, width-fieldLabelWidth-4-opsColumnWidth)
 	for _, f := range help.BQLFields() {
-		fieldsCol.WriteString(labelStyle.Render(f.Name) + valueStyle.Render(f.Values) + "\n")
+		fieldsCol.WriteString(help.RenderBQLFieldRow(labelStyle, valueStyle, fieldLabelWidth, fieldValueWidth, f.Name, f.Values) + "\n")
 	}
 
 	// Operators column - use compact symbols for better layout

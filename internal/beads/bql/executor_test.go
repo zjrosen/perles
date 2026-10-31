@@ -11,6 +11,8 @@ import (
 	"github.com/zjrosen/perles/internal/mocks"
 	"github.com/zjrosen/perles/internal/testutil"
 
+	"github.com/ncruces/go-sqlite3"
+	"github.com/ncruces/go-sqlite3/driver"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
@@ -2792,7 +2794,14 @@ func setupDoltDB(t *testing.T) *sql.DB {
 
 func setupDoltDBWithSchema(t *testing.T, schema string) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite3", ":memory:")
+	// The MySQL dialect compares against UTC_TIMESTAMP() as bd does, so
+	// register an equivalent function on the SQLite test engine. It returns
+	// the same "YYYY-MM-DD HH:MM:SS" UTC text as CURRENT_TIMESTAMP.
+	db, err := driver.Open(":memory:", func(conn *sqlite3.Conn) error {
+		return conn.CreateFunction("UTC_TIMESTAMP", 0, sqlite3.INNOCUOUS, func(ctx sqlite3.Context, _ ...sqlite3.Value) {
+			ctx.ResultText(time.Now().UTC().Format(time.DateTime))
+		})
+	})
 	require.NoError(t, err)
 	_, err = db.Exec(schema)
 	require.NoError(t, err)
@@ -3227,10 +3236,16 @@ func TestExecutor_MetadataQueries(t *testing.T) {
 		require.True(t, ids["meta-6"], "should include meta-6 (has jira, not team)")
 	})
 
-	t.Run("nested metadata key exists", func(t *testing.T) {
+	t.Run("dotted metadata key does not reach into nested objects", func(t *testing.T) {
+		// Like bd, metadata.jira.priority addresses the literal key
+		// "jira.priority", not {"jira": {"priority": ...}}.
 		issues, err := executor.Execute(`metadata.jira.priority != nil`)
 		require.NoError(t, err)
-		require.Len(t, issues, 1, "should find meta-6 with nested jira.priority")
+		require.Empty(t, issues, "meta-6 only has a nested jira object")
+
+		issues, err = executor.Execute(`metadata.jira != nil`)
+		require.NoError(t, err)
+		require.Len(t, issues, 1)
 		require.Equal(t, "meta-6", issues[0].ID)
 	})
 
@@ -3277,7 +3292,8 @@ func TestExecutor_MetadataValueComparisons(t *testing.T) {
 			WithIssue("mv-2", testutil.Metadata(`{"team":"Frontend","points":13,"estimate":2,"flaky":false}`)).
 			WithIssue("mv-3", testutil.Metadata(`{"team":"backend-infra","points":"5"}`)).
 			WithIssue("mv-4", testutil.Metadata(`{}`)).
-			WithIssue("mv-5", testutil.Metadata(`{"jira":{"sprint":"Q1-2026"}}`))
+			WithIssue("mv-5", testutil.Metadata(`{"jira":{"sprint":"Q1-2026"}}`)).
+			WithIssue("mv-6", testutil.Metadata(`{"jira.sprint":"Q1-2026","jira/epic":"auth"}`))
 	})
 	defer func() { _ = db.Close() }()
 
@@ -3294,7 +3310,11 @@ func TestExecutor_MetadataValueComparisons(t *testing.T) {
 		{"string not equals excludes missing keys", `metadata.team != "backend"`, []string{"mv-2", "mv-3"}},
 		{"string contains is case-insensitive", `metadata.team ~ BACKEND`, []string{"mv-1", "mv-3"}},
 		{"string not contains", `metadata.team !~ back`, []string{"mv-2"}},
-		{"nested string equals", `metadata.jira.sprint = "Q1-2026"`, []string{"mv-5"}},
+		// Dotted and slashed keys are literal top-level keys, as in bd.
+		{"dotted key equals literal key", `metadata.jira.sprint = "Q1-2026"`, []string{"mv-6"}},
+		{"dotted key exists", `metadata.jira.sprint != nil`, []string{"mv-6"}},
+		{"slash key equals", `metadata.jira/epic = "auth"`, []string{"mv-6"}},
+		{"slash key contains", `metadata.jira/epic ~ AU`, []string{"mv-6"}},
 
 		// Numbers compare as their JSON text, matching a string "5" too.
 		{"integer equals", `metadata.points = "5"`, []string{"mv-1", "mv-3"}},
@@ -3314,7 +3334,7 @@ func TestExecutor_MetadataValueComparisons(t *testing.T) {
 
 		// JSON null is a present key whose value renders as null.
 		{"json null key exists", `metadata.owner != nil`, []string{"mv-1"}},
-		{"json null key not exists", `metadata.owner = nil`, []string{"mv-2", "mv-3", "mv-4", "mv-5"}},
+		{"json null key not exists", `metadata.owner = nil`, []string{"mv-2", "mv-3", "mv-4", "mv-5", "mv-6"}},
 		{"json null equals null text", `metadata.owner = "null"`, []string{"mv-1"}},
 	}
 

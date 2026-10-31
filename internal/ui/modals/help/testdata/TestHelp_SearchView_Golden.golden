@@ -12,26 +12,34 @@
 │                                                                                                             │
 │                                                                                                             │
 │  BQL Fields                                                              BQL Operators                      │
-│  status      open, in_progress, closed, blocked, deferred                =  !=       equality               │
-│  type        bug, feature, task, epic, chore, milestone, story, spike    <  >        comparison             │
-│  priority    p0, p1, p2, p3, p4                                          ~  !~       contains               │
-│  blocked     true, false                                                 in          match any: in (a, b)   │
-│  ready       true, false                                                 and or      logical                │
-│  pinned      true, false                                                 expand      up, down, all          │
-│  is_template true, false                                                 depth       1-10 or * (unlimited)  │
-│  label       string (~ for contains)                                     not         negation               │
-│  title       string (~ for contains)                                                                        │
-│  description string (use ~ for contains)                                                                    │
-│  design      string (use ~ for contains)                                                                    │
-│  notes       string (use ~ for contains)                                                                    │
-│  id          string                                                                                         │
-│  assignee    string                                                                                         │
-│  sender      string                                                                                         │
-│  created_by  string                                                                                         │
-│  mol_type    string                                                                                         │
-│  created     today, -7d                                                                                     │
-│  updated     today, -7d                                                                                     │
-│  defer_until date (now, today, yesterday, -7d)                                                              │
+│  status              open, in_progress, blocked, deferred, closed,       =  !=       equality               │
+│                      pinned, hooked, custom                              <  >        comparison             │
+│  type                bug, feature, task, epic, chore, decision,          ~  !~       contains               │
+│                      spike, story, milestone, custom                     in          match any: in (a, b)   │
+│  priority            p0, p1, p2, p3, p4                                  and or      logical                │
+│  blocked             true, false                                         expand      up, down, all          │
+│  ready               true, false                                         depth       1-10 or * (unlimited)  │
+│  pinned              true, false                                         not         negation               │
+│  is_template         true, false                                                                            │
+│  label               string (~ for contains)                                                                │
+│  title               string (~ for contains)                                                                │
+│  description         string (use ~ for contains)                                                            │
+│  design              string (use ~ for contains)                                                            │
+│  notes               string (use ~ for contains)                                                            │
+│  acceptance_criteria string (~ for contains)                                                                │
+│  close_reason        string (~ for contains)                                                                │
+│  id                  string                                                                                 │
+│  assignee            string                                                                                 │
+│  owner               string                                                                                 │
+│  sender              string                                                                                 │
+│  created_by          string                                                                                 │
+│  mol_type            string                                                                                 │
+│  created             today, -7d                                                                             │
+│  updated             today, -7d                                                                             │
+│  started             today, -7d                                                                             │
+│  closed              today, -7d                                                                             │
+│  due                 today, -7d                                                                             │
+│  defer_until         date (now, today, yesterday, -7d)                                                      │
 │                                                                                                             │
 │                                                                                                             │
 │  Examples                                                                                                   │

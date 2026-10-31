@@ -22,6 +22,7 @@ type issueData struct {
 	priority    int
 	issueType   string
 	assignee    *string
+	owner       string
 	sender      string
 	ephemeral   bool
 	pinned      *bool
@@ -31,7 +32,9 @@ type issueData struct {
 	createdAt   time.Time
 	createdBy   string
 	updatedAt   time.Time
+	startedAt   *time.Time
 	closedAt    *time.Time
+	dueAt       *time.Time
 	deferUntil  *time.Time
 	closeReason string
 	deletedAt   *time.Time
@@ -82,7 +85,7 @@ func Priority(p int) IssueOption {
 	return func(i *issueData) { i.priority = p }
 }
 
-// IssueType sets the issue type (bug, feature, task, epic, chore, milestone, story, spike).
+// IssueType sets the issue type (bug, feature, task, epic, chore, decision, gate, ...).
 func IssueType(t string) IssueOption {
 	return func(i *issueData) { i.issueType = t }
 }
@@ -125,6 +128,21 @@ func ClosedAt(t time.Time) IssueOption {
 // DeferUntil sets the defer_until timestamp.
 func DeferUntil(t time.Time) IssueOption {
 	return func(i *issueData) { i.deferUntil = &t }
+}
+
+// StartedAt sets the started_at timestamp.
+func StartedAt(t time.Time) IssueOption {
+	return func(i *issueData) { i.startedAt = &t }
+}
+
+// DueAt sets the due_at timestamp.
+func DueAt(t time.Time) IssueOption {
+	return func(i *issueData) { i.dueAt = &t }
+}
+
+// Owner sets the owner field for the issue.
+func Owner(s string) IssueOption {
+	return func(i *issueData) { i.owner = s }
 }
 
 // CloseReason sets the close_reason field for closed issues.

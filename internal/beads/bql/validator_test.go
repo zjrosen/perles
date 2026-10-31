@@ -16,6 +16,24 @@ func TestValidate_ValidQueries(t *testing.T) {
 		"type = milestone",
 		"type = story",
 		"type = spike",
+		"type = decision",
+		"type = message",
+		"type = molecule",
+		"type = gate",
+		"type = event",
+		"type = convoy",
+		"type = my-custom-type",
+		"type in (gate, decision)",
+		"status = pinned",
+		"status = hooked",
+		"owner = alice",
+		"owner ~ ali",
+		"close_reason ~ duplicate",
+		"acceptance_criteria ~ tests",
+		"started > -7d",
+		"closed >= -30d",
+		"due < now",
+		"type = bug order by due asc, started desc, closed",
 		"priority = P0",
 		"priority < P2",
 		"priority >= P1",
@@ -121,7 +139,9 @@ func TestValidate_InvalidValue(t *testing.T) {
 		name  string
 		query string
 	}{
-		{"invalid type value", "type = invalid"},
+		{"type with number", "type = 5"},
+		{"status with boolean", "status = true"},
+		{"type with nil", "type = nil"},
 		{"boolean field with string", "blocked = yes"},
 		{"priority field with string", "priority = high"},
 		{"priority integer too high", "priority = 5"},
@@ -147,7 +167,7 @@ func TestValidate_InvalidIn(t *testing.T) {
 	}{
 		{"in with boolean field", "blocked in (true, false)"},
 		{"in with date field", "created in (today, yesterday)"},
-		{"in with invalid type values", "type in (invalid, unknown)"},
+		{"in with numeric status values", "status in (1, 2)"},
 	}
 
 	for _, tc := range tests {
@@ -277,4 +297,35 @@ func TestValidate_MetadataField(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "invalid metadata key")
 	})
+}
+
+func TestValidate_KnownValuesAndCustomNames(t *testing.T) {
+	for _, v := range KnownTypeValues {
+		q, err := NewParser("type = " + v).Parse()
+		require.NoError(t, err)
+		require.NoError(t, Validate(q), "known type %q", v)
+	}
+	for _, v := range KnownStatusValues {
+		q, err := NewParser("status = " + v).Parse()
+		require.NoError(t, err)
+		require.NoError(t, Validate(q), "known status %q", v)
+	}
+	require.Subset(t, KnownTypeValues, []string{
+		"bug", "feature", "task", "epic", "chore", "decision", "message",
+		"molecule", "gate", "spike", "story", "milestone", "event",
+	})
+	require.Subset(t, KnownStatusValues, []string{"pinned", "hooked"})
+}
+
+func TestValidate_MetadataKeysFollowBd(t *testing.T) {
+	for _, key := range []string{"team", "_private", "jira.sprint", "jira/sprint", "gc.routed_to", "a1/b2.c3"} {
+		q, err := NewParser("metadata." + key + ` = "x"`).Parse()
+		require.NoError(t, err, key)
+		require.NoError(t, Validate(q), key)
+	}
+	for _, key := range []string{"1team", "story-points", "a:b", "/lead", ".lead"} {
+		q, err := NewParser("metadata." + key + ` = "x"`).Parse()
+		require.NoError(t, err, key)
+		require.ErrorContains(t, Validate(q), "invalid metadata key", key)
+	}
 }

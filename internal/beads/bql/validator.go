@@ -6,7 +6,11 @@ import (
 	"strings"
 )
 
-var validMetadataKeyRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_.]*$`)
+// validMetadataKeyRe matches the metadata keys bd accepts (beads
+// internal/storage/metadata.go validMetadataKeyRe): a letter or underscore,
+// then letters, digits, underscores, dots and slashes. Dots are part of the
+// key, not a nested path.
+var validMetadataKeyRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_./]*$`)
 
 func isMetadataField(field string) (bool, string) {
 	if !strings.HasPrefix(field, "metadata.") {
@@ -18,33 +22,43 @@ func isMetadataField(field string) (bool, string) {
 
 func validateMetadataKey(key string) error {
 	if !validMetadataKeyRe.MatchString(key) {
-		return fmt.Errorf("invalid metadata key %q: must match [a-zA-Z_][a-zA-Z0-9_.]*", key)
+		return fmt.Errorf("invalid metadata key %q: must match %s", key, validMetadataKeyRe.String())
 	}
 	return nil
 }
 
 // ValidFields defines the set of valid field names in BQL.
+//
+// Some fields read columns that older beads schemas lack (e.g. started_at,
+// added around bd v1.0.1); the executor rejects those at run time with a
+// FieldUnavailableError when the probed database has no such column.
 var ValidFields = map[string]FieldType{
-	"type":        FieldEnum,
-	"priority":    FieldPriority,
-	"status":      FieldEnum,
-	"blocked":     FieldBool,
-	"ready":       FieldBool,
-	"pinned":      FieldBool,
-	"is_template": FieldBool,
-	"label":       FieldString,
-	"title":       FieldString,
-	"id":          FieldString,
-	"assignee":    FieldString,
-	"sender":      FieldString,
-	"description": FieldString,
-	"design":      FieldString,
-	"notes":       FieldString,
-	"created_by":  FieldString,
-	"mol_type":    FieldString,
-	"created":     FieldDate,
-	"updated":     FieldDate,
-	"defer_until": FieldDate,
+	"type":                FieldEnum,
+	"priority":            FieldPriority,
+	"status":              FieldEnum,
+	"blocked":             FieldBool,
+	"ready":               FieldBool,
+	"pinned":              FieldBool,
+	"is_template":         FieldBool,
+	"label":               FieldString,
+	"title":               FieldString,
+	"id":                  FieldString,
+	"assignee":            FieldString,
+	"owner":               FieldString,
+	"sender":              FieldString,
+	"description":         FieldString,
+	"design":              FieldString,
+	"acceptance_criteria": FieldString,
+	"notes":               FieldString,
+	"close_reason":        FieldString,
+	"created_by":          FieldString,
+	"mol_type":            FieldString,
+	"created":             FieldDate,
+	"updated":             FieldDate,
+	"started":             FieldDate,
+	"closed":              FieldDate,
+	"due":                 FieldDate,
+	"defer_until":         FieldDate,
 }
 
 // FieldType categorizes fields for validation.
@@ -58,16 +72,20 @@ const (
 	FieldDate
 )
 
-// ValidTypeValues are the valid values for the type field.
-var ValidTypeValues = map[string]bool{
-	"bug":       true,
-	"feature":   true,
-	"task":      true,
-	"epic":      true,
-	"chore":     true,
-	"milestone": true,
-	"story":     true,
-	"spike":     true,
+// KnownTypeValues lists bd's built-in issue types (beads internal/types
+// AllIssueTypes) plus the system "event" type, for completion, highlighting
+// and help. The type field accepts any string, since bd also supports custom
+// types (custom_types table, e.g. Gas Town's convoy and agent).
+var KnownTypeValues = []string{
+	"bug", "feature", "task", "epic", "chore", "decision", "message",
+	"molecule", "gate", "spike", "story", "milestone", "event",
+}
+
+// KnownStatusValues lists bd's built-in issue statuses (beads internal/types
+// AllStatuses). The status field accepts any string, since bd also supports
+// custom statuses (custom_statuses table).
+var KnownStatusValues = []string{
+	"open", "in_progress", "blocked", "deferred", "closed", "pinned", "hooked",
 }
 
 // ValidPriorityValues are the valid values for the priority field.
@@ -247,12 +265,12 @@ func validateValue(field string, fieldType FieldType, value Value) error {
 		}
 
 	case FieldEnum:
-		// Validate enum values (status accepts any string to support custom statuses)
-		switch field {
-		case "type":
-			if !ValidTypeValues[value.String] {
-				return fmt.Errorf("invalid value %q for field %q (valid: bug, feature, task, epic, chore, milestone, story, spike)", value.String, field)
-			}
+		// status and type accept any string: bd supports custom statuses and
+		// custom types (see KnownStatusValues and KnownTypeValues). Numbers,
+		// booleans and nil carry no string value, so they cannot match.
+		switch value.Type {
+		case ValueInt, ValueBool, ValueNull:
+			return fmt.Errorf("field %q requires a %s name, got %q", field, field, value.Raw)
 		}
 
 	case FieldString:
