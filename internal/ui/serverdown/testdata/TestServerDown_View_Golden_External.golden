@@ -1,0 +1,24 @@
+                                                                                
+                                                                                
+                                                                                
+                                   \│/                                          
+       ╔═══════╗   ╔═══════╗   ╔════╲   │   ╱════╗   ╔═══════╗   ╔═══════╗      
+       ║       ╠═══╣       ╠═══╣     ╲  │  ╱     ╠═══╣       ╠═══╣       ║      
+       ║       ╠═══╣       ╠═══╣     ╱  │  ╲     ╠═══╣       ╠═══╣       ║      
+       ╚═══════╝   ╚═══════╝   ╚════╱   │   ╲════╝   ╚═══════╝   ╚═══════╝      
+                                   /│\                                          
+                                                                                
+                                                                                
+                 Oh no! Looks like there's a break in the chain!                
+                                                                                
+        Could not connect to the Dolt server at unix:/var/run/dolt.sock.        
+        dial unix /var/run/dolt.sock: connect: no such file or directory        
+                                                                                
+      bd doesn't start this server. Make sure it is running and reachable,      
+       and check BEADS_DOLT_SERVER_* or .beads/metadata.json if it moved.       
+                                                                                
+                                                                                
+                                 Press q to quit                                
+                                                                                
+                                                                                
+                                                                                

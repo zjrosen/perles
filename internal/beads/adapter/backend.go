@@ -31,23 +31,13 @@ type BeadsBackend struct {
 // It opens the database, creates caches and all executor adapters.
 // The caller should defer Close() after checking the error.
 //
-// Returns *task.ErrServerDown if the backend is Dolt in server mode
-// and the server is unreachable.
+// Returns *task.UnsupportedWorkspaceError for a workspace perles cannot read
+// (such as embedded Dolt) and *task.ServerDownError when the workspace's Dolt
+// server is unreachable.
 func NewBeadsBackend(dataDir, workDir string) (*BeadsBackend, error) {
-	client, err := infrabeads.NewClient(dataDir)
+	client, err := infrabeads.NewClient(dataDir, infrabeads.ResolveOptions{WorkDir: workDir})
 	if err != nil {
-		// Check if embedded mode (exclusive lock, can't share with perles)
-		if _, ok := errors.AsType[*infrabeads.EmbeddedModeUnsupportedError](err); ok {
-			return nil, &task.EmbeddedModeError{BeadsDir: dataDir}
-		}
-		// Check if this is a Dolt server that's unreachable
-		if meta, metaErr := infrabeads.LoadMetadata(dataDir); metaErr == nil && meta.IsDoltServer() {
-			return nil, &task.ServerDownError{
-				Host: meta.GetDoltServerHost(),
-				Port: meta.GetDoltServerPortWithDir(dataDir),
-			}
-		}
-		return nil, fmt.Errorf("beads backend: %w", err)
+		return nil, translateClientError(err)
 	}
 
 	// Create BQL caches (beads-typed for the BQL executor internals)
@@ -75,9 +65,6 @@ func NewBeadsBackend(dataDir, workDir string) (*BeadsBackend, error) {
 	bqlExec := bql.NewExecutor(client.DB(), client.Dialect(), bqlCache, depGraphCache)
 	queryExec := NewBeadsQueryExecutor(bqlExec)
 
-	// Detect watcher config based on backend type (SQLite vs Dolt)
-	watcherCfg := detectWatcherConfig(dataDir)
-
 	return &BeadsBackend{
 		client:        client,
 		bqlCache:      bqlCache,
@@ -88,7 +75,7 @@ func NewBeadsBackend(dataDir, workDir string) (*BeadsBackend, error) {
 			QueryHelpers:      NewBeadsQueryHelpers(),
 			SyntaxHighlighter: NewBeadsSyntaxHighlighter(),
 			Capabilities:      beadsCapabilities(),
-			WatcherConfig:     watcherCfg,
+			WatcherConfig:     doltWatcherConfig(),
 			DBPath:            client.DBPath(),
 		},
 	}, nil
@@ -150,21 +137,53 @@ func beadsCapabilities() task.BackendCapabilities {
 	}
 }
 
-// detectWatcherConfig returns file watcher config based on the backend type.
-func detectWatcherConfig(dataDir string) task.WatcherConfig {
-	meta, err := infrabeads.LoadMetadata(dataDir)
-	if err == nil && meta.IsDoltServer() {
-		// Dolt server mode: watch last-touched sentinel file with longer debounce
-		// to coalesce rapid bd commands (e.g., bulk creates/deletes in a loop).
-		return task.WatcherConfig{
-			RelevantFiles:    []string{"last-touched"},
-			DebounceDuration: 500 * time.Millisecond,
+// doltWatcherConfig watches bd's .beads/last-touched sentinel, which bd
+// rewrites after commands that touch an issue, with a longer debounce to
+// coalesce rapid bd commands (e.g., bulk creates/deletes in a loop). The
+// watcher watches the parent of DBPath (.beads/dolt), i.e. the .beads dir.
+func doltWatcherConfig() task.WatcherConfig {
+	return task.WatcherConfig{
+		RelevantFiles:    []string{"last-touched"},
+		DebounceDuration: 500 * time.Millisecond,
+	}
+}
+
+// translateClientError maps infrastructure connection errors to the
+// task-layer errors the startup screens dispatch on.
+func translateClientError(err error) error {
+	if uw, ok := errors.AsType[*infrabeads.UnsupportedWorkspaceError](err); ok {
+		return &task.UnsupportedWorkspaceError{
+			Kind:     workspaceKind(uw.Kind),
+			BeadsDir: uw.BeadsDir,
+			Detail:   uw.Detail,
 		}
 	}
+	if su, ok := errors.AsType[*infrabeads.ServerUnreachableError](err); ok {
+		return &task.ServerDownError{
+			Host:        su.Conn.DisplayHost(),
+			Port:        su.Conn.Port,
+			Socket:      su.Conn.Socket,
+			ManagedByBD: su.Conn.ManagedByBD(),
+			Err:         su.Err,
+		}
+	}
+	return fmt.Errorf("beads backend: %w", err)
+}
 
-	// SQLite mode: watch database and WAL files
-	return task.WatcherConfig{
-		RelevantFiles:    []string{"beads.db", "beads.db-wal"},
-		DebounceDuration: 100 * time.Millisecond,
+// workspaceKind maps an infrastructure workspace kind to its task-layer kind.
+func workspaceKind(kind infrabeads.WorkspaceKind) task.UnsupportedWorkspaceKind {
+	switch kind {
+	case infrabeads.WorkspaceEmbeddedDolt:
+		return task.WorkspaceEmbeddedDolt
+	case infrabeads.WorkspaceProxiedServer:
+		return task.WorkspaceProxiedServer
+	case infrabeads.WorkspaceHTTPBackend:
+		return task.WorkspaceHTTPBackend
+	case infrabeads.WorkspaceGraph:
+		return task.WorkspaceGraph
+	case infrabeads.WorkspaceLegacySQLite:
+		return task.WorkspaceLegacySQLite
+	default:
+		return task.WorkspaceUnknownBackend
 	}
 }

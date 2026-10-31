@@ -1,0 +1,40 @@
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                      \│/                                                               
+                          ╔═══════╗   ╔═══════╗   ╔════╲   │   ╱════╗   ╔═══════╗   ╔═══════╗                           
+                          ║       ╠═══╣       ╠═══╣     ╲  │  ╱     ╠═══╣       ╠═══╣       ║                           
+                          ║       ╠═══╣       ╠═══╣     ╱  │  ╲     ╠═══╣       ╠═══╣       ║                           
+                          ╚═══════╝   ╚═══════╝   ╚════╱   │   ╲════╝   ╚═══════╝   ╚═══════╝                           
+                                                      /│\                                                               
+                                                                                                                        
+                                                                                                                        
+                                    Oh no! Looks like there's a break in the chain!                                     
+                                                                                                                        
+                          This project keeps its beads in embedded Dolt, which runs inside bd                           
+                       and has no SQL server for perles to connect to. Perles needs server mode.                        
+                                                                                                                        
+                                            New project with no issues yet:                                             
+                                                    bd init --server                                                    
+                                                                                                                        
+                             Existing project (bd init --server refuses one that has data):                             
+                         1. in this project:     bd backup init <backup-dir> && bd backup sync                          
+                         2. in a new directory:  bd init --server                                                       
+                         3. in that directory:   bd backup restore --force <backup-dir>                                 
+                                                                                                                        
+                                                                                                                        
+                                                    Press q to quit                                                     
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        

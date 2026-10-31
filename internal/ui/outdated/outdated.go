@@ -67,6 +67,13 @@ func (m Model) View() string {
 		Foreground(styles.StatusSuccessColor).
 		Bold(true)
 
+	cmdStyle := lipgloss.NewStyle().
+		Foreground(styles.StatusSuccessColor).
+		Bold(true)
+
+	noteStyle := lipgloss.NewStyle().
+		Foreground(styles.TextMutedColor)
+
 	hintStyle := lipgloss.NewStyle().
 		Foreground(styles.TextMutedColor).
 		Italic(true)
@@ -87,7 +94,13 @@ func (m Model) View() string {
 		"",
 		versionMsg,
 		"",
-		messageStyle.Render("Upgrade your beads instance and run `bd migrate` to update your database version."),
+		messageStyle.Render("Upgrade bd, then update the database:"),
+		"",
+		cmdStyle.Render("bd migrate schema"),
+		cmdStyle.Render("bd migrate"),
+		"",
+		noteStyle.Render("If bd says explicit migration is required, follow the cross-era"),
+		noteStyle.Render("upgrade guide: docs/getting-started/upgrading.md in the beads docs."),
 		"\n",
 		hintStyle.Render("Press q to quit"),
 	)

@@ -1,0 +1,24 @@
+                                                                                
+                                                                                
+                                                                                
+                                   \│/                                          
+       ╔═══════╗   ╔═══════╗   ╔════╲   │   ╱════╗   ╔═══════╗   ╔═══════╗      
+       ║       ╠═══╣       ╠═══╣     ╲  │  ╱     ╠═══╣       ╠═══╣       ║      
+       ║       ╠═══╣       ╠═══╣     ╱  │  ╲     ╠═══╣       ╠═══╣       ║      
+       ╚═══════╝   ╚═══════╝   ╚════╱   │   ╲════╝   ╚═══════╝   ╚═══════╝      
+                                   /│\                                          
+                                                                                
+                                                                                
+                 Oh no! Looks like there's a break in the chain!                
+                                                                                
+   This project uses the "postgres" storage backend, which perles can't read.   
+            Perles reads beads projects that use Dolt in server mode.           
+                                                                                
+    Check "backend" in .beads/metadata.json, or see the beads upgrade guide:    
+                        docs/getting-started/upgrading.md                       
+                                                                                
+                                                                                
+                                 Press q to quit                                
+                                                                                
+                                                                                
+                                                                                

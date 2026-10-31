@@ -1,0 +1,24 @@
+                                                                                
+                                   \│/                                          
+       ╔═══════╗   ╔═══════╗   ╔════╲   │   ╱════╗   ╔═══════╗   ╔═══════╗      
+       ║       ╠═══╣       ╠═══╣     ╲  │  ╱     ╠═══╣       ╠═══╣       ║      
+       ║       ╠═══╣       ╠═══╣     ╱  │  ╲     ╠═══╣       ╠═══╣       ║      
+       ╚═══════╝   ╚═══════╝   ╚════╱   │   ╲════╝   ╚═══════╝   ╚═══════╝      
+                                   /│\                                          
+                                                                                
+                                                                                
+                 Oh no! Looks like there's a break in the chain!                
+                                                                                
+            Could not connect to the Dolt server at 127.0.0.1:50362.            
+              dial tcp 127.0.0.1:50362: connect: connection refused             
+                                                                                
+                     Start the server for this project with:                    
+                                                                                
+                                  bd dolt start                                 
+                                                                                
+      A remote or externally managed server must be started where it runs.      
+                                                                                
+                                                                                
+                                 Press q to quit                                
+                                                                                
+                                                                                

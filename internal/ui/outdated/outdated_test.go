@@ -10,7 +10,7 @@ import (
 
 // testRequiredVersion is a representative minimum version string used in tests.
 // This avoids importing beads domain types into the backend-agnostic outdated UI.
-const testRequiredVersion = "0.62.0"
+const testRequiredVersion = "1.0.0"
 
 func TestOutdated_New(t *testing.T) {
 	m := New("0.29.0", testRequiredVersion)
@@ -137,7 +137,9 @@ func TestOutdated_View_ContainsUpgradeInstructions(t *testing.T) {
 	m := New("0.29.0", testRequiredVersion).SetSize(80, 24)
 	view := m.View()
 
-	require.Contains(t, view, "bd migrate", "expected view to contain upgrade instruction")
+	require.Contains(t, view, "bd migrate schema", "expected view to contain the schema migration")
+	require.Contains(t, view, "Upgrade bd", "expected view to ask for a bd upgrade")
+	require.Contains(t, view, "docs/getting-started/upgrading.md", "expected view to point at the cross-era guide")
 }
 
 func TestOutdated_View_ContainsHint(t *testing.T) {

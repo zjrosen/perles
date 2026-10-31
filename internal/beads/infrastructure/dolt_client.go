@@ -3,9 +3,9 @@ package infrastructure
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -44,32 +44,45 @@ type DoltClient struct {
 	doltDir string // Path to .beads/dolt/ directory
 }
 
-// NewDoltServerClient creates a client connected to a running dolt sql-server via MySQL protocol.
-func NewDoltServerClient(beadsDir, databaseName, host string, port int, user string) (*DoltClient, error) {
-	doltDir := filepath.Join(beadsDir, "dolt")
-	addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
+// errNoServerPort is returned for a server-mode workspace whose server port
+// could not be found: bd writes .beads/dolt-server.port when it starts the
+// server, so a missing port file means the server is not running.
+var errNoServerPort = errors.New("no Dolt server port found (.beads/dolt-server.port is missing)")
 
-	log.Debug(log.CatDB, "Connecting to Dolt server", "addr", addr, "database", databaseName)
+// minDoltServerVersion is the oldest dolt sql-server bd accepts in server mode
+// (bd's doltversion.RequiredMin).
+const minDoltServerVersion = "2.6.0"
 
-	// Fail-fast TCP check before MySQL protocol handshake
-	conn, err := (&net.Dialer{Timeout: 500 * time.Millisecond}).DialContext(context.Background(), "tcp", addr)
+// probeTimeout bounds the fail-fast reachability probes made before the MySQL
+// handshake.
+const probeTimeout = 500 * time.Millisecond
+
+// dialProbe reports whether network/addr accepts a connection. A variable so
+// tests can stub connectivity.
+var dialProbe = func(network, addr string, timeout time.Duration) error {
+	conn, err := (&net.Dialer{Timeout: timeout}).DialContext(context.Background(), network, addr)
 	if err != nil {
-		return nil, fmt.Errorf("dolt server unreachable at %s: %w\n\n"+
-			"The Dolt server may not be running. Start it with:\n"+
-			"bd dolt start",
-			addr, err)
+		return err
 	}
-	_ = conn.Close()
+	return conn.Close()
+}
 
-	// Build MySQL DSN
-	password := ""
-	if p := lookupEnv("BEADS_DOLT_PASSWORD"); p != "" {
-		password = ":" + p
+// NewDoltServerClient connects to the dolt sql-server described by conn over
+// the MySQL protocol.
+func NewDoltServerClient(conn Connection) (*DoltClient, error) {
+	if !conn.Dialable() {
+		return nil, errNoServerPort
 	}
-	dsn := fmt.Sprintf("%s%s@tcp(%s)/%s?parseTime=true",
-		user, password, addr, databaseName)
 
-	db, err := sql.Open("mysql", dsn)
+	socket := socketTransport(conn)
+	if socket == "" {
+		// Fail fast before the MySQL handshake when nothing is listening.
+		if err := dialProbe("tcp", conn.Addr(), probeTimeout); err != nil {
+			return nil, err
+		}
+	}
+
+	db, err := sql.Open("mysql", conn.dsn(socket))
 	if err != nil {
 		return nil, fmt.Errorf("opening dolt server connection: %w", err)
 	}
@@ -79,21 +92,49 @@ func NewDoltServerClient(beadsDir, databaseName, host string, port int, user str
 	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(5 * time.Minute)
 
-	if err := db.PingContext(context.Background()); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("pinging dolt server at %s: %w", addr, err)
+		return nil, err
 	}
 
-	log.Info(log.CatDB, "Connected to Dolt server",
-		"addr", addr, "database", databaseName)
+	log.Info(log.CatDB, "Connected to Dolt server", "location", conn.Location(), "database", conn.Database)
+	warnIfOldDoltServer(ctx, db, conn.Location())
 
-	return &DoltClient{db: db, doltDir: doltDir}, nil
+	return &DoltClient{db: db, doltDir: filepath.Join(conn.BeadsDir, "dolt")}, nil
 }
 
-// lookupEnv returns the value of an environment variable, or empty string if not set.
-func lookupEnv(key string) string {
-	v, _ := os.LookupEnv(key)
-	return v
+// socketTransport is bd's socket-first, TCP-fallback policy: the unix socket
+// to dial, or "" for TCP. A configured socket is used when it accepts
+// connections; when it does not but TCP does, TCP; when neither does, the
+// socket, so the error names what the workspace configured.
+func socketTransport(conn Connection) string {
+	if conn.Socket == "" {
+		return ""
+	}
+	if dialProbe("unix", conn.Socket, probeTimeout) == nil {
+		return conn.Socket
+	}
+	if conn.Port > 0 && dialProbe("tcp", conn.Addr(), probeTimeout) == nil {
+		log.Debug(log.CatDB, "Dolt socket unreachable, falling back to TCP", "socket", conn.Socket, "addr", conn.Addr())
+		return ""
+	}
+	return conn.Socket
+}
+
+// warnIfOldDoltServer logs a warning when the server runs a Dolt older than bd
+// requires in server mode. A version that cannot be read is not reported.
+func warnIfOldDoltServer(ctx context.Context, db *sql.DB, location string) {
+	var version string
+	if err := db.QueryRowContext(ctx, "SELECT dolt_version()").Scan(&version); err != nil {
+		log.Debug(log.CatDB, "Could not read the Dolt server version", "location", location, "error", err)
+		return
+	}
+	if domain.CompareVersions(baseVersion(version), minDoltServerVersion) < 0 {
+		log.Warn(log.CatDB, "Dolt server is older than bd supports in server mode",
+			"location", location, "version", version, "required", minDoltServerVersion)
+	}
 }
 
 // Close closes the database connection.
@@ -101,7 +142,8 @@ func (c *DoltClient) Close() error {
 	return c.db.Close()
 }
 
-// DBPath returns the path to the Dolt database directory for file watching.
+// DBPath returns the path to the Dolt database directory. The file watcher
+// watches its parent, the .beads directory, for bd's last-touched sentinel.
 func (c *DoltClient) DBPath() string {
 	return c.doltDir
 }

@@ -1,0 +1,24 @@
+                                                                                
+                                   \│/                                          
+       ╔═══════╗   ╔═══════╗   ╔════╲   │   ╱════╗   ╔═══════╗   ╔═══════╗      
+       ║       ╠═══╣       ╠═══╣     ╲  │  ╱     ╠═══╣       ╠═══╣       ║      
+       ║       ╠═══╣       ╠═══╣     ╱  │  ╲     ╠═══╣       ╠═══╣       ║      
+       ╚═══════╝   ╚═══════╝   ╚════╱   │   ╲════╝   ╚═══════╝   ╚═══════╝      
+                                   /│\                                          
+                                                                                
+                                                                                
+                 Oh no! Looks like there's a break in the chain!                
+                                                                                
+    This project uses Dolt proxied-server mode, which perles can't read yet.    
+                                                                                
+      Switch it to server mode (both modes keep their data in .beads/dolt):     
+                                  bd dolt stop                                  
+                    bd migrate from-proxied-server-to-server                    
+                                                                                
+        The migration is experimental in bd. It rewrites dolt_mode in the       
+     committed .beads/metadata.json, so other clones switch when they pull.     
+                                                                                
+                                                                                
+                                 Press q to quit                                
+                                                                                
+                                                                                

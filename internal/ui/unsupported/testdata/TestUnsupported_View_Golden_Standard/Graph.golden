@@ -1,0 +1,24 @@
+                                                                                
+                                                                                
+                                                                                
+                                  \│/                                           
+      ╔═══════╗   ╔═══════╗   ╔════╲   │   ╱════╗   ╔═══════╗   ╔═══════╗       
+      ║       ╠═══╣       ╠═══╣     ╲  │  ╱     ╠═══╣       ╠═══╣       ║       
+      ║       ╠═══╣       ╠═══╣     ╱  │  ╲     ╠═══╣       ╠═══╣       ║       
+      ╚═══════╝   ╚═══════╝   ╚════╱   │   ╲════╝   ╚═══════╝   ╚═══════╝       
+                                  /│\                                           
+                                                                                
+                                                                                
+                Oh no! Looks like there's a break in the chain!                 
+                                                                                
+          This workspace uses a graph data model (graph_mode "link"),           
+                 which perles can't read as an issue database.                  
+                                                                                
+        Open it with the bd build that created it, and leave graph_mode,        
+             the graph_* fields and the .beads directory unchanged.             
+                                                                                
+                                                                                
+                                Press q to quit                                 
+                                                                                
+                                                                                
+                                                                                

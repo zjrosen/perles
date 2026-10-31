@@ -58,11 +58,11 @@ test-update:
 		./internal/ui/coleditor/... \
 		./internal/ui/commandpalette/... \
 		./internal/ui/details/... \
-		./internal/ui/embeddedmode/... \
 		./internal/ui/modals/help/... \
 		./internal/ui/modals/issueeditor/... \
 		./internal/ui/nobeads/... \
 		./internal/ui/outdated/... \
+		./internal/ui/serverdown/... \
 		./internal/ui/shared/chatpanel/... \
 		./internal/ui/shared/colorpicker/... \
 		./internal/ui/shared/diffviewer/... \
@@ -79,6 +79,7 @@ test-update:
 		./internal/ui/shared/vimtextarea/... \
 		./internal/ui/styles/... \
 		./internal/ui/tree/... \
+		./internal/ui/unsupported/... \
 		./internal/mode/kanban/... \
 		./internal/mode/dashboard/... \
 		./internal/mode/search/... \

@@ -20,10 +20,10 @@ import (
 	appreg "github.com/zjrosen/perles/internal/registry/application"
 	"github.com/zjrosen/perles/internal/task"
 	"github.com/zjrosen/perles/internal/templates"
-	"github.com/zjrosen/perles/internal/ui/embeddedmode"
 	"github.com/zjrosen/perles/internal/ui/nobeads"
 	"github.com/zjrosen/perles/internal/ui/outdated"
 	"github.com/zjrosen/perles/internal/ui/serverdown"
+	"github.com/zjrosen/perles/internal/ui/unsupported"
 )
 
 func init() {
@@ -308,13 +308,20 @@ func runApp(cmd *cobra.Command, args []string) error {
 
 	backend, err := newBackend(&cfg, workDir)
 	if err != nil {
-		if _, ok := errors.AsType[*task.EmbeddedModeError](err); ok {
-			return runEmbeddedMode()
+		if unsupportedErr, ok := errors.AsType[*task.UnsupportedWorkspaceError](err); ok {
+			log.Info(log.CatBeads, "Unsupported beads workspace", "kind", string(unsupportedErr.Kind), "detail", unsupportedErr.Detail)
+			return runStartupScreen(unsupported.New(unsupportedErr.Kind, unsupportedErr.Detail))
 		}
 		if serverDown, ok := errors.AsType[*task.ServerDownError](err); ok {
-			return serverNotStarted(serverDown.Host, serverDown.Port)
+			log.Info(log.CatBeads, "Backend server unreachable", "error", serverDown)
+			reason := ""
+			if serverDown.Err != nil {
+				reason = serverDown.Err.Error()
+			}
+			return runStartupScreen(serverdown.NewUnreachable(serverDown.Address(), reason, serverDown.ManagedByBD))
 		}
-		return runNoBeadsMode()
+		log.Info(log.CatBeads, "Backend unavailable", "error", err)
+		return runStartupScreen(nobeads.New())
 	}
 	defer func() { _ = backend.Close() }()
 
@@ -322,7 +329,7 @@ func runApp(cmd *cobra.Command, args []string) error {
 	if err := backend.CheckCompatibility(); err != nil {
 		if versionErr, ok := errors.AsType[*task.VersionIncompatibleError](err); ok {
 			log.Debug(log.CatBeads, "Version incompatible", "current", versionErr.Current, "required", versionErr.Required)
-			return runOutdatedMode(versionErr.Current, versionErr.Required)
+			return runStartupScreen(outdated.New(versionErr.Current, versionErr.Required))
 		}
 		return fmt.Errorf("compatibility check: %w", err)
 	}
@@ -402,62 +409,12 @@ func SetVersion(v string) {
 	rootCmd.Version = v
 }
 
-// runNoBeadsMode launches the TUI in "no database" mode, showing a friendly
-// empty state view when no .beads directory is found.
-func runNoBeadsMode() error {
-	model := nobeads.New()
-	p := tea.NewProgram(
-		&model,
-		tea.WithAltScreen(),
-	)
-
-	_, err := p.Run()
-	if err != nil {
-		return fmt.Errorf("running program: %w", err)
-	}
-	return nil
-}
-
-// runEmbeddedMode launches the TUI showing the embedded dolt mode screen.
-func runEmbeddedMode() error {
-	model := embeddedmode.New()
-	p := tea.NewProgram(
-		&model,
-		tea.WithAltScreen(),
-	)
-
-	_, err := p.Run()
-	if err != nil {
-		return fmt.Errorf("running program: %w", err)
-	}
-	return nil
-}
-
-// serverNotStarted launches the TUI showing the Dolt server unreachable screen.
-func serverNotStarted(host string, port int) error {
-	model := serverdown.NewUnreachable(host, port)
-	p := tea.NewProgram(
-		&model,
-		tea.WithAltScreen(),
-	)
-
-	_, err := p.Run()
-	if err != nil {
-		return fmt.Errorf("running program: %w", err)
-	}
-	return nil
-}
-
-// runOutdatedMode launches the TUI showing the version upgrade screen.
-func runOutdatedMode(currentVersion, requiredVersion string) error {
-	model := outdated.New(currentVersion, requiredVersion)
-	p := tea.NewProgram(
-		&model,
-		tea.WithAltScreen(),
-	)
-
-	_, err := p.Run()
-	if err != nil {
+// runStartupScreen runs a full-screen view shown instead of the board when
+// the backend cannot start (no beads workspace, an unsupported workspace, an
+// unreachable server, or an outdated database) until the user quits.
+func runStartupScreen(model tea.Model) error {
+	p := tea.NewProgram(model, tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
 		return fmt.Errorf("running program: %w", err)
 	}
 	return nil

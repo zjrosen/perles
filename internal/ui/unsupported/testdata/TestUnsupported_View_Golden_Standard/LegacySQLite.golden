@@ -1,0 +1,24 @@
+                                                                                
+                                   \│/                                          
+       ╔═══════╗   ╔═══════╗   ╔════╲   │   ╱════╗   ╔═══════╗   ╔═══════╗      
+       ║       ╠═══╣       ╠═══╣     ╲  │  ╱     ╠═══╣       ╠═══╣       ║      
+       ║       ╠═══╣       ╠═══╣     ╱  │  ╲     ╠═══╣       ╠═══╣       ║      
+       ╚═══════╝   ╚═══════╝   ╚════╱   │   ╲════╝   ╚═══════╝   ╚═══════╝      
+                                   /│\                                          
+                                                                                
+                                                                                
+                 Oh no! Looks like there's a break in the chain!                
+                                                                                
+      This project still keeps its beads in SQLite. Beads moved to Dolt in      
+       v0.58, and current bd refuses this workspace until it is migrated.       
+                                                                                
+          Keep .beads unchanged and follow the sealed SQLite bridge in          
+                 the cross-era upgrade guide of the beads docs:                 
+              docs/getting-started/upgrading.md#cross-era-upgrades              
+                                                                                
+     Perles can read the migrated project once it runs in Dolt server mode.     
+                                                                                
+                                                                                
+                                 Press q to quit                                
+                                                                                
+                                                                                

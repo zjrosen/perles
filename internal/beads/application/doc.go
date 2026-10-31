@@ -2,14 +2,14 @@
 //
 // This package serves as a facade that bridges the domain layer to infrastructure concerns:
 //   - Provides port interfaces for database and CLI operations
-//   - Implements infrastructure adapters (SQLite client, BD CLI executor)
+//   - Implements infrastructure adapters (Dolt server client, BD CLI executor)
 //   - Offers a Service facade for high-level operations
 //
 // # Architecture
 //
 // The application layer depends on:
 //   - Domain layer (internal/domain/beads): pure domain types and logic
-//   - Infrastructure: database/sql for SQLite, os/exec for BD CLI
+//   - Infrastructure: database/sql for the Dolt SQL server, os/exec for BD CLI
 //
 // This separation ensures the domain layer remains free of I/O concerns and can be
 // tested in isolation.
@@ -24,7 +24,7 @@
 //
 // # Infrastructure Adapters
 //
-// SQLiteClient implements the read ports (VersionReader, CommentReader).
+// DoltClient implements the read ports (VersionReader, CommentReader).
 // BDExecutor implements both IssueReader and IssueWriter via the bd CLI.
 //
 // # Import Aliasing
