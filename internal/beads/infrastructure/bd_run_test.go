@@ -41,7 +41,10 @@ func TestBDEnviron(t *testing.T) {
 
 func TestAbsBeadsDir(t *testing.T) {
 	require.Empty(t, absBeadsDir(""))
-	require.Equal(t, "/already/abs/.beads", absBeadsDir("/already/abs/.beads"))
+	// t.TempDir is absolute on every platform; /already/abs/.beads is not
+	// absolute on Windows (no drive letter).
+	abs := filepath.Join(t.TempDir(), ".beads")
+	require.Equal(t, abs, absBeadsDir(abs))
 
 	cwd, err := os.Getwd()
 	require.NoError(t, err)

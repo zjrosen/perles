@@ -1,6 +1,9 @@
 package infrastructure
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -59,7 +62,21 @@ func TestDoltServerPassword(t *testing.T) {
 
 func TestDoltServerPassword_DefaultCredentialsPath(t *testing.T) {
 	home := isolateBeadsEnv(t)
-	writeFile(t, home, ".config/beads/credentials", "[127.0.0.1:3307]\npassword=fromHome\n")
+	// Like bd: %APPDATA%\beads\credentials on Windows, ~/.config/beads/credentials elsewhere.
+	dir := filepath.Join(home, ".config", "beads")
+	if runtime.GOOS == "windows" {
+		dir = filepath.Join(os.Getenv("APPDATA"), "beads")
+	}
+	writeFile(t, dir, "credentials", "[127.0.0.1:3307]\npassword=fromHome\n")
+
+	require.Equal(t, "fromHome", doltServerPassword("127.0.0.1", 3307))
+}
+
+func TestDoltServerPassword_DefaultCredentialsPath_NoAppData(t *testing.T) {
+	home := isolateBeadsEnv(t)
+	// Without APPDATA, Windows falls back to the home path like other platforms.
+	t.Setenv("APPDATA", "")
+	writeFile(t, home, filepath.Join(".config", "beads", "credentials"), "[127.0.0.1:3307]\npassword=fromHome\n")
 
 	require.Equal(t, "fromHome", doltServerPassword("127.0.0.1", 3307))
 }

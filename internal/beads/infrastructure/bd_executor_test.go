@@ -22,7 +22,9 @@ func TestBDExecutor_ImplementsCommentReader(t *testing.T) {
 // TestBDExecutor_NewBDExecutor tests the constructor.
 func TestBDExecutor_NewBDExecutor(t *testing.T) {
 	workDir := "/some/work/dir"
-	beadsDir := "/some/beads/dir"
+	// A rooted path like /some/beads/dir has no drive letter, so it is not
+	// absolute on Windows and NewBDExecutor would resolve it.
+	beadsDir := filepath.Join(t.TempDir(), ".beads")
 	executor := NewBDExecutor(workDir, beadsDir)
 
 	require.NotNil(t, executor, "NewBDExecutor returned nil")
