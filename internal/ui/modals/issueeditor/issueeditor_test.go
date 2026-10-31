@@ -553,14 +553,14 @@ func TestPriorityListOptions_SelectsCorrectPriority(t *testing.T) {
 	}
 }
 
-func TestStatusListOptions_Returns3Options(t *testing.T) {
+func TestStatusListOptions_ReturnsAllStatuses(t *testing.T) {
 	opts := statusListOptions(task.StatusOpen)
 
-	require.Len(t, opts, 5, "expected 5 status options")
+	require.Len(t, opts, 7, "expected 7 status options")
 
 	// Verify labels and values
-	expectedLabels := []string{"Open", "In Progress", "Closed", "Deferred", "Blocked"}
-	expectedValues := []string{"open", "in_progress", "closed", "deferred", "blocked"}
+	expectedLabels := []string{"Open", "In Progress", "Closed", "Deferred", "Blocked", "Pinned", "Hooked"}
+	expectedValues := []string{"open", "in_progress", "closed", "deferred", "blocked", "pinned", "hooked"}
 
 	for i, opt := range opts {
 		require.Equal(t, expectedLabels[i], opt.Label, "expected label for option %d", i)

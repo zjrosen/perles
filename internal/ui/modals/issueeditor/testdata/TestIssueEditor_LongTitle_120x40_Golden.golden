@@ -30,9 +30,9 @@
 │ │ ( ) Closed                                │                                                  │
 │ │ ( ) Deferred                              │                                                  │
 │ │ ( ) Blocked                               │                                                  │
+│ │ ( ) Pinned                                │                                                  │
+│ │ ( ) Hooked                                │                                                  │
 │ ╰───────────────────────────────────────────╯                                                  │
-│                                                                                                │
-│ ╭─ Labels (Space to toggle) ────────────────╮                                                  │
 │                                                                                                │
 │    Save      Cancel                                                                            │
 │                                                                                                │

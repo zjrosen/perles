@@ -151,6 +151,8 @@ Colors are organized by category:
 | `issue.status.closed` | Closed issue color |
 | `issue.status.deferred` | Deferred issue color |
 | `issue.status.blocked` | Blocked issue color |
+| `issue.status.pinned` | Pinned issue color (persistent bead) |
+| `issue.status.hooked` | Hooked issue color (claimed by a worker) |
 
 ### Issue Type
 
@@ -167,6 +169,9 @@ Colors are organized by category:
 | `type.molecule` | Molecule type color |
 | `type.convoy` | Convoy type color |
 | `type.agent` | Agent type color |
+| `type.decision` | Decision type color |
+| `type.message` | Message type color |
+| `type.gate` | Gate type color |
 
 ### BQL Syntax Highlighting
 

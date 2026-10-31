@@ -107,6 +107,8 @@ var (
 	StatusClosedColor     = lipgloss.AdaptiveColor{Light: "#AAAAAA", Dark: "#BBBBBB"}
 	StatusDeferredColor   = lipgloss.AdaptiveColor{Light: "#9B59B6", Dark: "#B07CC6"}
 	StatusBlockedColor    = lipgloss.AdaptiveColor{Light: "#FF6B6B", Dark: "#FF8787"}
+	StatusPinnedColor     = lipgloss.AdaptiveColor{Light: "#E8A838", Dark: "#FECA57"}
+	StatusHookedColor     = lipgloss.AdaptiveColor{Light: "#E67E22", Dark: "#FF9F43"}
 
 	// Issue priority colors
 	PriorityCriticalColor = lipgloss.AdaptiveColor{Light: "#FF6B6B", Dark: "#FF8787"}
@@ -133,6 +135,9 @@ var (
 	IssueMoleculeColor  = lipgloss.AdaptiveColor{Light: "#FF731A", Dark: "#FF731A"}
 	IssueConvoyColor    = lipgloss.AdaptiveColor{Light: "#888888", Dark: "#888888"}
 	IssueAgentColor     = lipgloss.AdaptiveColor{Light: "#5C6BC0", Dark: "#5C6BC0"}
+	IssueDecisionColor  = lipgloss.AdaptiveColor{Light: "#E84393", Dark: "#F78FB3"}
+	IssueMessageColor   = lipgloss.AdaptiveColor{Light: "#0ABDE3", Dark: "#48DBFB"}
+	IssueGateColor      = lipgloss.AdaptiveColor{Light: "#6C5CE7", Dark: "#A29BFE"}
 
 	TypeBugStyle       = lipgloss.NewStyle().Foreground(IssueBugColor)
 	TypeFeatureStyle   = lipgloss.NewStyle().Foreground(IssueFeatureColor)
@@ -145,6 +150,9 @@ var (
 	TypeMoleculeStyle  = lipgloss.NewStyle().Foreground(IssueMoleculeColor)
 	TypeConvoyStyle    = lipgloss.NewStyle().Foreground(IssueConvoyColor)
 	TypeAgentStyle     = lipgloss.NewStyle().Foreground(IssueAgentColor)
+	TypeDecisionStyle  = lipgloss.NewStyle().Foreground(IssueDecisionColor)
+	TypeMessageStyle   = lipgloss.NewStyle().Foreground(IssueMessageColor)
+	TypeGateStyle      = lipgloss.NewStyle().Foreground(IssueGateColor)
 
 	// Status bar
 	StatusBarStyle = lipgloss.NewStyle().
@@ -196,7 +204,13 @@ func GetTypeIndicator(t task.IssueType) string {
 		return "[S]"
 	case task.TypeSpike:
 		return "[Sp]"
-	case task.IssueType("molecule"):
+	case task.TypeDecision:
+		return "[D]"
+	case task.TypeMessage:
+		return "[Ms]"
+	case task.TypeGate:
+		return "[G]"
+	case task.TypeMolecule:
 		return "[Mo]"
 	case task.IssueType("convoy"):
 		return "[🚚]"
@@ -226,7 +240,13 @@ func GetTypeStyle(t task.IssueType) lipgloss.Style {
 		return TypeStoryStyle
 	case task.TypeSpike:
 		return TypeSpikeStyle
-	case task.IssueType("molecule"):
+	case task.TypeDecision:
+		return TypeDecisionStyle
+	case task.TypeMessage:
+		return TypeMessageStyle
+	case task.TypeGate:
+		return TypeGateStyle
+	case task.TypeMolecule:
 		return TypeMoleculeStyle
 	case task.IssueType("convoy"):
 		return TypeConvoyStyle

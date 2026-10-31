@@ -14,6 +14,8 @@ const (
 	StatusClosed     Status = "closed"
 	StatusDeferred   Status = "deferred"
 	StatusBlocked    Status = "blocked"
+	StatusPinned     Status = "pinned" // Persistent bead that stays open indefinitely
+	StatusHooked     Status = "hooked" // Work actively claimed by a worker
 )
 
 // Priority represents issue urgency (0 = critical, 4 = backlog).
@@ -39,6 +41,14 @@ const (
 	TypeMilestone IssueType = "milestone"
 	TypeStory     IssueType = "story"
 	TypeSpike     IssueType = "spike"
+	TypeDecision  IssueType = "decision"
+	TypeMessage   IssueType = "message"
+	TypeMolecule  IssueType = "molecule" // Swarm coordination (bd internal use)
+	TypeGate      IssueType = "gate"     // Async coordination gate (bd gate, formula gates)
+
+	// TypeEvent is the system-internal type bd uses for audit-trail beads
+	// (set-state). It is not a user-selectable type.
+	TypeEvent IssueType = "event"
 )
 
 // Comment represents a comment on an issue.

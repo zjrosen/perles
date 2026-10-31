@@ -97,6 +97,10 @@ func GetTokenColor(token styles.ColorToken) string {
 		return styles.StatusDeferredColor.Dark
 	case styles.TokenIssueBlocked:
 		return styles.StatusBlockedColor.Dark
+	case styles.TokenIssuePinned:
+		return styles.StatusPinnedColor.Dark
+	case styles.TokenIssueHooked:
+		return styles.StatusHookedColor.Dark
 
 	// Issue priority
 	case styles.TokenPriorityCritical:
@@ -133,6 +137,12 @@ func GetTokenColor(token styles.ColorToken) string {
 		return styles.IssueConvoyColor.Dark
 	case styles.TokenTypeAgent:
 		return styles.IssueAgentColor.Dark
+	case styles.TokenTypeDecision:
+		return styles.IssueDecisionColor.Dark
+	case styles.TokenTypeMessage:
+		return styles.IssueMessageColor.Dark
+	case styles.TokenTypeGate:
+		return styles.IssueGateColor.Dark
 
 	// BQL syntax highlighting
 	case styles.TokenBQLKeyword:
@@ -257,6 +267,8 @@ func GetTokenCategories() []TokenCategory {
 				styles.TokenIssueClosed,
 				styles.TokenIssueDeferred,
 				styles.TokenIssueBlocked,
+				styles.TokenIssuePinned,
+				styles.TokenIssueHooked,
 			},
 		},
 		{
@@ -283,6 +295,9 @@ func GetTokenCategories() []TokenCategory {
 				styles.TokenTypeMolecule,
 				styles.TokenTypeConvoy,
 				styles.TokenTypeAgent,
+				styles.TokenTypeDecision,
+				styles.TokenTypeMessage,
+				styles.TokenTypeGate,
 			},
 		},
 		{

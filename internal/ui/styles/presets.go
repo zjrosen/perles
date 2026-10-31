@@ -78,6 +78,8 @@ var DefaultPreset = Preset{
 		TokenIssueClosed:     "#BBBBBB",
 		TokenIssueDeferred:   "#B07CC6",
 		TokenIssueBlocked:    "#FF8787",
+		TokenIssuePinned:     "#FECA57", // yellow
+		TokenIssueHooked:     "#FF9F43", // orange
 
 		// Issue priority
 		TokenPriorityCritical: "#FF8787",
@@ -98,6 +100,9 @@ var DefaultPreset = Preset{
 		TokenTypeMolecule:  "#FF731A",
 		TokenTypeConvoy:    "#888888",
 		TokenTypeAgent:     "#5C6BC0", // indigo
+		TokenTypeDecision:  "#F78FB3", // pink
+		TokenTypeMessage:   "#48DBFB", // sky
+		TokenTypeGate:      "#A29BFE", // lavender
 
 		// BQL syntax highlighting (Catppuccin Mocha inspired)
 		TokenBQLKeyword:  "#CBA6F7",
@@ -179,6 +184,8 @@ var CatppuccinMochaPreset = Preset{
 		TokenIssueClosed:     "#6C7086", // overlay0
 		TokenIssueDeferred:   "#CBA6F7", // mauve
 		TokenIssueBlocked:    "#F38BA8", // red
+		TokenIssuePinned:     "#F9E2AF", // yellow
+		TokenIssueHooked:     "#FAB387", // peach
 
 		// Issue priority
 		TokenPriorityCritical: "#F38BA8", // red
@@ -199,6 +206,9 @@ var CatppuccinMochaPreset = Preset{
 		TokenTypeMolecule:  "#FAB387", // peach
 		TokenTypeConvoy:    "#6C7086", // overlay0
 		TokenTypeAgent:     "#89B4FA", // blue
+		TokenTypeDecision:  "#F5C2E7", // pink
+		TokenTypeMessage:   "#89DCEB", // sky
+		TokenTypeGate:      "#B4BEFE", // lavender
 
 		// BQL syntax highlighting
 		TokenBQLKeyword:  "#CBA6F7", // mauve
@@ -280,6 +290,8 @@ var CatppuccinLattePreset = Preset{
 		TokenIssueClosed:     "#9CA0B0", // overlay0
 		TokenIssueDeferred:   "#8839EF", // mauve
 		TokenIssueBlocked:    "#D20F39", // red
+		TokenIssuePinned:     "#DF8E1D", // yellow
+		TokenIssueHooked:     "#FE640B", // peach
 
 		// Issue priority
 		TokenPriorityCritical: "#D20F39", // red
@@ -300,6 +312,9 @@ var CatppuccinLattePreset = Preset{
 		TokenTypeMolecule:  "#FE640B", // peach
 		TokenTypeConvoy:    "#9CA0B0", // overlay0
 		TokenTypeAgent:     "#1E66F5", // blue
+		TokenTypeDecision:  "#EA76CB", // pink
+		TokenTypeMessage:   "#04A5E5", // sky
+		TokenTypeGate:      "#7287FD", // lavender
 
 		// BQL syntax highlighting
 		TokenBQLKeyword:  "#8839EF", // mauve
@@ -381,6 +396,8 @@ var DraculaPreset = Preset{
 		TokenIssueClosed:     "#6272A4", // comment
 		TokenIssueDeferred:   "#BD93F9", // purple
 		TokenIssueBlocked:    "#FF5555", // red
+		TokenIssuePinned:     "#F1FA8C", // yellow
+		TokenIssueHooked:     "#FFB86C", // orange
 
 		// Issue priority
 		TokenPriorityCritical: "#FF5555", // red
@@ -401,6 +418,9 @@ var DraculaPreset = Preset{
 		TokenTypeMolecule:  "#FFB86C", // orange
 		TokenTypeConvoy:    "#6272A4", // comment
 		TokenTypeAgent:     "#BD93F9", // purple
+		TokenTypeDecision:  "#FF79C6", // pink
+		TokenTypeMessage:   "#8BE9FD", // cyan
+		TokenTypeGate:      "#F1FA8C", // yellow
 
 		// BQL syntax highlighting
 		TokenBQLKeyword:  "#FF79C6", // pink
@@ -486,6 +506,8 @@ var NordPreset = Preset{
 		TokenIssueClosed:     "#4C566A", // polar night 4
 		TokenIssueDeferred:   "#B48EAD", // aurora purple
 		TokenIssueBlocked:    "#BF616A", // aurora red
+		TokenIssuePinned:     "#EBCB8B", // aurora yellow
+		TokenIssueHooked:     "#D08770", // aurora orange
 
 		// Issue priority
 		TokenPriorityCritical: "#BF616A", // aurora red
@@ -506,6 +528,9 @@ var NordPreset = Preset{
 		TokenTypeMolecule:  "#D08770", // aurora orange
 		TokenTypeConvoy:    "#4C566A", // polar night 4
 		TokenTypeAgent:     "#81A1C1", // frost blue
+		TokenTypeDecision:  "#B48EAD", // aurora purple
+		TokenTypeMessage:   "#5E81AC", // frost 4
+		TokenTypeGate:      "#EBCB8B", // aurora yellow
 
 		// BQL syntax highlighting
 		TokenBQLKeyword:  "#81A1C1", // frost 3
@@ -588,6 +613,8 @@ var HighContrastPreset = Preset{
 		TokenIssueClosed:     "#808080", // gray (only muted color - closed is inactive)
 		TokenIssueDeferred:   "#FF00FF", // magenta
 		TokenIssueBlocked:    "#FF0000", // red
+		TokenIssuePinned:     "#FFFF00", // yellow
+		TokenIssueHooked:     "#FFA500", // orange
 
 		// Issue priority - distinct colors from red to gray
 		TokenPriorityCritical: "#FF0000", // red
@@ -608,6 +635,9 @@ var HighContrastPreset = Preset{
 		TokenTypeMolecule:  "#FFA500", // orange
 		TokenTypeConvoy:    "#808080", // gray
 		TokenTypeAgent:     "#00BFFF", // deep sky blue
+		TokenTypeDecision:  "#FF69B4", // hot pink
+		TokenTypeMessage:   "#87CEFA", // light sky blue
+		TokenTypeGate:      "#FFD700", // gold
 
 		// BQL syntax highlighting - high contrast
 		TokenBQLKeyword:  "#FF00FF", // magenta
@@ -688,6 +718,8 @@ var GruvboxPreset = Preset{
 		TokenIssueClosed:     "#928374", // gray
 		TokenIssueDeferred:   "#D3869B", // purple
 		TokenIssueBlocked:    "#FB4934", // red
+		TokenIssuePinned:     "#FABD2F", // yellow
+		TokenIssueHooked:     "#FE8019", // orange
 
 		// Issue priority
 		TokenPriorityCritical: "#FB4934", // red bright
@@ -708,6 +740,9 @@ var GruvboxPreset = Preset{
 		TokenTypeMolecule:  "#FE8019", // orange
 		TokenTypeConvoy:    "#928374", // gray
 		TokenTypeAgent:     "#83A598", // blue bright
+		TokenTypeDecision:  "#D3869B", // purple
+		TokenTypeMessage:   "#8EC07C", // aqua
+		TokenTypeGate:      "#D79921", // neutral yellow
 
 		// BQL syntax highlighting
 		TokenBQLKeyword:  "#FB4934", // red

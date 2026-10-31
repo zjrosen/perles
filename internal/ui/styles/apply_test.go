@@ -293,3 +293,59 @@ func TestApplyTheme_PresetBorderFocusDoesNotAffectRendering(t *testing.T) {
 	require.NoError(t, ApplyTheme(ThemeConfig{Preset: "test-border-focus"}))
 	require.Equal(t, themeColor(DefaultPreset.Colors[TokenBorderHighlight]), BorderHighlightFocusColor)
 }
+
+func TestAllPresetsDefineStatusAndTypeTokens(t *testing.T) {
+	tokens := []ColorToken{
+		TokenIssueOpen, TokenIssueInProgress, TokenIssueClosed, TokenIssueDeferred,
+		TokenIssueBlocked, TokenIssuePinned, TokenIssueHooked,
+		TokenTypeTask, TokenTypeChore, TokenTypeEpic, TokenTypeBug, TokenTypeFeature,
+		TokenTypeMilestone, TokenTypeStory, TokenTypeSpike, TokenTypeMolecule,
+		TokenTypeConvoy, TokenTypeAgent, TokenTypeDecision, TokenTypeMessage, TokenTypeGate,
+	}
+	for name, preset := range Presets {
+		t.Run(name, func(t *testing.T) {
+			for _, token := range tokens {
+				color, ok := preset.Colors[token]
+				require.True(t, ok, "preset %q should define %q", name, token)
+				require.True(t, isValidHexColor(color), "preset %q has invalid color %q for %q", name, color, token)
+			}
+		})
+	}
+}
+
+func TestApplyTheme_NewStatusAndTypeTokensDriveStyles(t *testing.T) {
+	resetThemeAfter(t)
+
+	err := ApplyTheme(ThemeConfig{
+		Colors: map[string]string{
+			"issue.status.pinned": "#111111",
+			"issue.status.hooked": "#222222",
+			"type.decision":       "#333333",
+			"type.message":        "#444444",
+			"type.gate":           "#555555",
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, themeColor("#111111"), StatusPinnedColor)
+	require.Equal(t, themeColor("#222222"), StatusHookedColor)
+	require.Equal(t, themeColor("#333333"), GetTypeStyle(task.TypeDecision).GetForeground())
+	require.Equal(t, themeColor("#444444"), GetTypeStyle(task.TypeMessage).GetForeground())
+	require.Equal(t, themeColor("#555555"), GetTypeStyle(task.TypeGate).GetForeground())
+}
+
+func TestGetTypeIndicator_KnownTypesAreDistinct(t *testing.T) {
+	types := []task.IssueType{
+		task.TypeBug, task.TypeFeature, task.TypeTask, task.TypeEpic, task.TypeChore,
+		task.TypeMilestone, task.TypeStory, task.TypeSpike, task.TypeDecision,
+		task.TypeMessage, task.TypeGate, task.TypeMolecule,
+		task.IssueType("convoy"), task.IssueType("agent"),
+	}
+	seen := make(map[string]task.IssueType)
+	for _, typ := range types {
+		indicator := GetTypeIndicator(typ)
+		require.NotEqual(t, "[?]", indicator, "type %q should have an indicator", typ)
+		prev, dup := seen[indicator]
+		require.False(t, dup, "types %q and %q share indicator %q", prev, typ, indicator)
+		seen[indicator] = typ
+	}
+}

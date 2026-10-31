@@ -60,6 +60,8 @@ const (
 	TokenIssueClosed     ColorToken = "issue.status.closed"   //nolint:gosec // UI color token, not credentials
 	TokenIssueDeferred   ColorToken = "issue.status.deferred" //nolint:gosec // UI color token, not credentials
 	TokenIssueBlocked    ColorToken = "issue.status.blocked"  //nolint:gosec // UI color token, not credentials
+	TokenIssuePinned     ColorToken = "issue.status.pinned"   //nolint:gosec // UI color token, not credentials
+	TokenIssueHooked     ColorToken = "issue.status.hooked"   //nolint:gosec // UI color token, not credentials
 
 	// Issue priority
 	TokenPriorityCritical ColorToken = "priority.critical"
@@ -80,6 +82,9 @@ const (
 	TokenTypeMolecule  ColorToken = "type.molecule"
 	TokenTypeConvoy    ColorToken = "type.convoy"
 	TokenTypeAgent     ColorToken = "type.agent"
+	TokenTypeDecision  ColorToken = "type.decision"
+	TokenTypeMessage   ColorToken = "type.message"
+	TokenTypeGate      ColorToken = "type.gate"
 
 	// BQL syntax highlighting
 	TokenBQLKeyword  ColorToken = "bql.keyword" //nolint:gosec // UI color token, not credentials
@@ -156,6 +161,8 @@ func AllTokens() []ColorToken {
 		TokenIssueClosed,
 		TokenIssueDeferred,
 		TokenIssueBlocked,
+		TokenIssuePinned,
+		TokenIssueHooked,
 
 		// Issue priority
 		TokenPriorityCritical,
@@ -176,6 +183,9 @@ func AllTokens() []ColorToken {
 		TokenTypeMolecule,
 		TokenTypeConvoy,
 		TokenTypeAgent,
+		TokenTypeDecision,
+		TokenTypeMessage,
+		TokenTypeGate,
 
 		// BQL syntax highlighting
 		TokenBQLKeyword,

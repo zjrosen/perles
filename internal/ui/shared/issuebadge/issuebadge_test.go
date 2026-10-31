@@ -440,3 +440,16 @@ func TestRenderBadge_Pinned_Golden(t *testing.T) {
 	got := RenderBadge(issue)
 	teatest.RequireEqualOutput(t, []byte(got))
 }
+
+// TestRenderBadge_PinnedStatus verifies the pin emoji also marks the bd "pinned" status.
+func TestRenderBadge_PinnedStatus(t *testing.T) {
+	issue := task.Issue{
+		ID:       "test-pin",
+		Type:     task.TypeDecision,
+		Priority: task.PriorityMedium,
+		Status:   task.StatusPinned,
+	}
+
+	stripped := stripANSI(RenderBadge(issue))
+	require.Equal(t, "📌[D][P2][test-pin]", stripped)
+}

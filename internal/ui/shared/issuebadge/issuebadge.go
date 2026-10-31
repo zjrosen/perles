@@ -27,7 +27,7 @@ type Config struct {
 }
 
 // RenderBadge returns the issue badge without the title: [T][Pn][id]
-// When the issue is pinned, prepends 📌: 📌[T][Pn][id]
+// When the issue is pinned (pinned flag or pinned status), prepends 📌: 📌[T][Pn][id]
 // This is useful when callers need to add their own metadata after the badge.
 func RenderBadge(issue task.Issue) string {
 	priorityText := fmt.Sprintf("[P%d]", issue.Priority)
@@ -40,8 +40,9 @@ func RenderBadge(issue task.Issue) string {
 
 	var parts []string
 
-	// Add pin indicator if issue is pinned (stored in extensions by beads adapter)
-	if pinned, ok := issue.Extensions["pinned"].(bool); ok && pinned {
+	// Add pin indicator if issue is pinned: either the pinned flag (stored in
+	// extensions by the beads adapter) or the bd "pinned" status.
+	if pinned, ok := issue.Extensions["pinned"].(bool); (ok && pinned) || issue.Status == task.StatusPinned {
 		parts = append(parts, "📌")
 	}
 

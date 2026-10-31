@@ -1414,3 +1414,22 @@ func TestDetails_View_Golden_LongLabels(t *testing.T) {
 	view := m.View()
 	teatest.RequireEqualOutput(t, []byte(view))
 }
+
+func TestFormatStatus_PinnedAndHooked(t *testing.T) {
+	require.Equal(t, "Pinned", formatStatus(task.StatusPinned))
+	require.Equal(t, "Hooked", formatStatus(task.StatusHooked))
+	require.Equal(t, "custom_status", formatStatus(task.Status("custom_status")))
+}
+
+func TestRenderStatusIndicator_PinnedAndHooked(t *testing.T) {
+	require.Equal(t, "◆", stripANSI(renderStatusIndicator(task.StatusPinned)))
+	require.Equal(t, "↪", stripANSI(renderStatusIndicator(task.StatusHooked)))
+}
+
+func TestFormatType_BdTypes(t *testing.T) {
+	require.Equal(t, "Decision", formatType(task.TypeDecision))
+	require.Equal(t, "Message", formatType(task.TypeMessage))
+	require.Equal(t, "Gate", formatType(task.TypeGate))
+	require.Equal(t, "Molecule", formatType(task.TypeMolecule))
+	require.Equal(t, "Event", formatType(task.TypeEvent))
+}

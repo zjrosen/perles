@@ -932,26 +932,7 @@ func (m Model) renderFooter() string {
 
 // getTypeStyle returns the style for an issue type.
 func getTypeStyle(t task.IssueType) lipgloss.Style {
-	switch t {
-	case task.TypeBug:
-		return styles.TypeBugStyle
-	case task.TypeFeature:
-		return styles.TypeFeatureStyle
-	case task.TypeTask:
-		return styles.TypeTaskStyle
-	case task.TypeEpic:
-		return styles.TypeEpicStyle
-	case task.TypeChore:
-		return styles.TypeChoreStyle
-	case task.TypeMilestone:
-		return styles.TypeMilestoneStyle
-	case task.TypeStory:
-		return styles.TypeStoryStyle
-	case task.TypeSpike:
-		return styles.TypeSpikeStyle
-	default:
-		return lipgloss.NewStyle()
-	}
+	return styles.GetTypeStyle(t)
 }
 
 // getPriorityStyle returns the style for a priority level.
@@ -985,13 +966,18 @@ func getStatusStyle(s task.Status) lipgloss.Style {
 		return lipgloss.NewStyle().Foreground(styles.StatusDeferredColor)
 	case task.StatusBlocked:
 		return lipgloss.NewStyle().Foreground(styles.StatusBlockedColor)
+	case task.StatusPinned:
+		return lipgloss.NewStyle().Foreground(styles.StatusPinnedColor)
+	case task.StatusHooked:
+		return lipgloss.NewStyle().Foreground(styles.StatusHookedColor)
 	default:
 		return lipgloss.NewStyle()
 	}
 }
 
 // renderStatusIndicator renders the status badge for dependency items.
-// Matches the tree view format: ○ (open), ● (in progress), ✓ (closed), ⏸ (deferred), ⊘ (blocked).
+// Format: ○ (open), ● (in progress), ✓ (closed), ⏸ (deferred), ⊘ (blocked),
+// ◆ (pinned), ↪ (hooked). The tree view uses the same glyphs.
 func renderStatusIndicator(status task.Status) string {
 	switch status {
 	case task.StatusClosed:
@@ -1006,6 +992,12 @@ func renderStatusIndicator(status task.Status) string {
 	case task.StatusBlocked:
 		style := lipgloss.NewStyle().Foreground(styles.StatusBlockedColor)
 		return style.Render("⊘")
+	case task.StatusPinned:
+		style := lipgloss.NewStyle().Foreground(styles.StatusPinnedColor)
+		return style.Render("◆")
+	case task.StatusHooked:
+		style := lipgloss.NewStyle().Foreground(styles.StatusHookedColor)
+		return style.Render("↪")
 	default:
 		style := lipgloss.NewStyle().Foreground(styles.StatusOpenColor)
 		return style.Render("○")
@@ -1025,6 +1017,10 @@ func formatStatus(s task.Status) string {
 		return "Blocked"
 	case task.StatusDeferred:
 		return "Deferred"
+	case task.StatusPinned:
+		return "Pinned"
+	case task.StatusHooked:
+		return "Hooked"
 	default:
 		return string(s)
 	}
@@ -1049,6 +1045,16 @@ func formatType(t task.IssueType) string {
 		return "Story"
 	case task.TypeSpike:
 		return "Spike"
+	case task.TypeDecision:
+		return "Decision"
+	case task.TypeMessage:
+		return "Message"
+	case task.TypeGate:
+		return "Gate"
+	case task.TypeMolecule:
+		return "Molecule"
+	case task.TypeEvent:
+		return "Event"
 	default:
 		return string(t)
 	}

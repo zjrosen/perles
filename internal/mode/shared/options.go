@@ -25,5 +25,7 @@ func StatusOptions() []picker.Option {
 		{Label: "Closed", Value: string(task.StatusClosed), Color: styles.StatusClosedColor},
 		{Label: "Deferred", Value: string(task.StatusDeferred), Color: styles.StatusDeferredColor},
 		{Label: "Blocked", Value: string(task.StatusBlocked), Color: styles.StatusBlockedColor},
+		{Label: "Pinned", Value: string(task.StatusPinned), Color: styles.StatusPinnedColor},
+		{Label: "Hooked", Value: string(task.StatusHooked), Color: styles.StatusHookedColor},
 	}
 }

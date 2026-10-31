@@ -562,6 +562,12 @@ func (m *Model) renderStatus(status task.Status) string {
 	case task.StatusInProgress:
 		style := lipgloss.NewStyle().Foreground(styles.StatusInProgressColor)
 		return style.Render("●")
+	case task.StatusPinned:
+		style := lipgloss.NewStyle().Foreground(styles.StatusPinnedColor)
+		return style.Render("◆")
+	case task.StatusHooked:
+		style := lipgloss.NewStyle().Foreground(styles.StatusHookedColor)
+		return style.Render("↪")
 	default:
 		style := lipgloss.NewStyle().Foreground(styles.StatusOpenColor)
 		return style.Render("○")

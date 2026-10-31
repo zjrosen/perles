@@ -336,6 +336,7 @@ func issueTypeListOptions(current task.IssueType) []formmodal.ListOption {
 		task.TypeFeature,
 		task.TypeEpic,
 		task.TypeChore,
+		task.TypeDecision,
 		task.TypeStory,
 		task.TypeSpike,
 		task.TypeMilestone,

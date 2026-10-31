@@ -210,6 +210,12 @@ func applyColors(colors map[ColorToken]string) {
 	if c, ok := colors[TokenIssueBlocked]; ok {
 		StatusBlockedColor = makeColor(c)
 	}
+	if c, ok := colors[TokenIssuePinned]; ok {
+		StatusPinnedColor = makeColor(c)
+	}
+	if c, ok := colors[TokenIssueHooked]; ok {
+		StatusHookedColor = makeColor(c)
+	}
 
 	// Priority
 	if c, ok := colors[TokenPriorityCritical]; ok {
@@ -261,6 +267,15 @@ func applyColors(colors map[ColorToken]string) {
 	}
 	if c, ok := colors[TokenTypeAgent]; ok {
 		IssueAgentColor = makeColor(c)
+	}
+	if c, ok := colors[TokenTypeDecision]; ok {
+		IssueDecisionColor = makeColor(c)
+	}
+	if c, ok := colors[TokenTypeMessage]; ok {
+		IssueMessageColor = makeColor(c)
+	}
+	if c, ok := colors[TokenTypeGate]; ok {
+		IssueGateColor = makeColor(c)
 	}
 
 	// BQL
@@ -350,6 +365,9 @@ func rebuildStyles() {
 	TypeMoleculeStyle = lipgloss.NewStyle().Foreground(IssueMoleculeColor)
 	TypeConvoyStyle = lipgloss.NewStyle().Foreground(IssueConvoyColor)
 	TypeAgentStyle = lipgloss.NewStyle().Foreground(IssueAgentColor)
+	TypeDecisionStyle = lipgloss.NewStyle().Foreground(IssueDecisionColor)
+	TypeMessageStyle = lipgloss.NewStyle().Foreground(IssueMessageColor)
+	TypeGateStyle = lipgloss.NewStyle().Foreground(IssueGateColor)
 
 	// Status bar
 	StatusBarStyle = lipgloss.NewStyle().
