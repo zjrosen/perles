@@ -16,9 +16,9 @@ issue tracking, built in Go using the Bubble Tea TUI framework. It includes a
 - Node.js + npm (version in `.nvmrc`) for `make build` / `make install`, which rebuild the
   embedded frontend first. `make build-go` skips npm and embeds the committed `frontend/dist/`.
 - A project with a `.beads/` directory, using either:
-  - beads >= v0.62.0 (`MinBeadsVersion`), backed by SQLite (`.beads/beads.db`) or a Dolt
-    server (`"backend": "dolt"` with `"dolt_mode": "server"` in `.beads/metadata.json`).
-    Embedded Dolt (the default when `dolt_mode` is absent) is not supported.
+  - beads >= v1.0.0 (`MinBeadsVersion`) on a Dolt SQL server (server mode, Dolt >= 2.6.0).
+    Embedded Dolt (the `bd init` default), proxied-server, HTTP (`bd connect`), graph-mode and
+    historical SQLite workspaces are not supported; each gets an explanatory screen.
   - beads_rust (`backend: beads_rust` in the perles config)
 - The `bd` CLI (or `br` for beads_rust) on `PATH`. Perles uses it for writes.
 - golangci-lint v2 (for linting; `.golangci.yml` uses the v2 format)
@@ -161,7 +161,7 @@ perles/
 │   │   ├── modals/       # Modal dialogs (help, issueeditor, commenteditor)
 │   │   ├── nobeads/      # Empty state when no .beads directory
 │   │   ├── outdated/     # Database version too old state
-│   │   ├── embeddedmode/ # Shown when beads uses embedded Dolt (unsupported)
+│   │   ├── unsupported/  # Unsupported beads workspace (embedded, proxied-server, http, graph, legacy SQLite)
 │   │   ├── serverdown/   # Shown when the Dolt server is unreachable
 │   │   ├── shared/       # Reusable UI components
 │   │   │   ├── chatpanel/   # AI chat panel (kanban/search, ctrl+w)
@@ -423,7 +423,7 @@ imports these layers directly (e.g. `mode.Services` holds an `appgit.GitExecutor
 | Package | Layers |
 |---------|--------|
 | `internal/registry/` | `domain/` (Registration, Chain, Node, DAG algorithms), `application/` (RegistryService) |
-| `internal/beads/` | `domain/` (issue types, version checks), `application/` (ports such as `DBClient`), `infrastructure/` (SQLite/Dolt clients, `bd` executor), `adapter/` (implements the `internal/task` interfaces); `bql/` sits alongside |
+| `internal/beads/` | `domain/` (issue types, version checks), `application/` (ports such as `DBClient`), `infrastructure/` (workspace detection, Dolt connection resolution incl. `bd context --json`, Dolt client, `bd` executor), `adapter/` (implements the `internal/task` interfaces); `bql/` sits alongside |
 | `internal/git/` | `domain/` (types, errors), `application/` (`GitExecutor` port), `infrastructure/` (git CLI executor) |
 | `internal/sessions/domain/` | Persisted session entity and `SessionRepository` interface; SQLite implementation in `internal/infrastructure/sqlite/` |
 | `internal/orchestration/fabric/` | `domain/` (core messaging types), with `repository/` (storage) and `persistence/` (JSONL event log) |
@@ -657,12 +657,24 @@ and always in `perles daemon`, an in-memory registry is used.
 
 ### Fields
 
-`id`, `type`, `status`, `priority`, `title`, `description`, `design`, `notes`,
-`created`, `updated`, `defer_until`, `blocked`, `ready`, `pinned`, `is_template`, `label`,
-`assignee`, `sender`, `created_by`, `mol_type`, `metadata.$key`
+`id`, `type`, `status`, `priority`, `title`, `description`, `design`, `acceptance_criteria`,
+`notes`, `close_reason`, `created`, `updated`, `started`, `closed`, `due`, `defer_until`, `blocked`,
+`ready`, `pinned`, `is_template`, `label`, `assignee`, `owner`, `sender`, `created_by`, `mol_type`,
+`metadata.$key`
 
-The `beads_rust` backend also accepts `owner` but not `mol_type`; `metadata.*` queries fail there
-because its issues table has no metadata column.
+`status` and `type` accept any name (custom statuses and types included). The executor probes the
+schema once per connection (`issues`/`dependencies` columns, `custom_statuses`/`custom_types`
+tables) and re-probes after a missing-column error; a field whose column is absent (e.g. `started`
+on an old database) fails with `field "started" is not available in this beads database`.
+`blocked`/`ready` follow `bd blocked`/`bd ready`: `issues.is_blocked` when present, otherwise an
+inlined `blocks` check (Dolt) or `blocked_issues_cache` (SQLite); `ready` also requires status `open`
+or a custom `active` status, not pinned/ephemeral/future-deferred, no future-deferred parent, and
+not one of bd's internal types (`bql.ReadyExcludedTypes`). Dependency targets include
+`dependencies.depends_on_external` (cross-prefix edges) when that column exists.
+
+The `beads_rust` backend accepts `owner` but not `mol_type`, `acceptance_criteria`, `close_reason`,
+`started`, `closed` or `due`; `metadata.*` queries fail there because its issues table has no
+metadata column.
 
 ### Operators
 
@@ -676,7 +688,7 @@ because its issues table has no metadata column.
 - **Strings:** `"quoted"` or `unquoted`
 - **Priorities:** `P0`–`P4` (or `0`–`4`)
 - **Booleans:** `true`, `false`
-- **Dates:** `now`, `today`, `yesterday`, `-Nd` (e.g. `-7d`), `-Nh` (e.g. `-24h`), `-Nm` (months, e.g. `-3m`)
+- **Dates:** `now`, `today`, `yesterday`, `-Nd` (e.g. `-7d`), `-Nh` (e.g. `-24h`), `-Nm` (months, e.g. `-3m`), all in UTC (bd stores UTC; Dolt SQL uses `UTC_TIMESTAMP()`)
 - **Null:** `nil` (for metadata existence checks)
 
 ### Special Clauses
@@ -687,6 +699,8 @@ because its issues table has no metadata column.
   Values compare as text and must be strings or `nil`, so quote numbers and booleans
   (`metadata.points = "5"`, `metadata.flaky = "true"`). `=`/`!=` are case-sensitive, `~`/`!~` are
   case-insensitive substring matches, and `!=`/`!~` only match issues that have the key.
+  Like bd, the key is one literal top-level key (`$."jira.sprint"`): dots do not reach into nested
+  objects, and keys match `^[a-zA-Z_][a-zA-Z0-9_./]*$`.
 - **Metadata exists:** `metadata.$key != nil` - key exists (even if its value is JSON null), `metadata.$key = nil` - key does not exist
 
 ### Example Queries
@@ -852,8 +866,9 @@ This limitation ensures no conflicts with built-in keybindings across all modes.
 - `PERLES_DEBUG`: Enable debug mode (any non-empty value; same as `-d`)
 - `PERLES_LOG`: Debug log file path (default: `debug.log`)
 - `BEADS_DIR`: Beads directory (priority: `-b` > `BEADS_DIR` > `beads_dir` config > cwd; `perles daemon` has no `-b`)
-- `BEADS_DOLT_SERVER_MODE=1` / `BEADS_DOLT_SHARED_SERVER` (`1` or `true`): Force server mode for a Dolt backend (`"backend": "dolt"`) regardless of `dolt_mode` in `.beads/metadata.json`
-- `BEADS_DOLT_SERVER_HOST`, `BEADS_DOLT_SERVER_PORT`, `BEADS_DOLT_SERVER_USER`, `BEADS_DOLT_PASSWORD`: Dolt server connection overrides
+- `BEADS_DOLT_SERVER_MODE=1` / `BEADS_DOLT_SHARED_SERVER` (`1` or `true`): Force server mode for a Dolt backend regardless of `dolt_mode` in `.beads/metadata.json` (shared mode reads the port file under `BEADS_SHARED_SERVER_DIR` or `~/.beads/shared-server`, default port 3308)
+- `BEADS_DOLT_SERVER_HOST`, `BEADS_DOLT_SERVER_PORT`, `BEADS_DOLT_PORT` (legacy), `BEADS_DOLT_SERVER_USER`, `BEADS_DOLT_PASSWORD`, `BEADS_DOLT_SERVER_DATABASE`, `BEADS_DOLT_SERVER_SOCKET`, `BEADS_DOLT_SERVER_TLS`, `BEADS_DOLT_DATA_DIR`, `BEADS_CREDENTIALS_FILE`: Dolt connection settings, resolved in bd's order after asking `bd context --json` (see `internal/beads/infrastructure/connection.go` and docs/configuration/index.md)
+- `BD_JSON_ENVELOPE`: never inherited by perles' `bd` subprocesses (pinned to `0`, since perles parses bare `--json` output)
 - `VISUAL` / `EDITOR`: External editor opened with `ctrl+g` in text inputs (falls back to `vi`)
 - `BROWSER`: Command used to open the session viewer (dashboard `o`)
 - `GEMINI_API_KEY` / `GOOGLE_API_KEY`: Gemini auth when there is no `~/.gemini` OAuth token
@@ -912,13 +927,18 @@ Orchestration runs from the dashboard; there is no separate orchestration mode.
 
 ### Database Requirements
 
-- Requires a `.beads/` directory: beads (>= v0.62.0) backed by SQLite (`beads.db`; the default when
-  `.beads/metadata.json` is absent) or a Dolt SQL server (`"backend": "dolt"` with `"dolt_mode": "server"`
-  in `.beads/metadata.json`, or `BEADS_DOLT_SERVER_MODE=1`), or a beads_rust project with
-  `backend: beads_rust` in the perles config
-- Embedded Dolt, an unreachable Dolt server and an older beads version each show a dedicated screen
-  instead of the board
-- Auto-refresh watches `beads.db`/`beads.db-wal` (SQLite and beads_rust) or `.beads/last-touched` (Dolt server)
+- Requires a `.beads/` directory: beads (>= v1.0.0) on a Dolt SQL server (server mode, declared by
+  `dolt_mode` in `.beads/metadata.json`, `dolt.mode` in `.beads/config.yaml`, a non-local host,
+  shared-server mode or `BEADS_DOLT_SERVER_MODE=1`), or a beads_rust project with
+  `backend: beads_rust` in the perles config. A `.beads/` without `metadata.json` is treated as
+  Dolt, as bd does; beads' SQLite backend was removed in bd v0.58
+- Unsupported workspaces (embedded Dolt, proxied-server, HTTP, graph mode, historical SQLite) show the
+  `internal/ui/unsupported` screen; an unreachable server and an older beads version each have their own
+  screen
+- Auto-refresh watches `beads.db`/`beads.db-wal` (beads_rust) or `.beads/last-touched` (beads)
+- Writes go through `bd`, which may refuse them (pending `bd migrate schema`, bd older than the
+  schema, migration freeze, close policy with open children or blockers, notes overwrite without
+  `--force`); `internal/beads/infrastructure/bd_errors.go` turns those into one-line messages with a hint
 
 ### Terminal Compatibility
 

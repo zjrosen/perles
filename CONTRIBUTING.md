@@ -19,7 +19,7 @@ Thank you for your interest in contributing to Perles! This document provides gu
 - Go 1.27+
 - Node.js and npm, used by `make build` and `make install` to build the embedded web frontend (release builds use the version in `.nvmrc`; CI uses the current LTS). `make build-go` skips this step and uses the committed `frontend/dist/`.
 - golangci-lint v2 for `make lint` (CI runs the latest version)
-- A beads or beads_rust project for testing (a directory containing `.beads/`), with the `bd` (or `br`) CLI on your `PATH`. beads projects need database version v0.62.0+ and must use SQLite or Dolt server mode (`bd init --server`, then start the server with `bd dolt start`); Dolt embedded mode is not supported. Select beads_rust with `backend: beads_rust` in the config. See the [README requirements](README.md#requirements) for details.
+- A beads or beads_rust project for testing (a directory containing `.beads/`), with the `bd` (or `br`) CLI on your `PATH`. beads projects need beads v1.0.0+ and must use Dolt server mode (`bd init --server`, then start the server with `bd dolt start`); Dolt embedded mode is not supported. Select beads_rust with `backend: beads_rust` in the config. See the [README requirements](README.md#requirements) for details.
 
 ### Building
 
@@ -42,7 +42,7 @@ perles/
 ├── cmd/                    # Cobra CLI commands (root, init, daemon, workflows, themes, ...)
 ├── internal/
 │   ├── app/                # Root application model
-│   ├── beads/              # beads backend (Dolt/SQLite clients, bd CLI executor)
+│   ├── beads/              # beads backend (Dolt connection + client, bd CLI executor)
 │   │   └── bql/            # BQL lexer, parser, validator and executor
 │   ├── beadsrust/          # beads_rust backend
 │   ├── task/               # Backend-agnostic issue types and interfaces
@@ -63,7 +63,7 @@ perles/
 │       ├── modals/         # Help overlay, issue editor, comment editor
 │       ├── shared/         # Reusable components (modal, picker, colorpicker, toaster, formmodal, vimtextarea, chatpanel, ...)
 │       ├── styles/         # Theme system and shared lip gloss styles
-│       └── nobeads/, outdated/, embeddedmode/, serverdown/  # Screens shown when the board can't start
+│       └── nobeads/, outdated/, unsupported/, serverdown/  # Screens shown when the board can't start
 ├── communityworkflows/     # Embedded community workflow templates
 ├── frontend/               # React session viewer (built into frontend/dist/ and embedded in the binary)
 ├── docs/                   # Documentation site sources

@@ -31,7 +31,7 @@ If applicable, add screenshots to help explain your problem.
 ## Environment
 
 - **Perles version**: (run `perles --version`)
-- **Task backend / version**: (beads or beads_rust; run `bd --version` or `br --version`; for beads, Dolt server or SQLite)
+- **Task backend / version**: (beads or beads_rust; run `bd --version` or `br --version`; for beads, the `dolt_mode` from `bd context`)
 - **AI provider** (orchestration issues only): (claude, amp, codex, cursor, gemini, or opencode)
 - **Go version** (only if built from source): (run `go version`)
 - **OS**: (e.g., macOS 14.0, Ubuntu 22.04)

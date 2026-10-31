@@ -40,10 +40,13 @@ perles
 ## Requirements
 
 - A beads (`bd`) project containing a `.beads/` directory, with the `bd` CLI on your `PATH` (perles uses it to create and update issues)
-- Minimum beads database version v0.62.0 (run `bd migrate` to upgrade)
-- If beads uses the Dolt backend, it must run in server mode. Embedded Dolt, the beads v0.63+ default, takes an exclusive lock and is not supported. Initialize with `bd init --server` (or set `"dolt_mode": "server"` in `.beads/metadata.json`, or `BEADS_DOLT_SERVER_MODE=1`) and start the server with `bd dolt start`.
-  - Connection defaults are `127.0.0.1:3307`, user `root`, no password, database `beads`. Change them with the `dolt_server_host`, `dolt_server_port`, `dolt_server_user` and `dolt_database` fields in `.beads/metadata.json`. The `BEADS_DOLT_SERVER_HOST`, `BEADS_DOLT_SERVER_PORT` and `BEADS_DOLT_SERVER_USER` environment variables override those fields, and `BEADS_DOLT_PASSWORD` sets the password. If no port is set, perles uses the one `bd` writes to `.beads/dolt-server.port`.
-- Or a beads_rust (`br`) project: set `backend: beads_rust` in your perles config (`.perles/config.yaml` or `~/.config/perles/config.yaml`) and have `br` on your `PATH`. Perles does not detect beads_rust on its own, and the v0.62.0 minimum applies only to beads.
+- beads v1.0.0 or newer. To upgrade an older database, upgrade `bd`, then run `bd migrate schema` and `bd migrate` (see the [beads upgrade guide](https://github.com/steveyegge/beads/blob/main/docs/getting-started/upgrading.md)). For multi-agent orchestration, bd v1.3.2 or newer is recommended.
+- Beads must run in Dolt server mode with the server running (`bd dolt start` starts a bd-managed one), on Dolt 2.6.0 or newer. Embedded Dolt, the `bd init` default, has no SQL server for perles to read, so it is not supported.
+  - New project: `bd init --server`.
+  - Existing embedded project: back it up with `bd backup init <dir>` and `bd backup sync`, then in a new directory run `bd init --server` and `bd backup restore --force <dir>`.
+  - Proxied-server and HTTP (`bd connect`) workspaces aren't supported yet. `bd migrate from-proxied-server-to-server` switches a proxied-server workspace to server mode.
+  - Perles finds the server the same way `bd` does; see [Configuration](https://zjrosen.github.io/perles/configuration/#environment-variables) for the settings it reads.
+- Or a beads_rust (`br`) project: set `backend: beads_rust` in your perles config (`.perles/config.yaml` or `~/.config/perles/config.yaml`) and have `br` on your `PATH`. Perles does not detect beads_rust on its own, and the v1.0.0 minimum applies only to beads.
 
 ## License
 

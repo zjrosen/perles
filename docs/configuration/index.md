@@ -117,15 +117,24 @@ If tracing is enabled but the tracer can't be created (for example, the trace fi
 
 | Variable | Description |
 |----------|-------------|
-| `BEADS_DIR` | Beads database directory. Overrides `beads_dir`; `-b/--beads-dir` still wins |
+| `BEADS_DIR` | Beads database directory. Overrides `beads_dir`; `-b/--beads-dir` still wins. Perles passes it to `bd` as an absolute path |
 | `BEADS_DOLT_SERVER_MODE` | `1` forces Dolt server mode, whatever `dolt_mode` says in `.beads/metadata.json` |
-| `BEADS_DOLT_SHARED_SERVER` | `1` or `true` also forces Dolt server mode |
-| `BEADS_DOLT_SERVER_HOST` | Dolt server host (overrides `.beads/metadata.json`; default `127.0.0.1`) |
-| `BEADS_DOLT_SERVER_PORT` | Dolt server port (overrides `.beads/metadata.json` and `.beads/dolt-server.port`; default `3307`) |
-| `BEADS_DOLT_SERVER_USER` | Dolt server user (overrides `.beads/metadata.json`; default `root`) |
-| `BEADS_DOLT_PASSWORD` | Dolt server password |
+| `BEADS_DOLT_SHARED_SERVER` | `1` or `true` selects bd's shared server (port file under `BEADS_SHARED_SERVER_DIR` or `~/.beads/shared-server`, default port `3308`); also forces server mode |
+| `BEADS_DOLT_SERVER_HOST` | Dolt server host (default `127.0.0.1`). A non-local host implies server mode |
+| `BEADS_DOLT_SERVER_PORT` | Dolt server port; wins over every other port source. Setting it also tells `bd` the server is externally managed, so `bd` stops auto-starting one |
+| `BEADS_DOLT_PORT` | Legacy port variable. Like in `bd`, it replaces the port file or a default port, but not a port set in a config file or `.beads/metadata.json` |
+| `BEADS_DOLT_SERVER_USER` | Dolt server user (default `root`) |
+| `BEADS_DOLT_PASSWORD` | Dolt server password. Without it, perles reads the `[host:port]` section of the beads credentials file (`BEADS_CREDENTIALS_FILE`, default `~/.config/beads/credentials`) |
+| `BEADS_DOLT_SERVER_DATABASE` | Dolt database name (default: `dolt_database` in `.beads/metadata.json`, else `beads`) |
+| `BEADS_DOLT_SERVER_SOCKET` | Connect through this Unix socket instead of TCP |
+| `BEADS_DOLT_SERVER_TLS` | `true` connects with TLS (also `dolt_server_tls` in `.beads/metadata.json`) |
 
-The `BEADS_DOLT_*` variables only matter when `.beads/metadata.json` selects the Dolt backend. See [Debug Mode](../getting-started.md#debug-mode) for `PERLES_DEBUG` and `PERLES_LOG`.
+**How perles finds the Dolt server.** Perles first asks `bd context --json` for the resolved mode, host, port and database. If `bd` is missing, older than v1.0.0 or fails, it resolves them itself in the order `bd` uses:
+
+- **Mode:** `BEADS_DOLT_SERVER_MODE`, the shared-server setting, a non-local host, `dolt_mode` in `.beads/metadata.json`, then `dolt.mode` in `.beads/config.yaml`; otherwise embedded.
+- **Port:** `BEADS_DOLT_SERVER_PORT`, then the `.beads/dolt-server.port` file `bd` writes (only for a local host), then `listener.port` in the Dolt data directory's `config.yaml`, then `dolt.port` in `.beads/config.yaml`, then `dolt_server_port` in `.beads/metadata.json` (deprecated). With no port for a local, bd-run server, perles shows the server-down screen instead of guessing.
+
+The `BEADS_DOLT_*` variables only matter for the Dolt backend. See [Debug Mode](../getting-started.md#debug-mode) for `PERLES_DEBUG` and `PERLES_LOG`.
 
 ---
 

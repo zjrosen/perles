@@ -3,12 +3,15 @@
 ## Requirements
 
 - A [beads](https://github.com/steveyegge/beads) project (a `.beads/` directory). beads_rust projects also work if you set `backend: beads_rust` in your [config](configuration/index.md); perles doesn't detect beads_rust on its own.
-- Beads database version v0.62.0 or newer (upgrade beads and run `bd migrate`). This minimum doesn't apply to beads_rust.
+- Beads v1.0.0 or newer. To upgrade an older database, upgrade `bd`, then run `bd migrate schema` and `bd migrate`. This minimum doesn't apply to beads_rust. For multi-agent orchestration, bd v1.3.2 or newer is recommended.
 - The `bd` CLI on your `PATH`, which perles uses to create and update issues (`br` when using `backend: beads_rust`)
-- If beads stores its data in Dolt, it must use server mode and the Dolt server must be running. Perles can't open embedded Dolt mode (the beads v0.63+ default) because it locks the database. Set up server mode with `bd init --server` (or `"dolt_mode": "server"` in `.beads/metadata.json`) and start the server with `bd dolt start`.
+- Beads must use Dolt server mode with the server running (`bd dolt start`), on Dolt 2.6.0 or newer. Embedded Dolt, the `bd init` default, has no SQL server for perles to read:
+    - New project: `bd init --server`.
+    - Existing embedded project: run `bd backup init <dir>` and `bd backup sync`, then in a new directory `bd init --server` and `bd backup restore --force <dir>`.
+    - Proxied-server and HTTP (`bd connect`) workspaces aren't supported yet; `bd migrate from-proxied-server-to-server` switches a proxied-server workspace to server mode.
 - Go 1.27+ (only for `go install` or building from source; `make install` also needs Node.js/npm)
 
-If there's no `.beads/` directory, the database is too old, or Dolt is in embedded mode or its server isn't running, perles shows a screen explaining the problem instead of the board.
+If there's no `.beads/` directory, the database is too old, the workspace uses a mode perles can't read (embedded Dolt, proxied-server, HTTP, graph mode or historical SQLite), or the Dolt server isn't running, perles shows a screen explaining the problem and the fix instead of the board.
 
 ---
 
