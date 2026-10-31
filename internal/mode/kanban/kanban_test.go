@@ -435,6 +435,138 @@ func TestKanban_CreateIssueCmd_TaskWithParentEpic_PassesParentIDToCreateTask(t *
 	require.Equal(t, "epic-123", createdMsg.issue.ParentID)
 }
 
+// TestKanban_CreateIssueCmd_DefaultsSkipFollowUpUpdate verifies a create
+// whose fields all match what create stores (P2, open, no notes, task/epic)
+// makes no follow-up UpdateIssue call (the mock fails on unexpected calls).
+func TestKanban_CreateIssueCmd_DefaultsSkipFollowUpUpdate(t *testing.T) {
+	for _, issueType := range []task.IssueType{task.TypeTask, task.TypeEpic} {
+		t.Run(string(issueType), func(t *testing.T) {
+			m := createTestModel(t)
+			mockExecutor := mocks.NewMockTaskExecutor(t)
+			if issueType == task.TypeEpic {
+				mockExecutor.EXPECT().CreateEpic("Plain", "Desc", []string(nil)).Return(task.CreateResult{ID: "new-3", Title: "Plain"}, nil)
+			} else {
+				mockExecutor.EXPECT().CreateTask("Plain", "Desc", "", "", []string(nil)).Return(task.CreateResult{ID: "new-3", Title: "Plain"}, nil)
+			}
+			m.services.TaskExecutor = mockExecutor
+
+			cmd := m.createIssueCmd(issueeditor.SaveMsg{
+				IssueType:   issueType,
+				Title:       "Plain",
+				Description: "Desc",
+				Priority:    task.PriorityMedium,
+				Status:      task.StatusOpen,
+			})
+
+			createdMsg, ok := cmd().(issueCreatedMsg)
+			require.True(t, ok)
+			require.NoError(t, createdMsg.err)
+			require.Equal(t, "new-3", createdMsg.issueID)
+		})
+	}
+}
+
+// TestKanban_CreateIssueCmd_FollowUpOnlyCarriesChangedFields verifies the
+// follow-up never sends empty notes (bd refuses `--notes ""`), nor title,
+// description or labels that create already stored.
+func TestKanban_CreateIssueCmd_FollowUpOnlyCarriesChangedFields(t *testing.T) {
+	m := createTestModel(t)
+	mockExecutor := mocks.NewMockTaskExecutor(t)
+	mockExecutor.EXPECT().CreateTask("Urgent", "", "", "", []string{"ops"}).Return(task.CreateResult{ID: "new-4", Title: "Urgent"}, nil)
+	var got task.UpdateOptions
+	mockExecutor.EXPECT().UpdateIssue("new-4", mock.Anything).Run(func(_ string, opts task.UpdateOptions) {
+		got = opts
+	}).Return(nil)
+	m.services.TaskExecutor = mockExecutor
+
+	cmd := m.createIssueCmd(issueeditor.SaveMsg{
+		IssueType: task.TypeTask,
+		Title:     "Urgent",
+		Priority:  task.PriorityCritical,
+		Status:    task.StatusOpen,
+		Labels:    []string{"ops"},
+	})
+
+	createdMsg, ok := cmd().(issueCreatedMsg)
+	require.True(t, ok)
+	require.NoError(t, createdMsg.err)
+	require.NotNil(t, got.Priority)
+	require.Equal(t, task.PriorityCritical, *got.Priority)
+	require.Nil(t, got.Notes, "empty notes are never sent")
+	require.Nil(t, got.Status, "open is create's default")
+	require.Nil(t, got.Type, "task is set by CreateTask")
+	require.Nil(t, got.Title)
+	require.Nil(t, got.Description)
+	require.Nil(t, got.Labels)
+}
+
+func TestCreateFollowUpOptions(t *testing.T) {
+	cases := []struct {
+		name   string
+		msg    issueeditor.SaveMsg
+		want   task.UpdateOptions
+		hasAny bool
+	}{
+		{
+			name: "defaults",
+			msg:  issueeditor.SaveMsg{IssueType: task.TypeTask, Priority: task.PriorityMedium, Status: task.StatusOpen},
+		},
+		{
+			name: "empty status is treated as default",
+			msg:  issueeditor.SaveMsg{IssueType: task.TypeEpic, Priority: task.PriorityMedium},
+		},
+		{
+			name:   "notes",
+			msg:    issueeditor.SaveMsg{IssueType: task.TypeTask, Priority: task.PriorityMedium, Status: task.StatusOpen, Notes: "n"},
+			want:   task.UpdateOptions{Notes: ptr("n")},
+			hasAny: true,
+		},
+		{
+			name:   "status",
+			msg:    issueeditor.SaveMsg{IssueType: task.TypeTask, Priority: task.PriorityMedium, Status: task.StatusDeferred},
+			want:   task.UpdateOptions{Status: ptr(task.StatusDeferred)},
+			hasAny: true,
+		},
+		{
+			name:   "custom type and priority",
+			msg:    issueeditor.SaveMsg{IssueType: task.TypeChore, Priority: task.PriorityBacklog, Status: task.StatusOpen},
+			want:   task.UpdateOptions{Type: ptr(task.TypeChore), Priority: ptr(task.PriorityBacklog)},
+			hasAny: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, hasAny := createFollowUpOptions(tc.msg)
+			require.Equal(t, tc.hasAny, hasAny)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
+
+func TestKanban_HandleIssueCreated_FollowUpFailureNamesCreatedIssue(t *testing.T) {
+	m := createTestModel(t)
+	m.creatingIssue = true
+
+	m, cmd := m.handleIssueCreated(issueCreatedMsg{
+		issue:   task.Issue{ID: "new-5"},
+		issueID: "new-5",
+		err:     errors.New("saving issue new-5 notes: bd update failed: database is locked"),
+	})
+
+	require.False(t, m.creatingIssue)
+	toast, ok := cmd().(mode.ShowToastMsg)
+	require.True(t, ok)
+	require.Equal(t, toaster.StyleError, toast.Style)
+	require.Equal(t, "Created new-5, but saving its fields failed: saving issue new-5 notes: bd update failed: database is locked", toast.Message)
+
+	_, cmd = m.handleIssueCreated(issueCreatedMsg{err: errors.New("bd create failed: boom")})
+	toast, ok = cmd().(mode.ShowToastMsg)
+	require.True(t, ok)
+	require.Equal(t, "Create failed: bd create failed: boom", toast.Message)
+}
+
 func TestKanban_HandleIssueCreated_SuccessReturnsPostCreateRefresh(t *testing.T) {
 	m := createTestModel(t)
 	m.creatingIssue = true

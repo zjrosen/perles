@@ -884,12 +884,7 @@ func (m Model) createIssueCmd(msg issueeditor.SaveMsg) tea.Cmd {
 
 		created.ID = result.ID
 		created.TitleText = result.Title
-		updateOpts := msg.BuildUpdateOptions(nil)
-		if msg.IssueType != task.TypeEpic && msg.IssueType != task.TypeTask {
-			issueType := msg.IssueType
-			updateOpts.Type = &issueType
-		}
-		if created.Notes != "" || updateOpts.Priority != nil || updateOpts.Status != nil || updateOpts.Type != nil {
+		if updateOpts, ok := createFollowUpOptions(msg); ok {
 			if err := m.services.TaskExecutor.UpdateIssue(result.ID, updateOpts); err != nil {
 				return issueCreatedMsg{issue: created, issueID: result.ID, err: err}
 			}
@@ -899,13 +894,57 @@ func (m Model) createIssueCmd(msg issueeditor.SaveMsg) tea.Cmd {
 	}
 }
 
+// createDefaultPriority and createDefaultStatus are what a new issue gets
+// when create is given no priority or status (bd create: P2 and open).
+const (
+	createDefaultPriority = task.PriorityMedium
+	createDefaultStatus   = task.StatusOpen
+)
+
+// createFollowUpOptions returns the fields of a create that CreateTask and
+// CreateEpic cannot set, to be applied by a follow-up UpdateIssue, and
+// whether there are any. Fields equal to what create already stored are left
+// out: an empty Notes in particular is never sent, since bd refuses
+// `--notes ""` (a dead command substitution looks the same) and would fail
+// the whole follow-up.
+func createFollowUpOptions(msg issueeditor.SaveMsg) (task.UpdateOptions, bool) {
+	var opts task.UpdateOptions
+	changed := false
+	if msg.Notes != "" {
+		notes := msg.Notes
+		opts.Notes = &notes
+		changed = true
+	}
+	if msg.Priority != createDefaultPriority {
+		priority := msg.Priority
+		opts.Priority = &priority
+		changed = true
+	}
+	if msg.Status != "" && msg.Status != createDefaultStatus {
+		status := msg.Status
+		opts.Status = &status
+		changed = true
+	}
+	if msg.IssueType != "" && msg.IssueType != task.TypeEpic && msg.IssueType != task.TypeTask {
+		issueType := msg.IssueType
+		opts.Type = &issueType
+		changed = true
+	}
+	return opts, changed
+}
+
 func (m Model) handleIssueCreated(msg issueCreatedMsg) (Model, tea.Cmd) {
 	m.creatingIssue = false
 	m.createIssueID = ""
 	m.createIssue = nil
 	if msg.err != nil {
+		message := "Create failed: " + msg.err.Error()
+		if msg.issueID != "" {
+			// The issue exists; only the follow-up field update failed.
+			message = "Created " + msg.issueID + ", but saving its fields failed: " + msg.err.Error()
+		}
 		return m, func() tea.Msg {
-			return mode.ShowToastMsg{Message: "Create failed: " + msg.err.Error(), Style: toaster.StyleError}
+			return mode.ShowToastMsg{Message: message, Style: toaster.StyleError}
 		}
 	}
 

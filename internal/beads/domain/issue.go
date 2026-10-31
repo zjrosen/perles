@@ -109,4 +109,7 @@ type UpdateIssueOptions struct {
 	Assignee    *string    // proactive; not used by current editor
 	Type        *IssueType // proactive; not used by current editor
 	ParentID    *string    // nil = unchanged, &"" = remove parent
+	// ExpectedNotes is the notes value the caller last saw (see
+	// task.UpdateOptions.ExpectedNotes); nil = unguarded.
+	ExpectedNotes *string
 }

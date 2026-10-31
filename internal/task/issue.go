@@ -114,4 +114,9 @@ type UpdateOptions struct {
 	Assignee    *string    // nil = unchanged
 	Type        *IssueType // nil = unchanged
 	ParentID    *string    // nil = unchanged, &"" = remove parent
+	// ExpectedNotes is the notes value the caller last saw, set together with
+	// Notes. Backends that refuse a blind notes overwrite (beads >= 1.3.2)
+	// only force the write while the stored notes still equal it, so a
+	// concurrent append by someone else is never clobbered. nil = unguarded.
+	ExpectedNotes *string
 }

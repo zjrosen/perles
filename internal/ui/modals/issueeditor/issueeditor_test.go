@@ -113,6 +113,19 @@ func TestBuildUpdateOptions_SingleFieldChanged(t *testing.T) {
 	require.Nil(t, opts.Priority)
 	require.Nil(t, opts.Status)
 	require.Nil(t, opts.Labels)
+	require.Nil(t, opts.ExpectedNotes, "ExpectedNotes is only set with Notes")
+}
+
+func TestBuildUpdateOptions_NotesChangedCarriesExpectedNotes(t *testing.T) {
+	original := &task.Issue{TitleText: "T", Notes: "as opened"}
+	msg := SaveMsg{Title: "T", Notes: "edited"}
+
+	opts := msg.BuildUpdateOptions(original)
+
+	require.NotNil(t, opts.Notes)
+	require.Equal(t, "edited", *opts.Notes)
+	require.NotNil(t, opts.ExpectedNotes, "the original notes guard a concurrent change")
+	require.Equal(t, "as opened", *opts.ExpectedNotes)
 }
 
 func TestBuildUpdateOptions_NilOriginalFallback(t *testing.T) {

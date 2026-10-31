@@ -3,11 +3,16 @@ package handler
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	beadsadapter "github.com/zjrosen/perles/internal/beads/adapter"
+	beadsinfra "github.com/zjrosen/perles/internal/beads/infrastructure"
 	"github.com/zjrosen/perles/internal/mocks"
 	"github.com/zjrosen/perles/internal/orchestration/events"
 	"github.com/zjrosen/perles/internal/orchestration/v2/command"
@@ -77,6 +82,62 @@ func TestMarkTaskCompleteHandler_FailsOnAddCommentError(t *testing.T) {
 	require.Error(t, err, "expected error on BD AddComment failure")
 	require.Contains(t, err.Error(), "bd comment service unavailable")
 	require.Contains(t, err.Error(), "failed to add BD comment")
+}
+
+// closeRefusalText is bd's (>= 1.3) refusal to move an issue with open
+// children into closed without --force.
+const closeRefusalText = "cannot close perles-abc1.2: 2 open child issue(s); close children first or use --force to override"
+
+// TestMarkTaskCompleteHandler_CloseRefusalKeepsTaskAndReturnsReason verifies a
+// close-policy refusal reaches the coordinator with bd's reason, adds no
+// completion comment, and leaves the task tracked so it can be retried.
+func TestMarkTaskCompleteHandler_CloseRefusalKeepsTaskAndReturnsReason(t *testing.T) {
+	bdExecutor := mocks.NewMockTaskExecutor(t)
+	bdExecutor.EXPECT().UpdateStatus("perles-abc1.2", taskpkg.StatusClosed).
+		Return(errors.New("bd update failed: Error updating perles-abc1.2: " + closeRefusalText))
+
+	taskRepo := repository.NewMemoryTaskRepository()
+	require.NoError(t, taskRepo.Save(&repository.TaskAssignment{
+		TaskID:      "perles-abc1.2",
+		Implementer: "worker-1",
+		Status:      repository.TaskImplementing,
+	}))
+
+	handler := NewMarkTaskCompleteHandler(bdExecutor, taskRepo)
+	cmd := command.NewMarkTaskCompleteCommand(command.SourceMCPTool, "perles-abc1.2")
+	_, err := handler.Handle(context.Background(), cmd)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to update BD task status")
+	require.Contains(t, err.Error(), closeRefusalText)
+	_, getErr := taskRepo.Get("perles-abc1.2")
+	require.NoError(t, getErr, "a refused close leaves the task assignment in place")
+}
+
+// TestMarkTaskCompleteHandler_CloseRefusalEndToEnd runs mark_task_complete
+// against the real beads executor stack with a fake bd that refuses the close
+// the way bd >= 1.3 does (prose plus a JSON report on stderr, exit 1).
+func TestMarkTaskCompleteHandler_CloseRefusalEndToEnd(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake bd is a POSIX shell script")
+	}
+	script := "#!/bin/sh\n" +
+		"echo 'Error updating perles-abc1.2: " + closeRefusalText + "' >&2\n" +
+		`echo '{"error":"1 of 1 issues failed to update","failed":[{"id":"perles-abc1.2","error":"updating issue: ` + closeRefusalText + `"}],"schema_version":1}' >&2` + "\n" +
+		"exit 1\n"
+	binDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(binDir, "bd"), []byte(script), 0o755)) //nolint:gosec // test executable
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	executor := beadsadapter.NewBeadsTaskExecutor(beadsinfra.NewBDExecutor(t.TempDir(), ""))
+	handler := NewMarkTaskCompleteHandler(executor, nil)
+	cmd := command.NewMarkTaskCompleteCommand(command.SourceMCPTool, "perles-abc1.2")
+	_, err := handler.Handle(context.Background(), cmd)
+
+	require.Error(t, err)
+	require.Equal(t,
+		"failed to update BD task status: bd update failed: Error updating perles-abc1.2: "+closeRefusalText,
+		err.Error())
 }
 
 func TestMarkTaskCompleteHandler_PanicsIfBDExecutorNil(t *testing.T) {

@@ -73,6 +73,8 @@ func (m SaveMsg) BuildUpdateOptions(original *task.Issue) task.UpdateOptions {
 	}
 	if m.Notes != original.Notes {
 		opts.Notes = &m.Notes
+		expected := original.Notes
+		opts.ExpectedNotes = &expected
 	}
 	if m.Priority != original.Priority {
 		p := m.Priority

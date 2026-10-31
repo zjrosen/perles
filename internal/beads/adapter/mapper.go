@@ -156,6 +156,7 @@ func FromTaskUpdateOptions(o task.UpdateOptions) domain.UpdateIssueOptions {
 	result.Title = o.Title
 	result.Description = o.Description
 	result.Notes = o.Notes
+	result.ExpectedNotes = o.ExpectedNotes
 	result.Assignee = o.Assignee
 	result.ParentID = o.ParentID
 
