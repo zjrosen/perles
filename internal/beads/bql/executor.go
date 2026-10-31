@@ -384,8 +384,7 @@ func isMissingTableError(err error) bool {
 // field the cached schema lacks, or SQL that references a missing column or
 // table.
 func isStaleSchemaError(err error) bool {
-	var unavailable *FieldUnavailableError
-	if errors.As(err, &unavailable) {
+	if _, ok := errors.AsType[*FieldUnavailableError](err); ok {
 		return true
 	}
 	if isMissingTableError(err) {
