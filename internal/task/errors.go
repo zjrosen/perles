@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 )
 
 // ServerDownError indicates the backend's server is not reachable.
@@ -49,8 +50,9 @@ func (e *ServerDownError) Unwrap() error {
 type UnsupportedWorkspaceKind string
 
 const (
-	// WorkspaceEmbeddedDolt is a beads workspace using embedded Dolt, which has
-	// no SQL server for perles to connect to.
+	// WorkspaceEmbeddedDolt is a beads workspace using embedded Dolt that
+	// perles' snapshot reader cannot start on. UnsupportedWorkspaceError.Detail
+	// says why.
 	WorkspaceEmbeddedDolt UnsupportedWorkspaceKind = "embedded"
 	// WorkspaceProxiedServer is a beads workspace in Dolt proxied-server mode.
 	WorkspaceProxiedServer UnsupportedWorkspaceKind = "proxied-server"
@@ -75,6 +77,11 @@ type UnsupportedWorkspaceError struct {
 	BeadsDir string
 	// Detail qualifies Kind: the backend name for WorkspaceUnknownBackend, or
 	// what declared the format for WorkspaceGraph.
+	//
+	// For WorkspaceEmbeddedDolt it is "<cause>: <text>": cause is an
+	// EmbeddedCause constant and text says what failed (ParseEmbeddedDetail
+	// splits the two). An empty Detail means the workspace is embedded and
+	// this perles build cannot read it.
 	Detail string
 }
 
@@ -83,6 +90,47 @@ func (e *UnsupportedWorkspaceError) Error() string {
 		return fmt.Sprintf("unsupported beads workspace in %s: %s (%s)", e.BeadsDir, e.Kind, e.Detail)
 	}
 	return fmt.Sprintf("unsupported beads workspace in %s: %s", e.BeadsDir, e.Kind)
+}
+
+// EmbeddedCause names why perles' snapshot reader cannot start on an embedded
+// Dolt workspace. It is the cause in a WorkspaceEmbeddedDolt Detail,
+// "<cause>: <text>".
+type EmbeddedCause string
+
+const (
+	// EmbeddedCauseBDNotFound is bd missing from PATH. The text contains
+	// "bd CLI not found on PATH".
+	EmbeddedCauseBDNotFound EmbeddedCause = "bd-not-found"
+	// EmbeddedCauseBDVersion is the embedded bd version gate. The text is
+	// "embedded workspaces need bd >= 1.0.5 (found X)", or
+	// "embedded workspaces need bd >= 1.0.5 (could not read the bd version:
+	// <reason>)".
+	EmbeddedCauseBDVersion EmbeddedCause = "bd-version"
+	// EmbeddedCauseBDError is any other bd failure. The text is the bd error
+	// with perles' hint, e.g. "bd export failed: beads database needs a schema
+	// migration: run `bd migrate schema` — ...".
+	EmbeddedCauseBDError EmbeddedCause = "bd-error"
+	// EmbeddedCauseWorkspace is a failure to resolve the embedded database or
+	// its manifest, or any other error. The text describes it.
+	EmbeddedCauseWorkspace EmbeddedCause = "workspace"
+)
+
+// ParseEmbeddedDetail splits a WorkspaceEmbeddedDolt Detail, "<cause>: <text>",
+// into its cause and text. A Detail without a recognised cause is a bd error
+// whose text is the whole Detail. An empty (or blank) Detail gives an empty
+// cause and text: the workspace is embedded and this perles build cannot read
+// it.
+func ParseEmbeddedDetail(detail string) (EmbeddedCause, string) {
+	if strings.TrimSpace(detail) == "" {
+		return "", ""
+	}
+	if prefix, text, ok := strings.Cut(detail, ": "); ok {
+		switch cause := EmbeddedCause(prefix); cause {
+		case EmbeddedCauseBDNotFound, EmbeddedCauseBDVersion, EmbeddedCauseBDError, EmbeddedCauseWorkspace:
+			return cause, text
+		}
+	}
+	return EmbeddedCauseBDError, detail
 }
 
 // VersionIncompatibleError indicates the backend data store version is too old

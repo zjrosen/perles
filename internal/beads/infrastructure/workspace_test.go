@@ -196,6 +196,24 @@ func TestHasEmbeddedDoltRepository(t *testing.T) {
 	require.True(t, hasEmbeddedDoltRepository(beadsDir))
 }
 
+func TestUnsupportedWorkspaceError_EmbeddedMessage(t *testing.T) {
+	err := &UnsupportedWorkspaceError{Kind: WorkspaceEmbeddedDolt, BeadsDir: "/p/.beads"}
+	require.Equal(t, "beads workspace /p/.beads uses embedded Dolt; perles needs Dolt server mode", err.Error())
+
+	err = &UnsupportedWorkspaceError{
+		Kind:     WorkspaceEmbeddedDolt,
+		BeadsDir: "/p/.beads",
+		Detail:   "embedded workspaces need bd >= 1.0.5 (found 1.0.4)",
+	}
+	require.Equal(t, "beads workspace /p/.beads uses embedded Dolt, but perles' snapshot reader cannot start: "+
+		"embedded workspaces need bd >= 1.0.5 (found 1.0.4)", err.Error())
+
+	// The version gate's error reads the same way.
+	gate := CheckEmbeddedBDVersion("/p/.beads", "1.0.4", nil)
+	require.EqualError(t, gate, "beads workspace /p/.beads uses embedded Dolt, but perles' snapshot reader cannot start: "+
+		"embedded workspaces need bd >= 1.0.5 (found 1.0.4)")
+}
+
 func TestUnsupportedWorkspaceError_Messages(t *testing.T) {
 	for _, kind := range []WorkspaceKind{
 		WorkspaceEmbeddedDolt, WorkspaceProxiedServer, WorkspaceHTTPBackend,

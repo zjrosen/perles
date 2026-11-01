@@ -1,12 +1,15 @@
 // Package unsupported provides the view shown when the beads workspace is in a
-// mode or format perles cannot read: embedded or proxied-server Dolt, the http
-// backend, a graph workspace, a historical SQLite workspace, or an unknown
-// storage backend. Each kind explains why and what to run instead.
+// mode or format perles cannot read: embedded Dolt the snapshot reader cannot
+// start on, proxied-server Dolt, the http backend, a graph workspace, a
+// historical SQLite workspace, or an unknown storage backend. Each kind
+// explains why and what to run instead.
 package unsupported
 
 import (
 	"fmt"
+	"strings"
 
+	"github.com/zjrosen/perles/internal/beads/domain"
 	"github.com/zjrosen/perles/internal/keys"
 	"github.com/zjrosen/perles/internal/task"
 	"github.com/zjrosen/perles/internal/ui/shared/chainart"
@@ -15,6 +18,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Model holds the unsupported-workspace view state.
@@ -64,7 +68,16 @@ type screenStyles struct {
 	message lipgloss.Style
 	command lipgloss.Style
 	note    lipgloss.Style
+	reason  lipgloss.Style
 }
+
+// Embedded failure reasons wrap at maxReasonWidth columns and show at most
+// maxReasonLines lines, so the screen fits an 80x24 terminal. A bd error
+// message alone can run to 500 characters.
+const (
+	maxReasonWidth = 76
+	maxReasonLines = 6
+)
 
 // View renders the unsupported-workspace state.
 func (m Model) View() string {
@@ -76,6 +89,7 @@ func (m Model) View() string {
 		message: lipgloss.NewStyle().Foreground(styles.TextDescriptionColor),
 		command: lipgloss.NewStyle().Foreground(styles.StatusSuccessColor).Bold(true),
 		note:    lipgloss.NewStyle().Foreground(styles.TextMutedColor),
+		reason:  lipgloss.NewStyle().Foreground(styles.TextPrimaryColor),
 	}
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.TextPrimaryColor)
 	hintStyle := lipgloss.NewStyle().Foreground(styles.TextMutedColor).Italic(true)
@@ -109,20 +123,15 @@ func (m Model) body(st screenStyles) []string {
 
 	switch m.kind {
 	case task.WorkspaceEmbeddedDolt:
-		return []string{
-			msg("This project keeps its beads in embedded Dolt, which runs inside bd"),
-			msg("and has no SQL server for perles to connect to. Perles needs server mode."),
-			"",
-			msg("New project with no issues yet:"),
-			cmd("bd init --server"),
-			"",
-			msg("Existing project (bd init --server refuses one that has data):"),
-			steps(st,
-				step{"1. in this project:", "bd backup init <backup-dir> && bd backup sync"},
-				step{"2. in a new directory:", "bd init --server"},
-				step{"3. in that directory:", "bd backup restore --force <backup-dir>"},
-			),
+		cause, text := task.ParseEmbeddedDetail(m.detail)
+		if cause == "" {
+			return append([]string{
+				msg("This project keeps its beads in embedded Dolt, which runs inside bd"),
+				msg("and has no SQL server for perles to connect to. Perles needs server mode."),
+				"",
+			}, serverModeSteps(st)...)
 		}
+		return m.embeddedBody(st, cause, text)
 
 	case task.WorkspaceProxiedServer:
 		return []string{
@@ -183,6 +192,75 @@ func (m Model) body(st screenStyles) []string {
 			msg("Check \"backend\" in .beads/metadata.json, or see the beads upgrade guide:"),
 			cmd("docs/getting-started/upgrading.md"),
 		}
+	}
+}
+
+// embeddedBody explains why perles' snapshot reader cannot start on an
+// embedded workspace (see task.ParseEmbeddedDetail): the cause, bd's or the
+// backend's text, the remedy, then switching to server mode as the
+// alternative.
+func (m Model) embeddedBody(st screenStyles, cause task.EmbeddedCause, text string) []string {
+	msg := func(s string) string { return st.message.Render(s) }
+
+	const intro = "Perles reads this embedded Dolt project through bd, "
+	var problem, remedy string
+	switch cause {
+	case task.EmbeddedCauseBDNotFound:
+		problem = "but can't find bd:"
+		remedy = fmt.Sprintf("Install bd %s or later, put it on PATH and start perles again.", domain.MinEmbeddedBeadsVersion)
+	case task.EmbeddedCauseBDVersion:
+		problem = "but can't use this bd:"
+		remedy = fmt.Sprintf("Install or upgrade bd to %s or later and start perles again.", domain.MinEmbeddedBeadsVersion)
+	case task.EmbeddedCauseWorkspace:
+		problem = "but can't open it:"
+		remedy = "Fix the problem above and start perles again."
+	default:
+		problem = "but bd failed:"
+		remedy = "Fix the problem above and start perles again."
+	}
+
+	lines := append([]string{msg(intro + problem)}, m.reasonLines(st, text)...)
+	lines = append(lines,
+		"",
+		msg(remedy),
+		"",
+		msg("Or switch the project to Dolt server mode, which perles reads directly."),
+	)
+	return append(lines, serverModeSteps(st)...)
+}
+
+// reasonLines renders text word-wrapped to the view, at most maxReasonLines
+// lines; a longer text ends in an ellipsis.
+func (m Model) reasonLines(st screenStyles, text string) []string {
+	text = strings.Join(strings.Fields(text), " ")
+	if text == "" {
+		return nil
+	}
+	width := max(min(maxReasonWidth, m.width-4), 20)
+	lines := strings.Split(ansi.Wrap(text, width, ""), "\n")
+	if len(lines) > maxReasonLines {
+		lines = lines[:maxReasonLines]
+		lines[maxReasonLines-1] = ansi.Truncate(lines[maxReasonLines-1], width-1, "") + "…"
+	}
+	for i, line := range lines {
+		lines[i] = st.reason.Render(line)
+	}
+	return lines
+}
+
+// serverModeSteps is how to move a project to Dolt server mode: a new
+// project can be re-initialized, an existing one goes through a backup.
+func serverModeSteps(st screenStyles) []string {
+	return []string{
+		st.message.Render("New project with no issues yet:"),
+		st.command.Render("bd init --server"),
+		"",
+		st.message.Render("Existing project (bd init --server refuses one that has data):"),
+		steps(st,
+			step{"1. in this project:", "bd backup init <backup-dir> && bd backup sync"},
+			step{"2. in a new directory:", "bd init --server"},
+			step{"3. in that directory:", "bd backup restore --force <backup-dir>"},
+		),
 	}
 }
 

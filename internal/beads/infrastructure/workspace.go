@@ -13,8 +13,9 @@ import (
 type WorkspaceKind string
 
 const (
-	// WorkspaceEmbeddedDolt is Dolt in embedded mode: the database runs inside
-	// bd and there is no SQL server for perles to connect to.
+	// WorkspaceEmbeddedDolt is Dolt in embedded mode (the database runs inside
+	// bd, with no SQL server) that perles' snapshot reader cannot start on.
+	// Detail says why.
 	WorkspaceEmbeddedDolt WorkspaceKind = "embedded"
 	// WorkspaceProxiedServer is Dolt in proxied-server mode (dolt_mode
 	// "proxied-server"), which perles does not read yet.
@@ -39,12 +40,22 @@ type UnsupportedWorkspaceError struct {
 	BeadsDir string
 	// Detail qualifies the kind: the backend name for WorkspaceUnknownBackend,
 	// what declared the graph format for WorkspaceGraph.
+	//
+	// For WorkspaceEmbeddedDolt it is why the snapshot reader cannot start,
+	// such as CheckEmbeddedBDVersion's "embedded workspaces need bd >= 1.0.5
+	// (found X)". It carries no cause: mapping the error to
+	// task.UnsupportedWorkspaceError must prefix one (see that Detail's
+	// "<cause>: <text>" format). An empty Detail means the workspace is
+	// embedded and this perles build cannot read it.
 	Detail string
 }
 
 func (e *UnsupportedWorkspaceError) Error() string {
 	switch e.Kind {
 	case WorkspaceEmbeddedDolt:
+		if e.Detail != "" {
+			return fmt.Sprintf("beads workspace %s uses embedded Dolt, but perles' snapshot reader cannot start: %s", e.BeadsDir, e.Detail)
+		}
 		return fmt.Sprintf("beads workspace %s uses embedded Dolt; perles needs Dolt server mode", e.BeadsDir)
 	case WorkspaceProxiedServer:
 		return fmt.Sprintf("beads workspace %s uses Dolt proxied-server mode, which perles does not support", e.BeadsDir)

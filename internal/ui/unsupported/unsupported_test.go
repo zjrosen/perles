@@ -1,6 +1,7 @@
 package unsupported
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -11,12 +12,24 @@ import (
 	"github.com/zjrosen/perles/internal/task"
 )
 
+// Embedded Details in task.ParseEmbeddedDetail's "<cause>: <text>" format.
+const (
+	detailBDNotFound = "bd-not-found: bd export failed: bd CLI not found on PATH"
+	detailBDVersion  = "bd-version: embedded workspaces need bd >= 1.0.5 (found 1.0.4)"
+	detailBDError    = "bd-error: bd export failed: beads database needs a schema migration: run `bd migrate schema` — Error: schema 45 is behind bd's 47"
+	detailWorkspace  = "workspace: /p/.beads/embeddeddolt holds no embedded Dolt repository"
+)
+
 var allKinds = []struct {
 	name   string
 	kind   task.UnsupportedWorkspaceKind
 	detail string
 }{
 	{"Embedded", task.WorkspaceEmbeddedDolt, ""},
+	{"EmbeddedBDNotFound", task.WorkspaceEmbeddedDolt, detailBDNotFound},
+	{"EmbeddedBDVersion", task.WorkspaceEmbeddedDolt, detailBDVersion},
+	{"EmbeddedBDError", task.WorkspaceEmbeddedDolt, detailBDError},
+	{"EmbeddedWorkspace", task.WorkspaceEmbeddedDolt, detailWorkspace},
 	{"ProxiedServer", task.WorkspaceProxiedServer, ""},
 	{"HTTP", task.WorkspaceHTTPBackend, ""},
 	{"Graph", task.WorkspaceGraph, `graph_mode "link"`},
@@ -79,24 +92,66 @@ func TestUnsupported_EmptyDimensions(t *testing.T) {
 }
 
 func TestUnsupported_View_Content(t *testing.T) {
+	// serverMode is the server-mode alternative every embedded body ends with.
+	serverMode := []string{
+		"New project with no issues yet:", "bd init --server",
+		"bd backup init <backup-dir> && bd backup sync", "bd backup restore --force <backup-dir>",
+	}
+	// embedded is a cause body: its own lines, then the server-mode
+	// alternative, without the empty-Detail body's "needs server mode".
+	embedded := func(lines ...string) []string {
+		return append(append(lines, "Or switch the project to Dolt server mode"), serverMode...)
+	}
+	notCause := []string{"Perles needs server mode", "no SQL server"}
+
 	tests := []struct {
-		kind   task.UnsupportedWorkspaceKind
-		detail string
-		want   []string
+		kind    task.UnsupportedWorkspaceKind
+		detail  string
+		want    []string
+		notWant []string
 	}{
-		{task.WorkspaceEmbeddedDolt, "", []string{
-			"embedded Dolt", "no SQL server", "bd init --server",
-			"bd backup init <backup-dir> && bd backup sync", "bd backup restore --force <backup-dir>",
-		}},
+		{task.WorkspaceEmbeddedDolt, "", append([]string{"embedded Dolt", "no SQL server", "Perles needs server mode"}, serverMode...),
+			[]string{"Or switch", "through bd"}},
+		{task.WorkspaceEmbeddedDolt, " ", []string{"Perles needs server mode"}, []string{"Or switch"}},
+		{task.WorkspaceEmbeddedDolt, detailBDNotFound, embedded(
+			"embedded Dolt project through bd, but can't find bd:",
+			"bd export failed: bd CLI not found on PATH",
+			"Install bd 1.0.5 or later, put it on PATH and start perles again.",
+		), append(notCause, "bd-not-found")},
+		{task.WorkspaceEmbeddedDolt, detailBDVersion, embedded(
+			"embedded Dolt project through bd, but can't use this bd:",
+			"embedded workspaces need bd >= 1.0.5 (found 1.0.4)",
+			"Install or upgrade bd to 1.0.5 or later and start perles again.",
+		), append(notCause, "bd-version")},
+		{task.WorkspaceEmbeddedDolt, "bd-version: embedded workspaces need bd >= 1.0.5 (could not read the bd version: bd context failed)", embedded(
+			"but can't use this bd:",
+			"(could not read the bd version:",
+			"Install or upgrade bd to 1.0.5 or later",
+		), notCause},
+		{task.WorkspaceEmbeddedDolt, detailBDError, embedded(
+			"embedded Dolt project through bd, but bd failed:",
+			"bd export failed: beads database needs a schema migration: run `bd migrate",
+			"schema` — Error: schema 45 is behind bd's 47",
+			"Fix the problem above and start perles again.",
+		), append(notCause, "bd-error")},
+		{task.WorkspaceEmbeddedDolt, detailWorkspace, embedded(
+			"embedded Dolt project through bd, but can't open it:",
+			"/p/.beads/embeddeddolt holds no embedded Dolt repository",
+			"Fix the problem above and start perles again.",
+		), append(notCause, "workspace:")},
+		// A Detail without a recognised cause is a bd error.
+		{task.WorkspaceEmbeddedDolt, "bd export failed: boom", embedded(
+			"but bd failed:", "bd export failed: boom",
+		), notCause},
 		{task.WorkspaceProxiedServer, "", []string{
 			"proxied-server", "bd dolt stop", "bd migrate from-proxied-server-to-server",
-		}},
-		{task.WorkspaceHTTPBackend, "", []string{"bd connect", "http backend", "bd connect --clear"}},
-		{task.WorkspaceGraph, `graph_mode "link"`, []string{`graph_mode "link"`, "graph data model"}},
-		{task.WorkspaceGraph, "", []string{"graph data model (graph_mode)"}},
-		{task.WorkspaceLegacySQLite, "", []string{"SQLite", "docs/getting-started/upgrading.md#cross-era-upgrades"}},
-		{task.WorkspaceUnknownBackend, "postgres", []string{`"postgres" storage backend`}},
-		{task.WorkspaceUnknownBackend, "", []string{`"unknown" storage backend`}},
+		}, nil},
+		{task.WorkspaceHTTPBackend, "", []string{"bd connect", "http backend", "bd connect --clear"}, nil},
+		{task.WorkspaceGraph, `graph_mode "link"`, []string{`graph_mode "link"`, "graph data model"}, nil},
+		{task.WorkspaceGraph, "", []string{"graph data model (graph_mode)"}, nil},
+		{task.WorkspaceLegacySQLite, "", []string{"SQLite", "docs/getting-started/upgrading.md#cross-era-upgrades"}, nil},
+		{task.WorkspaceUnknownBackend, "postgres", []string{`"postgres" storage backend`}, nil},
+		{task.WorkspaceUnknownBackend, "", []string{`"unknown" storage backend`}, nil},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.kind)+"/"+tt.detail, func(t *testing.T) {
@@ -106,8 +161,48 @@ func TestUnsupported_View_Content(t *testing.T) {
 			for _, want := range tt.want {
 				require.Contains(t, view, want)
 			}
+			for _, notWant := range tt.notWant {
+				require.NotContains(t, view, notWant)
+			}
 		})
 	}
+}
+
+// A long bd error is word-wrapped and cut to maxReasonLines lines, so the
+// remedy, the server-mode alternative and the quit hint still fit 80x24.
+func TestUnsupported_View_LongReasonIsCapped(t *testing.T) {
+	long := "bd-error: bd export failed: " + strings.Repeat("the storage layer reported a failure ", 20) + "THE-END"
+	m := New(task.WorkspaceEmbeddedDolt, long).SetSize(80, 24)
+
+	reason := m.reasonLines(screenStyles{}, strings.TrimPrefix(long, "bd-error: "))
+	require.Len(t, reason, maxReasonLines)
+	for _, line := range reason {
+		require.LessOrEqual(t, lipgloss.Width(line), maxReasonWidth)
+	}
+	require.True(t, strings.HasSuffix(reason[maxReasonLines-1], "…"))
+
+	view := m.View()
+	require.Equal(t, 24, lipgloss.Height(view))
+	require.LessOrEqual(t, lipgloss.Width(view), 80)
+	require.Contains(t, view, "bd export failed: the storage layer reported a failure")
+	require.NotContains(t, view, "THE-END")
+	require.Contains(t, view, "Fix the problem above and start perles again.")
+	require.Contains(t, view, "bd backup restore --force <backup-dir>")
+	require.Contains(t, view, "Press q to quit")
+}
+
+// The reason wraps to the view on terminals narrower than maxReasonWidth.
+func TestUnsupported_ReasonLines_WrapToView(t *testing.T) {
+	text := strings.Repeat("word ", 30)
+	m := New(task.WorkspaceEmbeddedDolt, "").SetSize(50, 24)
+	lines := m.reasonLines(screenStyles{}, text)
+	require.Greater(t, len(lines), 1)
+	for _, line := range lines {
+		require.LessOrEqual(t, lipgloss.Width(line), 46)
+	}
+
+	require.Empty(t, m.reasonLines(screenStyles{}, " \n\t "))
+	require.Equal(t, []string{"a b"}, m.reasonLines(screenStyles{}, "a\n  b"))
 }
 
 // Every kind fits a standard 80x24 terminal without wrapping or overflowing.

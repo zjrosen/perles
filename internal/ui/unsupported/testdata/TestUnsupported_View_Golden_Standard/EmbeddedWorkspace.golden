@@ -1,0 +1,24 @@
+                                                                                
+                                                                                
+                                                                                
+                Oh no! Looks like there's a break in the chain!                 
+                                                                                
+     Perles reads this embedded Dolt project through bd, but can't open it:     
+            /p/.beads/embeddeddolt holds no embedded Dolt repository            
+                                                                                
+                 Fix the problem above and start perles again.                  
+                                                                                
+    Or switch the project to Dolt server mode, which perles reads directly.     
+                        New project with no issues yet:                         
+                                bd init --server                                
+                                                                                
+         Existing project (bd init --server refuses one that has data):         
+     1. in this project:     bd backup init <backup-dir> && bd backup sync      
+     2. in a new directory:  bd init --server                                   
+     3. in that directory:   bd backup restore --force <backup-dir>             
+                                                                                
+                                                                                
+                                Press q to quit                                 
+                                                                                
+                                                                                
+                                                                                
