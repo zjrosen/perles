@@ -76,7 +76,12 @@ func New(cfg Config) (*Watcher, error) {
 		log.ErrorErr(log.CatWatcher, "Failed to create fsnotify watcher", err)
 		return nil, fmt.Errorf("creating fsnotify watcher: %w", err)
 	}
+	return newWatcher(cfg, fsw), nil
+}
 
+// newWatcher returns the watcher configured with cfg that reads its events
+// from fsw. It starts nothing.
+func newWatcher(cfg Config, fsw *fsnotify.Watcher) *Watcher {
 	return &Watcher{
 		fsWatcher:     fsw,
 		dbPath:        cfg.DBPath,
@@ -85,7 +90,7 @@ func New(cfg Config) (*Watcher, error) {
 		maxWait:       cfg.MaxWait,
 		done:          make(chan struct{}),
 		broker:        pubsub.NewBroker[WatcherEvent](),
-	}, nil
+	}
 }
 
 // watchDir returns the directory to watch.

@@ -23,15 +23,17 @@ const (
 	// event (watcher.Config.MaxWait). bd rewrites the manifest throughout
 	// each command, so agents writing about every 0.8s never leave the
 	// debounce a 500ms pause; without a bound the watcher would stay silent,
-	// and the snapshot stale, until they stop. While events keep coming,
-	// the watcher reports at least this often, and the hash gate drops the
-	// reports that find no change.
+	// and the snapshot stale, until they stop. With it, the watcher reports
+	// a rewrite within about this long of it: while the rewrites go on,
+	// every 2–2.5s, since the bound runs from the first rewrite after a
+	// report. The hash gate drops the reports that find no change.
 	//
 	// It equals minRebuildGap. A report leads to a rebuild no sooner than
 	// pacing allows (at least minRebuildGap after the last build), so
 	// reporting more often could not rebuild more often or take more of
-	// the lock; reporting less often would leave the snapshot staler than
-	// pacing makes it. A report costs one read of the manifest.
+	// the lock. A report can already come up to about one maximum wait
+	// after the next build was due (nextBuildAt); a longer bound would
+	// lengthen that delay. A report costs one read of the manifest.
 	manifestMaxWait = minRebuildGap
 	// minRebuildGap is the least idle time between the end of a build and
 	// the start of the next one. A build that took longer than half of it
@@ -47,9 +49,10 @@ const (
 )
 
 // manifestWatcher publishes watcher.DBChanged on its broker, debounced,
-// whenever the manifest is written or replaced, and at least every
-// manifestMaxWait while it keeps being rewritten, until it is stopped.
-// *watcher.Watcher is one.
+// whenever the manifest is written or replaced, until it is stopped. While
+// the manifest keeps being rewritten without a debounce-long pause, it
+// still reports each rewrite within about manifestMaxWait of it (every
+// 2–2.5s). *watcher.Watcher is one.
 type manifestWatcher interface {
 	Broker() *pubsub.Broker[watcher.WatcherEvent]
 	Stop() error
@@ -106,6 +109,12 @@ type scheduler struct {
 	// consecutiveFailures counts the failed builds since the last success
 	// or FlushCaches, for the failure backoff.
 	consecutiveFailures int
+	// manualDuringBuild is set by a manual request (FlushCaches) made while
+	// a build runs. The request resets the backoff at once, but the build
+	// counts its failure after that; so if the build fails, finishBuild
+	// resets the backoff again, as if the request came right after the
+	// failure. A build clears it when it starts.
+	manualDuringBuild bool
 	// retryIfFailed is set by a manual request (FlushCaches) made after a
 	// failed build while a retry is running whose in-flight hash covers it.
 	// The gate drops the request, since the running build covers it; but if
@@ -170,27 +179,31 @@ func (b *SnapshotBackend) FlushCaches(context.Context) error {
 // read counts as changed, so the build reports why.
 //
 // A manual request also resets the failure backoff; automatic ones wait it
-// out. A manual request after a failed build that the running retry covers
-// is replayed if that retry fails (see retryIfFailed). Before the first
-// snapshot nothing else happens, since the first query builds one from
-// scratch, and after Close nothing happens.
+// out. A manual request made while a build runs resets it again if that
+// build fails (see manualDuringBuild), and one after a failed build that
+// the running retry covers is replayed if that retry fails (see
+// retryIfFailed). Before the first snapshot nothing else happens, since the
+// first query builds one from scratch, and after Close nothing happens.
 //
 // It never runs bd and never waits on a build: it reads the manifest (a
 // few hundred bytes) and takes schedMu, which no build holds across its bd
 // reads. It is called on the caller's goroutine (the UI's, a writer's, or
 // the watcher's forwarding goroutine).
 func (b *SnapshotBackend) requestRebuild(manual bool) {
+	s := &b.sched
 	if manual {
-		b.sched.mu.Lock()
-		b.sched.consecutiveFailures = 0
-		b.sched.mu.Unlock()
+		s.mu.Lock()
+		s.consecutiveFailures = 0
+		if s.running {
+			s.manualDuringBuild = true
+		}
+		s.mu.Unlock()
 	}
 	if b.current.Load() == nil {
 		return
 	}
 	hash, err := hashManifest(b.manifestPath)
 
-	s := &b.sched
 	s.mu.Lock()
 	needed := err != nil || !s.covers(hash)
 	if needed {
@@ -261,7 +274,7 @@ func (b *SnapshotBackend) deferredBuildErr() error {
 // build and the scheduler goroutine build through it, holding buildMu
 // throughout, so builds never overlap:
 //
-//  1. clear dirty and mark the build running;
+//  1. clear dirty and manualDuringBuild, and mark the build running;
 //  2. build (see build), publishing the manifest hash it read before its
 //     export as inFlightH0;
 //  3. install the snapshot, retiring the old one;
@@ -278,6 +291,7 @@ func (b *SnapshotBackend) rebuild(ctx context.Context) error {
 	s.mu.Lock()
 	s.dirty = false
 	s.running = true
+	s.manualDuringBuild = false
 	s.mu.Unlock()
 
 	var h0 string
@@ -309,9 +323,10 @@ func (b *SnapshotBackend) rebuild(ctx context.Context) error {
 // After a failure the current snapshot keeps serving. It clears the
 // installed hash (every later trigger then asks for a retry), records the
 // error for the backoff, logs a failed first build and publishes
-// WatcherError. A manual request that the failed build covered is replayed
-// (see retryIfFailed). A build that failed because Close cancelled it is not
-// counted and publishes nothing.
+// WatcherError. A manual request made during the failed build resets the
+// backoff (see manualDuringBuild), and one that the build covered is also
+// replayed (see retryIfFailed). A build that failed because Close cancelled
+// it is not counted and publishes nothing.
 func (b *SnapshotBackend) finishBuild(h0 string, start time.Time, err error) {
 	s := &b.sched
 	end := b.clock.Now()
@@ -361,6 +376,11 @@ func (b *SnapshotBackend) finishFailedBuild(start, end time.Time, err error) {
 		s.installedHash = ""
 		s.lastErr = err
 		s.consecutiveFailures++
+		if s.manualDuringBuild {
+			// A manual request during the build resets the backoff, as if
+			// made right after this failure.
+			s.consecutiveFailures = 0
+		}
 		if replay {
 			// The manual request, as if made right after this failure.
 			s.consecutiveFailures = 0

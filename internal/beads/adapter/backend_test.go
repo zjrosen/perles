@@ -103,9 +103,18 @@ func TestTranslateClientError_Other(t *testing.T) {
 // TestEmbeddedStartupError: each failure to start the snapshot reader maps
 // to its cause, with a non-empty text, and stays reachable.
 func TestEmbeddedStartupError(t *testing.T) {
+	export := func() error {
+		_, err := infrabeads.NewBDRunner(t.TempDir(), "/p/.beads")(context.Background(), infrabeads.BDRequest{Args: []string{"--readonly", "export", "--all"}})
+		return err
+	}
 	t.Setenv("PATH", "") // the real runner finds no bd
-	_, notFound := infrabeads.NewBDRunner(t.TempDir(), "/p/.beads")(context.Background(), infrabeads.BDRequest{Args: []string{"--readonly", "export", "--all"}})
+	notFound := export()
 	require.Error(t, notFound)
+	// The real runner, and a bd that refuses the export as bd does with a
+	// pending schema migration.
+	installFailingBD(t, "Error: database schema v45 has pending migrations; run 'bd migrate schema' to apply them")
+	refused := export()
+	require.Error(t, refused)
 
 	tests := []struct {
 		name       string
@@ -126,6 +135,12 @@ func TestEmbeddedStartupError(t *testing.T) {
 			name:       "bd not on PATH",
 			err:        notFound,
 			wantDetail: "bd-not-found: bd export failed: bd CLI not found on PATH",
+		},
+		{
+			name: "bd refused",
+			err:  refused,
+			wantDetail: "bd-error: bd export failed: beads database needs a schema migration: run `bd migrate schema` — " +
+				"database schema v45 has pending migrations; run 'bd migrate schema' to apply them",
 		},
 		{
 			name:       "not found outside a bd invocation is no bd error",
@@ -218,7 +233,8 @@ func TestNewBeadsBackend_EmbeddedContextErrorPassedThrough(t *testing.T) {
 
 // TestNewBeadsBackend_EmbeddedCheckCompatibility: CheckCompatibility reports
 // each startup failure as an embedded unsupported workspace whose Detail
-// names the cause, one case per bd version case.
+// names the cause, one case per bd version case. A version the gate admits
+// gets the first snapshot installed instead.
 func TestNewBeadsBackend_EmbeddedCheckCompatibility(t *testing.T) {
 	errUnsafe := errors.New("bd context: exit status 1: Error: refusing to run in unsafe location /tmp/project")
 	contextAnswer := func(version string) infrabeads.BDContextRunner {
@@ -236,9 +252,16 @@ func TestNewBeadsBackend_EmbeddedCheckCompatibility(t *testing.T) {
 		realBD     bool
 		wantDetail string // empty: CheckCompatibility succeeds
 		wantNoBD   bool   // the gate refuses before any bd call
+		// wantBDVersion is the bd version the backend keeps, as bd context
+		// printed it (rows that succeed).
+		wantBDVersion string
 	}{
-		{name: "bd 1.3.2", bdContext: contextAnswer("1.3.2 (6ebaacba8: main@6ebaacba8)")},
-		{name: "bd 1.0.5", bdContext: contextAnswer("1.0.5")},
+		{
+			name:          "bd 1.3.2",
+			bdContext:     contextAnswer("1.3.2 (6ebaacba8: main@6ebaacba8)"),
+			wantBDVersion: "1.3.2 (6ebaacba8: main@6ebaacba8)",
+		},
+		{name: "bd 1.0.5", bdContext: contextAnswer("1.0.5"), wantBDVersion: "1.0.5"},
 		{
 			name:       "bd 1.0.4",
 			bdContext:  contextAnswer("1.0.4"),
@@ -291,6 +314,15 @@ func TestNewBeadsBackend_EmbeddedCheckCompatibility(t *testing.T) {
 			err = backend.CheckCompatibility()
 			if tt.wantDetail == "" {
 				require.NoError(t, err)
+				b, ok := backend.(*SnapshotBackend)
+				require.True(t, ok, "got %T", backend)
+				require.Equal(t, tt.wantBDVersion, b.bdVersion)
+				require.NotNil(t, b.current.Load(), "CheckCompatibility installs the first snapshot")
+				require.Equal(t, []string{"export", "blocked"}, f.runner.commands())
+				issues, err := b.Services().QueryExecutor.Execute("type = task")
+				require.NoError(t, err)
+				require.Len(t, issues, 3)
+				require.Equal(t, 2, f.runner.count(""), "the query reads the installed snapshot")
 				return
 			}
 			uw := requireEmbeddedUnsupported(t, err, ws.beadsDir)
@@ -384,7 +416,8 @@ func TestNewBeadsBackend_EmbeddedWorkspaceUnresolved(t *testing.T) {
 				newBDRunner: f.new,
 			})
 
-			require.Nil(t, backend)
+			// == nil, not require.Nil, which also accepts a typed nil.
+			require.True(t, backend == nil, "no typed nil behind the interface: got %T", backend)
 			uw := requireEmbeddedUnsupported(t, err, beadsDir)
 			cause, text := task.ParseEmbeddedDetail(uw.Detail)
 			require.Equal(t, task.EmbeddedCauseWorkspace, cause)
@@ -422,7 +455,8 @@ func TestNewBeadsBackend_ServerDown(t *testing.T) {
 
 	backend, err := NewBeadsBackend(beadsDir, filepath.Dir(beadsDir))
 
-	require.Nil(t, backend, "no typed nil behind the interface")
+	// == nil, not require.Nil, which also accepts a typed nil.
+	require.True(t, backend == nil, "no typed nil behind the interface: got %T", backend)
 	sd, ok := errors.AsType[*task.ServerDownError](err)
 	require.True(t, ok, "got %v", err)
 	require.Zero(t, sd.Port, "no port file: nothing is listening")

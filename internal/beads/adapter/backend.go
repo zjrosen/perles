@@ -212,6 +212,12 @@ func doltWatcherConfig() task.WatcherConfig {
 func translateClientError(err error) error {
 	if uw, ok := errors.AsType[*infrabeads.UnsupportedWorkspaceError](err); ok {
 		if uw.Kind == infrabeads.WorkspaceEmbeddedDolt {
+			// Defensive, unreachable today: NewClient reports an embedded
+			// workspace as *infrabeads.EmbeddedWorkspaceError, which
+			// newBeadsBackend routes to the snapshot backend first, and only
+			// that backend's bd version gate makes an error of this kind.
+			// Should NewClient refuse an embedded workspace itself, the
+			// startup screen still gets a cause.
 			return embeddedStartupError(uw.BeadsDir, err)
 		}
 		return &task.UnsupportedWorkspaceError{
@@ -278,6 +284,9 @@ func embeddedStartupCause(err error) (task.EmbeddedCause, string) {
 func workspaceKind(kind infrabeads.WorkspaceKind) task.UnsupportedWorkspaceKind {
 	switch kind {
 	case infrabeads.WorkspaceEmbeddedDolt:
+		// Defensive and unreachable: translateClientError, the only caller,
+		// maps that kind with embeddedStartupError first. Kept so that the
+		// mapping is complete.
 		return task.WorkspaceEmbeddedDolt
 	case infrabeads.WorkspaceProxiedServer:
 		return task.WorkspaceProxiedServer

@@ -2,12 +2,13 @@ package watcher
 
 // Debounce timing tests. Each runs the watcher's loop in a testing/synctest
 // bubble, whose fake clock moves only when every goroutine in it is blocked,
-// and feeds the loop events from a channel in place of fsnotify (whose
-// reader goroutine sits in a system call, which would stop the fake clock).
+// and feeds the loop events and errors from channels in place of fsnotify
+// (whose reader goroutine sits in a system call, which would stop the fake
+// clock).
 // The publish times they assert are therefore exact, and no test sleeps.
 
 import (
-	"context"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -18,56 +19,118 @@ import (
 	"github.com/zjrosen/perles/internal/pubsub"
 )
 
+// loopRun is a watcher's loop running in a synctest bubble, reading the
+// channels it is sent events and errors on in place of fsnotify's, and a
+// subscription to its broker.
+type loopRun struct {
+	start   time.Time
+	cfg     Config
+	events  chan fsnotify.Event
+	errs    chan error
+	w       *Watcher
+	sub     <-chan pubsub.Event[WatcherEvent]
+	looping chan struct{}
+	// stop is Stop without closing the fsnotify watcher, which is not a
+	// real one. It waits for the loop to return before closing the broker,
+	// so a publish the loop makes while it stops still reaches sub. The
+	// test's end calls it too.
+	stop func()
+}
+
+// publication is one event the loop published, at its offset from the
+// start.
+type publication struct {
+	at  time.Duration
+	typ WatcherEventType
+	err error
+}
+
+// startLoop starts the loop of a watcher configured with cfg, to which the
+// test sends up to inputs events and errors. The loop publishes at most once
+// per input, so a subscription buffer of that size holds every publish. It
+// must run in a synctest bubble.
+func startLoop(t *testing.T, cfg Config, inputs int) *loopRun {
+	t.Helper()
+	r := &loopRun{
+		start:   time.Now(),
+		cfg:     cfg,
+		events:  make(chan fsnotify.Event),
+		errs:    make(chan error),
+		looping: make(chan struct{}),
+	}
+	r.w = newWatcher(cfg, &fsnotify.Watcher{Events: r.events, Errors: r.errs})
+	r.w.broker = pubsub.NewBrokerWithBuffer[WatcherEvent](inputs) // not the default 64
+	r.sub = r.w.broker.Subscribe(t.Context())
+	go func() {
+		defer close(r.looping)
+		r.w.loop()
+	}()
+	r.stop = sync.OnceFunc(func() {
+		close(r.w.done)
+		<-r.looping
+		r.w.broker.Close()
+	})
+	t.Cleanup(r.stop)
+	return r
+}
+
+// sleepUntil sleeps until offset at from the start.
+func (r *loopRun) sleepUntil(at time.Duration) {
+	time.Sleep(time.Until(r.start.Add(at)))
+}
+
+// sendAt sends the loop event at offset at.
+func (r *loopRun) sendAt(at time.Duration, event fsnotify.Event) {
+	r.sleepUntil(at)
+	r.events <- event
+}
+
+// errorAt sends the loop err at offset at.
+func (r *loopRun) errorAt(at time.Duration, err error) {
+	r.sleepUntil(at)
+	r.errs <- err
+}
+
+// relevant is an event on the first relevant file: a Create, as bd's
+// rename-replaced manifest is reported.
+func (r *loopRun) relevant() fsnotify.Event {
+	return fsnotify.Event{Name: "/workspace/" + r.cfg.RelevantFiles[0], Op: fsnotify.Create}
+}
+
+// published sleeps until long past every timer, then returns what the loop
+// has published.
+func (r *loopRun) published() []publication {
+	time.Sleep(time.Hour)
+	var got []publication
+	for {
+		select {
+		case e, ok := <-r.sub:
+			if !ok {
+				return got
+			}
+			got = append(got, publication{at: e.Timestamp.Sub(r.start), typ: e.Payload.Type, err: e.Payload.Error})
+		default:
+			return got
+		}
+	}
+}
+
 // publishTimes runs the watcher's loop, configured with cfg, sends it an
 // event on a relevant file at each of offsets (from the start, ascending)
 // and returns the offsets at which it published DBChanged. It must run in a
 // synctest bubble.
 func publishTimes(t *testing.T, cfg Config, offsets []time.Duration) []time.Duration {
 	t.Helper()
-	start := time.Now()
-	events := make(chan fsnotify.Event)
-	// The fields New sets, with the fsnotify watcher replaced by the
-	// channels the loop reads.
-	w := &Watcher{
-		fsWatcher:     &fsnotify.Watcher{Events: events, Errors: make(chan error)},
-		dbPath:        cfg.DBPath,
-		relevantFiles: cfg.RelevantFiles,
-		debounce:      cfg.DebounceDur,
-		maxWait:       cfg.MaxWait,
-		done:          make(chan struct{}),
-		broker:        pubsub.NewBroker[WatcherEvent](),
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	sub := w.broker.Subscribe(ctx)
-	looping := make(chan struct{})
-	go func() {
-		defer close(looping)
-		w.loop()
-	}()
-	defer func() {
-		close(w.done)
-		<-looping
-		w.broker.Close()
-	}()
-
-	event := fsnotify.Event{Name: "/workspace/" + cfg.RelevantFiles[0], Op: fsnotify.Create}
+	r := startLoop(t, cfg, len(offsets))
 	for _, at := range offsets {
-		time.Sleep(time.Until(start.Add(at)))
-		events <- event
+		r.sendAt(at, r.relevant())
 	}
-	time.Sleep(time.Hour) // long past every timer
-
-	var published []time.Duration
-	for {
-		select {
-		case e := <-sub:
-			require.Equal(t, DBChanged, e.Payload.Type)
-			published = append(published, e.Timestamp.Sub(start))
-		default:
-			return published
-		}
+	var times []time.Duration
+	for _, p := range r.published() {
+		require.Equal(t, DBChanged, p.typ)
+		times = append(times, p.at)
 	}
+	return times
 }
 
 // sustainedEvents is an event every 300ms for 8.7s (30 events), so never a
@@ -152,5 +215,63 @@ func TestWatcher_MaxWait_BurstsThatPauseUseTheDebounce(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		got := publishTimes(t, manifestConfig(2*time.Second), []time.Duration{0, ms(300), ms(1900)})
 		require.Equal(t, []time.Duration{ms(800), ms(2400)}, got)
+	})
+}
+
+// TestWatcher_MaxWait_ErrorMidStream: an fsnotify error during a stream
+// that never pauses is published at once as WatcherError, and leaves the
+// stream's DBChanged times as in TestWatcher_MaxWait_SustainedEvents. It
+// arrives at 1.95s, after the last event before the first maximum wait
+// ends, so that wait still reports the events pending then: the error
+// neither drops them nor restarts the wait.
+func TestWatcher_MaxWait_ErrorMidStream(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		offsets := sustainedEvents()
+		r := startLoop(t, manifestConfig(2*time.Second), len(offsets)+1)
+		for _, at := range offsets {
+			r.sendAt(at, r.relevant())
+			if at == ms(1800) {
+				r.errorAt(ms(1950), fsnotify.ErrEventOverflow)
+			}
+		}
+		changed := func(at time.Duration) publication { return publication{at: at, typ: DBChanged} }
+		require.Equal(t, []publication{
+			{at: ms(1950), typ: WatcherError, err: fsnotify.ErrEventOverflow},
+			changed(ms(2000)), changed(ms(4100)), changed(ms(6200)), changed(ms(8300)), changed(ms(9200)),
+		}, r.published())
+	})
+}
+
+// TestWatcher_MaxWait_IrrelevantEventsDoNotStartIt: events the watcher
+// ignores (another file in the directory, a chmod of the manifest) start no
+// maximum wait. Only the relevant event at 1.9s does, so it is published a
+// debounce later, at 2.4s, not when a wait started by the first ignored
+// event would end (2s).
+func TestWatcher_MaxWait_IrrelevantEventsDoNotStartIt(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const ignored = 7 // at 0, 300ms, ..., 1.8s
+		r := startLoop(t, manifestConfig(2*time.Second), 2*ignored+1)
+		for i := range ignored {
+			at := time.Duration(i) * 300 * time.Millisecond
+			r.sendAt(at, fsnotify.Event{Name: "/workspace/manifest.tmp", Op: fsnotify.Create})
+			r.sendAt(at, fsnotify.Event{Name: "/workspace/manifest", Op: fsnotify.Chmod})
+		}
+		r.sendAt(ms(1900), r.relevant())
+		require.Equal(t, []publication{{at: ms(2400), typ: DBChanged}}, r.published())
+	})
+}
+
+// TestWatcher_MaxWait_StopDropsPendingBurst: stopping the watcher while a
+// burst is pending, with its debounce and its maximum wait running,
+// publishes nothing: the loop returns at once, and neither timer fires.
+func TestWatcher_MaxWait_StopDropsPendingBurst(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := startLoop(t, manifestConfig(2*time.Second), 3)
+		for _, at := range []time.Duration{0, ms(300), ms(600)} {
+			r.sendAt(at, r.relevant())
+		}
+		r.sleepUntil(ms(700)) // the debounce would fire at 1.1s, the maximum wait at 2s
+		r.stop()
+		require.Empty(t, r.published())
 	})
 }
