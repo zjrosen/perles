@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
 
+	beadsdomain "github.com/zjrosen/perles/internal/beads/domain"
 	"github.com/zjrosen/perles/internal/config"
 	"github.com/zjrosen/perles/internal/keys"
 	"github.com/zjrosen/perles/internal/orchestration/client"
@@ -79,7 +80,7 @@ func TestUnsupportedWorkspaceScreen(t *testing.T) {
 		BeadsDir: "/repo/.beads",
 		Detail:   "bd export failed: beads database needs a schema migration",
 	}
-	want := unsupported.New(task.WorkspaceEmbeddedDolt, unsupportedErr.Detail, "1.0.5")
+	want := unsupported.New(task.WorkspaceEmbeddedDolt, unsupportedErr.Detail, beadsdomain.MinEmbeddedBeadsVersion)
 
 	tests := []struct {
 		name   string

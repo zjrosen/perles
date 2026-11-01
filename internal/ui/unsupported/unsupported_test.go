@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/teatest"
 	"github.com/stretchr/testify/require"
 
@@ -240,19 +241,77 @@ func TestUnsupported_View_ShortTerminalKeepsTitle(t *testing.T) {
 			require.Contains(t, view, "but bd failed:")
 			require.Contains(t, view, "Fix the problem above and start perles again.")
 			require.Contains(t, view, "Press q to quit")
-			reasons := 0
+			var reasons []string
 			for _, line := range strings.Split(view, "\n") {
 				if strings.Contains(line, "the storage layer") {
-					reasons++
+					reasons = append(reasons, strings.TrimSpace(ansi.Strip(line)))
 				}
 			}
-			require.Equal(t, tt.wantReasons, reasons, "reason lines")
+			require.Len(t, reasons, tt.wantReasons, "reason lines")
+			// The reason is longer than any of these limits, so its last
+			// line, and only that one, ends in an ellipsis.
+			for i, line := range reasons {
+				require.Equal(t, i == len(reasons)-1, strings.HasSuffix(line, "…"), "reason line %d: %q", i, line)
+			}
 			if tt.wantServer {
 				require.Contains(t, view, "bd backup restore --force <backup-dir>")
 			} else {
 				require.NotContains(t, view, "Or switch the project")
 				require.NotContains(t, view, "bd init --server")
 			}
+		})
+	}
+}
+
+// Without a reason (an empty Detail, or a cause with blank text) the body is
+// the cause, the remedy and the server-mode alternative. The alternative goes
+// once it no longer fits, so the title stays on terminals shorter than the
+// whole body.
+func TestUnsupported_View_ShortTerminalNoReason(t *testing.T) {
+	tests := []struct {
+		height     int
+		wantServer bool
+	}{
+		{height: 24, wantServer: true},
+		{height: 17, wantServer: true},
+		{height: 16, wantServer: false},
+		{height: 8, wantServer: false},
+	}
+	for _, detail := range []string{"", " ", "bd-not-found: ", "workspace: \t"} {
+		for _, tt := range tests {
+			t.Run(fmt.Sprintf("%q/%d", detail, tt.height), func(t *testing.T) {
+				view := New(task.WorkspaceEmbeddedDolt, detail, minBD).SetSize(80, tt.height).View()
+				require.Equal(t, tt.height, lipgloss.Height(view))
+				require.Contains(t, view, "Looks like there's a break in the chain!")
+				require.Contains(t, view, "Perles reads this embedded Dolt project through bd,")
+				require.Contains(t, view, "start perles again.")
+				require.Contains(t, view, "Press q to quit")
+				if tt.wantServer {
+					require.Contains(t, view, "bd backup restore --force <backup-dir>")
+				} else {
+					require.NotContains(t, view, "Or switch the project")
+					require.NotContains(t, view, "bd init --server")
+				}
+			})
+		}
+	}
+}
+
+// The embedded remedies name the bd version New is given, not a fixed one.
+func TestUnsupported_View_MinEmbeddedBDVersion(t *testing.T) {
+	tests := []struct {
+		detail string
+		remedy string
+	}{
+		{"", "Check that bd 9.9.9 or later is on PATH and start perles again."},
+		{detailBDNotFound, "Install bd 9.9.9 or later, put it on PATH and start perles again."},
+		{"bd-version: bd 9.9.8 is too old", "Install or upgrade bd to 9.9.9 or later and start perles again."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.detail, func(t *testing.T) {
+			view := New(task.WorkspaceEmbeddedDolt, tt.detail, "9.9.9").SetSize(100, 40).View()
+			require.Contains(t, view, tt.remedy)
+			require.NotContains(t, view, minBD)
 		})
 	}
 }

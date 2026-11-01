@@ -203,7 +203,8 @@ func (m Model) body(st screenStyles) []string {
 //
 // On a terminal too short for the whole body, the reason is cut to the lines
 // left over, and once not even one reason line would fit, the server-mode
-// alternative is dropped.
+// alternative is dropped. Without a reason, the alternative is dropped once
+// it does not fit itself.
 func (m Model) embeddedBody(st screenStyles, cause task.EmbeddedCause, text string) []string {
 	msg := func(s string) string { return st.message.Render(s) }
 
@@ -234,8 +235,14 @@ func (m Model) embeddedBody(st screenStyles, cause task.EmbeddedCause, text stri
 		msg("Or switch the project to Dolt server mode, which perles reads directly."),
 	}, serverModeSteps(st)...)
 
+	// The alternative stays only while it leaves a row for the reason; a
+	// blank reason shows no line, so it needs none.
+	reasonRows := 0
+	if strings.TrimSpace(text) != "" {
+		reasonRows = 1
+	}
 	room := m.height - viewChromeLines - lineCount(head) - lineCount(tail)
-	if strings.TrimSpace(text) != "" && room-lineCount(alternative) < 1 {
+	if room-lineCount(alternative) < reasonRows {
 		alternative = nil
 	}
 	reasons := m.reasonLines(st, text, max(room-lineCount(alternative), 1))
