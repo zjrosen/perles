@@ -80,8 +80,7 @@ type UnsupportedWorkspaceError struct {
 	//
 	// For WorkspaceEmbeddedDolt it is "<cause>: <text>": cause is an
 	// EmbeddedCause constant and text says what failed (EmbeddedDetail builds
-	// it, ParseEmbeddedDetail splits it). An empty Detail means the workspace
-	// is embedded and this perles build cannot read it.
+	// it, ParseEmbeddedDetail splits it). Perles always sets it for that kind.
 	Detail string
 	// Err is the failure behind Kind and Detail, when there is one: for
 	// WorkspaceEmbeddedDolt, why the snapshot reader cannot start (the bd
@@ -151,9 +150,8 @@ func embeddedCauseFallbackText(cause EmbeddedCause) string {
 
 // ParseEmbeddedDetail splits a WorkspaceEmbeddedDolt Detail, "<cause>: <text>",
 // into its cause and text. A Detail without a recognised cause is a bd error
-// whose text is the whole Detail. An empty (or blank) Detail gives an empty
-// cause and text: the workspace is embedded and this perles build cannot read
-// it.
+// whose text is the whole Detail. An empty (or blank) Detail, which perles
+// never builds, gives an empty cause and text: the cause is unknown.
 func ParseEmbeddedDetail(detail string) (EmbeddedCause, string) {
 	if strings.TrimSpace(detail) == "" {
 		return "", ""

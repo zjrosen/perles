@@ -16,7 +16,7 @@
                  the cross-era upgrade guide of the beads docs:                 
               docs/getting-started/upgrading.md#cross-era-upgrades              
                                                                                 
-     Perles can read the migrated project once it runs in Dolt server mode.     
+            Perles can read the project once it is migrated to Dolt.            
                                                                                 
                                                                                 
                                  Press q to quit                                

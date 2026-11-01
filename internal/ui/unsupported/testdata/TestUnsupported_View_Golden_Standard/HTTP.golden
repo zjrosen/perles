@@ -11,7 +11,7 @@
                 Oh no! Looks like there's a break in the chain!                 
                                                                                 
      This project is attached to a remote bd serve over HTTP (bd connect).      
-   Perles reads beads from a Dolt SQL server and can't use the http backend.    
+    Perles reads Dolt server and embedded workspaces, not the http backend.     
                                                                                 
       Run perles in the workspace that bd serve is serving, or detach this      
                      one and restore its previous backend:                      

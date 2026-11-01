@@ -5,31 +5,31 @@
                                                                                                                         
                                                                                                                         
                                                                                                                         
+                                                       \│/                                                              
+                           ╔═══════╗   ╔═══════╗   ╔════╲   │   ╱════╗   ╔═══════╗   ╔═══════╗                          
+                           ║       ╠═══╣       ╠═══╣     ╲  │  ╱     ╠═══╣       ╠═══╣       ║                          
+                           ║       ╠═══╣       ╠═══╣     ╱  │  ╲     ╠═══╣       ╠═══╣       ║                          
+                           ╚═══════╝   ╚═══════╝   ╚════╱   │   ╲════╝   ╚═══════╝   ╚═══════╝                          
+                                                       /│\                                                              
                                                                                                                         
-                                                      \│/                                                               
-                          ╔═══════╗   ╔═══════╗   ╔════╲   │   ╱════╗   ╔═══════╗   ╔═══════╗                           
-                          ║       ╠═══╣       ╠═══╣     ╲  │  ╱     ╠═══╣       ╠═══╣       ║                           
-                          ║       ╠═══╣       ╠═══╣     ╱  │  ╲     ╠═══╣       ╠═══╣       ║                           
-                          ╚═══════╝   ╚═══════╝   ╚════╱   │   ╲════╝   ╚═══════╝   ╚═══════╝                           
-                                                      /│\                                                               
                                                                                                                         
+                                     Oh no! Looks like there's a break in the chain!                                    
                                                                                                                         
-                                    Oh no! Looks like there's a break in the chain!                                     
+                        Perles reads this embedded Dolt project through bd, but could not start.                        
                                                                                                                         
-                          This project keeps its beads in embedded Dolt, which runs inside bd                           
-                       and has no SQL server for perles to connect to. Perles needs server mode.                        
+                             Check that bd 1.0.5 or later is on PATH and start perles again.                            
                                                                                                                         
-                                            New project with no issues yet:                                             
+                         Or switch the project to Dolt server mode, which perles reads directly.                        
+                                             New project with no issues yet:                                            
                                                     bd init --server                                                    
                                                                                                                         
                              Existing project (bd init --server refuses one that has data):                             
-                         1. in this project:     bd backup init <backup-dir> && bd backup sync                          
-                         2. in a new directory:  bd init --server                                                       
-                         3. in that directory:   bd backup restore --force <backup-dir>                                 
+                          1. in this project:     bd backup init <backup-dir> && bd backup sync                         
+                          2. in a new directory:  bd init --server                                                      
+                          3. in that directory:   bd backup restore --force <backup-dir>                                
                                                                                                                         
                                                                                                                         
-                                                    Press q to quit                                                     
-                                                                                                                        
+                                                     Press q to quit                                                    
                                                                                                                         
                                                                                                                         
                                                                                                                         

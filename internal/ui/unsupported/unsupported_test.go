@@ -1,6 +1,7 @@
 package unsupported
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -11,6 +12,9 @@ import (
 
 	"github.com/zjrosen/perles/internal/task"
 )
+
+// minBD is the minimum embedded bd version the tests pass to New.
+const minBD = "1.0.5"
 
 // Embedded Details in task.ParseEmbeddedDetail's "<cause>: <text>" format.
 const (
@@ -38,7 +42,7 @@ var allKinds = []struct {
 }
 
 func TestUnsupported_New(t *testing.T) {
-	m := New(task.WorkspaceGraph, "x")
+	m := New(task.WorkspaceGraph, "x", minBD)
 
 	require.Equal(t, 0, m.width)
 	require.Equal(t, 0, m.height)
@@ -48,7 +52,7 @@ func TestUnsupported_New(t *testing.T) {
 }
 
 func TestUnsupported_SetSize(t *testing.T) {
-	m := New(task.WorkspaceEmbeddedDolt, "").SetSize(120, 40)
+	m := New(task.WorkspaceEmbeddedDolt, "", minBD).SetSize(120, 40)
 	require.Equal(t, 120, m.width)
 	require.Equal(t, 40, m.height)
 
@@ -58,7 +62,7 @@ func TestUnsupported_SetSize(t *testing.T) {
 }
 
 func TestUnsupported_WindowSizeMsg(t *testing.T) {
-	newModel, cmd := New(task.WorkspaceEmbeddedDolt, "").Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	newModel, cmd := New(task.WorkspaceEmbeddedDolt, "", minBD).Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	updated := newModel.(Model)
 	require.Equal(t, 80, updated.width)
@@ -73,7 +77,7 @@ func TestUnsupported_QuitKeys(t *testing.T) {
 		{Type: tea.KeyEsc},
 	} {
 		t.Run(k.String(), func(t *testing.T) {
-			_, cmd := New(task.WorkspaceEmbeddedDolt, "").SetSize(80, 24).Update(k)
+			_, cmd := New(task.WorkspaceEmbeddedDolt, "", minBD).SetSize(80, 24).Update(k)
 			require.NotNil(t, cmd)
 			_, isQuit := cmd().(tea.QuitMsg)
 			require.True(t, isQuit)
@@ -82,13 +86,13 @@ func TestUnsupported_QuitKeys(t *testing.T) {
 }
 
 func TestUnsupported_OtherKey(t *testing.T) {
-	_, cmd := New(task.WorkspaceEmbeddedDolt, "").SetSize(80, 24).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	_, cmd := New(task.WorkspaceEmbeddedDolt, "", minBD).SetSize(80, 24).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
 	require.Nil(t, cmd)
 }
 
 func TestUnsupported_EmptyDimensions(t *testing.T) {
-	require.Empty(t, New(task.WorkspaceEmbeddedDolt, "").SetSize(0, 24).View())
-	require.Empty(t, New(task.WorkspaceEmbeddedDolt, "").SetSize(80, 0).View())
+	require.Empty(t, New(task.WorkspaceEmbeddedDolt, "", minBD).SetSize(0, 24).View())
+	require.Empty(t, New(task.WorkspaceEmbeddedDolt, "", minBD).SetSize(80, 0).View())
 }
 
 func TestUnsupported_View_Content(t *testing.T) {
@@ -98,11 +102,12 @@ func TestUnsupported_View_Content(t *testing.T) {
 		"bd backup init <backup-dir> && bd backup sync", "bd backup restore --force <backup-dir>",
 	}
 	// embedded is a cause body: its own lines, then the server-mode
-	// alternative, without the empty-Detail body's "needs server mode".
+	// alternative.
 	embedded := func(lines ...string) []string {
 		return append(append(lines, "Or switch the project to Dolt server mode"), serverMode...)
 	}
-	notCause := []string{"Perles needs server mode", "no SQL server"}
+	// notCause is text only the empty-Detail body shows.
+	notCause := []string{"but could not start.", "Check that bd"}
 
 	tests := []struct {
 		kind    task.UnsupportedWorkspaceKind
@@ -110,9 +115,12 @@ func TestUnsupported_View_Content(t *testing.T) {
 		want    []string
 		notWant []string
 	}{
-		{task.WorkspaceEmbeddedDolt, "", append([]string{"embedded Dolt", "no SQL server", "Perles needs server mode"}, serverMode...),
-			[]string{"Or switch", "through bd"}},
-		{task.WorkspaceEmbeddedDolt, " ", []string{"Perles needs server mode"}, []string{"Or switch"}},
+		// An empty Detail, which no perles path builds, names no reason.
+		{task.WorkspaceEmbeddedDolt, "", embedded(
+			"embedded Dolt project through bd, but could not start.",
+			"Check that bd 1.0.5 or later is on PATH and start perles again.",
+		), []string{"Perles needs server mode", "Fix the problem above"}},
+		{task.WorkspaceEmbeddedDolt, " ", embedded("but could not start."), []string{"Fix the problem above"}},
 		{task.WorkspaceEmbeddedDolt, detailBDNotFound, embedded(
 			"embedded Dolt project through bd, but can't find bd:",
 			"bd export failed: bd CLI not found on PATH",
@@ -155,7 +163,7 @@ func TestUnsupported_View_Content(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.kind)+"/"+tt.detail, func(t *testing.T) {
-			view := New(tt.kind, tt.detail).SetSize(100, 40).View()
+			view := New(tt.kind, tt.detail, minBD).SetSize(100, 40).View()
 			require.Contains(t, view, "Looks like there's a break in the chain!")
 			require.Contains(t, view, "Press q to quit")
 			for _, want := range tt.want {
@@ -172,9 +180,9 @@ func TestUnsupported_View_Content(t *testing.T) {
 // remedy, the server-mode alternative and the quit hint still fit 80x24.
 func TestUnsupported_View_LongReasonIsCapped(t *testing.T) {
 	long := "bd-error: bd export failed: " + strings.Repeat("the storage layer reported a failure ", 20) + "THE-END"
-	m := New(task.WorkspaceEmbeddedDolt, long).SetSize(80, 24)
+	m := New(task.WorkspaceEmbeddedDolt, long, minBD).SetSize(80, 24)
 
-	reason := m.reasonLines(screenStyles{}, strings.TrimPrefix(long, "bd-error: "))
+	reason := m.reasonLines(screenStyles{}, strings.TrimPrefix(long, "bd-error: "), maxReasonLines+1)
 	require.Len(t, reason, maxReasonLines)
 	for _, line := range reason {
 		require.LessOrEqual(t, lipgloss.Width(line), maxReasonWidth)
@@ -194,22 +202,66 @@ func TestUnsupported_View_LongReasonIsCapped(t *testing.T) {
 // The reason wraps to the view on terminals narrower than maxReasonWidth.
 func TestUnsupported_ReasonLines_WrapToView(t *testing.T) {
 	text := strings.Repeat("word ", 30)
-	m := New(task.WorkspaceEmbeddedDolt, "").SetSize(50, 24)
-	lines := m.reasonLines(screenStyles{}, text)
+	m := New(task.WorkspaceEmbeddedDolt, "", minBD).SetSize(50, 24)
+	lines := m.reasonLines(screenStyles{}, text, maxReasonLines)
 	require.Greater(t, len(lines), 1)
 	for _, line := range lines {
 		require.LessOrEqual(t, lipgloss.Width(line), 46)
 	}
 
-	require.Empty(t, m.reasonLines(screenStyles{}, " \n\t "))
-	require.Equal(t, []string{"a b"}, m.reasonLines(screenStyles{}, "a\n  b"))
+	require.Empty(t, m.reasonLines(screenStyles{}, " \n\t ", 1))
+	require.Equal(t, []string{"a b"}, m.reasonLines(screenStyles{}, "a\n  b", 0), "a limit below 1 still shows a line")
+}
+
+// On a terminal shorter than 80x24 an embedded cause body still fits: the
+// reason is cut to the lines left over, and the server-mode alternative goes
+// once not even one reason line would fit. The title, the cause, the remedy
+// and the quit hint stay.
+func TestUnsupported_View_ShortTerminalKeepsTitle(t *testing.T) {
+	long := "bd-error: bd export failed: " + strings.Repeat("the storage layer reported a failure ", 20) + "THE-END"
+	tests := []struct {
+		height      int
+		wantReasons int
+		wantServer  bool
+	}{
+		{height: 24, wantReasons: maxReasonLines, wantServer: true},
+		{height: 22, wantReasons: 5, wantServer: true},
+		{height: 20, wantReasons: 3, wantServer: true},
+		{height: 18, wantReasons: 1, wantServer: true},
+		{height: 17, wantReasons: maxReasonLines, wantServer: false},
+		{height: 12, wantReasons: 4, wantServer: false},
+		{height: 9, wantReasons: 1, wantServer: false},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprint(tt.height), func(t *testing.T) {
+			view := New(task.WorkspaceEmbeddedDolt, long, minBD).SetSize(80, tt.height).View()
+			require.Equal(t, tt.height, lipgloss.Height(view))
+			require.Contains(t, view, "Looks like there's a break in the chain!")
+			require.Contains(t, view, "but bd failed:")
+			require.Contains(t, view, "Fix the problem above and start perles again.")
+			require.Contains(t, view, "Press q to quit")
+			reasons := 0
+			for _, line := range strings.Split(view, "\n") {
+				if strings.Contains(line, "the storage layer") {
+					reasons++
+				}
+			}
+			require.Equal(t, tt.wantReasons, reasons, "reason lines")
+			if tt.wantServer {
+				require.Contains(t, view, "bd backup restore --force <backup-dir>")
+			} else {
+				require.NotContains(t, view, "Or switch the project")
+				require.NotContains(t, view, "bd init --server")
+			}
+		})
+	}
 }
 
 // Every kind fits a standard 80x24 terminal without wrapping or overflowing.
 func TestUnsupported_View_FitsStandardTerminal(t *testing.T) {
 	for _, k := range allKinds {
 		t.Run(k.name, func(t *testing.T) {
-			view := New(k.kind, k.detail).SetSize(80, 24).View()
+			view := New(k.kind, k.detail, minBD).SetSize(80, 24).View()
 			require.Equal(t, 24, lipgloss.Height(view))
 			require.LessOrEqual(t, lipgloss.Width(view), 80)
 			require.Contains(t, view, "Press q to quit")
@@ -219,12 +271,12 @@ func TestUnsupported_View_FitsStandardTerminal(t *testing.T) {
 
 // A terminal too short for the chain art still shows the instructions.
 func TestUnsupported_View_DropsArtWhenShort(t *testing.T) {
-	view := New(task.WorkspaceEmbeddedDolt, "").SetSize(80, 18).View()
+	view := New(task.WorkspaceEmbeddedDolt, "", minBD).SetSize(80, 18).View()
 	require.NotContains(t, view, "╔═══════╗")
 	require.Contains(t, view, "bd init --server")
 	require.Contains(t, view, "Press q to quit")
 
-	tall := New(task.WorkspaceEmbeddedDolt, "").SetSize(120, 40).View()
+	tall := New(task.WorkspaceEmbeddedDolt, "", minBD).SetSize(120, 40).View()
 	require.Contains(t, tall, "╔═══════╗")
 }
 
@@ -232,11 +284,11 @@ func TestUnsupported_View_DropsArtWhenShort(t *testing.T) {
 func TestUnsupported_View_Golden_Standard(t *testing.T) {
 	for _, k := range allKinds {
 		t.Run(k.name, func(t *testing.T) {
-			teatest.RequireEqualOutput(t, []byte(New(k.kind, k.detail).SetSize(80, 24).View()))
+			teatest.RequireEqualOutput(t, []byte(New(k.kind, k.detail, minBD).SetSize(80, 24).View()))
 		})
 	}
 }
 
 func TestUnsupported_View_Golden_Large(t *testing.T) {
-	teatest.RequireEqualOutput(t, []byte(New(task.WorkspaceEmbeddedDolt, "").SetSize(120, 40).View()))
+	teatest.RequireEqualOutput(t, []byte(New(task.WorkspaceEmbeddedDolt, "", minBD).SetSize(120, 40).View()))
 }

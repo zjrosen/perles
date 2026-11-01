@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zjrosen/perles/internal/beads/domain"
 	"github.com/zjrosen/perles/internal/keys"
 	"github.com/zjrosen/perles/internal/task"
 	"github.com/zjrosen/perles/internal/ui/shared/chainart"
@@ -27,12 +26,16 @@ type Model struct {
 	height int
 	kind   task.UnsupportedWorkspaceKind
 	detail string
+	// minEmbeddedBDVersion is the oldest bd that can read an embedded
+	// workspace, named in the embedded remedies.
+	minEmbeddedBDVersion string
 }
 
 // New creates a view for a workspace of the given kind. detail qualifies the
-// kind (see task.UnsupportedWorkspaceError.Detail).
-func New(kind task.UnsupportedWorkspaceKind, detail string) Model {
-	return Model{kind: kind, detail: detail}
+// kind (see task.UnsupportedWorkspaceError.Detail). minEmbeddedBDVersion is
+// the oldest bd perles' snapshot reader accepts for an embedded workspace.
+func New(kind task.UnsupportedWorkspaceKind, detail, minEmbeddedBDVersion string) Model {
+	return Model{kind: kind, detail: detail, minEmbeddedBDVersion: minEmbeddedBDVersion}
 }
 
 // Init returns the initial command.
@@ -79,6 +82,10 @@ const (
 	maxReasonLines = 6
 )
 
+// viewChromeLines is how many lines View adds around the body: the title and
+// the blank line under it, then the two-line gap and the quit hint.
+const viewChromeLines = 5
+
 // View renders the unsupported-workspace state.
 func (m Model) View() string {
 	if m.width == 0 || m.height == 0 {
@@ -124,13 +131,6 @@ func (m Model) body(st screenStyles) []string {
 	switch m.kind {
 	case task.WorkspaceEmbeddedDolt:
 		cause, text := task.ParseEmbeddedDetail(m.detail)
-		if cause == "" {
-			return append([]string{
-				msg("This project keeps its beads in embedded Dolt, which runs inside bd"),
-				msg("and has no SQL server for perles to connect to. Perles needs server mode."),
-				"",
-			}, serverModeSteps(st)...)
-		}
 		return m.embeddedBody(st, cause, text)
 
 	case task.WorkspaceProxiedServer:
@@ -148,7 +148,7 @@ func (m Model) body(st screenStyles) []string {
 	case task.WorkspaceHTTPBackend:
 		return []string{
 			msg("This project is attached to a remote bd serve over HTTP (bd connect)."),
-			msg("Perles reads beads from a Dolt SQL server and can't use the http backend."),
+			msg("Perles reads Dolt server and embedded workspaces, not the http backend."),
 			"",
 			msg("Run perles in the workspace that bd serve is serving, or detach this"),
 			msg("one and restore its previous backend:"),
@@ -177,7 +177,7 @@ func (m Model) body(st screenStyles) []string {
 			msg("the cross-era upgrade guide of the beads docs:"),
 			cmd("docs/getting-started/upgrading.md#cross-era-upgrades"),
 			"",
-			note("Perles can read the migrated project once it runs in Dolt server mode."),
+			note("Perles can read the project once it is migrated to Dolt."),
 		}
 
 	default:
@@ -187,7 +187,7 @@ func (m Model) body(st screenStyles) []string {
 		}
 		return []string{
 			msg(fmt.Sprintf("This project uses the %q storage backend, which perles can't read.", backend)),
-			msg("Perles reads beads projects that use Dolt in server mode."),
+			msg("Perles reads beads projects that use Dolt, in server or embedded mode."),
 			"",
 			msg("Check \"backend\" in .beads/metadata.json, or see the beads upgrade guide:"),
 			cmd("docs/getting-started/upgrading.md"),
@@ -198,19 +198,27 @@ func (m Model) body(st screenStyles) []string {
 // embeddedBody explains why perles' snapshot reader cannot start on an
 // embedded workspace (see task.ParseEmbeddedDetail): the cause, bd's or the
 // backend's text, the remedy, then switching to server mode as the
-// alternative.
+// alternative. An empty cause is a Detail that said nothing, which no perles
+// path builds; its body names no reason.
+//
+// On a terminal too short for the whole body, the reason is cut to the lines
+// left over, and once not even one reason line would fit, the server-mode
+// alternative is dropped.
 func (m Model) embeddedBody(st screenStyles, cause task.EmbeddedCause, text string) []string {
 	msg := func(s string) string { return st.message.Render(s) }
 
 	const intro = "Perles reads this embedded Dolt project through bd, "
 	var problem, remedy string
 	switch cause {
+	case "":
+		problem = "but could not start."
+		remedy = fmt.Sprintf("Check that bd %s or later is on PATH and start perles again.", m.minEmbeddedBDVersion)
 	case task.EmbeddedCauseBDNotFound:
 		problem = "but can't find bd:"
-		remedy = fmt.Sprintf("Install bd %s or later, put it on PATH and start perles again.", domain.MinEmbeddedBeadsVersion)
+		remedy = fmt.Sprintf("Install bd %s or later, put it on PATH and start perles again.", m.minEmbeddedBDVersion)
 	case task.EmbeddedCauseBDVersion:
 		problem = "but can't use this bd:"
-		remedy = fmt.Sprintf("Install or upgrade bd to %s or later and start perles again.", domain.MinEmbeddedBeadsVersion)
+		remedy = fmt.Sprintf("Install or upgrade bd to %s or later and start perles again.", m.minEmbeddedBDVersion)
 	case task.EmbeddedCauseWorkspace:
 		problem = "but can't open it:"
 		remedy = "Fix the problem above and start perles again."
@@ -219,28 +227,46 @@ func (m Model) embeddedBody(st screenStyles, cause task.EmbeddedCause, text stri
 		remedy = "Fix the problem above and start perles again."
 	}
 
-	lines := append([]string{msg(intro + problem)}, m.reasonLines(st, text)...)
-	lines = append(lines,
-		"",
-		msg(remedy),
+	head := []string{msg(intro + problem)}
+	tail := []string{"", msg(remedy)}
+	alternative := append([]string{
 		"",
 		msg("Or switch the project to Dolt server mode, which perles reads directly."),
-	)
-	return append(lines, serverModeSteps(st)...)
+	}, serverModeSteps(st)...)
+
+	room := m.height - viewChromeLines - lineCount(head) - lineCount(tail)
+	if strings.TrimSpace(text) != "" && room-lineCount(alternative) < 1 {
+		alternative = nil
+	}
+	reasons := m.reasonLines(st, text, max(room-lineCount(alternative), 1))
+
+	lines := append(head, reasons...)
+	lines = append(lines, tail...)
+	return append(lines, alternative...)
 }
 
-// reasonLines renders text word-wrapped to the view, at most maxReasonLines
-// lines; a longer text ends in an ellipsis.
-func (m Model) reasonLines(st screenStyles, text string) []string {
+// lineCount is how many lines parts take up when joined vertically.
+func lineCount(parts []string) int {
+	n := 0
+	for _, p := range parts {
+		n += lipgloss.Height(p)
+	}
+	return n
+}
+
+// reasonLines renders text word-wrapped to the view, at most
+// min(limit, maxReasonLines) lines; a longer text ends in an ellipsis.
+func (m Model) reasonLines(st screenStyles, text string, limit int) []string {
 	text = strings.Join(strings.Fields(text), " ")
 	if text == "" {
 		return nil
 	}
+	limit = min(max(limit, 1), maxReasonLines)
 	width := max(min(maxReasonWidth, m.width-4), 20)
 	lines := strings.Split(ansi.Wrap(text, width, ""), "\n")
-	if len(lines) > maxReasonLines {
-		lines = lines[:maxReasonLines]
-		lines[maxReasonLines-1] = ansi.Truncate(lines[maxReasonLines-1], width-1, "") + "…"
+	if len(lines) > limit {
+		lines = lines[:limit]
+		lines[limit-1] = ansi.Truncate(lines[limit-1], width-1, "") + "…"
 	}
 	for i, line := range lines {
 		lines[i] = st.reason.Render(line)

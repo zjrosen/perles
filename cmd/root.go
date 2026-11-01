@@ -13,6 +13,7 @@ import (
 
 	"github.com/zjrosen/perles/communityworkflows"
 	"github.com/zjrosen/perles/internal/app"
+	beadsdomain "github.com/zjrosen/perles/internal/beads/domain"
 	"github.com/zjrosen/perles/internal/config"
 	"github.com/zjrosen/perles/internal/keys"
 	"github.com/zjrosen/perles/internal/log"
@@ -422,7 +423,7 @@ func unsupportedWorkspaceScreen(err error) (screen unsupported.Model, ok bool) {
 		return unsupported.Model{}, false
 	}
 	log.Info(log.CatBeads, "Unsupported beads workspace", "kind", string(unsupportedErr.Kind), "detail", unsupportedErr.Detail)
-	return unsupported.New(unsupportedErr.Kind, unsupportedErr.Detail), true
+	return unsupported.New(unsupportedErr.Kind, unsupportedErr.Detail, beadsdomain.MinEmbeddedBeadsVersion), true
 }
 
 // runStartupScreen runs a full-screen view shown instead of the board when

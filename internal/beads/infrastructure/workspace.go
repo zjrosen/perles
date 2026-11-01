@@ -45,8 +45,7 @@ type UnsupportedWorkspaceError struct {
 	// such as CheckEmbeddedBDVersion's "embedded workspaces need bd >= 1.0.5
 	// (found X)". It carries no cause: mapping the error to
 	// task.UnsupportedWorkspaceError must prefix one (see that Detail's
-	// "<cause>: <text>" format). An empty Detail means the workspace is
-	// embedded and this perles build cannot read it.
+	// "<cause>: <text>" format). The embedded bd version gate always sets it.
 	Detail string
 }
 

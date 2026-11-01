@@ -69,7 +69,7 @@ func newEmbeddedWorkspaceError(beadsDir, database string, bdCtx *BDContext, ctxE
 // database, or when the manifest is missing.
 func EmbeddedManifestPath(beadsDir, database string) (string, error) {
 	if database == "" {
-		return "", fmt.Errorf("embedded Dolt workspace %s names no database (bd context and metadata.json dolt_database are empty)", beadsDir)
+		return "", fmt.Errorf("embedded Dolt workspace %s: no database name to find the manifest for", beadsDir)
 	}
 	dir := embeddedDatabaseDir(database)
 	if database == "." || database == ".." || strings.ContainsAny(database, `/\`) || !filepath.IsLocal(dir) {

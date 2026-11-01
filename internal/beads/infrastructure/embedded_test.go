@@ -238,7 +238,7 @@ func TestEmbeddedManifestPath(t *testing.T) {
 	}{
 		{
 			name: "empty database", files: []string{"embeddeddolt/perles/.dolt/noms/manifest"},
-			database: "", wantErr: "names no database",
+			database: "", wantErr: "no database name to find the manifest for",
 		},
 		{
 			name: "database escapes embeddeddolt", files: []string{"embeddeddolt/perles/.dolt/noms/manifest"},

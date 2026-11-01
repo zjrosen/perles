@@ -79,7 +79,7 @@ func TestUnsupportedWorkspaceScreen(t *testing.T) {
 		BeadsDir: "/repo/.beads",
 		Detail:   "bd export failed: beads database needs a schema migration",
 	}
-	want := unsupported.New(task.WorkspaceEmbeddedDolt, unsupportedErr.Detail)
+	want := unsupported.New(task.WorkspaceEmbeddedDolt, unsupportedErr.Detail, "1.0.5")
 
 	tests := []struct {
 		name   string
