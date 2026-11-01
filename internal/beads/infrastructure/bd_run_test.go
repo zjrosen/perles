@@ -253,9 +253,16 @@ func TestBDRunner_ExtraEnv(t *testing.T) {
 	require.Equal(t, "BD_EXPORT_EXCLUDE_OWNER=unset\nBD_EXPORT_EXCLUDE_OWNERS=alice", strings.TrimSpace(out))
 }
 
-// TestBDRunner_ExtraEnvNoDuplicateKeys reads bd's raw environment. A shell
-// script would collapse duplicate keys, so bd is env(1) here, which prints
-// its environment as received.
+// TestBDRunner_ExtraEnvNoDuplicateKeys checks, end to end through the real
+// runner, the environment bd receives: caller entries override inherited
+// values and the pinned keys stay pinned. bd is a script that execs env(1),
+// which prints its environment. os/exec already drops duplicate keys from
+// cmd.Env before exec, so the exact no-duplicates guarantee is pinned by
+// TestMergeBDEnv; this test checks the values that reach bd.
+//
+// env(1) is exec'd under its own name rather than symlinked as bd: multi-call
+// builds such as uutils coreutils (Ubuntu's default env) refuse to run under
+// another name.
 func TestBDRunner_ExtraEnvNoDuplicateKeys(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("env(1) stand-in for bd is POSIX only")
@@ -263,7 +270,8 @@ func TestBDRunner_ExtraEnvNoDuplicateKeys(t *testing.T) {
 	envPath, err := exec.LookPath("env")
 	require.NoError(t, err)
 	dir := t.TempDir()
-	require.NoError(t, os.Symlink(envPath, filepath.Join(dir, "bd")))
+	script := "#!/bin/sh\nexec '" + envPath + "'\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "bd"), []byte(script), 0o755)) //nolint:gosec // test-only executable stand-in
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("BD_EXPORT_EXCLUDE_OWNERS", "alice")
 	t.Setenv("BD_JSON_ENVELOPE", "1")
@@ -280,9 +288,6 @@ func TestBDRunner_ExtraEnvNoDuplicateKeys(t *testing.T) {
 		if ok {
 			values[key] = append(values[key], value)
 		}
-	}
-	for key, vs := range values {
-		require.Len(t, vs, 1, "duplicate environment key %s", key)
 	}
 	require.Equal(t, []string{"__perles_none__"}, values["BD_EXPORT_EXCLUDE_OWNERS"])
 	require.Equal(t, []string{"0"}, values["BD_JSON_ENVELOPE"])
