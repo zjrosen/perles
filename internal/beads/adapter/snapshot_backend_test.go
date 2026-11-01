@@ -37,6 +37,7 @@ type fixtureIssue struct {
 
 type fixtureComment struct {
 	ID, Text  string
+	Author    string // "tester" when empty
 	CreatedAt time.Time
 }
 
@@ -72,7 +73,11 @@ func exportJSONL(t *testing.T, issues ...fixtureIssue) string {
 		rec["dependencies"] = deps
 		var comments []comment
 		for _, c := range issue.Comments {
-			comments = append(comments, comment{ID: c.ID, Author: "tester", Text: c.Text, CreatedAt: c.CreatedAt})
+			author := c.Author
+			if author == "" {
+				author = "tester"
+			}
+			comments = append(comments, comment{ID: c.ID, Author: author, Text: c.Text, CreatedAt: c.CreatedAt})
 		}
 		rec["comments"] = comments
 		line, err := json.Marshal(rec)
@@ -190,18 +195,19 @@ func newTestWorkspace(t *testing.T) testWorkspace {
 }
 
 // newTestBackend returns a backend over a temp workspace, bd 1.3.2 and run.
-// PATH is emptied so that nothing can reach a real bd.
 func newTestBackend(t *testing.T, run infrabeads.BDRunner) *SnapshotBackend {
 	t.Helper()
+	return newTestBackendWith(t, newTestWorkspace(t), SnapshotBackendConfig{BDVersion: "1.3.2", Runner: run})
+}
+
+// newTestBackendWith returns the backend cfg configures over ws, whose
+// BeadsDir and ManifestPath it sets, and closes it when the test ends. PATH
+// is emptied so that nothing can reach a real bd.
+func newTestBackendWith(t *testing.T, ws testWorkspace, cfg SnapshotBackendConfig) *SnapshotBackend {
+	t.Helper()
 	t.Setenv("PATH", "")
-	ws := newTestWorkspace(t)
-	b, err := NewSnapshotBackend(SnapshotBackendConfig{
-		BeadsDir:     ws.beadsDir,
-		WorkDir:      filepath.Dir(ws.beadsDir),
-		ManifestPath: ws.manifest,
-		BDVersion:    "1.3.2",
-		Runner:       run,
-	})
+	cfg.BeadsDir, cfg.ManifestPath = ws.beadsDir, ws.manifest
+	b, err := NewSnapshotBackend(cfg)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, b.Close()) })
 	return b
@@ -542,6 +548,10 @@ func TestSnapshotBackend_RetireWaitsForReader(t *testing.T) {
 
 	acquired := make(chan struct{})
 	release := make(chan struct{})
+	// A failing assertion must not leave the reader holding the snapshot,
+	// or the backend's Close would wait on it forever.
+	releaseReader := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseReader)
 	readerDone := make(chan error, 1)
 	var readerIssues []beads.Issue
 	go func() {
@@ -577,7 +587,7 @@ func TestSnapshotBackend_RetireWaitsForReader(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 2, gen, "new readers use the new snapshot without waiting")
 
-	close(release)
+	releaseReader()
 	require.NoError(t, <-readerDone, "the held reader's query succeeds")
 	require.Len(t, readerIssues, 3)
 	require.NoError(t, <-swapped)
@@ -677,6 +687,25 @@ func TestSnapshotBackend_LoadFailureFreesMemdb(t *testing.T) {
 	require.ErrorContains(t, err, "loading snapshot: insert issue s-dup")
 	require.Nil(t, b.current.Load())
 	require.Equal(t, []*sql.DB{nil}, loaded, "LoadSnapshot returns no database on failure")
+	requireNoSnapshotDB(t, snapshotMemdbName(b.id, 1))
+}
+
+// TestSnapshotBackend_LoadErrorClosesReturnedDatabase: a load that fails but
+// still returns a database has it closed, and its memdb deleted.
+func TestSnapshotBackend_LoadErrorClosesReturnedDatabase(t *testing.T) {
+	b := newTestBackend(t, generationRunner(t).run)
+	var loaded *sql.DB
+	b.load = func(ctx context.Context, name string, data infrabeads.SnapshotData) (*sql.DB, error) {
+		db, err := infrabeads.LoadSnapshot(ctx, name, data)
+		require.NoError(t, err)
+		loaded = db
+		return db, errors.New("checking the snapshot: boom")
+	}
+
+	require.EqualError(t, b.CheckCompatibility(), "loading snapshot: checking the snapshot: boom")
+	require.Nil(t, b.current.Load())
+	require.NotNil(t, loaded)
+	require.EqualError(t, loaded.PingContext(context.Background()), "sql: database is closed")
 	requireNoSnapshotDB(t, snapshotMemdbName(b.id, 1))
 }
 
@@ -785,16 +814,14 @@ func TestSnapshotBackend_FailedBuildsDoNotAccumulate(t *testing.T) {
 // TestSnapshotBackend_VersionGate: every build runs the embedded bd version
 // gate before any bd call.
 func TestSnapshotBackend_VersionGate(t *testing.T) {
-	newBackend := func(t *testing.T, version string, contextErr error, run infrabeads.BDRunner) *SnapshotBackend {
+	newBackend := func(t *testing.T, ws testWorkspace, version string, contextErr error, run infrabeads.BDRunner) *SnapshotBackend {
 		t.Helper()
-		b := newTestBackend(t, run)
-		b.bdVersion, b.bdContextErr = version, contextErr
-		return b
+		return newTestBackendWith(t, ws, SnapshotBackendConfig{BDVersion: version, BDContextErr: contextErr, Runner: run})
 	}
 
 	t.Run("bd 1.0.4 is refused without running bd", func(t *testing.T) {
 		runner := generationRunner(t)
-		b := newBackend(t, "1.0.4", nil, runner.run)
+		b := newBackend(t, newTestWorkspace(t), "1.0.4", nil, runner.run)
 
 		for _, build := range []func() error{
 			b.CheckCompatibility,
@@ -813,7 +840,7 @@ func TestSnapshotBackend_VersionGate(t *testing.T) {
 
 	t.Run("version info left out is refused", func(t *testing.T) {
 		runner := generationRunner(t)
-		b := newBackend(t, "", nil, runner.run)
+		b := newBackend(t, newTestWorkspace(t), "", nil, runner.run)
 		uw, ok := errors.AsType[*infrabeads.UnsupportedWorkspaceError](b.CheckCompatibility())
 		require.True(t, ok)
 		require.Contains(t, uw.Detail, "could not read the bd version")
@@ -825,7 +852,7 @@ func TestSnapshotBackend_VersionGate(t *testing.T) {
 		t.Setenv("PATH", "") // the real runner finds no bd
 		real := infrabeads.NewBDRunner(filepath.Dir(ws.beadsDir), ws.beadsDir)
 		runner := &fakeRunner{answer: real}
-		b := newBackend(t, "", fmt.Errorf("bd context: %w", exec.ErrNotFound), runner.run)
+		b := newBackend(t, ws, "", fmt.Errorf("bd context: %w", exec.ErrNotFound), runner.run)
 
 		err := b.CheckCompatibility()
 		require.ErrorIs(t, err, exec.ErrNotFound)
@@ -836,7 +863,7 @@ func TestSnapshotBackend_VersionGate(t *testing.T) {
 
 	t.Run("bd 1.3.2 builds", func(t *testing.T) {
 		runner := generationRunner(t)
-		b := newBackend(t, "1.3.2 (6ebaacba8: main@6ebaacba8)", nil, runner.run)
+		b := newBackend(t, newTestWorkspace(t), "1.3.2 (6ebaacba8: main@6ebaacba8)", nil, runner.run)
 		require.NoError(t, b.CheckCompatibility())
 		require.NotNil(t, b.current.Load())
 	})

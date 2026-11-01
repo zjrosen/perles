@@ -1,6 +1,7 @@
 package infrastructure
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -24,6 +25,10 @@ type BDExecutor struct {
 	beadsDir string
 	// timeout bounds each bd invocation; zero means defaultBDTimeout.
 	timeout time.Duration
+	// runner, when set, runs every bd command with runCtx as its parent
+	// context instead of the real bd (NewBDExecutorWithRunner).
+	runner BDRunner
+	runCtx context.Context
 	// runFunc is an optional override for running bd, used in tests.
 	runFunc func(args ...string) bdOutput
 }
@@ -37,9 +42,25 @@ func NewBDExecutor(workDir, beadsDir string) *BDExecutor {
 	return &BDExecutor{workDir: workDir, beadsDir: absBeadsDir(beadsDir)}
 }
 
+// NewBDExecutorWithRunner returns a BDExecutor that runs every bd command
+// through run, with ctx as the parent context of each one: when ctx ends, the
+// command running and every later one fail with run's error. run decides
+// where bd runs and how long it may take (NewBDRunner: workDir, beadsDir and
+// defaultBDTimeout), and its errors are returned unchanged.
+func NewBDExecutorWithRunner(ctx context.Context, run BDRunner) *BDExecutor {
+	return &BDExecutor{runner: run, runCtx: ctx}
+}
+
 // runBeads executes a bd command and returns its trimmed stdout. On failure
 // the error carries bd's own explanation (see newBDError).
 func (e *BDExecutor) runBeads(args ...string) (string, error) {
+	if e.runner != nil {
+		out, err := e.runner(e.runCtx, BDRequest{Args: args})
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(out), nil
+	}
 	var out bdOutput
 	if e.runFunc != nil {
 		out = e.runFunc(args...)

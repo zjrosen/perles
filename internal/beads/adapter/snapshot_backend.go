@@ -57,9 +57,6 @@ func (systemClock) Now() time.Time { return time.Now() }
 type SnapshotBackendConfig struct {
 	// BeadsDir is the embedded workspace's .beads directory.
 	BeadsDir string
-	// WorkDir is the directory bd runs in for writes, ShowIssue and the
-	// comment fallback.
-	WorkDir string
 	// ManifestPath is the embedded database's noms manifest
 	// (infrabeads.EmbeddedManifestPath). Every build hashes it before
 	// exporting.
@@ -71,8 +68,10 @@ type SnapshotBackendConfig struct {
 	// the gate refuses the workspace because it could not read the bd version.
 	BDVersion    string
 	BDContextErr error
-	// Runner runs the bd reads that build snapshots (infrabeads.NewBDRunner
-	// in production).
+	// Runner runs every bd command of the backend: the reads that build
+	// snapshots, the writes, ShowIssue and the comment reads. In production
+	// it is infrabeads.NewBDRunner(workDir, beadsDir), which sets where bd
+	// runs.
 	Runner infrabeads.BDRunner
 	// Clock times builds; nil means the system clock.
 	Clock Clock
@@ -82,7 +81,10 @@ type SnapshotBackendConfig struct {
 // has no SQL server to query. It answers queries from a snapshot: an
 // in-memory SQLite database (memdb) loaded from bounded --readonly bd reads
 // and queried by the BQL executor in its SQLite dialect. Writes, ShowIssue
-// and the comment fallback go through the bd CLI.
+// and the comment reads made before the first snapshot go through the bd
+// CLI. After perles adds a comment, the issue's comments are served from an
+// overlay until a snapshot covering the write is installed (see
+// snapshotIssueExecutor).
 //
 // The installed snapshot is swapped atomically for a newer generation. A
 // reader takes the current snapshot's read lock for its whole call and
@@ -94,8 +96,8 @@ type SnapshotBackendConfig struct {
 //
 // The first snapshot is built lazily, by the first query (or by
 // CheckCompatibility), with concurrent first callers sharing one build. Once
-// a snapshot is installed, queries and snapshot comment reads never run bd
-// and never wait on an export.
+// a snapshot is installed, queries and comment reads never run bd and never
+// wait on an export.
 //
 // Create it with NewSnapshotBackend; it is safe for concurrent use.
 type SnapshotBackend struct {
@@ -111,6 +113,16 @@ type SnapshotBackend struct {
 	// infrabeads.LoadSnapshot; tests wrap it to act between the load and the
 	// install.
 	load func(ctx context.Context, name string, data infrabeads.SnapshotData) (*sql.DB, error)
+	// bdReads runs the bd reads that build no snapshot (ShowIssue, the
+	// comments read back after AddComment, and comment reads made before the
+	// first snapshot) through run with ctx as their parent, so Close cancels
+	// them and later ones fail.
+	bdReads *infrabeads.BDExecutor
+	// onOwnWrite is called on the writer's goroutine after each successful
+	// write made through perles, with the writeSeq that write was given. It
+	// must not block, since writes never wait on a rebuild. It is
+	// b.logOwnWrite; tests replace it to observe writes.
+	onOwnWrite func(seq uint64)
 
 	// ctx is the parent context of every bd read; Close cancels it with
 	// errSnapshotBackendClosed.
@@ -125,6 +137,15 @@ type SnapshotBackend struct {
 	writeSeq atomic.Uint64
 	// lastGen is the last generation number handed to a build.
 	lastGen atomic.Uint64
+
+	// overlayMu guards overlay. It is taken after a snapshot's read lock,
+	// never before one.
+	overlayMu sync.Mutex
+	// overlay holds, per issue, the comments read straight after perles
+	// added one. GetComments serves an entry while the snapshot it reads does
+	// not cover the entry's write; install drops the entries a new snapshot
+	// covers.
+	overlay map[string]commentOverlay
 
 	// installMu orders installs with Close: once closed is set, no snapshot
 	// is installed and the built one is discarded.
@@ -190,16 +211,27 @@ func NewSnapshotBackend(cfg SnapshotBackendConfig) (*SnapshotBackend, error) {
 		clock:        clock,
 		blocked:      infrabeads.NewBlockedFlagSource(cfg.Runner),
 		load:         infrabeads.LoadSnapshot,
+		bdReads:      infrabeads.NewBDExecutorWithRunner(ctx, cfg.Runner),
 		ctx:          ctx,
 		cancel:       cancel,
+		overlay:      map[string]commentOverlay{},
 	}
+	b.onOwnWrite = b.logOwnWrite
 
-	bdExec := infrabeads.NewBDExecutor(cfg.WorkDir, cfg.BeadsDir)
+	// No WithFallbackCommentReader: BeadsTaskExecutor falls back on any
+	// primary-reader error, which would run bd on the caller's goroutine
+	// when an installed snapshot fails to read. The comment reader runs bd
+	// only while no snapshot exists yet.
 	b.services = task.BackendServices{
 		TaskExecutor: NewBeadsTaskExecutor(
-			bdExec,
+			snapshotIssueExecutor{
+				b: b,
+				// Writes do not run with b.ctx: Close must not kill a
+				// write in flight, which could lose it. bd's timeout
+				// bounds them, as in server mode.
+				writes: infrabeads.NewBDExecutorWithRunner(context.Background(), cfg.Runner),
+			},
 			WithCommentReader(snapshotCommentReader{b: b}),
-			WithFallbackCommentReader(bdExec),
 		),
 		QueryExecutor:     NewBeadsQueryExecutor(snapshotQueries{b: b}),
 		QueryHelpers:      NewBeadsQueryHelpers(),
@@ -234,8 +266,9 @@ func (b *SnapshotBackend) FlushCaches(context.Context) error {
 
 // Close cancels the backend's running bd reads, retires the current snapshot
 // (waiting for its in-flight readers) and deletes its memdb. A build that
-// finishes afterwards is discarded. Reads after Close fail. Close is
-// idempotent.
+// finishes afterwards is discarded. Reads after Close fail, ShowIssue
+// included. Writes do not depend on the snapshot: Close neither cancels one
+// in flight nor refuses later ones. Close is idempotent.
 func (b *SnapshotBackend) Close() error {
 	b.cancel(errSnapshotBackendClosed)
 
@@ -379,8 +412,8 @@ func (b *SnapshotBackend) readSnapshotData(ctx context.Context) (infrabeads.Snap
 }
 
 // install makes next the current snapshot, then retires the one it
-// replaces. After Close it discards next instead and returns
-// errSnapshotBackendClosed.
+// replaces and drops the comment overlay entries next covers. After Close it
+// discards next instead and returns errSnapshotBackendClosed.
 func (b *SnapshotBackend) install(next *snapshot) error {
 	b.installMu.Lock()
 	if b.closed.Load() {
@@ -398,6 +431,9 @@ func (b *SnapshotBackend) install(next *snapshot) error {
 			log.Warn(log.CatBeads, "Closing retired snapshot failed", "name", old.memdbName, "error", err)
 		}
 	}
+	// Prune only after the retire: until it returned, a reader could still
+	// hold old, which lacks the overlaid comments, and need the entries.
+	b.pruneOverlay(next.coveredWriteSeq)
 	return nil
 }
 
@@ -449,12 +485,18 @@ func (b *SnapshotBackend) execute(query string) ([]beads.Issue, error) {
 	return issues, nil
 }
 
-// snapshotComments returns an issue's comments from the current snapshot,
-// oldest first. It never runs bd, and builds no snapshot: before the first
-// one it returns errNoSnapshot.
+// snapshotComments returns an issue's comments as of the current snapshot,
+// oldest first: its overlay entry when the snapshot does not cover the
+// entry's write, the snapshot's comments otherwise. It reads memory only,
+// never running bd, and builds no snapshot: before the first one it returns
+// errNoSnapshot.
 func (b *SnapshotBackend) snapshotComments(issueID string) ([]beads.Comment, error) {
 	var comments []beads.Comment
 	err := b.withCurrent(func(s *snapshot) error {
+		if overlaid, ok := b.liveOverlay(s, issueID); ok {
+			comments = overlaid
+			return nil
+		}
 		var err error
 		comments, err = s.comments(issueID)
 		return err
@@ -547,9 +589,10 @@ func (q snapshotQueries) Execute(query string) ([]beads.Issue, error) {
 	return q.b.execute(query)
 }
 
-// snapshotCommentReader reads comments from a backend's current snapshot.
+// snapshotCommentReader is the comment reader of a backend's TaskExecutor
+// (see SnapshotBackend.getComments).
 type snapshotCommentReader struct{ b *SnapshotBackend }
 
 func (r snapshotCommentReader) GetComments(issueID string) ([]beads.Comment, error) {
-	return r.b.snapshotComments(issueID)
+	return r.b.getComments(issueID)
 }

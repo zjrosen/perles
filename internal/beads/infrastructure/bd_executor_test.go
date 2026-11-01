@@ -1,6 +1,7 @@
 package infrastructure
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -30,6 +31,50 @@ func TestBDExecutor_NewBDExecutor(t *testing.T) {
 	require.NotNil(t, executor, "NewBDExecutor returned nil")
 	require.Equal(t, workDir, executor.workDir)
 	require.Equal(t, beadsDir, executor.beadsDir)
+}
+
+// TestBDExecutor_NewBDExecutorWithRunner: every bd command goes through the
+// runner with the executor's context, stdout is trimmed, and the runner's
+// errors come back unchanged, so translated bd errors still drive the
+// executor's fallbacks.
+func TestBDExecutor_NewBDExecutorWithRunner(t *testing.T) {
+	type ctxKey struct{}
+	ctx, cancel := context.WithCancelCause(context.WithValue(context.Background(), ctxKey{}, "executor"))
+	var requests []BDRequest
+	run := func(reqCtx context.Context, req BDRequest) (string, error) {
+		requests = append(requests, req)
+		if reqCtx.Value(ctxKey{}) != "executor" {
+			return "", errors.New("the request does not run with the executor's context")
+		}
+		if err := context.Cause(reqCtx); err != nil {
+			return "", err
+		}
+		switch req.Args[0] {
+		case "reopen":
+			return "", newBDError(req.Args, bdFailed(1, "", "Error: unknown command \"reopen\" for \"bd\"\n"), defaultBDTimeout)
+		case "--readonly":
+			return "\n  [{\"id\":\"PROJ-1\",\"title\":\"One\",\"status\":\"open\"}]  \n", nil
+		}
+		return "", nil
+	}
+	executor := NewBDExecutorWithRunner(ctx, run)
+
+	issue, err := executor.ShowIssue("PROJ-1")
+	require.NoError(t, err)
+	require.Equal(t, "One", issue.TitleText)
+
+	require.NoError(t, executor.ReopenIssue("PROJ-1"), "the runner's bdError reaches the reopen fallback")
+	require.Equal(t, []BDRequest{
+		{Args: []string{"--readonly", "show", "PROJ-1", "--json"}},
+		{Args: []string{"reopen", "PROJ-1", "--json"}},
+		{Args: []string{"update", "PROJ-1", "--status=open", "--json"}},
+	}, requests)
+
+	closed := errors.New("owner closed")
+	cancel(closed)
+	_, err = executor.GetComments("PROJ-1")
+	require.ErrorIs(t, err, closed, "once the context ends, commands fail with the runner's error")
+	require.Equal(t, []string{"--readonly", "comments", "PROJ-1", "--json"}, requests[len(requests)-1].Args)
 }
 
 // TestBDExecutor_NewBDExecutor_RelativeBeadsDirIsAbsolute verifies a relative
