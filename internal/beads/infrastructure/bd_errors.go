@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 )
@@ -107,15 +108,32 @@ func newBDError(args []string, out bdOutput, timeout time.Duration) *bdError {
 	return e
 }
 
-// bdCommandName names the bd command in args for error messages.
+// bdValueGlobalFlags are bd's global flags that take their value as the next
+// argument when it is not attached with "=" (cmd/bd/main.go).
+var bdValueGlobalFlags = []string{"--actor", "--database", "--db", "-C", "--directory", "--dolt-auto-commit", "--mem-profile"}
+
+// bdCommandName names the bd command in args for error messages, skipping
+// the global flags before it: {"--readonly", "export", "--all"} is "export".
+// args with no command after the flags are named by their first argument.
 func bdCommandName(args []string) string {
 	if len(args) == 0 {
 		return "command"
 	}
-	if len(args) > 1 && args[1] == "add" && (args[0] == "comments" || args[0] == "dep") {
-		return args[0] + " add"
+	i := 0
+	for i < len(args) && strings.HasPrefix(args[i], "-") {
+		if slices.Contains(bdValueGlobalFlags, args[i]) {
+			i++ // the flag's value
+		}
+		i++
 	}
-	return args[0]
+	if i >= len(args) {
+		return args[0]
+	}
+	command := args[i]
+	if i+1 < len(args) && args[i+1] == "add" && (command == "comments" || command == "dep") {
+		return command + " add"
+	}
+	return command
 }
 
 // bdFailure is what perles could read out of a failed invocation's output.
@@ -309,6 +327,27 @@ func isUnknownFlag(err error, flag string) bool {
 	}
 	lower := strings.ToLower(e.Message)
 	return strings.Contains(lower, "unknown flag") && strings.Contains(lower, strings.ToLower(flag))
+}
+
+// unknownFlagPrefix starts cobra's refusal of an unknown long flag, e.g.
+// "Error: unknown flag: --flags" (pflag reports only the first one).
+const unknownFlagPrefix = "unknown flag: "
+
+// unknownFlagName returns the flag bd rejected as unknown, exactly as named
+// after "unknown flag: " in a *bdError ("--flags" for "unknown flag: --flags"),
+// or "" when err is not such a refusal. Unlike isUnknownFlag it does not
+// match substrings, so a caller can tell --flags from --flagsx.
+func unknownFlagName(err error) string {
+	e, ok := errors.AsType[*bdError](err)
+	if !ok {
+		return ""
+	}
+	_, rest, found := strings.Cut(e.Message, unknownFlagPrefix)
+	if !found {
+		return ""
+	}
+	name, _, _ := strings.Cut(rest, " ")
+	return strings.TrimRight(name, `.,;:'")`)
 }
 
 // isUnknownCommand reports whether err is bd rejecting name as an unknown command.

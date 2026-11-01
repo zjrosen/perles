@@ -161,29 +161,33 @@ func TestReadSnapshotExport_FailureIsTranslated(t *testing.T) {
 	migrateConsent := `{"error":"database schema is at v65; this bd requires v74 (9 pending migration(s)), and bd no longer migrates a database without explicit consent","migrate_consent":{"pending":9},"schema_version":1}`
 
 	tests := []struct {
-		name      string
-		out       bdOutput
-		wantHint  string
-		wantText  string
-		wantErrIs error
+		name       string
+		out        bdOutput
+		wantHint   string
+		wantPrefix string
+		wantText   string
+		wantErrIs  error
 	}{
 		{
-			name:     "pending migration refusal",
-			out:      bdFailed(1, "", migrateConsent+"\n"),
-			wantHint: hintMigrate,
-			wantText: "9 pending migration(s)",
+			name:       "pending migration refusal",
+			out:        bdFailed(1, "", migrateConsent+"\n"),
+			wantHint:   hintMigrate,
+			wantPrefix: "bd export failed: " + hintMigrate + " — ",
+			wantText:   "9 pending migration(s)",
 		},
 		{
-			name:     "timeout names the snapshot bound",
-			out:      bdOutput{ExitCode: -1, Err: errors.New("signal: killed"), TimedOut: true},
-			wantHint: hintTimeout,
-			wantText: "timed out after 30s",
+			name:       "timeout names the snapshot bound",
+			out:        bdOutput{ExitCode: -1, Err: errors.New("signal: killed"), TimedOut: true},
+			wantHint:   hintTimeout,
+			wantPrefix: "bd export timed out after 30s: " + hintTimeout,
+			wantText:   "timed out after 30s",
 		},
 		{
-			name:      "bd not on PATH",
-			out:       bdOutput{ExitCode: -1, Err: &exec.Error{Name: "bd", Err: exec.ErrNotFound}},
-			wantText:  "bd CLI not found on PATH",
-			wantErrIs: exec.ErrNotFound,
+			name:       "bd not on PATH",
+			out:        bdOutput{ExitCode: -1, Err: &exec.Error{Name: "bd", Err: exec.ErrNotFound}},
+			wantPrefix: "bd export failed: bd CLI not found on PATH",
+			wantText:   "bd CLI not found on PATH",
+			wantErrIs:  exec.ErrNotFound,
 		},
 	}
 	for _, tt := range tests {
@@ -194,6 +198,8 @@ func TestReadSnapshotExport_FailureIsTranslated(t *testing.T) {
 			require.Empty(t, out)
 			bdErr, ok := errors.AsType[*bdError](err)
 			require.True(t, ok, "want the translated *bdError, got %v", err)
+			require.Equal(t, "export", bdErr.Command, "the command, not the --readonly global flag")
+			require.True(t, strings.HasPrefix(err.Error(), tt.wantPrefix), "got %q, want prefix %q", err.Error(), tt.wantPrefix)
 			require.Equal(t, tt.wantHint, bdErr.Hint)
 			require.ErrorContains(t, err, tt.wantText)
 			if tt.wantHint != "" {
@@ -326,7 +332,9 @@ func TestReadCustomStatuses_Failures(t *testing.T) {
 		require.Nil(t, statuses)
 		bdErr, ok := errors.AsType[*bdError](err)
 		require.True(t, ok, "got %v", err)
+		require.Equal(t, "statuses", bdErr.Command, "the command, not the --readonly global flag")
 		require.Equal(t, hintMigrate, bdErr.Hint)
+		require.True(t, strings.HasPrefix(err.Error(), "bd statuses failed: "+hintMigrate+" — "), err.Error())
 	})
 
 	t.Run("malformed output", func(t *testing.T) {

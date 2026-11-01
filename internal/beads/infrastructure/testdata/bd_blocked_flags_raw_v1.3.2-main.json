@@ -1,0 +1,46 @@
+[
+  {
+    "id": "fx-dependent",
+    "is_blocked": true
+  },
+  {
+    "id": "fx-waits",
+    "is_blocked": true
+  },
+  {
+    "id": "fx-spawner.1",
+    "is_blocked": false
+  },
+  {
+    "id": "fx-mixed",
+    "is_blocked": true
+  },
+  {
+    "id": "fx-ext",
+    "is_blocked": false
+  },
+  {
+    "id": "fx-on-done",
+    "is_blocked": false
+  },
+  {
+    "id": "fx-on-shipped",
+    "is_blocked": true
+  },
+  {
+    "id": "fx-epic.1",
+    "is_blocked": true
+  },
+  {
+    "id": "fx-epic",
+    "is_blocked": true
+  },
+  {
+    "id": "fx-cond",
+    "is_blocked": true
+  },
+  {
+    "id": "fx-blocked",
+    "is_blocked": true
+  }
+]

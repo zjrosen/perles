@@ -89,6 +89,94 @@ func TestBDError_CommandName(t *testing.T) {
 	require.Equal(t, "bd dep add failed: cycle", err.Error())
 }
 
+func TestBDCommandName(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "no args", args: nil, want: "command"},
+		{name: "plain command", args: []string{"update", "X-1", "--json"}, want: "update"},
+		{name: "readonly export", args: []string{"--readonly", "export", "--all"}, want: "export"},
+		{name: "readonly show", args: []string{"--readonly", "show", "X-1", "--json"}, want: "show"},
+		{name: "readonly comments", args: []string{"--readonly", "comments", "X-1", "--json"}, want: "comments"},
+		{name: "readonly statuses", args: []string{"--readonly", "statuses", "--json"}, want: "statuses"},
+		{name: "readonly blocked with command flags", args: []string{"--readonly", "blocked", "--flags", "--raw", "--json"}, want: "blocked"},
+		{name: "several global flags", args: []string{"--json", "--readonly", "-q", "list"}, want: "list"},
+		{name: "comments add", args: []string{"comments", "add", "X-1", "--", "hi"}, want: "comments add"},
+		{name: "readonly comments add", args: []string{"--readonly", "comments", "add", "X-1"}, want: "comments add"},
+		{name: "dep add", args: []string{"dep", "add", "X-1", "X-2"}, want: "dep add"},
+		{name: "add only qualifies comments and dep", args: []string{"show", "add"}, want: "show"},
+		{name: "value flag with separate value", args: []string{"--actor", "alice", "update", "X-1"}, want: "update"},
+		{name: "value flag with attached value", args: []string{"--actor=alice", "update", "X-1"}, want: "update"},
+		{name: "directory shorthand", args: []string{"-C", "/repo", "--readonly", "list"}, want: "list"},
+		{name: "only flags", args: []string{"--version"}, want: "--version"},
+		{name: "value flag missing its value", args: []string{"--readonly", "--db"}, want: "--readonly"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, bdCommandName(tt.args))
+		})
+	}
+}
+
+// TestBDError_ReadonlyCommandName: --readonly reads name their command in
+// the message, not the global flag.
+func TestBDError_ReadonlyCommandName(t *testing.T) {
+	err := bdErrorFor(t, []string{"--readonly", "show", "X-1", "--json"}, bdFailed(1, "", "Error: no issue found matching \"X-1\"\n"))
+	require.Equal(t, `bd show failed: no issue found matching "X-1"`, err.Error())
+
+	err = bdErrorFor(t, []string{"--readonly", "comments", "X-1", "--json"}, bdFailed(1, "", "Error: boom\n"))
+	require.Equal(t, "bd comments failed: boom", err.Error())
+
+	timedOut := newBDError([]string{"--readonly", "export", "--all"},
+		bdOutput{ExitCode: -1, Err: errors.New("signal: killed"), TimedOut: true}, 30*time.Second)
+	require.Equal(t, "export", timedOut.Command)
+	require.Equal(t, "bd export timed out after 30s: "+hintTimeout, timedOut.Error())
+}
+
+func TestUnknownFlagName(t *testing.T) {
+	refusal := func(stdout, stderr string) error {
+		return newBDError([]string{"--readonly", "blocked", "--flags", "--raw", "--json"}, bdFailed(1, stdout, stderr), time.Minute)
+	}
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		// bd v1.3.2 (release), stdout empty: cobra names only the first unknown flag.
+		{name: "--flags", err: refusal("", "Error: unknown flag: --flags\n"), want: "--flags"},
+		{name: "--raw", err: refusal("", "Error: unknown flag: --raw\n"), want: "--raw"},
+		{name: "near miss is its own name", err: refusal("", "Error: unknown flag: --flagsx\n"), want: "--flagsx"},
+		{name: "prefix of the name", err: refusal("", "Error: unknown flag: --flag\n"), want: "--flag"},
+		{name: "clear-notes", err: refusal("", "Error: unknown flag: --clear-notes\n"), want: "--clear-notes"},
+		{name: "usage line after it", err: refusal("", "Error: unknown flag: --flags\nRun 'bd blocked --help' for usage.\n"), want: "--flags"},
+		{name: "JSON error object", err: refusal(`{"error":"unknown flag: --raw","schema_version":1}`, ""), want: "--raw"},
+		{name: "trailing punctuation", err: refusal("", "Error: unknown flag: --flags.\n"), want: "--flags"},
+		{name: "wrapped bd error", err: fmt.Errorf("reading blocked flags: %w", refusal("", "Error: unknown flag: --flags\n")), want: "--flags"},
+		{name: "shorthand flag", err: refusal("", "Error: unknown shorthand flag: 'f' in -f\n"), want: ""},
+		{name: "unknown command", err: refusal("", "Error: unknown command \"blocked\" for \"bd\"\n"), want: ""},
+		{name: "flag without its argument", err: refusal("", "Error: flag needs an argument: --actor\n"), want: ""},
+		{name: "migration refusal", err: refusal("", "Error: database schema is at v45 but this binary expects v46; run 'bd migrate schema'\n"), want: ""},
+		{name: "timeout", err: newBDError([]string{"blocked"}, bdOutput{ExitCode: -1, Err: errors.New("signal: killed"), TimedOut: true}, time.Second), want: ""},
+		{name: "not a bd error", err: errors.New("unknown flag: --flags"), want: ""},
+		{name: "nil", err: nil, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, unknownFlagName(tt.err))
+		})
+	}
+}
+
+// TestUnknownFlagName_StricterThanIsUnknownFlag: isUnknownFlag keeps its
+// substring match (used for --clear-notes); unknownFlagName names the flag.
+func TestUnknownFlagName_StricterThanIsUnknownFlag(t *testing.T) {
+	err := bdErrorFor(t, []string{"--readonly", "blocked", "--flagsx"}, bdFailed(1, "", "Error: unknown flag: --flagsx\n"))
+	require.True(t, isUnknownFlag(err, "flags"))
+	require.Equal(t, "--flagsx", unknownFlagName(err))
+}
+
 func TestBDError_Classification(t *testing.T) {
 	migrateConsent := `{
   "error": "database schema is at v65; this bd requires v74 (9 pending migration(s)), and bd no longer migrates a database without explicit consent",

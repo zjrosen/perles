@@ -1,0 +1,122 @@
+[
+  {
+    "id": "fx-dependent",
+    "title": "Blocked through a blocks edge added by its blocker",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "author@example.com",
+    "created_at": "2026-11-01T00:40:41Z",
+    "created_by": "Fixture Author",
+    "updated_at": "2026-11-01T00:40:41Z",
+    "blocked_by_count": 1,
+    "blocked_by": [
+      "fx-incoming"
+    ]
+  },
+  {
+    "id": "fx-waits",
+    "title": "Waits for spawner",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "author@example.com",
+    "created_at": "2026-11-01T00:40:38Z",
+    "created_by": "Fixture Author",
+    "updated_at": "2026-11-01T00:40:38Z",
+    "blocked_by_count": 1,
+    "blocked_by": [
+      "fx-spawner"
+    ]
+  },
+  {
+    "id": "fx-mixed",
+    "title": "External and local blockers",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "author@example.com",
+    "created_at": "2026-11-01T00:40:34Z",
+    "created_by": "Fixture Author",
+    "updated_at": "2026-11-01T00:40:34Z",
+    "blocked_by_count": 1,
+    "blocked_by": [
+      "fx-blocker"
+    ]
+  },
+  {
+    "id": "fx-on-shipped",
+    "title": "Blocked by custom-done blocker",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "author@example.com",
+    "created_at": "2026-11-01T00:40:29Z",
+    "created_by": "Fixture Author",
+    "updated_at": "2026-11-01T00:40:29Z",
+    "blocked_by_count": 1,
+    "blocked_by": [
+      "fx-shipped"
+    ]
+  },
+  {
+    "id": "fx-epic.1",
+    "title": "Child of blocked epic",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "author@example.com",
+    "created_at": "2026-11-01T00:40:28Z",
+    "created_by": "Fixture Author",
+    "updated_at": "2026-11-01T00:40:28Z",
+    "blocked_by_count": 1,
+    "blocked_by": [
+      "fx-epic"
+    ]
+  },
+  {
+    "id": "fx-epic",
+    "title": "Blocked epic",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "epic",
+    "owner": "author@example.com",
+    "created_at": "2026-11-01T00:40:26Z",
+    "created_by": "Fixture Author",
+    "updated_at": "2026-11-01T00:40:26Z",
+    "blocked_by_count": 1,
+    "blocked_by": [
+      "fx-blocker"
+    ]
+  },
+  {
+    "id": "fx-cond",
+    "title": "Conditional-blocks on open blocker",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "author@example.com",
+    "created_at": "2026-11-01T00:40:25Z",
+    "created_by": "Fixture Author",
+    "updated_at": "2026-11-01T00:40:25Z",
+    "blocked_by_count": 1,
+    "blocked_by": [
+      "fx-blocker"
+    ]
+  },
+  {
+    "id": "fx-blocked",
+    "title": "Blocked by open blocker",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "author@example.com",
+    "created_at": "2026-11-01T00:40:24Z",
+    "created_by": "Fixture Author",
+    "updated_at": "2026-11-01T00:40:24Z",
+    "blocked_by_count": 1,
+    "blocked_by": [
+      "fx-blocker"
+    ]
+  }
+]
