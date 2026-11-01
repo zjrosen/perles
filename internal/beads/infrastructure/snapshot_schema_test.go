@@ -218,6 +218,16 @@ func TestDecodeExport_Records(t *testing.T) {
 			wantIDs: []string{"a-1"},
 		},
 		{
+			name: "non-issue records are not decoded as issues",
+			input: `{"_type":"memory","key":"k","priority":"high","created_at":"yesterday","labels":"x","metadata":5,"comments":{"a":1}}
+{"_type":"issue","id":"a-1","priority":2}
+{"_type":"agent_state","id":7,"ephemeral":"yes","dependencies":"none"}`,
+			wantIDs: []string{"a-1"},
+			check: func(t *testing.T, issues []ExportIssue) {
+				require.Equal(t, 2, issues[0].Priority)
+			},
+		},
+		{
 			name: "wisps are skipped",
 			input: `{"_type":"issue","id":"w-1","ephemeral":true}
 {"_type":"issue","id":"w-2","no_history":true,"wisp_plane":true}
@@ -311,6 +321,21 @@ func TestDecodeExport_Errors(t *testing.T) {
 		{
 			name:    "wrong field type",
 			input:   `{"id":"a-1","priority":"high"}`,
+			wantErr: "bd export line 1:",
+		},
+		{
+			name:    "wrong field type in an issue record",
+			input:   "{\"_type\":\"memory\",\"priority\":\"high\"}\n{\"_type\":\"issue\",\"id\":\"a-1\",\"priority\":\"high\"}",
+			wantErr: "bd export line 2:",
+		},
+		{
+			name:    "_type that is not a string",
+			input:   `{"_type":5,"id":"a-1"}`,
+			wantErr: "bd export line 1:",
+		},
+		{
+			name:    "line that is not an object",
+			input:   `["_type","memory"]`,
 			wantErr: "bd export line 1:",
 		},
 		{

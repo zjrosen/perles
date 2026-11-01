@@ -209,10 +209,24 @@ type exportCommentJSON struct {
 	CreatedAt time.Time    `json:"created_at"`
 }
 
+// exportRecordHeader is the record discriminator of a bd export line, decoded
+// before the record itself so that a memory or other non-issue record is
+// skipped without being decoded as an issue: its keys may share an issue
+// field's name but not its JSON type.
+type exportRecordHeader struct {
+	RecordType string `json:"_type"` //nolint:tagliatelle // bd's record discriminator key
+}
+
+// isIssueType reports whether a record of type recordType is an issue
+// record: "issue", or no _type (bd older than 1.0.3).
+func isIssueType(recordType string) bool {
+	return recordType == "" || recordType == "issue"
+}
+
 // isIssue reports whether the record is an issues-table issue: an issue
 // record that is not a wisp.
 func (r *exportRecord) isIssue() bool {
-	if r.RecordType != "" && r.RecordType != "issue" {
+	if !isIssueType(r.RecordType) {
 		return false
 	}
 	return !r.Ephemeral && !r.WispPlane
@@ -284,7 +298,9 @@ func normalizeExportMetadata(raw json.RawMessage) (string, error) {
 // DecodeExport decodes `bd export --all` JSONL into the issues a snapshot
 // loads. It keeps issue records, including records without _type (bd older
 // than 1.0.3), and skips wisps (ephemeral or wisp_plane), memories and every
-// other record type. Blank lines are skipped. A malformed line is an error
+// other record type. Only issue records are decoded in full, so a non-issue
+// record fails the decode only when its line is not a JSON object with a
+// string or null _type. Blank lines are skipped. A malformed line is an error
 // that names its line number.
 func DecodeExport(r io.Reader) ([]ExportIssue, error) {
 	scanner := bufio.NewScanner(r)
@@ -297,6 +313,14 @@ func DecodeExport(r io.Reader) ([]ExportIssue, error) {
 		line++
 		text := bytes.TrimSpace(scanner.Bytes())
 		if len(text) == 0 {
+			continue
+		}
+		var header exportRecordHeader
+		if err := json.Unmarshal(text, &header); err != nil {
+			return nil, fmt.Errorf("bd export line %d: %w", line, err)
+		}
+		if !isIssueType(header.RecordType) {
+			skipped++
 			continue
 		}
 		var rec exportRecord

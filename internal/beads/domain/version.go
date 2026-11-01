@@ -14,6 +14,13 @@ import (
 // migrated explicitly (bd's cmd/bd/legacy_upgrade_guard.go).
 const MinBeadsVersion = "1.0.0"
 
+// MinEmbeddedBeadsVersion is the minimum bd version perles requires for an
+// embedded Dolt workspace, which it reads through bd. bd 1.0.5 added the
+// stored is_blocked column (migration 0046_add_is_blocked) that
+// `bd blocked --json` lists, so a snapshot's blocked and ready match server
+// mode. Server mode keeps MinBeadsVersion.
+const MinEmbeddedBeadsVersion = "1.0.5"
+
 // CheckVersion returns nil if current >= MinBeadsVersion, error otherwise.
 func CheckVersion(current string) error {
 	if CompareVersions(current, MinBeadsVersion) < 0 {
