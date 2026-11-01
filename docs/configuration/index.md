@@ -164,13 +164,13 @@ The `BEADS_DOLT_*` variables only matter for the Dolt backend. See [Debug Mode](
 - bd builds with `bd blocked --flags --raw` (so far only main-branch builds newer than v1.3.2) report the stored flags exactly, stale ones included. Perles checks for it once per session and uses it when it is there. On other builds the check costs at most one rejected `bd` call.
 - An issue whose only open blocker is an `external:` (cross-project) dependency counts as not blocked, so it can be ready, in both modes. bd builds that apply bd's external-dependency policy (main-branch builds) leave such an issue out of `bd ready`. Adopting that policy in BQL is tracked as perles-v18.
 
-**`export.exclude_owners`.** bd's `export.exclude_owners` and `export.exclude_owner` settings (bd v1.2.0 and newer) leave issues out of `bd export` by `created_by`. Perles overrides both for its own export only, through bd's `BD_EXPORT_*` environment variables, so the board shows every issue. Your `.beads/config.yaml` and your own `bd export` runs are unchanged. A value stored in the database's config table rather than in `config.yaml` is not overridden (no `bd` command writes one there).
+**`export.exclude_owners`.** bd's `export.exclude_owners` and `export.exclude_owner` settings (bd v1.3.0 and newer; the retracted v1.2.1 had them, the v1.2.2 recovery release does not) leave issues out of `bd export` by `created_by`. Perles overrides both for its own export only, through bd's `BD_EXPORT_*` environment variables, so the board shows every issue. Your `.beads/config.yaml` and your own `bd export` runs are unchanged. A value stored in the database's config table rather than in `config.yaml` is not overridden (no `bd` command writes one there).
 
 **bd v1.0.5.** Embedded workspaces work on the minimum version, which differs from current bd in a few ways:
 
-- Its `bd ready` leaves out issues in a custom status of category `active`. Perles counts them as ready, as newer bd does.
+- Its `bd ready` leaves out issues in a custom status of category `active`. Perles counts them as ready, as `bd ready` does from bd v1.3.1.
 - Its `bd list --all` includes wisps (ephemeral issues). Perles never shows wisps, on any bd version.
-- It has no `export.exclude_owners` (added in v1.2.0), so there is nothing to override.
+- It has no `export.exclude_owners` (bd v1.3.0 and newer have it), so there is nothing to override.
 - An epic can only be blocked by another epic.
 
 **When perles can't read the workspace.** If the snapshot reader can't start, perles shows a screen with the cause and its fix instead of the board, followed by the steps to switch to server mode:

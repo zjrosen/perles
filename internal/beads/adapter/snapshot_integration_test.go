@@ -16,20 +16,24 @@ package adapter
 //     checked with the production gate (infrabeads.CheckEmbeddedBDVersion);
 //   - bd refuses the workspace location as an "unsafe location".
 //
-// Any other failure, setup included, fails the test. Parts of the parity test
-// also skip, with a logged reason, when the installed bd lacks what they
-// check: the upgrade path needs `blocked --flags --raw` (no released bd up to
-// v1.3.2 has it), and the export.exclude_owners and `bd schema` checks need
-// bd >= 1.2.0.
+// A `bd --version` it cannot parse fails the test, as does any other failure,
+// setup included. Parts of the parity test also skip, with a logged reason,
+// when the installed bd lacks what they check. The upgrade path needs
+// `blocked --flags --raw`, which the test asks bd for itself (no released bd
+// up to v1.3.2 has it). The export.exclude_owners and `bd schema` checks need
+// bd >= 1.3.0, decided by the parsed version, as is the one ready difference
+// allowed on bd < 1.3.1 (see the integration*BD constants).
 //
 // Safety: each workspace is a fresh os.MkdirTemp directory under the user's
 // home (not t.TempDir(): on Linux that is under /tmp, which bd context
-// refuses as unsafe), removed by t.Cleanup. Every BEADS_* and BD_* variable
-// is cleared and BEADS_DIR is set to the workspace's .beads for the test, and
-// every bd runs with its working directory in the workspace. Before the first
-// bd write (bd init), bd context must not resolve any other beads directory;
-// after it, bd context must report the workspace's own embedded beads dir.
-// This repository's .beads is never touched.
+// refuses as unsafe), removed by t.Cleanup (the removal uses the path
+// MkdirTemp returned, before any symlink resolution). Every BEADS_* and BD_*
+// variable is cleared and BEADS_DIR is set to the workspace's .beads for the
+// test, and every bd runs with its working directory in the workspace. Before
+// the first bd write (bd init), bd context must not resolve any other beads
+// directory. After it, bd context must succeed and report exactly the
+// workspace's own embedded beads dir, or the test stops. This repository's
+// .beads is never touched.
 
 import (
 	"bufio"
@@ -41,6 +45,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -61,12 +66,28 @@ const integrationEnv = "PERLES_BD_INTEGRATION"
 const integrationTimeout = 2 * time.Minute
 
 // integrationPickupTimeout bounds the wait for a rebuild. Rebuilds are paced
-// at least minRebuildGap (2s) after the previous one, plus the build itself.
-const integrationPickupTimeout = 30 * time.Second
+// at least minRebuildGap (2s) after the previous one, plus the build itself;
+// the rest is room for a slow machine.
+const integrationPickupTimeout = 60 * time.Second
 
 // integrationOtherAuthor is the created_by of the issue that the parity
 // workspace's export.exclude_owners excludes from bd's own exports.
 const integrationOtherAuthor = "perles-it-other@example.com"
+
+// The first bd releases with what the parity test's version-gated checks
+// need. bd v1.2.1 first shipped export.exclude_owners and `bd schema`, but it
+// was pulled, and v1.2.2 re-released the v1.1.2 code without them, so v1.3.0
+// is the first release with both. bd ready counts custom active statuses as
+// ready from v1.3.1 (beads #5918).
+const (
+	integrationExcludeOwnersBD = "1.3.0"
+	integrationSchemaBD        = "1.3.0"
+	integrationActiveReadyBD   = "1.3.1"
+)
+
+// integrationVersion finds the version in `bd --version` output, e.g.
+// "bd version 1.3.2 (6ebaacba8)".
+var integrationVersion = regexp.MustCompile(`\bversion v?(\d+\.\d+\.\d+)\b`)
 
 // TestSnapshotBackend_Integration_Parity builds every edge case of the
 // proposal's E16 in a real embedded workspace and checks the snapshot's
@@ -77,8 +98,8 @@ const integrationOtherAuthor = "perles-it-other@example.com"
 // touching config.yaml), that the real export, comments included, loads into
 // the snapshot DDL, metadata queries, and bd's JSON schema version.
 func TestSnapshotBackend_Integration_Parity(t *testing.T) {
-	w := newIntegrationWorkspace(t, "ipy")
-	e := buildIntegrationEdgeCases(t, w)
+	w := integrationNewWorkspace(t, "ipy")
+	e := integrationBuildEdgeCases(t, w)
 	configPath := filepath.Join(w.beadsDir, "config.yaml")
 	configBefore, err := os.ReadFile(configPath) //nolint:gosec // G304: the throwaway workspace's config
 	require.NoError(t, err)
@@ -118,10 +139,13 @@ func TestSnapshotBackend_Integration_Parity(t *testing.T) {
 
 	t.Run("exclude_owners handled", func(t *testing.T) {
 		require.Contains(t, snapshotAll, e.excludedOwner)
-		if slices.Contains(integrationExportIDs(t, w.bd(t, "--readonly", "export", "--all")), e.excludedOwner) {
-			t.Skip("this bd's export ignores export.exclude_owners (added in bd v1.2.0): there is nothing to neutralize")
+		require.Equal(t, []string{e.excludedOwner}, integrationQuery(t, b, fmt.Sprintf("created_by = %q", integrationOtherAuthor)),
+			"the snapshot keeps the imported created_by")
+		if w.bdBefore(integrationExcludeOwnersBD) {
+			t.Skipf("bd %s has no export.exclude_owners (bd >= %s has): there is nothing to neutralize", w.bdVersion, integrationExcludeOwnersBD)
 		}
-		t.Log("bd's own export honours export.exclude_owners; perles' export neutralizes it")
+		require.NotContains(t, integrationExportIDs(t, w.bd(t, "--readonly", "export", "--all")), e.excludedOwner,
+			"bd's own export honours export.exclude_owners; perles' export neutralizes it")
 	})
 
 	t.Run("blocked parity, listing path", func(t *testing.T) {
@@ -136,7 +160,9 @@ func TestSnapshotBackend_Integration_Parity(t *testing.T) {
 		blocked := integrationQuery(t, b, "blocked = true")
 		require.Equal(t, want, blocked, "bd blocked --json minus the external-only rows")
 
-		for _, id := range []string{e.blockedEpic, e.epicChild, e.blockedByShipped, e.waiter} {
+		// The mixed issue keeps its open blocker: only rows whose blockers
+		// are all external drop out.
+		for _, id := range []string{e.blockedEpic, e.epicChild, e.blockedByShipped, e.waiter, e.mixed} {
 			require.Contains(t, blocked, id)
 		}
 		for _, id := range []string{e.externalOnly, e.blockedByClosed, e.pinned} {
@@ -157,11 +183,14 @@ func TestSnapshotBackend_Integration_Parity(t *testing.T) {
 		// (bd's external-dependency policy); perles' stored-flag semantics
 		// count them as ready.
 		allowed := []string{e.externalOnly}
-		if !slices.Contains(bdReady, e.inReview) {
-			// bd 1.0.5's ready does not count custom active statuses as
-			// ready; bd 1.3.2's does, as perles does in both modes.
-			t.Logf("this bd's ready leaves out the custom active status issue %s", e.inReview)
+		if w.bdBefore(integrationActiveReadyBD) {
+			// Before bd 1.3.1, bd ready does not count custom active
+			// statuses as ready; perles does, in both modes.
+			t.Logf("bd %s predates %s, whose ready counts custom active statuses: the in_review issue %s may differ",
+				w.bdVersion, integrationActiveReadyBD, e.inReview)
 			allowed = append(allowed, e.inReview)
+		} else {
+			require.Contains(t, bdReady, e.inReview, "bd ready counts a custom active status as ready")
 		}
 		require.Subset(t, allowed, extra, "only the external-only issue differs")
 		require.Contains(t, ready, e.inReview, "a custom active status is ready")
@@ -186,18 +215,17 @@ func TestSnapshotBackend_Integration_Parity(t *testing.T) {
 	})
 
 	t.Run("blocked parity, upgrade path", func(t *testing.T) {
-		up, upRec := w.backend(t, nil)
-		require.NoError(t, up.CheckCompatibility())
-		if integrationBlockedReads(upRec, false) > 0 {
-			t.Skip("the installed bd has no blocked --flags --raw (detection fell back to the listing, as on every released bd): " +
-				"the upgrade path needs a bd built after beads 4450fe99b")
-		}
-		require.Equal(t, 1, integrationBlockedReads(upRec, true), "the --flags --raw read on the candidates")
-
-		out := w.bdRequest(t, infrabeads.BDRequest{
+		// Ask bd itself, so that a regression in the backend's detection
+		// fails below instead of skipping.
+		out, err := w.bdResult(t, infrabeads.BDRequest{
 			Args:  []string{"--readonly", "blocked", "--flags", "--raw", "--json"},
 			Stdin: strings.Join(all, "\n") + "\n",
 		})
+		if err != nil && (strings.Contains(err.Error(), "unknown flag: --flags") || strings.Contains(err.Error(), "unknown flag: --raw")) {
+			t.Skipf("bd %s rejects blocked --flags --raw as unknown flags (no released bd up to v1.3.2 has them): "+
+				"the upgrade path needs a bd built after beads 4450fe99b", w.bdVersion)
+		}
+		require.NoError(t, err, "bd blocked --flags --raw")
 		var want []string
 		for _, row := range integrationDecode[[]integrationRow](t, "bd blocked --flags", out) {
 			if row.IsBlocked {
@@ -205,21 +233,21 @@ func TestSnapshotBackend_Integration_Parity(t *testing.T) {
 			}
 		}
 		slices.Sort(want)
+
+		up, upRec := w.backend(t, nil)
+		require.NoError(t, up.CheckCompatibility())
+		require.Equal(t, 1, integrationBlockedReads(upRec, true), "detection finds --flags: one --flags --raw read on the candidates")
+		require.Zero(t, integrationBlockedReads(upRec, false), "and no listing")
 		require.Equal(t, want, integrationQuery(t, up, "blocked = true"), "bd blocked --flags --raw over every ID")
 	})
 
 	t.Run("bd JSON schema version", func(t *testing.T) {
-		require.True(t, w.verified)
-		ctx, cancel := context.WithTimeout(context.Background(), integrationTimeout)
-		defer cancel()
-		out, err := w.run(ctx, infrabeads.BDRequest{Args: []string{"schema", "--json"}})
-		if err != nil && strings.Contains(err.Error(), `unknown command "schema"`) {
-			t.Skipf("this bd has no bd schema (added in bd v1.2.0): %v", err)
+		if w.bdBefore(integrationSchemaBD) {
+			t.Skipf("bd %s has no bd schema (bd >= %s has)", w.bdVersion, integrationSchemaBD)
 		}
-		require.NoError(t, err, "bd schema --json")
 		schema := integrationDecode[struct {
 			SchemaVersion int `json:"schema_version"`
-		}](t, "bd schema", out)
+		}](t, "bd schema", w.bd(t, "schema", "--json"))
 		require.Equal(t, 1, schema.SchemaVersion, "the export records perles decodes")
 	})
 
@@ -233,9 +261,10 @@ func TestSnapshotBackend_Integration_Parity(t *testing.T) {
 // snapshot is installed, is picked up with no further trigger. The first
 // snapshot's manifest hash predates the write and no watcher was running
 // when it landed, so only the post-install re-hash can see it. The manifest
-// watcher is disabled to make sure of that.
+// watcher is disabled to make sure of that. Rebuilds then settle: the
+// follow-up's own re-hash finds the state it exported, so no build follows.
 func TestSnapshotBackend_Integration_TrailingWrite(t *testing.T) {
-	w := newIntegrationWorkspace(t, "itw")
+	w := integrationNewWorkspace(t, "itw")
 	id := w.create(t, "trailing write target", "--priority", "2")
 
 	var wrote atomic.Bool
@@ -265,6 +294,17 @@ func TestSnapshotBackend_Integration_TrailingWrite(t *testing.T) {
 		return err == nil && len(issues) == 1 && issues[0].Priority == 0
 	}, integrationPickupTimeout, 100*time.Millisecond, "a newer snapshot shows the trailing write")
 	require.Equal(t, 2, rec.count("export"), "one follow-up build")
+
+	// Wait for the follow-up to finish, then until pacing would allow
+	// another build (at least minRebuildGap later), plus one build's time
+	// (at least 1s) for its export to start, and count again.
+	require.Eventually(t, func() bool { return !schedState(b).running },
+		integrationPickupTimeout, 50*time.Millisecond, "the follow-up build finishes")
+	b.sched.mu.Lock()
+	nextBuild, buildTime := b.sched.nextBuildAt(), b.sched.lastDuration
+	b.sched.mu.Unlock()
+	time.Sleep(time.Until(nextBuild) + max(buildTime, time.Second))
+	require.Equal(t, 2, rec.count("export"), "rebuilds settle: no build follows the follow-up")
 }
 
 // TestSnapshotBackend_Integration_CommentReadAfterWrite: after AddComment,
@@ -273,7 +313,7 @@ func TestSnapshotBackend_Integration_TrailingWrite(t *testing.T) {
 // export until it has read the comment, then lets it land and reads the
 // comment from the snapshot itself.
 func TestSnapshotBackend_Integration_CommentReadAfterWrite(t *testing.T) {
-	w := newIntegrationWorkspace(t, "icm")
+	w := integrationNewWorkspace(t, "icm")
 	id := w.create(t, "commented issue")
 
 	release := make(chan struct{})
@@ -318,7 +358,7 @@ func TestSnapshotBackend_Integration_CommentReadAfterWrite(t *testing.T) {
 // before the first snapshot come from bd comments, not an export. The first
 // query exports.
 func TestSnapshotBackend_Integration_DaemonLazy(t *testing.T) {
-	w := newIntegrationWorkspace(t, "ilz")
+	w := integrationNewWorkspace(t, "ilz")
 	id := w.create(t, "lazy issue")
 	w.bd(t, "comments", "add", id, "--", "before any snapshot")
 
@@ -344,31 +384,43 @@ type integrationWorkspace struct {
 	dir, beadsDir string
 	// prefix is the workspace's issue prefix.
 	prefix string
-	run    infrabeads.BDRunner
+	// bdVersion is the installed bd's version, e.g. "1.3.2".
+	bdVersion string
+	run       infrabeads.BDRunner
 	// verified is set once bd context reported the workspace's own beads
 	// dir after bd init; bd refuses to run other commands before.
 	verified bool
 }
 
-// newIntegrationWorkspace skips unless the real-bd tests can run (see the
+// integrationNewWorkspace skips unless the real-bd tests can run (see the
 // file comment), then creates an embedded workspace whose issue prefix is
 // prefix and isolates the environment for it.
-func newIntegrationWorkspace(t *testing.T, prefix string) *integrationWorkspace {
+func integrationNewWorkspace(t *testing.T, prefix string) *integrationWorkspace {
 	t.Helper()
-	integrationRequireBD(t)
+	return integrationInitWorkspace(t, "perles-embed-it-*", prefix, integrationRequireBD(t))
+}
 
+// integrationInitWorkspace creates an embedded workspace, for the installed
+// bd of version bdVersion, in a fresh directory under the user's home named
+// after pattern (see os.MkdirTemp), with issue prefix prefix. It isolates the
+// environment for it and removes the directory when the test ends. Before
+// bd init and after it, the safety guard (requireOwnContext) must pass.
+func integrationInitWorkspace(t *testing.T, pattern, prefix, bdVersion string) *integrationWorkspace {
+	t.Helper()
 	home, err := os.UserHomeDir()
 	require.NoError(t, err)
-	dir, err := os.MkdirTemp(home, "perles-embed-it-*")
+	created, err := os.MkdirTemp(home, pattern)
 	require.NoError(t, err)
+	// created is never reassigned: the cleanup removes exactly what
+	// MkdirTemp created, even if resolving its symlinks fails below.
 	t.Cleanup(func() {
-		if err := os.RemoveAll(dir); err != nil {
-			t.Errorf("removing the integration workspace %s: %v", dir, err)
+		if err := os.RemoveAll(created); err != nil {
+			t.Errorf("removing the workspace %s: %v", created, err)
 		}
 	})
-	dir, err = filepath.EvalSymlinks(dir)
+	dir, err := filepath.EvalSymlinks(created)
 	require.NoError(t, err)
-	w := &integrationWorkspace{dir: dir, beadsDir: filepath.Join(dir, ".beads"), prefix: prefix}
+	w := &integrationWorkspace{dir: dir, beadsDir: filepath.Join(dir, ".beads"), prefix: prefix, bdVersion: bdVersion}
 	integrationIsolateEnv(t, w.beadsDir)
 	w.run = infrabeads.NewBDRunner(w.dir, w.beadsDir)
 
@@ -382,13 +434,19 @@ func newIntegrationWorkspace(t *testing.T, prefix string) *integrationWorkspace 
 	}
 	w.requireOwnContext(t, true)
 	w.verified = true
-	t.Logf("integration workspace %s", w.dir)
+	t.Logf("workspace %s", w.dir)
 	return w
 }
 
-// integrationRequireBD skips the test unless it is opted in, not -short,
-// and the bd on PATH is at least domain.MinEmbeddedBeadsVersion.
-func integrationRequireBD(t *testing.T) {
+// bdBefore reports whether the installed bd is older than version.
+func (w *integrationWorkspace) bdBefore(version string) bool {
+	return domain.CompareVersions(w.bdVersion, version) < 0
+}
+
+// integrationRequireBD skips the test unless it is opted in and not -short,
+// then checks the installed bd (see integrationBDVersion) and returns its
+// version.
+func integrationRequireBD(t *testing.T) string {
 	t.Helper()
 	if os.Getenv(integrationEnv) != "1" {
 		t.Skipf("set %s=1 to run the real-bd integration tests (they run bd writes in throwaway workspaces under your home directory)", integrationEnv)
@@ -396,6 +454,15 @@ func integrationRequireBD(t *testing.T) {
 	if testing.Short() {
 		t.Skip("-short: skipping the real-bd integration test")
 	}
+	return integrationBDVersion(t)
+}
+
+// integrationBDVersion returns the version of the bd on PATH, e.g. "1.3.2".
+// It skips the test when bd is not on PATH or is older than
+// domain.MinEmbeddedBeadsVersion, checked with the production gate, and
+// fails it when `bd --version` fails or prints no version it can parse.
+func integrationBDVersion(t *testing.T) string {
+	t.Helper()
 	path, err := exec.LookPath("bd")
 	if err != nil {
 		t.Skipf("bd is not on PATH: %v", err)
@@ -409,16 +476,15 @@ func integrationRequireBD(t *testing.T) {
 	out, err := cmd.Output()
 	require.NoError(t, err, "bd --version")
 	line := strings.TrimSpace(string(out))
-	_, version, found := strings.Cut(line, "version ")
-	if !found {
-		version = line
+	match := integrationVersion.FindStringSubmatch(line)
+	if match == nil {
+		t.Fatalf("cannot parse the bd version from `bd --version`: %q", line)
 	}
-	version = strings.TrimSpace(version)
-	require.NotEmpty(t, version, "bd --version printed no version: %q", line)
-	if infrabeads.CheckEmbeddedBDVersion("", version, nil) != nil {
-		t.Skipf("bd %s is older than %s, the oldest bd embedded workspaces support", version, domain.MinEmbeddedBeadsVersion)
+	if infrabeads.CheckEmbeddedBDVersion("", match[1], nil) != nil {
+		t.Skipf("bd %s is older than %s, the oldest bd embedded workspaces support", match[1], domain.MinEmbeddedBeadsVersion)
 	}
 	t.Logf("bd: %s (%s)", path, line)
+	return match[1]
 }
 
 // integrationIsolateEnv clears every BEADS_* and BD_* variable, and the git
@@ -474,38 +540,45 @@ func integrationBDContext(ctx context.Context, beadsDir, workDir string) ([]byte
 
 // requireOwnContext is the safety guard around bd writes. Before bd init
 // (initialized false) bd context must not resolve any beads dir but the
-// workspace's: it fails with no workspace, or names this one. After it, bd
-// context must report the workspace's own embedded beads dir. An unsafe
-// location refusal skips the test.
+// workspace's: it fails with no workspace, or names this one; a refusal of
+// the location as unsafe skips the test. After it, bd context must succeed
+// and report exactly the workspace's own beads dir, in embedded mode.
+// Anything else stops the test.
 func (w *integrationWorkspace) requireOwnContext(t *testing.T, initialized bool) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), integrationTimeout)
 	defer cancel()
 	out, runErr := integrationBDContext(ctx, w.beadsDir, w.dir)
+	var answer struct {
+		BeadsDir string `json:"beads_dir"`
+		DoltMode string `json:"dolt_mode"`
+	}
+	parseErr := json.Unmarshal(bytes.TrimSpace(out), &answer)
+
+	if initialized {
+		require.NoError(t, runErr, "SAFETY: bd context in the workspace")
+		require.NoError(t, parseErr, "SAFETY: parsing bd context output %q", out)
+		require.NotEmpty(t, answer.BeadsDir, "SAFETY: bd context names no beads dir; refusing to run bd writes")
+		require.Equal(t, w.beadsDir, integrationCanonical(answer.BeadsDir),
+			"SAFETY: bd context resolves another beads dir; refusing to run bd writes")
+		require.Equal(t, "embedded", answer.DoltMode, "bd init creates an embedded workspace")
+		return
+	}
+
 	text := string(out)
 	if runErr != nil {
 		text += "\n" + runErr.Error()
 	}
 	integrationSkipUnsafe(t, "bd context", text)
-
-	var answer struct {
-		BeadsDir string `json:"beads_dir"`
-		DoltMode string `json:"dolt_mode"`
-	}
-	if err := json.Unmarshal(bytes.TrimSpace(out), &answer); err != nil && runErr == nil {
-		t.Fatalf("parsing bd context output %q: %v", out, err)
+	if parseErr != nil && runErr == nil {
+		t.Fatalf("parsing bd context output %q: %v", out, parseErr)
 	}
 	if answer.BeadsDir != "" {
 		require.Equal(t, w.beadsDir, integrationCanonical(answer.BeadsDir),
 			"SAFETY: bd context resolves another beads dir; refusing to run bd writes")
 	}
-	if !initialized {
-		require.True(t, runErr != nil || answer.BeadsDir != "",
-			"SAFETY: bd context succeeded without naming a beads dir before bd init: %s", text)
-		return
-	}
-	require.NoError(t, runErr, "bd context after bd init")
-	require.Equal(t, "embedded", answer.DoltMode, "bd init creates an embedded workspace")
+	require.True(t, runErr != nil || answer.BeadsDir != "",
+		"SAFETY: bd context succeeded without naming a beads dir before bd init: %s", text)
 }
 
 // integrationSkipUnsafe skips the test when bd refused the workspace
@@ -537,13 +610,20 @@ func integrationGit(t *testing.T, dir string, args ...string) {
 	require.NoError(t, err, "git %s: %s", strings.Join(args, " "), out)
 }
 
-// bdRequest runs req with the workspace's runner and returns bd's stdout.
-func (w *integrationWorkspace) bdRequest(t *testing.T, req infrabeads.BDRequest) string {
+// bdResult runs req with the workspace's runner and returns bd's stdout and
+// the runner's error.
+func (w *integrationWorkspace) bdResult(t *testing.T, req infrabeads.BDRequest) (string, error) {
 	t.Helper()
 	require.True(t, w.verified, "SAFETY: bd context has not confirmed the workspace")
 	ctx, cancel := context.WithTimeout(context.Background(), integrationTimeout)
 	defer cancel()
-	out, err := w.run(ctx, req)
+	return w.run(ctx, req)
+}
+
+// bdRequest runs req with the workspace's runner and returns bd's stdout.
+func (w *integrationWorkspace) bdRequest(t *testing.T, req infrabeads.BDRequest) string {
+	t.Helper()
+	out, err := w.bdResult(t, req)
 	require.NoError(t, err, "bd %s", strings.Join(req.Args, " "))
 	return out
 }
@@ -585,8 +665,8 @@ func (w *integrationWorkspace) backend(t *testing.T, answer infrabeads.BDRunner)
 type integrationEdgeCases struct {
 	openBlocker, blockedEpic, epicChild string
 	shippedBlocker, blockedByShipped    string
-	spawner, spawnerChild, waiter       string
-	externalOnly                        string
+	spawner, waiter                     string
+	externalOnly, mixed                 string
 	closedBlocker, blockedByClosed      string
 	pinBlocker, pinned                  string
 	deferredParent, deferredChild       string
@@ -597,9 +677,9 @@ type integrationEdgeCases struct {
 	commented                           string
 }
 
-// buildIntegrationEdgeCases creates the proposal's E16 edge cases, an issue
+// integrationBuildEdgeCases creates the proposal's E16 edge cases, an issue
 // with metadata and one with a comment.
-func buildIntegrationEdgeCases(t *testing.T, w *integrationWorkspace) integrationEdgeCases {
+func integrationBuildEdgeCases(t *testing.T, w *integrationWorkspace) integrationEdgeCases {
 	t.Helper()
 	var e integrationEdgeCases
 	w.bd(t, "config", "set", "status.custom", "shipped:done,in_review:active,on_hold:frozen")
@@ -619,11 +699,18 @@ func buildIntegrationEdgeCases(t *testing.T, w *integrationWorkspace) integratio
 
 	// A waits-for gate on a spawner with an open child.
 	e.spawner = w.create(t, "spawner", "--type", "epic")
-	e.spawnerChild = w.create(t, "spawner child", "--parent", e.spawner)
+	w.create(t, "spawner child", "--parent", e.spawner)
 	e.waiter = w.create(t, "waiter", "--waits-for", e.spawner)
 
 	e.externalOnly = w.create(t, "external-only dependency")
 	w.bd(t, "dep", "add", e.externalOnly, "external:otherproj:somecap")
+
+	// An open blocker and an external dependency: blocked, unlike the
+	// external-only issue.
+	mixedBlocker := w.create(t, "mixed issue's open blocker")
+	e.mixed = w.create(t, "blocked by an open issue and an external dependency")
+	w.bd(t, "dep", "add", e.mixed, mixedBlocker)
+	w.bd(t, "dep", "add", e.mixed, "external:otherproj:somecap")
 
 	e.closedBlocker = w.create(t, "closed blocker")
 	e.blockedByClosed = w.create(t, "blocked by a closed blocker")
@@ -652,6 +739,11 @@ func buildIntegrationEdgeCases(t *testing.T, w *integrationWorkspace) integratio
 	})
 	require.NoError(t, err)
 	w.bdRequest(t, infrabeads.BDRequest{Args: []string{"import", "-"}, Stdin: string(record) + "\n"})
+	shown := integrationDecode[[]struct {
+		CreatedBy string `json:"created_by"`
+	}](t, "bd show", w.bd(t, "--readonly", "show", e.excludedOwner, "--json"))
+	require.Len(t, shown, 1, "bd show %s", e.excludedOwner)
+	require.Equal(t, integrationOtherAuthor, shown[0].CreatedBy, "bd import keeps created_by, which export.exclude_owners matches")
 	w.bd(t, "config", "set", "export.exclude_owners", integrationOtherAuthor)
 
 	e.withMetadata = w.create(t, "has metadata")

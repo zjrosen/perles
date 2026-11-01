@@ -101,7 +101,7 @@ PERLES_BD_INTEGRATION=1 go test ./internal/beads/adapter/ -run Integration -v
 PERLES_BD_CONTENTION=1 go test ./internal/beads/adapter/ -run Contention -count=1 -v
 ```
 
-Both skip, with a logged reason, under `-short`, without `bd` on `PATH`, with bd older than v1.0.5, or when bd refuses the throwaway workspace's location as unsafe. Some checks skip on older bd too: the `export.exclude_owners` and `bd schema` checks need bd v1.2.0+, and the exact `bd blocked --flags --raw` path needs a main-branch bd build newer than v1.3.2 (released versions use the `bd blocked --json` listing). The contention benchmark also needs `lsof` for its lock check, and skips only that check without it.
+Both skip, with a logged reason, under `-short`, without `bd` on `PATH`, with bd older than v1.0.5, or when bd refuses the throwaway workspace's location as unsafe; a `bd --version` they cannot parse fails them. Some checks skip on older bd too: the `export.exclude_owners` and `bd schema` checks need bd v1.3.0+ (v1.2.2 re-released the v1.1.2 code without them), and the exact `bd blocked --flags --raw` path needs a main-branch bd build newer than v1.3.2 (released versions use the `bd blocked --json` listing). The contention benchmark also needs `lsof` for its lock check, and skips only that check without it.
 
 ### Golden Tests
 

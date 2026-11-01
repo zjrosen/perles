@@ -64,9 +64,9 @@ package adapter
 // context must report exactly the workspace's own embedded beads dir, or the
 // test stops. This repository's .beads is never touched.
 //
-// The workspace, environment and backend helpers are the integration
-// tests' (snapshot_integration_test.go); the helpers below are prefixed
-// contention.
+// The workspace (its bd version check and safety guard included),
+// environment and backend helpers are the integration tests'
+// (snapshot_integration_test.go); the helpers below are prefixed contention.
 
 import (
 	"bytes"
@@ -78,7 +78,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"slices"
 	"strconv"
@@ -89,7 +88,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/zjrosen/perles/internal/beads/domain"
 	infrabeads "github.com/zjrosen/perles/internal/beads/infrastructure"
 	"github.com/zjrosen/perles/internal/watcher"
 )
@@ -126,19 +124,15 @@ const (
 // is a real write.
 var contentionPriorities = [...]int{0, 1, 3, 4}
 
-// contentionVersion finds the version in `bd --version` output, e.g.
-// "bd version 1.3.2 (6ebaacba8)".
-var contentionVersion = regexp.MustCompile(`\bversion v?(\d+\.\d+\.\d+)\b`)
-
 // TestSnapshotBackend_Contention_LockBudget is the benchmark described in
 // the file comment.
 func TestSnapshotBackend_Contention_LockBudget(t *testing.T) {
-	w := newContentionWorkspace(t, "cnt")
+	w := integrationInitWorkspace(t, "perles-embed-bench-*", "cnt", contentionRequireBD(t))
 	ids := contentionImport(t, w)
 	writer := &contentionWriter{w: w, pids: map[int]bool{}}
 
 	// Round 1, the baseline: no perles.
-	contentionRequireOwnContext(t, w)
+	w.requireOwnContext(t, true)
 	baseline := writer.updates(t, ids[:contentionUpdates])
 
 	// Round 2: as many writes again, to other issues, while perles rebuilds.
@@ -146,11 +140,11 @@ func TestSnapshotBackend_Contention_LockBudget(t *testing.T) {
 	b, _ := w.backend(t, tracker.runner)
 	lockPath := filepath.Join(filepath.Dir(b.manifestPath), "LOCK")
 	require.FileExists(t, lockPath)
-	m := startContentionMonitor(t, b, tracker, writer, lockPath)
+	m := contentionStartMonitor(t, b, tracker, writer, lockPath)
 	require.NoError(t, b.CheckCompatibility(), "the pre-build")
 	require.Len(t, integrationQuery(t, b, `id != ""`), contentionIssues, "the snapshot holds every issue")
 
-	contentionRequireOwnContext(t, w)
+	w.requireOwnContext(t, true)
 	windowStart := time.Now()
 	loaded := writer.updates(t, ids[contentionUpdates:2*contentionUpdates])
 	window := time.Since(windowStart)
@@ -201,50 +195,10 @@ func TestSnapshotBackend_Contention_LockBudget(t *testing.T) {
 	})
 }
 
-// newContentionWorkspace skips unless the benchmark can run (see the file
-// comment), then creates an embedded workspace whose issue prefix is prefix
-// and isolates the environment for it.
-func newContentionWorkspace(t *testing.T, prefix string) *integrationWorkspace {
-	t.Helper()
-	contentionRequireBD(t)
-
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
-	created, err := os.MkdirTemp(home, "perles-embed-bench-*")
-	require.NoError(t, err)
-	// created is never reassigned: the cleanup removes exactly what
-	// MkdirTemp created, even if resolving its symlinks fails below.
-	t.Cleanup(func() {
-		if err := os.RemoveAll(created); err != nil {
-			t.Errorf("removing the contention workspace %s: %v", created, err)
-		}
-	})
-	dir, err := filepath.EvalSymlinks(created)
-	require.NoError(t, err)
-	w := &integrationWorkspace{dir: dir, beadsDir: filepath.Join(dir, ".beads"), prefix: prefix}
-	integrationIsolateEnv(t, w.beadsDir)
-	w.run = infrabeads.NewBDRunner(w.dir, w.beadsDir)
-
-	integrationGit(t, w.dir, "init", "-q")
-	// Before bd init no beads dir exists, so bd context must not resolve
-	// any other one.
-	w.requireOwnContext(t, false)
-	ctx, cancel := context.WithTimeout(context.Background(), integrationTimeout)
-	defer cancel()
-	if _, err := w.run(ctx, infrabeads.BDRequest{Args: []string{"init", "--prefix", prefix, "--non-interactive"}}); err != nil {
-		integrationSkipUnsafe(t, "bd init", err.Error())
-		t.Fatalf("bd init in %s: %v", w.dir, err)
-	}
-	contentionRequireOwnContext(t, w)
-	w.verified = true
-	t.Logf("contention workspace %s", w.dir)
-	return w
-}
-
-// contentionRequireBD skips the benchmark unless it is opted in, not -short,
-// and the bd on PATH is at least domain.MinEmbeddedBeadsVersion. It fails
-// when it cannot parse `bd --version`.
-func contentionRequireBD(t *testing.T) {
+// contentionRequireBD skips the benchmark unless it is opted in and not
+// -short, then checks the installed bd (see integrationBDVersion) and
+// returns its version.
+func contentionRequireBD(t *testing.T) string {
 	t.Helper()
 	if os.Getenv(contentionEnv) != "1" {
 		t.Skipf("set %s=1 to run the contention benchmark (it runs bd writes in a throwaway 5,000-issue workspace under your home directory)", contentionEnv)
@@ -252,47 +206,7 @@ func contentionRequireBD(t *testing.T) {
 	if testing.Short() {
 		t.Skip("-short: skipping the contention benchmark")
 	}
-	path, err := exec.LookPath("bd")
-	if err != nil {
-		t.Skipf("bd is not on PATH: %v", err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), integrationTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, path, "--version") //nolint:gosec // G204: the bd on PATH
-	cmd.Dir = os.TempDir()
-	cmd.Env = integrationBDEnv("")
-	out, err := cmd.Output()
-	require.NoError(t, err, "bd --version")
-	line := strings.TrimSpace(string(out))
-	match := contentionVersion.FindStringSubmatch(line)
-	if match == nil {
-		t.Fatalf("cannot parse the bd version from `bd --version`: %q", line)
-	}
-	if infrabeads.CheckEmbeddedBDVersion("", match[1], nil) != nil {
-		t.Skipf("bd %s is older than %s, the oldest bd embedded workspaces support", match[1], domain.MinEmbeddedBeadsVersion)
-	}
-	t.Logf("bd: %s (%s)", path, line)
-}
-
-// contentionRequireOwnContext is the safety guard before bd writes once the
-// workspace exists: bd context must succeed and report exactly the
-// workspace's own beads dir, in embedded mode. Anything else stops the test.
-func contentionRequireOwnContext(t *testing.T, w *integrationWorkspace) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), integrationTimeout)
-	defer cancel()
-	out, err := integrationBDContext(ctx, w.beadsDir, w.dir)
-	require.NoError(t, err, "SAFETY: bd context in the contention workspace")
-	var answer struct {
-		BeadsDir string `json:"beads_dir"`
-		DoltMode string `json:"dolt_mode"`
-	}
-	require.NoError(t, json.Unmarshal(bytes.TrimSpace(out), &answer), "SAFETY: parsing bd context output %q", out)
-	require.NotEmpty(t, answer.BeadsDir, "SAFETY: bd context names no beads dir; refusing to run bd writes")
-	require.Equal(t, w.beadsDir, integrationCanonical(answer.BeadsDir),
-		"SAFETY: bd context resolves another beads dir; refusing to run bd writes")
-	require.Equal(t, "embedded", answer.DoltMode, "bd init creates an embedded workspace")
+	return integrationBDVersion(t)
 }
 
 // contentionImport imports contentionIssues issues into w with one bd
@@ -330,7 +244,7 @@ func contentionImport(t *testing.T, w *integrationWorkspace) []string {
 		jsonl.WriteByte('\n')
 	}
 
-	contentionRequireOwnContext(t, w)
+	w.requireOwnContext(t, true)
 	start := time.Now()
 	w.bdRequest(t, infrabeads.BDRequest{Args: []string{"import", "-"}, Stdin: jsonl.String(), Timeout: integrationTimeout})
 	t.Logf("imported %d issues in %s", contentionIssues, contentionSeconds(time.Since(start)))
@@ -461,9 +375,9 @@ type contentionMonitor struct {
 	notes []string
 }
 
-// startContentionMonitor subscribes to b's Changes broker and starts
+// contentionStartMonitor subscribes to b's Changes broker and starts
 // watching it until stop, which also runs at cleanup.
-func startContentionMonitor(t *testing.T, b *SnapshotBackend, tracker *contentionTracker, writer *contentionWriter, lockPath string) *contentionMonitor {
+func contentionStartMonitor(t *testing.T, b *SnapshotBackend, tracker *contentionTracker, writer *contentionWriter, lockPath string) *contentionMonitor {
 	t.Helper()
 	m := &contentionMonitor{b: b, tracker: tracker, writer: writer, lockPath: lockPath, done: make(chan struct{})}
 	m.lsof, m.lsofErr = exec.LookPath("lsof")
