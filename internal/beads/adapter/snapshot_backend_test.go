@@ -429,7 +429,8 @@ func TestSnapshotBackend_ConcurrentFirstQueriesBuildOnce(t *testing.T) {
 }
 
 // TestSnapshotBackend_FailedFirstBuildIsRetried: a failed first build
-// installs nothing, so the next query builds again.
+// installs nothing, so a later query builds again once the failure backoff
+// allows (see TestSnapshotScheduler_FirstBuildBacksOff).
 func TestSnapshotBackend_FailedFirstBuildIsRetried(t *testing.T) {
 	inner := generationRunner(t)
 	var fail atomic.Bool
@@ -440,7 +441,8 @@ func TestSnapshotBackend_FailedFirstBuildIsRetried(t *testing.T) {
 		}
 		return inner.answer(ctx, req)
 	}}
-	b := newTestBackend(t, runner.run)
+	clock := newFakeClock(schedStart)
+	b := newTestBackendWith(t, newTestWorkspace(t), SnapshotBackendConfig{BDVersion: "1.3.2", Runner: runner.run, Clock: clock})
 	query := b.Services().QueryExecutor
 
 	_, err := query.Execute("type = task")
@@ -448,6 +450,11 @@ func TestSnapshotBackend_FailedFirstBuildIsRetried(t *testing.T) {
 	require.Nil(t, b.current.Load())
 
 	fail.Store(false)
+	_, err = query.Execute("type = task")
+	require.EqualError(t, err, "bd export failed: boom", "the backoff defers the retry")
+	require.Equal(t, 1, runner.count("export"))
+
+	clock.Advance(firstFailureBackoff)
 	issues, err := query.Execute("type = task")
 	require.NoError(t, err)
 	_, err = checkGeneration(issues)
@@ -608,7 +615,7 @@ func TestSnapshotBackend_ReaderRetriesRetiredSnapshot(t *testing.T) {
 	b := newTestBackend(t, generationRunner(t).run)
 	require.NoError(t, b.CheckCompatibility())
 	old := b.current.Load()
-	next, err := b.build(b.ctx)
+	next, err := b.build(b.ctx, func(string) {})
 	require.NoError(t, err)
 
 	old.mu.Lock()

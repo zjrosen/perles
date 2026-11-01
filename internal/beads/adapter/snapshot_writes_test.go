@@ -185,11 +185,6 @@ func overlaySize(b *SnapshotBackend) int {
 	return len(b.overlay)
 }
 
-// fixedClock is a Clock stopped at now.
-type fixedClock struct{ now time.Time }
-
-func (c fixedClock) Now() time.Time { return c.now }
-
 // captureLog sends perles' log to a temp file for the test and returns a
 // function that reads it.
 func captureLog(t *testing.T) func() string {
@@ -222,7 +217,7 @@ func TestSnapshotBackend_AddCommentReadAfterWrite(t *testing.T) {
 	b := newTestBackend(t, bd.runner.run)
 	require.NoError(t, b.CheckCompatibility())
 	te := b.Services().TaskExecutor
-	stale, err := b.build(b.ctx) // exported before the write: does not cover it
+	stale, err := b.build(b.ctx, func(string) {}) // exported before the write: does not cover it
 	require.NoError(t, err)
 	before := requestCount(bd.runner)
 
@@ -285,7 +280,7 @@ func TestSnapshotBackend_AddCommentFetchFailure(t *testing.T) {
 		return nil
 	}
 	b := newTestBackendWith(t, newTestWorkspace(t), SnapshotBackendConfig{
-		BDVersion: "1.3.2", Runner: bd.runner.run, Clock: fixedClock{now: now},
+		BDVersion: "1.3.2", Runner: bd.runner.run, Clock: newFakeClock(now),
 	})
 	require.NoError(t, b.CheckCompatibility())
 	te := b.Services().TaskExecutor
@@ -509,8 +504,9 @@ func TestSnapshotBackend_ReadsAfterClose(t *testing.T) {
 }
 
 // TestSnapshotBackend_WritesRecordOwnWrites: every IssueWriter method, on
-// success, bumps writeSeq and calls onOwnWrite once with the new value; on
-// failure it does neither. No write builds a snapshot.
+// success, records an own write (ownWrite bumps writeSeq and asks for a
+// rebuild, see TestSnapshotScheduler_OwnWritesTrigger); on failure it does
+// not. No write builds a snapshot.
 func TestSnapshotBackend_WritesRecordOwnWrites(t *testing.T) {
 	title, notes := "New title", "New notes"
 	writes := []struct {
@@ -560,22 +556,15 @@ func TestSnapshotBackend_WritesRecordOwnWrites(t *testing.T) {
 				return "", nil
 			}}
 			b := newTestBackend(t, runner.run)
-			var hooked []uint64
-			b.onOwnWrite = func(seq uint64) {
-				require.Equal(t, b.writeSeq.Load(), seq, "the hook runs after the bump")
-				hooked = append(hooked, seq)
-			}
 			te := b.Services().TaskExecutor
 
 			require.NoError(t, tt.write(te))
 			require.NoError(t, tt.write(te))
 			require.Equal(t, uint64(2), b.writeSeq.Load())
-			require.Equal(t, []uint64{1, 2}, hooked)
 
 			failing.Store(true)
 			require.ErrorContains(t, tt.write(te), "boom")
 			require.Equal(t, uint64(2), b.writeSeq.Load(), "a failed write is not counted")
-			require.Equal(t, []uint64{1, 2}, hooked, "nor hooked")
 			require.Zero(t, runner.count("export"))
 		})
 	}

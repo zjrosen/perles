@@ -26,9 +26,10 @@ type commentOverlay struct {
 
 // snapshotIssueExecutor is the IssueExecutor under a SnapshotBackend's
 // TaskExecutor. Every write goes through bd; after a successful one it bumps
-// the backend's writeSeq and calls onOwnWrite. A failed write does neither.
-// Writes never build or wait on a snapshot, and neither does ShowIssue,
-// which always runs bd --readonly show, so it is always fresh.
+// the backend's writeSeq and asks for a rebuild (see ownWrite). A failed
+// write does neither. Writes never build or wait on a snapshot, and neither
+// does ShowIssue, which always runs bd --readonly show, so it is always
+// fresh.
 //
 // AddComment also reads the issue's comments back into the comment overlay,
 // so a GetComments straight after it (as the TUI's comment editor runs it)
@@ -121,21 +122,21 @@ func (e snapshotIssueExecutor) UpdateIssue(issueID string, opts beads.UpdateIssu
 	return e.wrote(e.writes.UpdateIssue(issueID, opts))
 }
 
-// ownWrite records a successful write made through perles: it bumps
-// writeSeq, calls onOwnWrite with the new value and returns it. A write that
-// fails partway (UpdateIssue runs up to three bd commands) is not recorded;
-// what it did write is a database change like any other.
+// ownWrite records a successful write made through perles and returns its
+// writeSeq. It bumps writeSeq, then asks for a rebuild through the hash
+// gate (T2, see requestRebuild): bd changed the manifest, so the gate
+// passes and the scheduler rebuilds once pacing and the failure backoff
+// allow. It runs on the writer's goroutine and never blocks: writes never
+// wait on a rebuild. Until a build covers the write, queries answer from
+// the installed snapshot without it, while comment reads use the overlay.
+//
+// A write that fails partway (UpdateIssue runs up to three bd commands) is
+// not recorded; what it did write reaches the snapshot like any external
+// change, through the manifest watcher.
 func (b *SnapshotBackend) ownWrite() uint64 {
 	seq := b.writeSeq.Add(1)
-	b.onOwnWrite(seq)
+	b.requestRebuild(false)
 	return seq
-}
-
-// logOwnWrite is the default onOwnWrite. Until a later build covers the
-// write, queries answer from the installed snapshot without it, while
-// comment reads use the overlay.
-func (b *SnapshotBackend) logOwnWrite(seq uint64) {
-	log.Debug(log.CatBeads, "Own write is not in the snapshot yet", "writeSeq", seq)
 }
 
 // overlayComment fills the issue's overlay entry after perles added a
@@ -206,10 +207,10 @@ func (b *SnapshotBackend) liveOverlay(s *snapshot, issueID string) ([]beads.Comm
 
 // pruneOverlay drops the overlay entries whose write is covered by a
 // snapshot with this coveredWriteSeq. install calls it after retiring the
-// snapshot that one replaced. Installs run one at a time (the lazy first
-// build is shared, later builds are not concurrent) and covered write
-// sequences only grow, so by then no reader holds a snapshot that lacks an
-// entry it drops.
+// snapshot that one replaced. Installs run one at a time, in build order
+// (every build holds the scheduler's buildMu), and covered write sequences
+// only grow, so by then no reader holds a snapshot that lacks an entry it
+// drops.
 func (b *SnapshotBackend) pruneOverlay(coveredWriteSeq uint64) {
 	b.overlayMu.Lock()
 	defer b.overlayMu.Unlock()

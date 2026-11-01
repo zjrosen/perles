@@ -21,7 +21,9 @@ import (
 	infrabeads "github.com/zjrosen/perles/internal/beads/infrastructure"
 	"github.com/zjrosen/perles/internal/cachemanager"
 	"github.com/zjrosen/perles/internal/log"
+	"github.com/zjrosen/perles/internal/pubsub"
 	"github.com/zjrosen/perles/internal/task"
+	"github.com/zjrosen/perles/internal/watcher"
 )
 
 // Compile-time checks.
@@ -42,15 +44,22 @@ var errNoSnapshot = errors.New("no snapshot installed yet")
 // process-wide, so each backend's generations get their own name prefix.
 var snapshotBackendIDs atomic.Uint64
 
-// Clock tells a SnapshotBackend the time.
+// Clock tells a SnapshotBackend the time, and when to wake its scheduler.
 type Clock interface {
 	Now() time.Time
+	// WaitUntil returns a channel that receives the time once it is
+	// deadline or later (at once when deadline has passed).
+	WaitUntil(deadline time.Time) <-chan time.Time
 }
 
 // systemClock is the Clock of a SnapshotBackend configured without one.
 type systemClock struct{}
 
 func (systemClock) Now() time.Time { return time.Now() }
+
+func (systemClock) WaitUntil(deadline time.Time) <-chan time.Time {
+	return time.After(time.Until(deadline))
+}
 
 // SnapshotBackendConfig configures a SnapshotBackend. BeadsDir, ManifestPath
 // and Runner are required.
@@ -73,7 +82,7 @@ type SnapshotBackendConfig struct {
 	// it is infrabeads.NewBDRunner(workDir, beadsDir), which sets where bd
 	// runs.
 	Runner infrabeads.BDRunner
-	// Clock times builds; nil means the system clock.
+	// Clock times builds and paces rebuilds; nil means the system clock.
 	Clock Clock
 }
 
@@ -99,6 +108,10 @@ type SnapshotBackendConfig struct {
 // a snapshot is installed, queries and comment reads never run bd and never
 // wait on an export.
 //
+// Later snapshots are built by the scheduler (snapshot_scheduler.go), when
+// the manifest watcher, perles' own writes or FlushCaches find the manifest
+// changed, and the backend publishes each install on Changes().
+//
 // Create it with NewSnapshotBackend; it is safe for concurrent use.
 type SnapshotBackend struct {
 	id           uint64
@@ -118,11 +131,6 @@ type SnapshotBackend struct {
 	// first snapshot) through run with ctx as their parent, so Close cancels
 	// them and later ones fail.
 	bdReads *infrabeads.BDExecutor
-	// onOwnWrite is called on the writer's goroutine after each successful
-	// write made through perles, with the writeSeq that write was given. It
-	// must not block, since writes never wait on a rebuild. It is
-	// b.logOwnWrite; tests replace it to observe writes.
-	onOwnWrite func(seq uint64)
 
 	// ctx is the parent context of every bd read; Close cancels it with
 	// errSnapshotBackendClosed.
@@ -156,6 +164,11 @@ type SnapshotBackend struct {
 	firstMu    sync.Mutex
 	firstBuild *pendingBuild
 
+	// sched decides when to rebuild, and serializes builds.
+	sched scheduler
+	// changes is the Changes() broker: created here, closed by Close.
+	changes *pubsub.Broker[watcher.WatcherEvent]
+
 	services task.BackendServices
 }
 
@@ -185,8 +198,9 @@ type pendingBuild struct {
 }
 
 // NewSnapshotBackend returns the backend of the embedded workspace described
-// by cfg. It runs no bd and builds no snapshot: the first query or
-// CheckCompatibility does.
+// by cfg. It runs no bd, builds no snapshot and starts no goroutine: the
+// first query or CheckCompatibility builds the first snapshot, and its
+// install starts the scheduler and the manifest watcher.
 func NewSnapshotBackend(cfg SnapshotBackendConfig) (*SnapshotBackend, error) {
 	switch {
 	case cfg.BeadsDir == "":
@@ -215,8 +229,10 @@ func NewSnapshotBackend(cfg SnapshotBackendConfig) (*SnapshotBackend, error) {
 		ctx:          ctx,
 		cancel:       cancel,
 		overlay:      map[string]commentOverlay{},
+		changes:      pubsub.NewBroker[watcher.WatcherEvent](),
 	}
-	b.onOwnWrite = b.logOwnWrite
+	b.sched.wake = make(chan struct{}, 1)
+	b.sched.newWatcher = b.watchManifest
 
 	// No WithFallbackCommentReader: BeadsTaskExecutor falls back on any
 	// primary-reader error, which would run bd on the caller's goroutine
@@ -237,9 +253,10 @@ func NewSnapshotBackend(cfg SnapshotBackendConfig) (*SnapshotBackend, error) {
 		QueryHelpers:      NewBeadsQueryHelpers(),
 		SyntaxHighlighter: NewBeadsSyntaxHighlighter(),
 		Capabilities:      beadsCapabilities(),
-		// No DBPath: the app creates no file watcher. bd rewrites the
-		// manifest on every command, reads included, so the backend
-		// watches it itself.
+		// No DBPath: the app creates no file watcher and listens to
+		// Changes() instead. bd rewrites the manifest on every command,
+		// reads included, so the backend watches it itself and publishes
+		// installs only.
 		DBPath: "",
 	}
 	return b, nil
@@ -253,22 +270,19 @@ func (b *SnapshotBackend) Services() task.BackendServices {
 // CheckCompatibility builds and installs the first snapshot when none is
 // installed yet, so the export runs before the UI starts, and returns the
 // build's error unchanged: the embedded bd version gate's
-// *infrabeads.UnsupportedWorkspaceError or bd's translated error.
+// *infrabeads.UnsupportedWorkspaceError or bd's translated error. Unlike a
+// query, it builds even while the failure backoff defers retries.
 func (b *SnapshotBackend) CheckCompatibility() error {
-	return b.buildFirst()
+	return b.buildFirst(true)
 }
 
-// FlushCaches does nothing: each snapshot is immutable and owns its BQL
-// caches, so they cannot be stale for the snapshot they belong to.
-func (b *SnapshotBackend) FlushCaches(context.Context) error {
-	return nil
-}
-
-// Close cancels the backend's running bd reads, retires the current snapshot
-// (waiting for its in-flight readers) and deletes its memdb. A build that
-// finishes afterwards is discarded. Reads after Close fail, ShowIssue
-// included. Writes do not depend on the snapshot: Close neither cancels one
-// in flight nor refuses later ones. Close is idempotent.
+// Close cancels the backend's running bd reads (a running build fails and
+// is discarded), stops the manifest watcher and the scheduler goroutine,
+// closes the Changes broker, and retires the current snapshot (waiting for
+// its in-flight readers) and deletes its memdb. A build that finishes
+// afterwards is discarded. Reads after Close fail, ShowIssue included.
+// Writes do not depend on the snapshot: Close neither cancels one in flight
+// nor refuses later ones. Close is idempotent.
 func (b *SnapshotBackend) Close() error {
 	b.cancel(errSnapshotBackendClosed)
 
@@ -280,19 +294,25 @@ func (b *SnapshotBackend) Close() error {
 	old := b.current.Swap(nil)
 	b.installMu.Unlock()
 
-	if old == nil {
-		return nil
+	err := b.stopLoops()
+	b.changes.Close()
+	if old != nil {
+		if retireErr := old.retire(); retireErr != nil {
+			err = errors.Join(err, fmt.Errorf("closing snapshot database: %w", retireErr))
+		}
 	}
-	if err := old.retire(); err != nil {
-		return fmt.Errorf("closing snapshot database: %w", err)
-	}
-	return nil
+	return err
 }
 
 // buildFirst builds and installs the first snapshot when none is installed.
 // Concurrent callers share one build and its result. A failed build installs
-// nothing, so the next caller builds again.
-func (b *SnapshotBackend) buildFirst() error {
+// nothing, so a later caller builds again, but a query (explicit false) does
+// so only once the scheduler's pacing and failure backoff allow; until then
+// it returns the last build's error at once without running bd. A broken
+// workspace therefore spawns no bd per query, in the daemon too (it never
+// calls CheckCompatibility). FlushCaches resets the backoff. An explicit
+// request (CheckCompatibility) always builds.
+func (b *SnapshotBackend) buildFirst(explicit bool) error {
 	b.firstMu.Lock()
 	if b.current.Load() != nil {
 		b.firstMu.Unlock()
@@ -306,6 +326,12 @@ func (b *SnapshotBackend) buildFirst() error {
 	if b.closed.Load() {
 		b.firstMu.Unlock()
 		return errSnapshotBackendClosed
+	}
+	if !explicit {
+		if err := b.deferredBuildErr(); err != nil {
+			b.firstMu.Unlock()
+			return err
+		}
 	}
 	p := &pendingBuild{done: make(chan struct{})}
 	b.firstBuild = p
@@ -321,20 +347,13 @@ func (b *SnapshotBackend) buildFirst() error {
 	return p.err
 }
 
-// rebuild builds the next generation and installs it.
-func (b *SnapshotBackend) rebuild(ctx context.Context) error {
-	next, err := b.build(ctx)
-	if err != nil {
-		return err
-	}
-	return b.install(next)
-}
-
 // build makes the next snapshot generation without installing it:
 //
 //  1. the embedded bd version gate, before any bd call;
 //  2. the manifest hash and writeSeq, read before exporting, so the
-//     snapshot claims no more than the export can cover;
+//     snapshot claims no more than the export can cover. started is then
+//     called with the hash, still before the export (rebuild publishes it
+//     as the in-flight hash);
 //  3. the bd reads: export, blocked flags, custom statuses;
 //  4. only then, a fresh memdb database with a unique per-generation name,
 //     and a BQL executor over it with fresh caches.
@@ -342,7 +361,7 @@ func (b *SnapshotBackend) rebuild(ctx context.Context) error {
 // Every bd read runs before the memdb database is created, so a bd failure
 // leaves nothing to free. A failure from the load on deletes the database.
 // bd's errors are returned unchanged.
-func (b *SnapshotBackend) build(ctx context.Context) (*snapshot, error) {
+func (b *SnapshotBackend) build(ctx context.Context, started func(manifestHash string)) (*snapshot, error) {
 	start := b.clock.Now()
 	if err := infrabeads.CheckEmbeddedBDVersion(b.beadsDir, b.bdVersion, b.bdContextErr); err != nil {
 		return nil, err
@@ -352,6 +371,7 @@ func (b *SnapshotBackend) build(ctx context.Context) (*snapshot, error) {
 		return nil, err
 	}
 	coveredWriteSeq := b.writeSeq.Load()
+	started(manifestHash)
 
 	data, err := b.readSnapshotData(ctx)
 	if err != nil {
@@ -413,7 +433,8 @@ func (b *SnapshotBackend) readSnapshotData(ctx context.Context) (infrabeads.Snap
 
 // install makes next the current snapshot, then retires the one it
 // replaces and drops the comment overlay entries next covers. After Close it
-// discards next instead and returns errSnapshotBackendClosed.
+// discards next instead and returns errSnapshotBackendClosed. Its callers
+// hold the scheduler's buildMu, so installs run one at a time.
 func (b *SnapshotBackend) install(next *snapshot) error {
 	b.installMu.Lock()
 	if b.closed.Load() {
@@ -475,7 +496,7 @@ func (b *SnapshotBackend) execute(query string) ([]beads.Issue, error) {
 	}
 	err := b.withCurrent(runQuery)
 	if errors.Is(err, errNoSnapshot) {
-		if err = b.buildFirst(); err == nil {
+		if err = b.buildFirst(false); err == nil {
 			err = b.withCurrent(runQuery)
 		}
 	}
@@ -549,17 +570,20 @@ func (s *snapshot) retire() error {
 }
 
 // newSnapshotExecutor returns a BQL executor over a snapshot database with
-// fresh caches, so no cached result outlives its generation.
+// fresh caches, so no cached result outlives its generation. The caches run
+// no janitor (cleanup interval 0): a janitor is a goroutine per cache, freed
+// only by a finalizer, which would pile up across generations. Expired
+// entries are still never returned, and each cache goes with its snapshot.
 func newSnapshotExecutor(db *sql.DB) *bql.Executor {
 	bqlCache := cachemanager.NewInMemoryCacheManager[string, []beads.Issue](
 		"snapshot-bql-cache",
 		cachemanager.DefaultExpiration,
-		cachemanager.DefaultCleanupInterval,
+		0,
 	)
 	depGraphCache := cachemanager.NewInMemoryCacheManager[string, *bql.DependencyGraph](
 		"snapshot-bql-dep-cache",
 		cachemanager.DefaultExpiration,
-		cachemanager.DefaultCleanupInterval,
+		0,
 	)
 	return bql.NewExecutor(db, appbeads.DialectSQLite, bqlCache, depGraphCache)
 }
