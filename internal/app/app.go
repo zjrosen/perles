@@ -84,7 +84,10 @@ type Model struct {
 	// Backend for cache flushing on DB changes
 	backend taskpkg.Backend
 
-	// File watcher for auto-refresh (pubsub-based)
+	// Change events for auto-refresh (pubsub-based). watcherListener listens
+	// to the backend's Changes() broker when the backend is a changeNotifier,
+	// otherwise to the file watcher on Services().DBPath. watcherHandle is set
+	// only when the app owns that file watcher.
 	watcherHandle   *watcher.Watcher
 	watcherCtx      context.Context
 	watcherCancel   context.CancelFunc
@@ -114,6 +117,24 @@ type Model struct {
 	// startupWarning is a non-fatal configuration problem detected during
 	// NewWithConfig (e.g., an invalid theme). Shown as a warning toast on Init.
 	startupWarning string
+}
+
+// changeNotifier is implemented by backends that detect data changes
+// themselves instead of through a file watcher on Services().DBPath (the
+// beads embedded-Dolt snapshot backend, which reports DBPath ""). The app
+// listens to Changes() and handles its events like file-watcher events:
+// DBChanged flushes the backend caches and reloads the active mode, and
+// WatcherError is only logged. The backend owns the broker and closes it in
+// Close; the app only cancels its subscription.
+//
+// The FlushCaches call that follows each DBChanged must not itself cause
+// another change event, or the app and the backend would refresh each other
+// forever. A backend publishes DBChanged only after installing new data, so
+// that FlushCaches finds nothing new and must publish nothing. The snapshot
+// backend's hash gate guarantees this: the manifest hash still equals the
+// installed snapshot's, so the flush is dropped without a rebuild.
+type changeNotifier interface {
+	Changes() *pubsub.Broker[watcher.WatcherEvent]
 }
 
 // AppConfig holds all pre-constructed dependencies for the application.
@@ -173,7 +194,8 @@ func NewWithConfig(appCfg AppConfig) (Model, error) {
 	// Initialize global zone manager for mouse click detection (bubblezone)
 	zone.NewGlobal()
 
-	// Initialize file watcher for database change detection
+	// Listen for data changes: to the backend's own change events when it
+	// publishes them, otherwise to a file watcher on the backend's DBPath.
 	var (
 		watcherHandle   *watcher.Watcher
 		watcherCtx      context.Context
@@ -181,7 +203,11 @@ func NewWithConfig(appCfg AppConfig) (Model, error) {
 		watcherListener *pubsub.ContinuousListener[watcher.WatcherEvent]
 	)
 
-	if dbPath != "" {
+	if notifier, ok := backend.(changeNotifier); ok {
+		watcherCtx, watcherCancel = context.WithCancel(context.Background())
+		watcherListener = pubsub.NewContinuousListener(watcherCtx, notifier.Changes())
+		log.Debug(log.CatWatcher, "Listening to backend change events instead of a file watcher")
+	} else if dbPath != "" {
 		debounceDur := watcherCfg.DebounceDuration
 		if debounceDur == 0 {
 			debounceDur = 100 * time.Millisecond

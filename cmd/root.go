@@ -308,9 +308,8 @@ func runApp(cmd *cobra.Command, args []string) error {
 
 	backend, err := newBackend(&cfg, workDir)
 	if err != nil {
-		if unsupportedErr, ok := errors.AsType[*task.UnsupportedWorkspaceError](err); ok {
-			log.Info(log.CatBeads, "Unsupported beads workspace", "kind", string(unsupportedErr.Kind), "detail", unsupportedErr.Detail)
-			return runStartupScreen(unsupported.New(unsupportedErr.Kind, unsupportedErr.Detail))
+		if screen, ok := unsupportedWorkspaceScreen(err); ok {
+			return runStartupScreen(screen)
 		}
 		if serverDown, ok := errors.AsType[*task.ServerDownError](err); ok {
 			log.Info(log.CatBeads, "Backend server unreachable", "error", serverDown)
@@ -327,6 +326,9 @@ func runApp(cmd *cobra.Command, args []string) error {
 
 	// Verify the backend data store is compatible with this version of perles
 	if err := backend.CheckCompatibility(); err != nil {
+		if screen, ok := unsupportedWorkspaceScreen(err); ok {
+			return runStartupScreen(screen)
+		}
 		if versionErr, ok := errors.AsType[*task.VersionIncompatibleError](err); ok {
 			log.Debug(log.CatBeads, "Version incompatible", "current", versionErr.Current, "required", versionErr.Required)
 			return runStartupScreen(outdated.New(versionErr.Current, versionErr.Required))
@@ -407,6 +409,20 @@ func Execute() error {
 func SetVersion(v string) {
 	version = v
 	rootCmd.Version = v
+}
+
+// unsupportedWorkspaceScreen returns the unsupported-workspace screen when err
+// wraps a *task.UnsupportedWorkspaceError, and logs its kind and detail. ok is
+// false for any other error. Both startup checks use it: newBackend rejects a
+// workspace it cannot open, and CheckCompatibility rejects one it opened but
+// cannot read (an embedded Dolt workspace whose snapshot cannot be built).
+func unsupportedWorkspaceScreen(err error) (screen unsupported.Model, ok bool) {
+	unsupportedErr, ok := errors.AsType[*task.UnsupportedWorkspaceError](err)
+	if !ok {
+		return unsupported.Model{}, false
+	}
+	log.Info(log.CatBeads, "Unsupported beads workspace", "kind", string(unsupportedErr.Kind), "detail", unsupportedErr.Detail)
+	return unsupported.New(unsupportedErr.Kind, unsupportedErr.Detail), true
 }
 
 // runStartupScreen runs a full-screen view shown instead of the board when

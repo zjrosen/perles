@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,6 +15,8 @@ import (
 	"github.com/zjrosen/perles/internal/config"
 	"github.com/zjrosen/perles/internal/keys"
 	"github.com/zjrosen/perles/internal/orchestration/client"
+	"github.com/zjrosen/perles/internal/task"
+	"github.com/zjrosen/perles/internal/ui/unsupported"
 )
 
 // TestNoBeadsDirectory_BackendFails verifies that newBackend returns an error
@@ -62,6 +66,42 @@ func TestNoBeadsDirectory_WithBeadsSucceeds(t *testing.T) {
 	backend, err := newBackend(&cfg, projectRoot)
 	if err == nil {
 		_ = backend.Close()
+	}
+}
+
+// TestUnsupportedWorkspaceScreen verifies the error-to-screen choice shared by
+// the newBackend and CheckCompatibility startup branches: an unsupported
+// workspace error, bare or wrapped, shows the unsupported screen with its kind
+// and detail, and any other error is left to the caller.
+func TestUnsupportedWorkspaceScreen(t *testing.T) {
+	unsupportedErr := &task.UnsupportedWorkspaceError{
+		Kind:     task.WorkspaceEmbeddedDolt,
+		BeadsDir: "/repo/.beads",
+		Detail:   "bd export failed: beads database needs a schema migration",
+	}
+	want := unsupported.New(task.WorkspaceEmbeddedDolt, unsupportedErr.Detail)
+
+	tests := []struct {
+		name   string
+		err    error
+		wantOK bool
+	}{
+		{name: "unsupported workspace", err: unsupportedErr, wantOK: true},
+		{name: "wrapped unsupported workspace", err: fmt.Errorf("building snapshot: %w", unsupportedErr), wantOK: true},
+		{name: "version incompatible", err: &task.VersionIncompatibleError{Current: "0.9.0", Required: "1.0.0"}},
+		{name: "server down", err: &task.ServerDownError{Host: "127.0.0.1", Port: 3307}},
+		{name: "other error", err: errors.New("connection refused")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			screen, ok := unsupportedWorkspaceScreen(tt.err)
+			require.Equal(t, tt.wantOK, ok)
+			if tt.wantOK {
+				require.Equal(t, want, screen)
+			} else {
+				require.Equal(t, unsupported.Model{}, screen)
+			}
+		})
 	}
 }
 
