@@ -27,11 +27,18 @@ package adapter
 // It asserts:
 //
 //   - external bd update p95 <= baseline p95 + 2.0s, and max <= 10s;
-//   - perles rebuilt at least twice while the writes ran;
+//   - at least two rebuilds overlapped the writes (a build still running
+//     when the writes end is waited for, and counts);
 //   - between rebuilds, lsof shows no process the test process spawned,
-//     other than the external writer's bd, with noms/LOCK open, nor the test
-//     process itself with it open for writing (see classify for its
-//     read-only manifest-watcher descriptor on macOS).
+//     other than the external writer's bd, with noms/LOCK open, no bd or
+//     dolt process that it cannot trace to the external writer (an orphaned
+//     perles bd, say), nor the test process itself with it open for writing
+//     (see classify for its read-only manifest-watcher descriptor on macOS);
+//   - at least one of those lsof checks followed an install that ended once
+//     the writes had started, and, on macOS, where that descriptor is always
+//     there, they listed some holder;
+//   - first, as a positive control, lsof lists a child of the test process
+//     holding noms/LOCK open, and classify counts it as perles'.
 //
 // It logs the latencies (p50/p95/max), each rebuild's duration and the idle
 // gap before it, the time spent in each bd read, and the machine.
@@ -51,7 +58,7 @@ package adapter
 //   - bd refuses the workspace location as an "unsafe location".
 //
 // A `bd --version` it cannot parse fails the test, as does any other failure.
-// The lsof check alone is skipped, with a logged reason, when lsof is not on
+// The lsof checks alone are skipped, with a logged reason, when lsof is not on
 // PATH.
 //
 // Safety: the workspace is a fresh os.MkdirTemp directory under the user's
@@ -64,9 +71,12 @@ package adapter
 // context must report exactly the workspace's own embedded beads dir, or the
 // test stops. This repository's .beads is never touched.
 //
-// The workspace (its bd version check and safety guard included),
-// environment and backend helpers are the integration tests'
-// (snapshot_integration_test.go); the helpers below are prefixed contention.
+// The workspace comes from the integration tests' helpers
+// (snapshot_integration_test.go): integrationInitWorkspace, with the bd
+// check of integrationBDVersion and the safety guard of requireOwnContext,
+// then the workspace's backend and bd helpers and integrationBDEnv. The
+// helpers below, the opt-in gate included, are this file's own and prefixed
+// contention.
 
 import (
 	"bytes"
@@ -141,13 +151,19 @@ func TestSnapshotBackend_Contention_LockBudget(t *testing.T) {
 	lockPath := filepath.Join(filepath.Dir(b.manifestPath), "LOCK")
 	require.FileExists(t, lockPath)
 	m := contentionStartMonitor(t, b, tracker, writer, lockPath)
+	if m.lsof != "" {
+		m.control(t)
+	}
 	require.NoError(t, b.CheckCompatibility(), "the pre-build")
 	require.Len(t, integrationQuery(t, b, `id != ""`), contentionIssues, "the snapshot holds every issue")
 
 	w.requireOwnContext(t, true)
 	windowStart := time.Now()
 	loaded := writer.updates(t, ids[contentionUpdates:2*contentionUpdates])
-	window := time.Since(windowStart)
+	windowEnd := time.Now()
+	// A build still running now overlapped the writes too: let it install,
+	// so that it counts.
+	inFlight := m.awaitBuild(t)
 	m.stop()
 
 	m.mu.Lock()
@@ -156,6 +172,7 @@ func TestSnapshotBackend_Contention_LockBudget(t *testing.T) {
 	m.mu.Unlock()
 	require.NotEmpty(t, builds, "the pre-build installed a snapshot")
 	pre, rebuilds := builds[0], builds[1:]
+	during := contentionOverlapping(rebuilds, windowStart, windowEnd)
 
 	base, load := contentionSummarize(baseline), contentionSummarize(loaded)
 	t.Logf("machine: %s/%s, %d CPUs", runtime.GOOS, runtime.GOARCH, runtime.NumCPU())
@@ -165,11 +182,14 @@ func TestSnapshotBackend_Contention_LockBudget(t *testing.T) {
 		contentionSeconds(base.p95+contentionP95Slack), contentionSeconds(contentionP95Slack), contentionSeconds(contentionMaxLatency))
 	t.Logf("pre-build (CheckCompatibility): %s; the writes started %s after it ended",
 		contentionSeconds(pre.duration()), contentionSeconds(windowStart.Sub(pre.end)))
-	contentionLogRebuilds(t, pre, rebuilds, window)
+	if inFlight {
+		t.Log("a build was running when the writes ended; the benchmark waited for it")
+	}
+	contentionLogRebuilds(t, pre, rebuilds, windowStart, windowEnd)
 	contentionLogReads(t, tracker)
 
 	require.Empty(t, failures, "no snapshot build failed")
-	require.GreaterOrEqual(t, len(rebuilds), contentionMinRebuilds, "perles rebuilt while the writes ran")
+	require.GreaterOrEqual(t, len(during), contentionMinRebuilds, "perles rebuilt while the writes ran")
 
 	t.Run("lock budget", func(t *testing.T) {
 		require.LessOrEqual(t, load.p95, base.p95+contentionP95Slack,
@@ -184,14 +204,30 @@ func TestSnapshotBackend_Contention_LockBudget(t *testing.T) {
 		}
 		m.mu.Lock()
 		defer m.mu.Unlock()
-		t.Logf("lsof checks between rebuilds: %d (discarded because perles started bd during the check: %d); "+
-			"external writer bd processes seen holding noms/LOCK: %d", m.checks, m.discarded, m.writerSeen)
+		// Only the checks after installs that ended once the writes had
+		// started count: the pre-build's own check runs before any write.
+		var checks, holders, writers int
+		for _, c := range m.checks {
+			if !c.installEnd.Before(windowStart) {
+				checks++
+				holders += c.holders
+				writers += c.writers
+			}
+		}
+		t.Logf("lsof checks between rebuilds: %d, %d of them after installs that ended once the writes had started "+
+			"(discarded because perles started bd during the check: %d); noms/LOCK holders those listed: %d, "+
+			"of which the external writer's bd processes: %d", len(m.checks), checks, m.discarded, holders, writers)
 		for _, note := range m.notes {
 			t.Log(note)
 		}
 		require.Empty(t, m.checkErrs, "every lsof check ran")
 		require.Empty(t, m.violations)
-		require.Positive(t, m.checks, "at least one check ran while perles ran no bd")
+		require.Positive(t, checks, "at least one check, after an install that ended once the writes had started, ran while perles ran no bd")
+		if runtime.GOOS == "darwin" {
+			// The manifest watcher's kqueue descriptor (see classify) is
+			// there in every check, so an empty listing means lsof missed it.
+			require.Positive(t, holders, "on macOS lsof lists noms/LOCK's holders during the writes")
+		}
 	})
 }
 
@@ -290,10 +326,15 @@ func (cw *contentionWriter) update(t *testing.T, id string, priority int) {
 	cmd.Env = integrationBDEnv(cw.w.beadsDir)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	require.NoError(t, cmd.Start(), "starting bd update %s", id)
+	// Start under the lock: an lsof check that lists this bd before its PID
+	// is recorded waits for it in spawned.
 	cw.mu.Lock()
-	cw.pids[cmd.Process.Pid] = true
+	err := cmd.Start()
+	if err == nil {
+		cw.pids[cmd.Process.Pid] = true
+	}
 	cw.mu.Unlock()
+	require.NoError(t, err, "starting bd update %s", id)
 	require.NoError(t, cmd.Wait(), "bd update %s: %s", id, strings.TrimSpace(stderr.String()))
 }
 
@@ -344,6 +385,28 @@ type contentionBuild struct{ start, end time.Time }
 
 func (b contentionBuild) duration() time.Duration { return b.end.Sub(b.start) }
 
+// contentionOverlapping returns the builds that ran during [start, end).
+func contentionOverlapping(builds []contentionBuild, start, end time.Time) []contentionBuild {
+	var during []contentionBuild
+	for _, b := range builds {
+		if b.start.Before(end) && b.end.After(start) {
+			during = append(during, b)
+		}
+	}
+	return during
+}
+
+// contentionCheck is one lsof check of noms/LOCK made while perles ran no
+// bd.
+type contentionCheck struct {
+	// installEnd is when the build whose install the check followed ended.
+	installEnd time.Time
+	// holders counts the processes lsof listed with noms/LOCK open; writers
+	// those of them that were the external writer's bd processes, or their
+	// descendants.
+	holders, writers int
+}
+
 // contentionMonitor watches the backend's Changes broker. For each install
 // it records the build's start and end, from the scheduler's own
 // bookkeeping, then checks with lsof that no process perles spawned holds
@@ -356,6 +419,9 @@ type contentionMonitor struct {
 	// lsof is lsof's path, empty when it is not on PATH (lsofErr says why).
 	lsof    string
 	lsofErr error
+	// bdCommands are the command names of bd and Dolt processes (see
+	// contentionBDCommands).
+	bdCommands map[string]bool
 
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -363,15 +429,15 @@ type contentionMonitor struct {
 	mu       sync.Mutex
 	builds   []contentionBuild
 	failures []error
-	// checks counts the lsof checks made while perles ran no bd; discarded
-	// those thrown away because perles started bd during them. writerSeen
-	// counts the external writer's bd processes the checks found holding
-	// noms/LOCK.
-	checks, discarded, writerSeen int
-	checkErrs                     []error
-	violations                    []string
+	// checks are the lsof checks made while perles ran no bd; discarded
+	// counts those thrown away because perles started bd during them.
+	checks     []contentionCheck
+	discarded  int
+	checkErrs  []error
+	violations []string
 	// notes describe the holders that break nothing, once each: processes
-	// this test did not spawn, and the test process's read-only descriptor.
+	// other than bd or Dolt that this test did not spawn, and the test
+	// process's read-only descriptor.
 	notes []string
 }
 
@@ -379,7 +445,10 @@ type contentionMonitor struct {
 // watching it until stop, which also runs at cleanup.
 func contentionStartMonitor(t *testing.T, b *SnapshotBackend, tracker *contentionTracker, writer *contentionWriter, lockPath string) *contentionMonitor {
 	t.Helper()
-	m := &contentionMonitor{b: b, tracker: tracker, writer: writer, lockPath: lockPath, done: make(chan struct{})}
+	m := &contentionMonitor{
+		b: b, tracker: tracker, writer: writer, lockPath: lockPath,
+		bdCommands: contentionBDCommands(t), done: make(chan struct{}),
+	}
 	m.lsof, m.lsofErr = exec.LookPath("lsof")
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
@@ -389,8 +458,8 @@ func contentionStartMonitor(t *testing.T, b *SnapshotBackend, tracker *contentio
 		for event := range events {
 			switch event.Payload.Type {
 			case watcher.DBChanged:
-				if m.recordBuild() && m.lsof != "" {
-					m.checkLock(ctx)
+				if build, ok := m.recordBuild(); ok && m.lsof != "" {
+					m.checkLock(ctx, build)
 				}
 			case watcher.WatcherError:
 				m.mu.Lock()
@@ -403,16 +472,113 @@ func contentionStartMonitor(t *testing.T, b *SnapshotBackend, tracker *contentio
 	return m
 }
 
+// contentionBDCommands returns the command names that lsof lists for bd and
+// Dolt processes: bd and dolt, and the base names of the bd on PATH and of
+// the file it resolves to.
+func contentionBDCommands(t *testing.T) map[string]bool {
+	t.Helper()
+	path, err := exec.LookPath("bd")
+	require.NoError(t, err)
+	resolved, err := filepath.EvalSymlinks(path)
+	require.NoError(t, err)
+	return map[string]bool{"bd": true, "dolt": true, filepath.Base(path): true, filepath.Base(resolved): true}
+}
+
 // stop ends the subscription and waits for the monitor to return.
 func (m *contentionMonitor) stop() {
 	m.cancel()
 	<-m.done
 }
 
+// control is the lock check's positive control, run before perles starts:
+// lsof must list a child of the test process holding noms/LOCK open, with
+// its parent, command and access mode, and classify must count it as
+// perles'. The child's stdin is a read-only descriptor of the test process,
+// which lsof must list as well, and which classify must not count.
+func (m *contentionMonitor) control(t *testing.T) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), integrationTimeout)
+	defer cancel()
+	lock, err := os.Open(m.lockPath)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, lock.Close()) }()
+	child := exec.CommandContext(ctx, "sleep", "60")
+	child.Stdin = lock
+	require.NoError(t, child.Start())
+	defer func() {
+		require.NoError(t, child.Process.Kill())
+		_, killed := errors.AsType[*exec.ExitError](child.Wait())
+		require.True(t, killed, "the control's sleep ends killed")
+	}()
+
+	holders, err := contentionLockHolders(ctx, m.lsof, m.lockPath)
+	require.NoError(t, err)
+	t.Logf("positive control: lsof lists noms/LOCK's holders %+v", holders)
+	var sawChild, sawSelf bool
+	for _, h := range holders {
+		perles, why := m.classify(ctx, h)
+		switch h.pid {
+		case child.Process.Pid:
+			sawChild = true
+			require.Equal(t, os.Getpid(), h.ppid, "lsof lists the child's parent")
+			require.Equal(t, "sleep", h.command, "lsof lists the child's command")
+			require.Equal(t, []string{"r"}, h.access, "lsof lists the child's read-only descriptor")
+			require.True(t, perles, "a holder the test process spawned holds noms/LOCK for perles: %s", why)
+		case os.Getpid():
+			sawSelf = true
+			require.False(t, perles, "the test process's read-only descriptor locks nothing: %s", why)
+		}
+	}
+	require.True(t, sawChild, "positive control: lsof lists the test process's child holding noms/LOCK")
+	require.True(t, sawSelf, "positive control: lsof lists the test process's own descriptor")
+}
+
+// awaitBuild waits, up to integrationPickupTimeout in all, for the build
+// running now, if any, to end, then for the monitor to record the last
+// build's outcome: its install, or its failure. It reports whether a build
+// was running.
+func (m *contentionMonitor) awaitBuild(t *testing.T) (running bool) {
+	t.Helper()
+	s := &m.b.sched
+	s.mu.Lock()
+	running = s.running
+	s.mu.Unlock()
+
+	deadline := time.Now().Add(integrationPickupTimeout)
+	var lastEnd time.Time
+	var failed bool
+	contentionPoll(t, deadline, "the build running when the writes ended finishes", func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		lastEnd, failed = s.lastEnd, s.lastErr != nil
+		return !s.running
+	})
+	contentionPoll(t, deadline, "the monitor records the last build", func() bool {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if failed {
+			return len(m.failures) > 0
+		}
+		n := len(m.builds)
+		return n > 0 && !m.builds[n-1].end.Before(lastEnd)
+	})
+	return running
+}
+
+// contentionPoll calls done every 10ms until it returns true, and fails the
+// test if it has not by deadline.
+func contentionPoll(t *testing.T, deadline time.Time, what string, done func() bool) {
+	t.Helper()
+	for !done() {
+		require.True(t, time.Now().Before(deadline), "timed out waiting: %s", what)
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // recordBuild records the build that was just installed, as the scheduler
-// timed it, and reports whether it is new. Builds are paced seconds apart,
-// so the scheduler's last build is still the installed one.
-func (m *contentionMonitor) recordBuild() bool {
+// timed it, and returns it, unless it was recorded already. Builds are paced
+// seconds apart, so the scheduler's last build is still the installed one.
+func (m *contentionMonitor) recordBuild() (contentionBuild, bool) {
 	s := &m.b.sched
 	s.mu.Lock()
 	end, duration := s.lastEnd, s.lastDuration
@@ -420,16 +586,17 @@ func (m *contentionMonitor) recordBuild() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if n := len(m.builds); n > 0 && m.builds[n-1].end.Equal(end) {
-		return false
+		return contentionBuild{}, false
 	}
-	m.builds = append(m.builds, contentionBuild{start: end.Add(-duration), end: end})
-	return true
+	build := contentionBuild{start: end.Add(-duration), end: end}
+	m.builds = append(m.builds, build)
+	return build, true
 }
 
-// checkLock lists the processes with noms/LOCK open once the build that was
-// just installed has finished its bookkeeping, while perles runs no bd. A
+// checkLock lists the processes with noms/LOCK open once build, which was
+// just installed, has finished its bookkeeping, while perles runs no bd. A
 // check during which perles started bd is discarded.
-func (m *contentionMonitor) checkLock(ctx context.Context) {
+func (m *contentionMonitor) checkLock(ctx context.Context, build contentionBuild) {
 	before, ok := m.waitIdle(ctx)
 	if !ok {
 		m.discard()
@@ -462,8 +629,7 @@ func (m *contentionMonitor) checkLock(ctx context.Context) {
 		}
 	}
 	m.mu.Lock()
-	m.checks++
-	m.writerSeen += writers
+	m.checks = append(m.checks, contentionCheck{installEnd: build.end, holders: len(holders), writers: writers})
 	m.violations = append(m.violations, violations...)
 	for _, note := range notes {
 		if !slices.Contains(m.notes, note) {
@@ -505,11 +671,14 @@ func (m *contentionMonitor) discard() {
 
 // classify reports whether holder, a process with noms/LOCK open between two
 // builds, holds it for perles, and describes it. Perles' holders are the
-// test process itself with LOCK open for writing, and any process it
-// spawned other than the external writer's bd. An external writer's bd, or
-// a descendant of one, is fine and not described. A process this test did
-// not spawn, and the test process with LOCK open read-only, are fine and
-// described.
+// test process itself with LOCK open for writing, any process it spawned
+// other than the external writer's bd, and any bd or Dolt process that
+// cannot be traced to the external writer: only the writer and perles run
+// bd in this private workspace, so an untraceable one is most likely a
+// perles bd that outlived its parent (its ancestry then reaches pid 1). An
+// external writer's bd, or a descendant of one, is fine and not described.
+// Any other process this test did not spawn, and the test process with LOCK
+// open read-only, are fine and described.
 //
 // lsof cannot show flock locks on every platform (macOS shows none), so the
 // test process's descriptors are told apart by access mode: Dolt opens LOCK
@@ -541,10 +710,14 @@ func (m *contentionMonitor) classify(ctx context.Context, h contentionLockHolder
 	if m.writer.spawned(chain) {
 		return false, ""
 	}
-	if parent != self {
-		return false, fmt.Sprintf("pid %d (%s, ancestry %v) has noms/LOCK open; this test did not spawn it", h.pid, h.command, chain)
+	if parent == self {
+		return true, fmt.Sprintf("pid %d (%s, ancestry %v up to the test process %d) has noms/LOCK open between rebuilds", h.pid, h.command, chain, self)
 	}
-	return true, fmt.Sprintf("pid %d (%s, ancestry %v up to the test process %d) has noms/LOCK open between rebuilds", h.pid, h.command, chain, self)
+	if m.bdCommands[h.command] {
+		return true, fmt.Sprintf("pid %d (%s, ancestry %v, not traceable to the external writer) has noms/LOCK open between rebuilds",
+			h.pid, h.command, chain)
+	}
+	return false, fmt.Sprintf("pid %d (%s, ancestry %v) has noms/LOCK open; this test did not spawn it", h.pid, h.command, chain)
 }
 
 // contentionLockHolder is a process with noms/LOCK open, as lsof lists it.
@@ -557,9 +730,10 @@ type contentionLockHolder struct {
 }
 
 // writable reports whether the holder has the file open for writing, or in
-// a mode lsof could not tell.
+// a mode lsof could not tell, or lsof listed no access mode for it at all
+// (conservatively).
 func (h contentionLockHolder) writable() bool {
-	return slices.ContainsFunc(h.access, func(mode string) bool { return mode != "r" })
+	return len(h.access) == 0 || slices.ContainsFunc(h.access, func(mode string) bool { return mode != "r" })
 }
 
 // contentionLockHolders lists the processes that have path open.
@@ -654,27 +828,44 @@ func contentionSeconds(d time.Duration) string {
 }
 
 // contentionLogRebuilds logs each rebuild's duration and the idle time
-// before it, then the rebuild durations' summary and perles' share of the
-// write window spent building.
-func contentionLogRebuilds(t *testing.T, pre contentionBuild, rebuilds []contentionBuild, window time.Duration) {
+// before it, marking those that did not overlap the write window [start,
+// end), then the overlapping rebuilds' summary and perles' share of the
+// window spent building.
+func contentionLogRebuilds(t *testing.T, pre contentionBuild, rebuilds []contentionBuild, start, end time.Time) {
 	t.Helper()
-	if len(rebuilds) == 0 {
+	window := end.Sub(start)
+	previous := pre
+	var durations []time.Duration
+	var building time.Duration
+	for i, r := range rebuilds {
+		when := ""
+		switch {
+		case !r.end.After(start):
+			when = " (before the writes)"
+		case !r.start.Before(end):
+			when = " (after the writes)"
+		default:
+			durations = append(durations, r.duration())
+			from, to := r.start, r.end
+			if from.Before(start) {
+				from = start
+			}
+			if to.After(end) {
+				to = end
+			}
+			building += to.Sub(from)
+		}
+		paced := max(minRebuildGap, 2*previous.duration())
+		t.Logf("rebuild %d%s: %s, after %s idle (pacing: >= %s)",
+			i+1, when, contentionSeconds(r.duration()), contentionSeconds(r.start.Sub(previous.end)), contentionSeconds(paced))
+		previous = r
+	}
+	if len(durations) == 0 {
 		t.Logf("no rebuild during the %s write window", contentionSeconds(window))
 		return
 	}
-	previous := pre
-	durations := make([]time.Duration, 0, len(rebuilds))
-	var building time.Duration
-	for i, r := range rebuilds {
-		paced := max(minRebuildGap, 2*previous.duration())
-		t.Logf("rebuild %d: %s, after %s idle (pacing: >= %s)",
-			i+1, contentionSeconds(r.duration()), contentionSeconds(r.start.Sub(previous.end)), contentionSeconds(paced))
-		durations = append(durations, r.duration())
-		building += r.duration()
-		previous = r
-	}
 	t.Logf("rebuilds while the writes ran: %d in %s, %s; building %.0f%% of the window",
-		len(rebuilds), contentionSeconds(window), contentionSummarize(durations), 100*building.Seconds()/window.Seconds())
+		len(durations), contentionSeconds(window), contentionSummarize(durations), 100*building.Seconds()/window.Seconds())
 }
 
 // contentionLogReads logs the time perles spent in each bd read.

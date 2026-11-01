@@ -14,7 +14,8 @@ package adapter
 //   - bd is not on PATH;
 //   - the installed bd is older than domain.MinEmbeddedBeadsVersion (1.0.5),
 //     checked with the production gate (infrabeads.CheckEmbeddedBDVersion);
-//   - bd refuses the workspace location as an "unsafe location".
+//   - bd refuses the workspace location as an "unsafe location" (bd context
+//     checks it once the workspace's .beads exists, so after bd init).
 //
 // A `bd --version` it cannot parse fails the test, as does any other failure,
 // setup included. Parts of the parity test also skip, with a logged reason,
@@ -22,7 +23,9 @@ package adapter
 // `blocked --flags --raw`, which the test asks bd for itself (no released bd
 // up to v1.3.2 has it). The export.exclude_owners and `bd schema` checks need
 // bd >= 1.3.0, decided by the parsed version, as is the one ready difference
-// allowed on bd < 1.3.1 (see the integration*BD constants).
+// allowed on bd < 1.3.1: see integrationExcludeOwnersBD, integrationSchemaBD
+// and integrationActiveReadyBD. A release candidate of one of those versions
+// counts as older than it.
 //
 // Safety: each workspace is a fresh os.MkdirTemp directory under the user's
 // home (not t.TempDir(): on Linux that is under /tmp, which bd context
@@ -78,16 +81,22 @@ const integrationOtherAuthor = "perles-it-other@example.com"
 // need. bd v1.2.1 first shipped export.exclude_owners and `bd schema`, but it
 // was pulled, and v1.2.2 re-released the v1.1.2 code without them, so v1.3.0
 // is the first release with both. bd ready counts custom active statuses as
-// ready from v1.3.1 (beads #5918).
+// ready from v1.3.1 (beads #5918). A gate's release candidates may lack what
+// it checks (see bdBefore).
 const (
 	integrationExcludeOwnersBD = "1.3.0"
 	integrationSchemaBD        = "1.3.0"
 	integrationActiveReadyBD   = "1.3.1"
 )
 
-// integrationVersion finds the version in `bd --version` output, e.g.
-// "bd version 1.3.2 (6ebaacba8)".
-var integrationVersion = regexp.MustCompile(`\bversion v?(\d+\.\d+\.\d+)\b`)
+// integrationExternalRef is the external dependency of the parity
+// workspace's external-only and mixed issues.
+const integrationExternalRef = "external:otherproj:somecap"
+
+// integrationVersion finds the version, with any pre-release suffix, in
+// `bd --version` output, e.g. "bd version 1.3.2 (6ebaacba8)" or
+// "bd version 1.3.1-rc.1 (0a1b2c3d4)".
+var integrationVersion = regexp.MustCompile(`\bversion v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)`)
 
 // TestSnapshotBackend_Integration_Parity builds every edge case of the
 // proposal's E16 in a real embedded workspace and checks the snapshot's
@@ -167,6 +176,27 @@ func TestSnapshotBackend_Integration_Parity(t *testing.T) {
 		}
 		for _, id := range []string{e.externalOnly, e.blockedByClosed, e.pinned} {
 			require.NotContains(t, blocked, id)
+		}
+
+		// The mixed row tests the external-only rule only when bd lists
+		// external refs in blocked_by, which bd 1.0.5 leaves out; bd lists
+		// them if it lists the external-only issue's.
+		row := func(id string) integrationRow {
+			i := slices.IndexFunc(rows, func(r integrationRow) bool { return r.ID == id })
+			if i < 0 {
+				return integrationRow{}
+			}
+			return rows[i]
+		}
+		mixed := row(e.mixed)
+		require.Contains(t, mixed.BlockedBy, e.mixedBlocker, "bd blocked lists the mixed issue's open blocker")
+		if slices.Contains(row(e.externalOnly).BlockedBy, integrationExternalRef) {
+			require.Contains(t, mixed.BlockedBy, integrationExternalRef,
+				"bd lists external refs (the external-only issue's), so the mixed row carries both kinds")
+			t.Logf("bd %s lists external refs: the mixed row %s is blocked by %v", w.bdVersion, e.mixed, mixed.BlockedBy)
+		} else {
+			t.Logf("bd %s leaves external refs out of blocked_by: the mixed row %s (blocked by %v) checks only its open blocker",
+				w.bdVersion, e.mixed, mixed.BlockedBy)
 		}
 	})
 
@@ -378,6 +408,32 @@ func TestSnapshotBackend_Integration_DaemonLazy(t *testing.T) {
 	require.Equal(t, 1, rec.count("export"), "the first query builds the first snapshot")
 }
 
+// TestSnapshotBackend_Integration_VersionGates needs no bd, so it is not
+// opt-in: the parsed `bd --version` decides the parity test's version-gated
+// checks, and a release candidate of a gate's version is older than it.
+func TestSnapshotBackend_Integration_VersionGates(t *testing.T) {
+	for _, tc := range []struct {
+		line, version                     string
+		beforeActiveReady, beforeExcluded bool
+	}{
+		{line: "bd version 1.3.2 (6ebaacba8)", version: "1.3.2"},
+		{line: "bd version 1.3.1 (0a1b2c3d4)", version: "1.3.1"},
+		{line: "bd version 1.3.1-rc.1 (0a1b2c3d4)", version: "1.3.1-rc.1", beforeActiveReady: true},
+		{line: "bd version 1.3.2-rc.3", version: "1.3.2-rc.3"},
+		{line: "bd version v1.3.0-rc.2+dirty", version: "1.3.0-rc.2", beforeActiveReady: true, beforeExcluded: true},
+		{line: "bd version 1.0.5 (dev)", version: "1.0.5", beforeActiveReady: true, beforeExcluded: true},
+	} {
+		match := integrationVersion.FindStringSubmatch(tc.line)
+		require.NotNil(t, match, tc.line)
+		require.Equal(t, tc.version, match[1], tc.line)
+		require.NoError(t, infrabeads.CheckEmbeddedBDVersion("", match[1], nil), "%s passes the production gate", tc.line)
+		w := &integrationWorkspace{bdVersion: match[1]}
+		require.Equal(t, tc.beforeActiveReady, w.bdBefore(integrationActiveReadyBD), "%s before %s", tc.line, integrationActiveReadyBD)
+		require.Equal(t, tc.beforeExcluded, w.bdBefore(integrationExcludeOwnersBD), "%s before %s", tc.line, integrationExcludeOwnersBD)
+	}
+	require.Nil(t, integrationVersion.FindStringSubmatch("bd version unknown"))
+}
+
 // integrationWorkspace is a throwaway embedded beads workspace under the
 // user's home. run is the production bd runner for it.
 type integrationWorkspace struct {
@@ -438,9 +494,14 @@ func integrationInitWorkspace(t *testing.T, pattern, prefix, bdVersion string) *
 	return w
 }
 
-// bdBefore reports whether the installed bd is older than version.
+// bdBefore reports whether the installed bd is older than version, a final
+// release. A pre-release of version ("1.3.1-rc.1") is older: the gates name
+// the first release with what they check, which its release candidates may
+// lack.
 func (w *integrationWorkspace) bdBefore(version string) bool {
-	return domain.CompareVersions(w.bdVersion, version) < 0
+	release, prerelease, _ := strings.Cut(w.bdVersion, "-")
+	cmp := domain.CompareVersions(release, version)
+	return cmp < 0 || (cmp == 0 && prerelease != "")
 }
 
 // integrationRequireBD skips the test unless it is opted in and not -short,
@@ -457,10 +518,11 @@ func integrationRequireBD(t *testing.T) string {
 	return integrationBDVersion(t)
 }
 
-// integrationBDVersion returns the version of the bd on PATH, e.g. "1.3.2".
-// It skips the test when bd is not on PATH or is older than
-// domain.MinEmbeddedBeadsVersion, checked with the production gate, and
-// fails it when `bd --version` fails or prints no version it can parse.
+// integrationBDVersion returns the version of the bd on PATH, e.g. "1.3.2",
+// or "1.3.1-rc.1" for a release candidate. It skips the test when bd is not
+// on PATH or is older than domain.MinEmbeddedBeadsVersion, checked with the
+// production gate, and fails it when `bd --version` fails or prints no
+// version it can parse.
 func integrationBDVersion(t *testing.T) string {
 	t.Helper()
 	path, err := exec.LookPath("bd")
@@ -540,10 +602,12 @@ func integrationBDContext(ctx context.Context, beadsDir, workDir string) ([]byte
 
 // requireOwnContext is the safety guard around bd writes. Before bd init
 // (initialized false) bd context must not resolve any beads dir but the
-// workspace's: it fails with no workspace, or names this one; a refusal of
-// the location as unsafe skips the test. After it, bd context must succeed
-// and report exactly the workspace's own beads dir, in embedded mode.
-// Anything else stops the test.
+// workspace's: it fails with no workspace, or names this one. After it, bd
+// context must succeed and report exactly the workspace's own beads dir, in
+// embedded mode. Either way, a refusal of the location as unsafe skips the
+// test; bd context checks the location only once a .beads exists, so the
+// refusal shows after bd init (bd init itself does not check). Anything else
+// stops the test.
 func (w *integrationWorkspace) requireOwnContext(t *testing.T, initialized bool) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), integrationTimeout)
@@ -555,8 +619,15 @@ func (w *integrationWorkspace) requireOwnContext(t *testing.T, initialized bool)
 	}
 	parseErr := json.Unmarshal(bytes.TrimSpace(out), &answer)
 
+	// With --json, bd prints its error on stdout.
+	text := string(out)
+	if runErr != nil {
+		text += "\n" + runErr.Error()
+	}
+	integrationSkipUnsafe(t, "bd context", text)
+
 	if initialized {
-		require.NoError(t, runErr, "SAFETY: bd context in the workspace")
+		require.NoError(t, runErr, "SAFETY: bd context in the workspace printed %q", out)
 		require.NoError(t, parseErr, "SAFETY: parsing bd context output %q", out)
 		require.NotEmpty(t, answer.BeadsDir, "SAFETY: bd context names no beads dir; refusing to run bd writes")
 		require.Equal(t, w.beadsDir, integrationCanonical(answer.BeadsDir),
@@ -565,11 +636,6 @@ func (w *integrationWorkspace) requireOwnContext(t *testing.T, initialized bool)
 		return
 	}
 
-	text := string(out)
-	if runErr != nil {
-		text += "\n" + runErr.Error()
-	}
-	integrationSkipUnsafe(t, "bd context", text)
 	if parseErr != nil && runErr == nil {
 		t.Fatalf("parsing bd context output %q: %v", out, parseErr)
 	}
@@ -661,20 +727,23 @@ func (w *integrationWorkspace) backend(t *testing.T, answer infrabeads.BDRunner)
 	return b, f.runner
 }
 
-// integrationEdgeCases are the IDs of the parity workspace's issues.
+// integrationEdgeCases are the IDs of the parity workspace's issues that the
+// checks name. The issues that only set up a case (the other blockers, the
+// spawner and its child, the deferred parent) are integrationBuildEdgeCases'
+// locals.
 type integrationEdgeCases struct {
-	openBlocker, blockedEpic, epicChild string
-	shippedBlocker, blockedByShipped    string
-	spawner, waiter                     string
-	externalOnly, mixed                 string
-	closedBlocker, blockedByClosed      string
-	pinBlocker, pinned                  string
-	deferredParent, deferredChild       string
-	inReview                            string
-	wisp                                string
-	excludedOwner                       string
-	withMetadata                        string
-	commented                           string
+	blockedEpic, epicChild      string
+	blockedByShipped            string
+	waiter                      string
+	externalOnly                string
+	mixed, mixedBlocker         string
+	blockedByClosed             string
+	pinned                      string
+	deferredChild               string
+	inReview                    string
+	wisp                        string
+	excludedOwner, withMetadata string
+	commented                   string
 }
 
 // integrationBuildEdgeCases creates the proposal's E16 edge cases, an issue
@@ -686,45 +755,45 @@ func integrationBuildEdgeCases(t *testing.T, w *integrationWorkspace) integratio
 
 	// Blockedness flows down parent-child. The blocker is an epic too:
 	// bd 1.0.5 lets only epics block epics.
-	e.openBlocker = w.create(t, "open blocker", "--type", "epic")
+	openBlocker := w.create(t, "open blocker", "--type", "epic")
 	e.blockedEpic = w.create(t, "blocked epic", "--type", "epic")
-	w.bd(t, "dep", "add", e.blockedEpic, e.openBlocker)
+	w.bd(t, "dep", "add", e.blockedEpic, openBlocker)
 	e.epicChild = w.create(t, "child of the blocked epic", "--parent", e.blockedEpic)
 
 	// A custom done status does not unblock.
-	e.shippedBlocker = w.create(t, "shipped blocker")
-	w.bd(t, "update", e.shippedBlocker, "--status", "shipped")
+	shippedBlocker := w.create(t, "shipped blocker")
+	w.bd(t, "update", shippedBlocker, "--status", "shipped")
 	e.blockedByShipped = w.create(t, "blocked by a shipped blocker")
-	w.bd(t, "dep", "add", e.blockedByShipped, e.shippedBlocker)
+	w.bd(t, "dep", "add", e.blockedByShipped, shippedBlocker)
 
 	// A waits-for gate on a spawner with an open child.
-	e.spawner = w.create(t, "spawner", "--type", "epic")
-	w.create(t, "spawner child", "--parent", e.spawner)
-	e.waiter = w.create(t, "waiter", "--waits-for", e.spawner)
+	spawner := w.create(t, "spawner", "--type", "epic")
+	w.create(t, "spawner child", "--parent", spawner)
+	e.waiter = w.create(t, "waiter", "--waits-for", spawner)
 
 	e.externalOnly = w.create(t, "external-only dependency")
-	w.bd(t, "dep", "add", e.externalOnly, "external:otherproj:somecap")
+	w.bd(t, "dep", "add", e.externalOnly, integrationExternalRef)
 
 	// An open blocker and an external dependency: blocked, unlike the
 	// external-only issue.
-	mixedBlocker := w.create(t, "mixed issue's open blocker")
+	e.mixedBlocker = w.create(t, "mixed issue's open blocker")
 	e.mixed = w.create(t, "blocked by an open issue and an external dependency")
-	w.bd(t, "dep", "add", e.mixed, mixedBlocker)
-	w.bd(t, "dep", "add", e.mixed, "external:otherproj:somecap")
+	w.bd(t, "dep", "add", e.mixed, e.mixedBlocker)
+	w.bd(t, "dep", "add", e.mixed, integrationExternalRef)
 
-	e.closedBlocker = w.create(t, "closed blocker")
+	closedBlocker := w.create(t, "closed blocker")
 	e.blockedByClosed = w.create(t, "blocked by a closed blocker")
-	w.bd(t, "dep", "add", e.blockedByClosed, e.closedBlocker)
-	w.bd(t, "close", e.closedBlocker)
+	w.bd(t, "dep", "add", e.blockedByClosed, closedBlocker)
+	w.bd(t, "close", closedBlocker)
 
-	e.pinBlocker = w.create(t, "pinned issue's blocker")
+	pinBlocker := w.create(t, "pinned issue's blocker")
 	e.pinned = w.create(t, "pinned issue")
-	w.bd(t, "dep", "add", e.pinned, e.pinBlocker)
+	w.bd(t, "dep", "add", e.pinned, pinBlocker)
 	w.bd(t, "update", e.pinned, "--status", "pinned")
 
-	e.deferredParent = w.create(t, "deferred parent", "--type", "epic")
-	e.deferredChild = w.create(t, "child of the deferred parent", "--parent", e.deferredParent)
-	w.bd(t, "defer", e.deferredParent, "--until=2099-01-01")
+	deferredParent := w.create(t, "deferred parent", "--type", "epic")
+	e.deferredChild = w.create(t, "child of the deferred parent", "--parent", deferredParent)
+	w.bd(t, "defer", deferredParent, "--until=2099-01-01")
 
 	e.inReview = w.create(t, "in review")
 	w.bd(t, "update", e.inReview, "--status", "in_review")
@@ -749,7 +818,7 @@ func integrationBuildEdgeCases(t *testing.T, w *integrationWorkspace) integratio
 	e.withMetadata = w.create(t, "has metadata")
 	w.bd(t, "update", e.withMetadata, "--metadata", `{"team":"backend"}`)
 
-	e.commented = e.openBlocker
+	e.commented = openBlocker
 	w.bd(t, "comments", "add", e.commented, "--", "a comment from bd")
 	return e
 }
