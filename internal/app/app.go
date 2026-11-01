@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -118,6 +119,17 @@ type Model struct {
 	// startupWarning is a non-fatal configuration problem detected during
 	// NewWithConfig (e.g., an invalid theme). Shown as a warning toast on Init.
 	startupWarning string
+
+	// closer makes Close idempotent. NewWithConfig creates it, so the copies
+	// Bubble Tea makes of the Model share it, as they share what Close
+	// releases.
+	closer *closeOnce
+}
+
+// closeOnce runs Model.Close's cleanup once and keeps its result.
+type closeOnce struct {
+	once sync.Once
+	err  error
 }
 
 // changeNotifier is implemented by backends that detect data changes
@@ -339,6 +351,7 @@ func NewWithConfig(appCfg AppConfig) (Model, error) {
 		db:              db,
 		tracingProvider: tracingProvider,
 		startupWarning:  startupWarning,
+		closer:          &closeOnce{},
 	}, nil
 }
 
@@ -1288,13 +1301,28 @@ func (m Model) View() string {
 	return view
 }
 
-// closeKanban closes the kanban mode controller. It is (*kanban.Model).Close;
-// tests replace it to make it fail.
+// closeKanban closes the kanban mode controller. It is (*kanban.Model).Close,
+// which is a no-op today (it always returns nil); tests replace it to make it
+// fail.
 var closeKanban = (*kanban.Model).Close
 
 // Close releases resources held by the application. Every step runs even when
 // an earlier one fails; the returned error joins the failures.
+//
+// Close is idempotent: the cleanup runs once for the Model and its copies, and
+// later calls, on it or on a copy, return the first call's error. Call it on
+// the final Model: the control plane and API server, started on the first
+// dashboard entry, are known only to the copies made since.
 func (m *Model) Close() error {
+	if m.closer == nil { // a Model not built by NewWithConfig
+		m.closer = &closeOnce{}
+	}
+	m.closer.once.Do(func() { m.closer.err = m.closeResources() })
+	return m.closer.err
+}
+
+// closeResources runs Close's cleanup steps.
+func (m *Model) closeResources() error {
 	var errs []error
 
 	m.logOverlay.StopListening()

@@ -45,7 +45,9 @@ package adapter
 //
 // It runs real bd writes in a throwaway workspace and takes a minute or two,
 // so it is skipped unless PERLES_BD_CONTENTION=1 is set: `make test` and CI
-// never run it. Run it with:
+// never run it. (TestSnapshotBackend_Contention_LockCheck, which runs no bd,
+// lsof or ps and pins the lock check's pieces on literal inputs, is not
+// opt-in.) Run it with:
 //
 //	PERLES_BD_CONTENTION=1 go test ./internal/beads/adapter/ -run Contention -count=1 -v
 //
@@ -74,9 +76,10 @@ package adapter
 // The workspace comes from the integration tests' helpers
 // (snapshot_integration_test.go): integrationInitWorkspace, with the bd
 // check of integrationBDVersion and the safety guard of requireOwnContext,
-// then the workspace's backend and bd helpers and integrationBDEnv. The
-// helpers below, the opt-in gate included, are this file's own and prefixed
-// contention.
+// then the workspace's backend and bd helpers, integrationBDEnv,
+// integrationQuery, and the integrationTimeout and integrationPickupTimeout
+// bounds. The helpers below, the opt-in gate included, are this file's own
+// and prefixed contention.
 
 import (
 	"bytes"
@@ -227,6 +230,159 @@ func TestSnapshotBackend_Contention_LockBudget(t *testing.T) {
 			// The manifest watcher's kqueue descriptor (see classify) is
 			// there in every check, so an empty listing means lsof missed it.
 			require.Positive(t, holders, "on macOS lsof lists noms/LOCK's holders during the writes")
+		}
+	})
+}
+
+// TestSnapshotBackend_Contention_LockCheck runs no bd, lsof or ps, so it is
+// not opt-in: it pins, on literal inputs, the pieces of the benchmark's lock
+// check that only the benchmark would run otherwise.
+func TestSnapshotBackend_Contention_LockCheck(t *testing.T) {
+	t.Run("lsof -F parser", func(t *testing.T) {
+		for _, tc := range []struct {
+			name, out string
+			want      []contentionLockHolder
+			err       string
+		}{
+			{name: "no output", out: ""},
+			{
+				name: "two processes",
+				out:  "p4242\nR1\ncbd\nf5\nau\np777\nR4242\ncdolt\nf3\nar\nf9\nau\n",
+				want: []contentionLockHolder{
+					{pid: 4242, ppid: 1, command: "bd", access: []string{"u"}},
+					{pid: 777, ppid: 4242, command: "dolt", access: []string{"r", "u"}},
+				},
+			},
+			{
+				name: "blank lines and other fields skipped, unknown access kept",
+				out:  "\np10\nR2\ncgsleep\nf0\na \nn/w/.beads/embeddeddolt/x/.dolt/noms/LOCK\n\n",
+				want: []contentionLockHolder{{pid: 10, ppid: 2, command: "gsleep", access: []string{" "}}},
+			},
+			{
+				name: "no access mode",
+				out:  "p10\nR2\ncsleep\nf0",
+				want: []contentionLockHolder{{pid: 10, ppid: 2, command: "sleep"}},
+			},
+			{name: "a field before any process", out: "R1\np10\n", err: `lsof printed "R1" before any process`},
+			{name: "bad PID", out: "pabc\n", err: `parsing lsof's PID "abc"`},
+			{name: "bad PPID", out: "p10\nRx\n", err: `parsing lsof's PPID "x"`},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				holders, err := contentionParseLsof(tc.out)
+				if tc.err != "" {
+					require.ErrorContains(t, err, tc.err)
+					require.Nil(t, holders)
+					return
+				}
+				require.NoError(t, err)
+				require.Equal(t, tc.want, holders)
+			})
+		}
+	})
+
+	t.Run("writable", func(t *testing.T) {
+		for _, tc := range []struct {
+			access []string
+			want   bool
+		}{
+			{access: nil, want: true}, // no access mode listed: conservatively writable
+			{access: []string{"r"}, want: false},
+			{access: []string{"r", "r"}, want: false},
+			{access: []string{"u"}, want: true},
+			{access: []string{"w"}, want: true},
+			{access: []string{" "}, want: true}, // a mode lsof could not tell
+			{access: []string{"r", "u"}, want: true},
+		} {
+			require.Equal(t, tc.want, contentionLockHolder{access: tc.access}.writable(), "access %q", tc.access)
+		}
+	})
+
+	t.Run("overlap edges", func(t *testing.T) {
+		t0 := time.Unix(1_000_000, 0)
+		at := func(s int) time.Time { return t0.Add(time.Duration(s) * time.Second) }
+		start, end := at(10), at(20)
+		var builds, want []contentionBuild
+		for _, tc := range []struct {
+			name     string
+			from, to int
+			overlaps bool
+		}{
+			{name: "ends before the window", from: 0, to: 5},
+			{name: "ends as the window starts", from: 5, to: 10},
+			{name: "straddles the start", from: 5, to: 11, overlaps: true},
+			{name: "inside", from: 12, to: 15, overlaps: true},
+			{name: "the window itself", from: 10, to: 20, overlaps: true},
+			{name: "covers the window", from: 5, to: 25, overlaps: true},
+			{name: "straddles the end", from: 19, to: 25, overlaps: true},
+			{name: "starts as the window ends", from: 20, to: 25},
+			{name: "starts after the window", from: 21, to: 25},
+		} {
+			b := contentionBuild{start: at(tc.from), end: at(tc.to)}
+			require.Equal(t, tc.overlaps, b.overlaps(start, end), tc.name)
+			builds = append(builds, b)
+			if tc.overlaps {
+				want = append(want, b)
+			}
+		}
+		require.Equal(t, want, contentionOverlapping(builds, start, end), "contentionOverlapping keeps the overlapping builds, in order")
+	})
+
+	t.Run("classify", func(t *testing.T) {
+		// Parents are 1 or the test process, so classify runs no ps.
+		self := os.Getpid()
+		writerBD, other := self+1, self+2
+		m := &contentionMonitor{
+			writer:     &contentionWriter{pids: map[int]bool{writerBD: true}},
+			bdCommands: map[string]bool{"bd": true, "dolt": true},
+		}
+		for _, tc := range []struct {
+			name   string
+			holder contentionLockHolder
+			perles bool
+			why    string // a fragment of the description; "" for none
+		}{
+			{
+				name:   "the test process, read-only",
+				holder: contentionLockHolder{pid: self, ppid: 1, command: "adapter.test", access: []string{"r"}},
+				why:    "open read-only",
+			},
+			{
+				name:   "the test process, for writing",
+				holder: contentionLockHolder{pid: self, ppid: 1, command: "adapter.test", access: []string{"r", "u"}},
+				perles: true, why: "open for writing",
+			},
+			{
+				name:   "a child of the test process",
+				holder: contentionLockHolder{pid: other, ppid: self, command: "sleep", access: []string{"r"}},
+				perles: true, why: "up to the test process",
+			},
+			{
+				name:   "the external writer's bd",
+				holder: contentionLockHolder{pid: writerBD, ppid: self, command: "bd", access: []string{"u"}},
+			},
+			{
+				name:   "an untraceable bd",
+				holder: contentionLockHolder{pid: other, ppid: 1, command: "bd", access: []string{"u"}},
+				perles: true, why: "not traceable to the external writer",
+			},
+			{
+				name:   "an untraceable dolt",
+				holder: contentionLockHolder{pid: other, ppid: 1, command: "dolt", access: []string{"u"}},
+				perles: true, why: "not traceable to the external writer",
+			},
+			{
+				name:   "another process",
+				holder: contentionLockHolder{pid: other, ppid: 1, command: "mds", access: []string{"r"}},
+				why:    "this test did not spawn it",
+			},
+		} {
+			perles, why := m.classify(t.Context(), tc.holder)
+			require.Equal(t, tc.perles, perles, "%s: %s", tc.name, why)
+			if tc.why == "" {
+				require.Empty(t, why, tc.name)
+			} else {
+				require.Contains(t, why, tc.why, tc.name)
+			}
 		}
 	})
 }
@@ -385,11 +541,17 @@ type contentionBuild struct{ start, end time.Time }
 
 func (b contentionBuild) duration() time.Duration { return b.end.Sub(b.start) }
 
+// overlaps reports whether the build ran during [start, end): a build that
+// ended as the window started, or started as it ended, did not.
+func (b contentionBuild) overlaps(start, end time.Time) bool {
+	return b.start.Before(end) && b.end.After(start)
+}
+
 // contentionOverlapping returns the builds that ran during [start, end).
 func contentionOverlapping(builds []contentionBuild, start, end time.Time) []contentionBuild {
 	var during []contentionBuild
 	for _, b := range builds {
-		if b.start.Before(end) && b.end.After(start) {
+		if b.overlaps(start, end) {
 			during = append(during, b)
 		}
 	}
@@ -410,7 +572,8 @@ type contentionCheck struct {
 // contentionMonitor watches the backend's Changes broker. For each install
 // it records the build's start and end, from the scheduler's own
 // bookkeeping, then checks with lsof that no process perles spawned holds
-// noms/LOCK. It records every failed build.
+// noms/LOCK, nor any bd or Dolt process (by bdCommands) that it cannot trace
+// to the external writer (see classify). It records every failed build.
 type contentionMonitor struct {
 	b        *SnapshotBackend
 	tracker  *contentionTracker
@@ -473,15 +636,28 @@ func contentionStartMonitor(t *testing.T, b *SnapshotBackend, tracker *contentio
 }
 
 // contentionBDCommands returns the command names that lsof lists for bd and
-// Dolt processes: bd and dolt, and the base names of the bd on PATH and of
-// the file it resolves to.
+// Dolt processes: bd and dolt, and the names of the bd on PATH (see
+// contentionCommandNames).
 func contentionBDCommands(t *testing.T) map[string]bool {
 	t.Helper()
 	path, err := exec.LookPath("bd")
 	require.NoError(t, err)
+	commands := map[string]bool{"bd": true, "dolt": true}
+	for _, name := range contentionCommandNames(t, path) {
+		commands[name] = true
+	}
+	return commands
+}
+
+// contentionCommandNames returns the command names lsof may list for a
+// process running the executable at path: its base name, and the base name
+// of the file it resolves to. macOS lists the latter, so a coreutils gnubin
+// sleep, a symlink to gsleep, lists as gsleep.
+func contentionCommandNames(t *testing.T, path string) []string {
+	t.Helper()
 	resolved, err := filepath.EvalSymlinks(path)
 	require.NoError(t, err)
-	return map[string]bool{"bd": true, "dolt": true, filepath.Base(path): true, filepath.Base(resolved): true}
+	return []string{filepath.Base(path), filepath.Base(resolved)}
 }
 
 // stop ends the subscription and waits for the monitor to return.
@@ -492,17 +668,21 @@ func (m *contentionMonitor) stop() {
 
 // control is the lock check's positive control, run before perles starts:
 // lsof must list a child of the test process holding noms/LOCK open, with
-// its parent, command and access mode, and classify must count it as
+// its parent, command (the sleep on PATH, by either name of
+// contentionCommandNames) and access mode, and classify must count it as
 // perles'. The child's stdin is a read-only descriptor of the test process,
 // which lsof must list as well, and which classify must not count.
 func (m *contentionMonitor) control(t *testing.T) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), integrationTimeout)
 	defer cancel()
+	sleep, err := exec.LookPath("sleep")
+	require.NoError(t, err)
+	sleepNames := contentionCommandNames(t, sleep)
 	lock, err := os.Open(m.lockPath)
 	require.NoError(t, err)
 	defer func() { require.NoError(t, lock.Close()) }()
-	child := exec.CommandContext(ctx, "sleep", "60")
+	child := exec.CommandContext(ctx, sleep, "60") //nolint:gosec // G204: the sleep on PATH, fixed arguments
 	child.Stdin = lock
 	require.NoError(t, child.Start())
 	defer func() {
@@ -521,7 +701,7 @@ func (m *contentionMonitor) control(t *testing.T) {
 		case child.Process.Pid:
 			sawChild = true
 			require.Equal(t, os.Getpid(), h.ppid, "lsof lists the child's parent")
-			require.Equal(t, "sleep", h.command, "lsof lists the child's command")
+			require.Contains(t, sleepNames, h.command, "lsof lists the child's command")
 			require.Equal(t, []string{"r"}, h.access, "lsof lists the child's read-only descriptor")
 			require.True(t, perles, "a holder the test process spawned holds noms/LOCK for perles: %s", why)
 		case os.Getpid():
@@ -749,12 +929,16 @@ func contentionLockHolders(ctx context.Context, lsof, path string) ([]contention
 		}
 		return nil, fmt.Errorf("lsof %s: %w: %s", path, err, strings.TrimSpace(stderr.String()))
 	}
+	return contentionParseLsof(stdout.String())
+}
 
-	// -F output: a "p<pid>" line starts each process, followed by its
-	// "R<ppid>" and "c<command>" lines, then one "f<fd>" line per
-	// descriptor, each followed by its "a<access mode>" line.
+// contentionParseLsof parses lsof's -F pRca output. A "p<pid>" line starts
+// each process, followed by its "R<ppid>" and "c<command>" lines, then one
+// "f<fd>" line per descriptor, each followed by its "a<access mode>" line.
+// Blank lines and other fields are skipped.
+func contentionParseLsof(out string) ([]contentionLockHolder, error) {
 	var holders []contentionLockHolder
-	for line := range strings.Lines(stdout.String()) {
+	for line := range strings.Lines(out) {
 		line = strings.TrimRight(line, "\n")
 		if line == "" {
 			continue
@@ -840,11 +1024,7 @@ func contentionLogRebuilds(t *testing.T, pre contentionBuild, rebuilds []content
 	for i, r := range rebuilds {
 		when := ""
 		switch {
-		case !r.end.After(start):
-			when = " (before the writes)"
-		case !r.start.Before(end):
-			when = " (after the writes)"
-		default:
+		case r.overlaps(start, end):
 			durations = append(durations, r.duration())
 			from, to := r.start, r.end
 			if from.Before(start) {
@@ -854,6 +1034,10 @@ func contentionLogRebuilds(t *testing.T, pre contentionBuild, rebuilds []content
 				to = end
 			}
 			building += to.Sub(from)
+		case !r.end.After(start):
+			when = " (before the writes)"
+		default:
+			when = " (after the writes)"
 		}
 		paced := max(minRebuildGap, 2*previous.duration())
 		t.Logf("rebuild %d%s: %s, after %s idle (pacing: >= %s)",

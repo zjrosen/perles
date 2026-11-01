@@ -4,7 +4,9 @@ package adapter
 //
 // They run real bd writes in throwaway embedded workspaces, so they are
 // skipped unless PERLES_BD_INTEGRATION=1 is set: `make test` and CI never run
-// them. Run them with:
+// them. The exception is TestSnapshotBackend_Integration_VersionGates, which
+// runs no bd (it checks how the tests parse `bd --version` and gate on it)
+// and so runs in `make test` too. Run them with:
 //
 //	PERLES_BD_INTEGRATION=1 go test ./internal/beads/adapter/ -run Integration -v
 //
@@ -95,8 +97,10 @@ const integrationExternalRef = "external:otherproj:somecap"
 
 // integrationVersion finds the version, with any pre-release suffix, in
 // `bd --version` output, e.g. "bd version 1.3.2 (6ebaacba8)" or
-// "bd version 1.3.1-rc.1 (0a1b2c3d4)".
-var integrationVersion = regexp.MustCompile(`\bversion v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)`)
+// "bd version 1.3.1-rc.1 (0a1b2c3d4)". The trailing \b rejects a pre-release
+// without a dash ("1.3.2rc1", "1.3.1_rc1"), which would otherwise parse as
+// the final release.
+var integrationVersion = regexp.MustCompile(`\bversion v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\b`)
 
 // TestSnapshotBackend_Integration_Parity builds every edge case of the
 // proposal's E16 in a real embedded workspace and checks the snapshot's
@@ -409,29 +413,43 @@ func TestSnapshotBackend_Integration_DaemonLazy(t *testing.T) {
 }
 
 // TestSnapshotBackend_Integration_VersionGates needs no bd, so it is not
-// opt-in: the parsed `bd --version` decides the parity test's version-gated
-// checks, and a release candidate of a gate's version is older than it.
+// opt-in: the parsed `bd --version` decides whether the tests run at all (the
+// production gate) and the parity test's version-gated checks, and a release
+// candidate of a gate's version is older than it. A pre-release without a
+// dash fails to parse instead of passing for the final release.
 func TestSnapshotBackend_Integration_VersionGates(t *testing.T) {
 	for _, tc := range []struct {
-		line, version                     string
-		beforeActiveReady, beforeExcluded bool
+		line, version string
+		// tooOld: the production gate rejects the version, so the opt-in
+		// tests skip.
+		tooOld                                          bool
+		beforeActiveReady, beforeExcluded, beforeSchema bool
 	}{
 		{line: "bd version 1.3.2 (6ebaacba8)", version: "1.3.2"},
 		{line: "bd version 1.3.1 (0a1b2c3d4)", version: "1.3.1"},
 		{line: "bd version 1.3.1-rc.1 (0a1b2c3d4)", version: "1.3.1-rc.1", beforeActiveReady: true},
 		{line: "bd version 1.3.2-rc.3", version: "1.3.2-rc.3"},
-		{line: "bd version v1.3.0-rc.2+dirty", version: "1.3.0-rc.2", beforeActiveReady: true, beforeExcluded: true},
-		{line: "bd version 1.0.5 (dev)", version: "1.0.5", beforeActiveReady: true, beforeExcluded: true},
+		{line: "bd version v1.3.0-rc.2+dirty", version: "1.3.0-rc.2", beforeActiveReady: true, beforeExcluded: true, beforeSchema: true},
+		{line: "bd version 1.0.5 (dev)", version: "1.0.5", beforeActiveReady: true, beforeExcluded: true, beforeSchema: true},
+		{line: "bd version 1.0.5-rc.1 (dev)", version: "1.0.5-rc.1", beforeActiveReady: true, beforeExcluded: true, beforeSchema: true},
+		{line: "bd version 1.0.4 (dev)", version: "1.0.4", tooOld: true, beforeActiveReady: true, beforeExcluded: true, beforeSchema: true},
 	} {
 		match := integrationVersion.FindStringSubmatch(tc.line)
 		require.NotNil(t, match, tc.line)
 		require.Equal(t, tc.version, match[1], tc.line)
-		require.NoError(t, infrabeads.CheckEmbeddedBDVersion("", match[1], nil), "%s passes the production gate", tc.line)
+		if gateErr := infrabeads.CheckEmbeddedBDVersion("", match[1], nil); tc.tooOld {
+			require.Error(t, gateErr, "%s fails the production gate", tc.line)
+		} else {
+			require.NoError(t, gateErr, "%s passes the production gate", tc.line)
+		}
 		w := &integrationWorkspace{bdVersion: match[1]}
 		require.Equal(t, tc.beforeActiveReady, w.bdBefore(integrationActiveReadyBD), "%s before %s", tc.line, integrationActiveReadyBD)
 		require.Equal(t, tc.beforeExcluded, w.bdBefore(integrationExcludeOwnersBD), "%s before %s", tc.line, integrationExcludeOwnersBD)
+		require.Equal(t, tc.beforeSchema, w.bdBefore(integrationSchemaBD), "%s before %s", tc.line, integrationSchemaBD)
 	}
-	require.Nil(t, integrationVersion.FindStringSubmatch("bd version unknown"))
+	for _, line := range []string{"bd version unknown", "bd version 1.3.2rc1", "bd version 1.3.1_rc1 (0a1b2c3d4)"} {
+		require.Nil(t, integrationVersion.FindStringSubmatch(line), line)
+	}
 }
 
 // integrationWorkspace is a throwaway embedded beads workspace under the
@@ -485,6 +503,8 @@ func integrationInitWorkspace(t *testing.T, pattern, prefix, bdVersion string) *
 	ctx, cancel := context.WithTimeout(context.Background(), integrationTimeout)
 	defer cancel()
 	if _, err := w.run(ctx, infrabeads.BDRequest{Args: []string{"init", "--prefix", prefix, "--non-interactive"}}); err != nil {
+		// Defensive: bd init has not been seen to refuse the location (see
+		// requireOwnContext).
 		integrationSkipUnsafe(t, "bd init", err.Error())
 		t.Fatalf("bd init in %s: %v", w.dir, err)
 	}
@@ -606,8 +626,9 @@ func integrationBDContext(ctx context.Context, beadsDir, workDir string) ([]byte
 // context must succeed and report exactly the workspace's own beads dir, in
 // embedded mode. Either way, a refusal of the location as unsafe skips the
 // test; bd context checks the location only once a .beads exists, so the
-// refusal shows after bd init (bd init itself does not check). Anything else
-// stops the test.
+// refusal shows after bd init. (bd init has not been seen to check it;
+// integrationInitWorkspace looks for the refusal in its error too,
+// defensively.) Anything else stops the test.
 func (w *integrationWorkspace) requireOwnContext(t *testing.T, initialized bool) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), integrationTimeout)
