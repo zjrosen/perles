@@ -107,19 +107,21 @@ type scheduler struct {
 	// lazy first build is deferred (see buildFirst).
 	lastErr error
 	// consecutiveFailures counts the failed builds since the last success
-	// or FlushCaches, for the failure backoff.
+	// or FlushCaches, for the failure backoff. A FlushCaches made while a
+	// build runs counts as made after it: if that build fails, it is not
+	// counted either (see manualDuringBuild).
 	consecutiveFailures int
 	// manualDuringBuild is set by a manual request (FlushCaches) made while
 	// a build runs. The request resets the backoff at once, but the build
-	// counts its failure after that; so if the build fails, finishBuild
-	// resets the backoff again, as if the request came right after the
-	// failure. A build clears it when it starts.
+	// counts its failure after that; so if the build fails,
+	// finishFailedBuild resets the backoff again, as if the request came
+	// right after the failure. A build clears it when it starts.
 	manualDuringBuild bool
 	// retryIfFailed is set by a manual request (FlushCaches) made after a
 	// failed build while a retry is running whose in-flight hash covers it.
 	// The gate drops the request, since the running build covers it; but if
-	// that build fails too, finishBuild replays the request: it resets the
-	// backoff and marks the snapshot dirty, so a manual refresh after a
+	// that build fails too, finishFailedBuild replays the request: it resets
+	// the backoff and marks the snapshot dirty, so a manual refresh after a
 	// failure always gets its retry. The end of every build clears it.
 	retryIfFailed bool
 
@@ -192,6 +194,7 @@ func (b *SnapshotBackend) FlushCaches(context.Context) error {
 func (b *SnapshotBackend) requestRebuild(manual bool) {
 	s := &b.sched
 	if manual {
+		// Before the first snapshot, this is the only section that runs.
 		s.mu.Lock()
 		s.consecutiveFailures = 0
 		if s.running {
@@ -205,6 +208,11 @@ func (b *SnapshotBackend) requestRebuild(manual bool) {
 	hash, err := hashManifest(b.manifestPath)
 
 	s.mu.Lock()
+	if manual && s.running {
+		// Again: a build may have started, and cleared the flag, since the
+		// first check.
+		s.manualDuringBuild = true
+	}
 	needed := err != nil || !s.covers(hash)
 	if needed {
 		s.dirty = true

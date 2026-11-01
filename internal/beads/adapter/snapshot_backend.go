@@ -150,9 +150,9 @@ type SnapshotBackend struct {
 	// never before one.
 	overlayMu sync.Mutex
 	// overlay holds, per issue, the comments read straight after perles
-	// added one. GetComments serves an entry while the snapshot it reads does
-	// not cover the entry's write; install drops the entries a new snapshot
-	// covers.
+	// added one (or synthesized when that read failed). GetComments serves
+	// an entry while the snapshot it reads does not cover the entry's write;
+	// install drops the entries a new snapshot covers.
 	overlay map[string]commentOverlay
 
 	// installMu orders installs with Close: once closed is set, no snapshot
@@ -519,20 +519,31 @@ func (b *SnapshotBackend) execute(query string) ([]beads.Issue, error) {
 // never running bd, and builds no snapshot: before the first one it returns
 // errNoSnapshot.
 func (b *SnapshotBackend) snapshotComments(issueID string) ([]beads.Comment, error) {
-	var comments []beads.Comment
-	err := b.withCurrent(func(s *snapshot) error {
-		if overlaid, ok := b.liveOverlay(s, issueID); ok {
-			comments = overlaid
-			return nil
-		}
-		var err error
-		comments, err = s.comments(issueID)
-		return err
-	})
+	served, err := b.servedComments(issueID)
 	if err != nil {
 		return nil, err
 	}
-	return comments, nil
+	return served.comments, nil
+}
+
+// servedComments is snapshotComments returning a copy of the overlay entry
+// that it serves, or an entry holding the snapshot's comments (seq 0, not
+// synthesized) when no live entry overlays them.
+func (b *SnapshotBackend) servedComments(issueID string) (commentOverlay, error) {
+	var served commentOverlay
+	err := b.withCurrent(func(s *snapshot) error {
+		if entry, ok := b.liveOverlay(s, issueID); ok {
+			served = entry
+			return nil
+		}
+		comments, err := s.comments(issueID)
+		served = commentOverlay{comments: comments}
+		return err
+	})
+	if err != nil {
+		return commentOverlay{}, err
+	}
+	return served, nil
 }
 
 // comments reads an issue's comments, oldest first. Snapshot times have

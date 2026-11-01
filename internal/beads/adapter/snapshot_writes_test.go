@@ -171,6 +171,38 @@ func commentTexts(comments []task.Comment) []string {
 	return texts
 }
 
+func commentIDs(comments []task.Comment) []string {
+	var ids []string
+	for _, c := range comments {
+		ids = append(ids, c.ID)
+	}
+	return ids
+}
+
+// errCommentsLocked is a failing comments read's error.
+var errCommentsLocked = errors.New("bd comments failed: database is locked")
+
+// failCommentReads fails every bd comments read.
+func failCommentReads(req infrabeads.BDRequest) error {
+	if bdOp(req) == "comments" {
+		return errCommentsLocked
+	}
+	return nil
+}
+
+// receiveWithin waits up to 5s for a value on ch, and fails the test with
+// msg if none comes.
+func receiveWithin[T any](t *testing.T, ch <-chan T, msg string) T {
+	t.Helper()
+	select {
+	case v := <-ch:
+		return v
+	case <-time.After(5 * time.Second):
+		t.Fatal(msg)
+		panic("unreachable")
+	}
+}
+
 // overlayEntry returns an issue's comment overlay entry.
 func overlayEntry(b *SnapshotBackend, issueID string) (commentOverlay, bool) {
 	b.overlayMu.Lock()
@@ -334,6 +366,386 @@ func TestSnapshotBackend_AddCommentFetchFailureWithoutSnapshot(t *testing.T) {
 	require.Equal(t, []string{"hello"}, commentTexts(comments))
 	require.Equal(t, 2, opCount(bd.runner, "comments"))
 	require.Zero(t, opCount(bd.runner, "export"))
+}
+
+// TestSnapshotBackend_AddCommentFetchFailureOverOverlay: when the read after
+// an AddComment fails while an earlier AddComment's overlay entry is live,
+// the local copy builds on that entry, not on the snapshot alone:
+// GetComments returns the snapshot's comments, the earlier comment and the
+// local copy.
+func TestSnapshotBackend_AddCommentFetchFailureOverOverlay(t *testing.T) {
+	bd := newCommentBD(t, "s-a")
+	bd.add("s-a", "tester", "first")
+	b := newTestBackendWith(t, newTestWorkspace(t), SnapshotBackendConfig{
+		BDVersion: "1.3.2", Runner: bd.runner.run, Clock: newFakeClock(schedStart),
+	})
+	require.NoError(t, b.CheckCompatibility())
+	te := b.Services().TaskExecutor
+
+	require.NoError(t, te.AddComment("s-a", "alice", "one"))
+	bd.fail = failCommentReads
+	require.NoError(t, te.AddComment("s-a", "alice", "two"))
+	comments, err := te.GetComments("s-a")
+	require.NoError(t, err)
+	require.Equal(t, []string{"bd-c-1", "bd-c-2", "local-2"}, commentIDs(comments))
+
+	// A local copy builds on the live entry itself, not on the snapshot's
+	// comments alone, which lack bd-c-2 and local-2: its entry keeps them
+	// even if a snapshot covering only the earlier writes prunes the live
+	// entry before it is stored.
+	entry, err := b.withLocalComment("s-a", localComment{
+		comment: beads.Comment{ID: "local-3", Author: "alice", Text: "three"},
+		since:   schedStart,
+	}, 3)
+	require.NoError(t, err)
+	require.Equal(t, []string{"bd-c-1", "bd-c-2", "local-2", "local-3"}, commentIDs(ToTaskComments(entry.comments)))
+}
+
+// TestSnapshotBackend_LocalCopyOnlyWithoutBDCopy: when the read after an
+// AddComment fails, a local copy stands in for the new comment unless the
+// comments GetComments serves already hold bd's copy: a comment by the same
+// author with the same text, created no earlier than the second in which
+// the write started. A local copy never passes for bd's copy of another.
+func TestSnapshotBackend_LocalCopyOnlyWithoutBDCopy(t *testing.T) {
+	t.Run("a snapshot exported after the write has it", func(t *testing.T) {
+		// A build reads writeSeq before the write but exports after bd
+		// committed the comment, then installs before the read fails.
+		bd := newCommentBD(t, "s-a")
+		bd.add("s-a", "tester", "first") // bd-c-1
+		// The write starts mid-second; bd stores its copy (bd-c-2) at
+		// fixtureTime+2s, in whole seconds.
+		clock := newFakeClock(fixtureTime.Add(2*time.Second + 500*time.Millisecond))
+		b := newTestBackendWith(t, newTestWorkspace(t), SnapshotBackendConfig{
+			BDVersion: "1.3.2", Runner: bd.runner.run, Clock: clock,
+		})
+		require.NoError(t, b.CheckCompatibility())
+		te := b.Services().TaskExecutor
+
+		release, closeRelease := releaseOnCleanup(t)
+		exporting, built := make(chan struct{}), make(chan struct{})
+		bd.fail = func(req infrabeads.BDRequest) error {
+			switch bdOp(req) {
+			case "export":
+				close(exporting)
+				<-release
+			case "comments":
+				closeRelease() // the export runs after bd committed the comment
+				waitClosed(t, built, "the rebuild did not finish")
+				return errCommentsLocked
+			}
+			return nil
+		}
+		var buildErr error
+		go func() {
+			defer close(built)
+			buildErr = b.rebuild(b.ctx)
+		}()
+		waitClosed(t, exporting, "the rebuild did not start")
+
+		require.NoError(t, te.AddComment("s-a", "alice", "hello"))
+		require.NoError(t, buildErr)
+		require.Zero(t, b.current.Load().coveredWriteSeq, "the snapshot does not cover the write")
+		comments, err := te.GetComments("s-a")
+		require.NoError(t, err)
+		require.Equal(t, []string{"bd-c-1", "bd-c-2"}, commentIDs(comments), "no local copy next to bd's")
+	})
+
+	t.Run("an earlier identical comment is no copy", func(t *testing.T) {
+		bd := newCommentBD(t, "s-a")
+		bd.add("s-a", "alice", "hello") // bd-c-1, at fixtureTime+1s
+		b := newTestBackendWith(t, newTestWorkspace(t), SnapshotBackendConfig{
+			BDVersion: "1.3.2", Runner: bd.runner.run, Clock: newFakeClock(fixtureTime.Add(2 * time.Second)),
+		})
+		require.NoError(t, b.CheckCompatibility())
+		te := b.Services().TaskExecutor
+		bd.fail = failCommentReads
+
+		require.NoError(t, te.AddComment("s-a", "alice", "hello"))
+		comments, err := te.GetComments("s-a")
+		require.NoError(t, err)
+		require.Equal(t, []string{"bd-c-1", "local-1"}, commentIDs(comments))
+	})
+
+	t.Run("two identical comments whose reads fail", func(t *testing.T) {
+		bd := newCommentBD(t, "s-a")
+		b := newTestBackendWith(t, newTestWorkspace(t), SnapshotBackendConfig{
+			BDVersion: "1.3.2", Runner: bd.runner.run, Clock: newFakeClock(fixtureTime),
+		})
+		require.NoError(t, b.CheckCompatibility())
+		te := b.Services().TaskExecutor
+		bd.fail = failCommentReads
+
+		require.NoError(t, te.AddComment("s-a", "alice", "+1"))
+		require.NoError(t, te.AddComment("s-a", "alice", "+1"))
+		comments, err := te.GetComments("s-a")
+		require.NoError(t, err)
+		require.Equal(t, []string{"local-1", "local-2"}, commentIDs(comments))
+	})
+}
+
+// TestSnapshotBackend_SlowCommentReadMeetsLocalCopy: an AddComment whose
+// read back is slow, and a later one whose read fails and stores its
+// synthesized entry first. The slow read's entry, though of the earlier
+// write, is merged into the synthesized one rather than dropped, so
+// GetComments still returns the earlier comment; the later comment's local
+// copy goes when the slow read brought bd's copy.
+func TestSnapshotBackend_SlowCommentReadMeetsLocalCopy(t *testing.T) {
+	for _, seesLater := range []bool{true, false} {
+		t.Run(fmt.Sprintf("the slow read sees the later comment %v", seesLater), func(t *testing.T) {
+			bd := newCommentBD(t, "s-a")
+			bd.add("s-a", "tester", "first") // bd-c-1; the writes add bd-c-2 and bd-c-3
+			release, closeRelease := releaseOnCleanup(t)
+			reading := make(chan struct{})
+			var reads atomic.Int32
+			runner := &fakeRunner{answer: func(ctx context.Context, req infrabeads.BDRequest) (string, error) {
+				if bdOp(req) != "comments" {
+					return bd.answer(ctx, req)
+				}
+				if reads.Add(1) > 1 {
+					return "", errCommentsLocked // the later AddComment's read
+				}
+				// The earlier AddComment's read, before or after the later
+				// write, returns only once released.
+				var out string
+				var err error
+				if !seesLater {
+					out, err = bd.answer(ctx, req)
+				}
+				close(reading)
+				<-release
+				if seesLater {
+					out, err = bd.answer(ctx, req)
+				}
+				return out, err
+			}}
+			b := newTestBackendWith(t, newTestWorkspace(t), SnapshotBackendConfig{
+				BDVersion: "1.3.2", Runner: runner.run, Clock: newFakeClock(fixtureTime.Add(time.Second)),
+			})
+			require.NoError(t, b.CheckCompatibility())
+			te := b.Services().TaskExecutor
+
+			earlier := make(chan error, 1)
+			go func() { earlier <- te.AddComment("s-a", "alice", "one") }()
+			waitClosed(t, reading, "the earlier AddComment did not read its comments")
+			later := make(chan error, 1)
+			go func() { later <- te.AddComment("s-a", "bob", "two") }()
+			require.NoError(t, receiveWithin(t, later, "the later AddComment did not return"))
+			entry, ok := overlayEntry(b, "s-a")
+			require.True(t, ok)
+			require.True(t, entry.synthesized)
+			require.Equal(t, []string{"bd-c-1", "local-2"}, commentIDs(ToTaskComments(entry.comments)),
+				"the snapshot lacks the earlier comment")
+
+			closeRelease()
+			require.NoError(t, receiveWithin(t, earlier, "the earlier AddComment did not return"))
+			want := []string{"bd-c-1", "bd-c-2", "local-2"}
+			if seesLater {
+				want = []string{"bd-c-1", "bd-c-2", "bd-c-3"}
+			}
+			comments, err := te.GetComments("s-a")
+			require.NoError(t, err)
+			require.Equal(t, want, commentIDs(comments))
+			entry, _ = overlayEntry(b, "s-a")
+			require.Equal(t, uint64(2), entry.seq, "the merged entry is the later write's")
+
+			require.NoError(t, b.rebuild(b.ctx))
+			require.Zero(t, overlaySize(b))
+			comments, err = te.GetComments("s-a")
+			require.NoError(t, err)
+			require.Equal(t, []string{"bd-c-1", "bd-c-2", "bd-c-3"}, commentIDs(comments))
+		})
+	}
+}
+
+// TestMergeOverlay: the entry that replaces an issue's overlay entries, as
+// storeOverlay merges them one by one, does not depend on the order they
+// are stored in. A later write's bd read replaces the earlier entries. A
+// later write's synthesized entry is merged with them into an entry that
+// stays synthesized and the later write's, so an earlier read stored after
+// the merge is merged too, and the merge drops each local copy, of either
+// entry, whose bd copy it holds.
+func TestMergeOverlay(t *testing.T) {
+	at := func(second int) time.Time { return fixtureTime.Add(time.Duration(second) * time.Second) }
+	comment := func(id, author, text string, second int) beads.Comment {
+		return beads.Comment{ID: id, Author: author, Text: text, CreatedAt: at(second)}
+	}
+	// bd's comments: snap was there before the writes; c1, c2 and c3 are
+	// bd's copies of writes 1, 2 and 3, whose local copies are l1, l2, l3.
+	snap := comment("bd-c-0", "tester", "snapshot", 0)
+	c1 := comment("bd-c-1", "alice", "one", 1)
+	c2 := comment("bd-c-2", "bob", "two", 2)
+	local := func(seq uint64, c beads.Comment) localComment {
+		return localComment{comment: comment(fmt.Sprintf("local-%d", seq), c.Author, c.Text, int(seq)), since: at(int(seq))}
+	}
+	l1, l2, l3 := local(1, c1), local(2, c2), local(3, comment("bd-c-3", "carol", "three", 3))
+	read := func(seq uint64, comments ...beads.Comment) commentOverlay {
+		return commentOverlay{comments: comments, seq: seq}
+	}
+	synthesized := func(seq uint64, base []beads.Comment, locals ...localComment) commentOverlay {
+		o := commentOverlay{comments: slices.Clone(base), seq: seq, synthesized: true, local: locals}
+		for _, l := range locals {
+			o.comments = append(o.comments, l.comment)
+		}
+		return o
+	}
+
+	tests := []struct {
+		name    string
+		entries []commentOverlay // as stored, the first one first
+		want    commentOverlay
+	}{
+		{
+			name:    "a later bd read replaces an earlier synthesized entry",
+			entries: []commentOverlay{synthesized(1, []beads.Comment{snap}, l1), read(2, snap, c1, c2)},
+			want:    read(2, snap, c1, c2),
+		},
+		{
+			name:    "an earlier bd read loses to a later one",
+			entries: []commentOverlay{read(2, snap, c1, c2), read(1, snap, c1)},
+			want:    read(2, snap, c1, c2),
+		},
+		{
+			name:    "an earlier bd read is merged into a later synthesized entry",
+			entries: []commentOverlay{synthesized(2, []beads.Comment{snap}, l2), read(1, snap, c1)},
+			want:    synthesized(2, []beads.Comment{snap, c1}, l2),
+		},
+		{
+			name:    "the later entry's local copy goes when the earlier read has its bd copy",
+			entries: []commentOverlay{synthesized(2, []beads.Comment{snap}, l2), read(1, snap, c1, c2)},
+			want:    synthesized(2, []beads.Comment{snap, c1, c2}),
+		},
+		{
+			name: "a merged entry stays synthesized, so an earlier read stored later is merged too",
+			entries: []commentOverlay{
+				synthesized(3, []beads.Comment{snap}, l3),
+				read(1, snap, c1),
+				read(2, snap, c1, c2),
+			},
+			want: synthesized(3, []beads.Comment{snap, c1, c2}, l3),
+		},
+		{
+			name:    "the earlier entry's local copy goes when the later entry has its bd copy",
+			entries: []commentOverlay{synthesized(1, []beads.Comment{snap}, l1), synthesized(2, []beads.Comment{snap, c1}, l2)},
+			want:    synthesized(2, []beads.Comment{snap, c1}, l2),
+		},
+	}
+	// view is an entry with its comments and local copies as IDs.
+	type view struct {
+		Comments    []string
+		Seq         uint64
+		Synthesized bool
+		Local       []string
+	}
+	viewOf := func(o commentOverlay) view {
+		v := view{Comments: commentIDs(ToTaskComments(o.comments)), Seq: o.seq, Synthesized: o.synthesized}
+		for _, l := range o.local {
+			v.Local = append(v.Local, l.comment.ID)
+		}
+		return v
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reversed := slices.Clone(tt.entries)
+			slices.Reverse(reversed)
+			for name, entries := range map[string][]commentOverlay{"as listed": tt.entries, "reversed": reversed} {
+				got := entries[0]
+				for _, next := range entries[1:] {
+					got = mergeOverlay(got, next)
+				}
+				require.Equal(t, viewOf(tt.want), viewOf(got), "stored %s", name)
+			}
+		})
+	}
+}
+
+// TestSnapshotBackend_StaleOverlayEntryIsNotServed: an overlay entry stored
+// after a snapshot covering its write was installed (the read back was
+// slower than the rebuild) is not served: GetComments returns the
+// snapshot's comments, although the entry holds a comment the snapshot
+// lacks.
+func TestSnapshotBackend_StaleOverlayEntryIsNotServed(t *testing.T) {
+	bd := newCommentBD(t, "s-a")
+	b := newTestBackend(t, bd.runner.run)
+	require.NoError(t, b.CheckCompatibility())
+	te := b.Services().TaskExecutor
+	release, closeRelease := releaseOnCleanup(t)
+	reading := make(chan struct{})
+	bd.fail = func(req infrabeads.BDRequest) error {
+		if bdOp(req) == "comments" {
+			close(reading)
+			<-release
+		}
+		return nil
+	}
+
+	added := make(chan error, 1)
+	go func() { added <- te.AddComment("s-a", "alice", "hello") }()
+	waitClosed(t, reading, "the AddComment did not read its comments")
+	rebuilt := make(chan error, 1)
+	go func() { rebuilt <- b.rebuild(b.ctx) }()
+	require.NoError(t, receiveWithin(t, rebuilt, "the rebuild did not finish"))
+	require.Equal(t, uint64(1), b.current.Load().coveredWriteSeq, "the rebuild covers the write")
+	bd.add("s-a", "bob", "external") // after the export, before the read
+	closeRelease()
+	require.NoError(t, receiveWithin(t, added, "the AddComment did not return"))
+
+	entry, ok := overlayEntry(b, "s-a")
+	require.True(t, ok, "the read stored its entry after the covering install")
+	require.Equal(t, []string{"hello", "external"}, commentTexts(ToTaskComments(entry.comments)))
+	comments, err := te.GetComments("s-a")
+	require.NoError(t, err)
+	require.Equal(t, []string{"hello"}, commentTexts(comments), "the snapshot is served")
+}
+
+// TestSnapshotBackend_OverlayPrunedAfterRetire: install prunes the overlay
+// entries the new snapshot covers only after retiring the old snapshot. A
+// reader holding the old snapshot, which lacks the overlaid comment,
+// therefore keeps the entry until it releases the snapshot.
+func TestSnapshotBackend_OverlayPrunedAfterRetire(t *testing.T) {
+	bd := newCommentBD(t, "s-a")
+	b := newTestBackend(t, bd.runner.run)
+	require.NoError(t, b.CheckCompatibility())
+	require.NoError(t, b.Services().TaskExecutor.AddComment("s-a", "alice", "hello"))
+	old := b.current.Load()
+
+	acquired := make(chan struct{})
+	release, releaseReader := releaseOnCleanup(t)
+	readerDone := make(chan error, 1)
+	var (
+		served   []beads.Comment
+		overlaid bool
+	)
+	go func() {
+		readerDone <- b.withCurrent(func(s *snapshot) error {
+			if s != old {
+				return errors.New("the reader acquired another snapshot")
+			}
+			close(acquired)
+			<-release
+			// What snapshotComments reads, on the snapshot the reader holds.
+			entry, ok := b.liveOverlay(s, "s-a")
+			served, overlaid = entry.comments, ok
+			return nil
+		})
+	}()
+	waitClosed(t, acquired, "the reader did not acquire the snapshot")
+
+	swapped := make(chan error, 1)
+	go func() { swapped <- b.rebuild(b.ctx) }()
+	require.Eventually(t, func() bool { return b.current.Load() != old }, 5*time.Second, time.Millisecond)
+	require.Equal(t, uint64(1), b.current.Load().coveredWriteSeq, "the new snapshot covers the write")
+	select {
+	case err := <-swapped:
+		t.Fatalf("the swap finished retiring while a reader held the old snapshot (err %v)", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	releaseReader()
+	require.NoError(t, receiveWithin(t, readerDone, "the reader did not finish"))
+	require.True(t, overlaid, "the entry outlives the swap while a reader holds the old snapshot")
+	require.Equal(t, []string{"hello"}, commentTexts(ToTaskComments(served)))
+	require.NoError(t, receiveWithin(t, swapped, "the swap did not finish"))
+	require.Zero(t, overlaySize(b), "the entry is pruned once the old snapshot is retired")
 }
 
 // TestSnapshotBackend_ConcurrentCommentsReadYourWrites: writers adding
@@ -593,7 +1005,7 @@ func TestSnapshotBackend_CloseDoesNotCancelWrites(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() { done <- te.CloseIssue("s-a", "done") }()
-	<-writing
+	waitClosed(t, writing, "the write did not start")
 	require.NoError(t, b.Close())
 	releaseWrite()
 	require.NoError(t, <-done, "the write in flight completes")

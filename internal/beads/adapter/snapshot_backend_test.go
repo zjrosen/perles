@@ -426,7 +426,7 @@ func TestSnapshotBackend_ConcurrentFirstQueriesBuildOnce(t *testing.T) {
 		results[i], errs[i] = query.Execute("type = task")
 	}
 	wg.Go(func() { call(0) })
-	<-exporting
+	waitClosed(t, exporting, "the first build did not start")
 	for i := 1; i < callers; i++ {
 		wg.Go(func() { call(i) })
 	}
@@ -590,7 +590,7 @@ func TestSnapshotBackend_RetireWaitsForReader(t *testing.T) {
 			return err
 		})
 	}()
-	<-acquired
+	waitClosed(t, acquired, "the reader did not acquire the snapshot")
 
 	swapped := make(chan error, 1)
 	go func() { swapped <- b.rebuild(b.ctx) }()
@@ -1037,7 +1037,7 @@ func TestSnapshotBackend_CloseCancelsRunningBuild(t *testing.T) {
 		_, err := b.Services().QueryExecutor.Execute("type = task")
 		done <- err
 	}()
-	<-exporting
+	waitClosed(t, exporting, "the first build did not start")
 	require.NoError(t, b.Close())
 	select {
 	case err := <-done:

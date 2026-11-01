@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -343,15 +342,7 @@ func TestNewBeadsBackend_EmbeddedCheckCompatibility(t *testing.T) {
 // TestNewBeadsBackend_EmbeddedBDRefusal: bd refusing the export (a pending
 // schema migration) is a bd-error whose text leads with perles' hint.
 func TestNewBeadsBackend_EmbeddedBDRefusal(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the fake bd is a POSIX shell script")
-	}
 	ws := newEmbeddedWorkspace(t, embeddedTestMetadata)
-	fakeBDDir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(fakeBDDir, "bd"), []byte(`#!/bin/sh
-echo "Error: database schema v45 has pending migrations; run 'bd migrate schema' to apply them" >&2
-exit 1
-`), 0o755)) //nolint:gosec // test executable
 	f := newRunnerFactory(nil)
 
 	backend, err := newBeadsBackend(ws.beadsDir, filepath.Dir(ws.beadsDir), backendDeps{
@@ -360,7 +351,7 @@ exit 1
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, backend.Close()) })
-	t.Setenv("PATH", fakeBDDir) // the fake bd only
+	installFailingBD(t, "Error: database schema v45 has pending migrations; run 'bd migrate schema' to apply them")
 
 	err = backend.CheckCompatibility()
 

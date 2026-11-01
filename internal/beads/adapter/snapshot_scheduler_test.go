@@ -453,7 +453,7 @@ func TestSnapshotScheduler_RealChangeDuringRebuild(t *testing.T) {
 	h.replaceManifest("manifest v2")
 	h.b.requestRebuild(false)
 	h.clock.Advance(minRebuildGap)
-	<-exporting
+	waitClosed(t, exporting, "the rebuild did not start")
 	st := h.state()
 	require.True(t, st.running)
 	require.False(t, st.dirty, "the build cleared dirty")
@@ -493,7 +493,7 @@ func TestSnapshotScheduler_InFlightHashCausesNoFollowUp(t *testing.T) {
 	h.replaceManifest("manifest v2")
 	h.b.requestRebuild(false)
 	h.clock.Advance(minRebuildGap)
-	<-exporting
+	waitClosed(t, exporting, "the rebuild did not start")
 	st := h.state()
 	require.Equal(t, manifestHashOf("manifest v1"), st.installedHash, "only the in-flight hash matches the events below")
 	require.Equal(t, manifestHashOf("manifest v2"), st.inFlightH0)
@@ -944,6 +944,56 @@ func TestSnapshotScheduler_ManualRefreshDuringFailingBuild(t *testing.T) {
 	}
 }
 
+// TestSnapshotScheduler_ManualRefreshDuringSuccessfulBuild: a FlushCaches
+// while a build runs that then succeeds resets no later build's backoff:
+// the next build forgets the refresh when it starts, so when that build
+// fails, its failure counts and the retry waits out the 5s backoff.
+func TestSnapshotScheduler_ManualRefreshDuringSuccessfulBuild(t *testing.T) {
+	h := newSchedHarness(t, false)
+	require.Equal(t, 1, h.query())
+	release, closeRelease := releaseOnCleanup(t)
+	building := make(chan struct{})
+	h.setExportHook(func(ctx context.Context, n int) error {
+		switch n {
+		case 2: // blocks until release, then succeeds
+			close(building)
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return context.Cause(ctx)
+			}
+		case 3:
+			return errLocked
+		}
+		return nil
+	})
+
+	h.replaceManifest("manifest v2")
+	h.b.requestRebuild(false)
+	h.clock.Advance(minRebuildGap)
+	waitClosed(t, building, "the build did not start")
+	require.NoError(t, h.b.FlushCaches(context.Background()))
+	require.True(t, h.state().manualDuringBuild)
+	closeRelease()
+	h.waitBuilt(2)
+	st := h.state()
+	require.NoError(t, st.lastErr)
+	require.False(t, st.dirty, "the build covered the refresh")
+
+	// A watcher-triggered rebuild fails: no refresh was made during it.
+	h.replaceManifest("manifest v3")
+	h.b.requestRebuild(false)
+	h.rebuildAfterPacing(minRebuildGap) // export 3 fails
+	st = h.state()
+	require.ErrorIs(t, st.lastErr, errLocked)
+	require.Equal(t, 1, st.consecutiveFailures, "the refresh during the earlier build does not reset this one's backoff")
+
+	h.b.requestRebuild(false) // the watcher asks for a retry
+	h.rebuildAfterPacing(5 * time.Second)
+	require.NoError(t, h.state().lastErr)
+	require.Equal(t, 3, h.query(), "export 3 failed, so export 4 installs generation 3")
+}
+
 // TestSnapshotScheduler_FailedFirstBuildIsLogged: a failed lazy first
 // build (CheckCompatibility or the first query) is logged, like the
 // scheduler goroutine's failed rebuilds.
@@ -1045,7 +1095,7 @@ func TestSnapshotScheduler_TriggersNeverBlock(t *testing.T) {
 		h.replaceManifest("manifest v2")
 		h.b.requestRebuild(false)
 		h.clock.Advance(minRebuildGap)
-		<-exporting
+		waitClosed(t, exporting, "the rebuild did not start")
 
 		requireFastFlushes(t, h)
 		require.True(t, h.state().dirty, "a change during the build is still recorded")
@@ -1071,7 +1121,7 @@ func TestSnapshotScheduler_TriggersNeverBlock(t *testing.T) {
 			_, err := h.b.Services().QueryExecutor.Execute("type = task")
 			queried <- err
 		}()
-		<-exporting
+		waitClosed(t, exporting, "the first build did not start")
 
 		requireFastFlushes(t, h)
 		closeRelease()
@@ -1144,7 +1194,7 @@ func TestSnapshotScheduler_CloseStopsEverything(t *testing.T) {
 		h.replaceManifest("manifest v2")
 		h.b.requestRebuild(false)
 		h.clock.Advance(minRebuildGap)
-		<-exporting
+		waitClosed(t, exporting, "the rebuild did not start")
 
 		closeWithin(t, h.b)
 		require.ErrorIs(t, cause.Load().(error), errSnapshotBackendClosed)
