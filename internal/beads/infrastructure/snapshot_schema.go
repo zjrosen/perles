@@ -100,6 +100,10 @@ const maxExportLineBytes = 64 << 20
 // memdb database stays alive without them, but it must be at least 1.
 const snapshotMaxIdleConns = 4
 
+// openSnapshotDB opens a snapshot database pool. It is sql.Open; tests
+// replace it to observe the pool LoadSnapshot closes on failure.
+var openSnapshotDB = sql.Open
+
 // ExportIssue is one issues-table record of `bd export --all`, with its
 // labels, outgoing dependency edges and comments.
 type ExportIssue struct {
@@ -392,7 +396,7 @@ func LoadSnapshot(ctx context.Context, name string, data SnapshotData) (*sql.DB,
 		Path:     "/" + name,
 		RawQuery: url.Values{"vfs": {"memdb"}}.Encode(),
 	}).String()
-	db, err := sql.Open("sqlite3", dsn)
+	db, err := openSnapshotDB("sqlite3", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open snapshot database: %w", err)
 	}
@@ -418,9 +422,7 @@ func loadSnapshot(ctx context.Context, db *sql.DB, data SnapshotData) (err error
 	}
 	defer func() {
 		if err != nil {
-			if rbErr := tx.Rollback(); rbErr != nil {
-				err = errors.Join(err, fmt.Errorf("roll back snapshot load: %w", rbErr))
-			}
+			err = rollbackSnapshotLoad(tx, err)
 		}
 	}()
 
@@ -452,6 +454,17 @@ func loadSnapshot(ctx context.Context, db *sql.DB, data SnapshotData) (err error
 		return fmt.Errorf("commit snapshot load: %w", err)
 	}
 	return nil
+}
+
+// rollbackSnapshotLoad rolls back tx after the load failed with err, and
+// returns err with any rollback failure joined to it. sql.ErrTxDone is not a
+// failure: the transaction has already ended, because its Commit failed or its
+// context was cancelled (database/sql then rolls it back itself).
+func rollbackSnapshotLoad(tx *sql.Tx, err error) error {
+	if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
+		return errors.Join(err, fmt.Errorf("roll back snapshot load: %w", rbErr))
+	}
+	return err
 }
 
 // snapshotLoader holds the prepared insert statements of one load.

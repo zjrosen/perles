@@ -109,8 +109,9 @@ func newBDError(args []string, out bdOutput, timeout time.Duration) *bdError {
 }
 
 // bdValueGlobalFlags are bd's global flags that take their value as the next
-// argument when it is not attached with "=" (cmd/bd/main.go).
-var bdValueGlobalFlags = []string{"--actor", "--database", "--db", "-C", "--directory", "--dolt-auto-commit", "--mem-profile"}
+// argument when it is not attached with "=" (cmd/bd/main.go), including the
+// hidden --format.
+var bdValueGlobalFlags = []string{"--actor", "--database", "--db", "-C", "--directory", "--dolt-auto-commit", "--format", "--mem-profile"}
 
 // bdCommandName names the bd command in args for error messages, skipping
 // the global flags before it: {"--readonly", "export", "--all"} is "export".

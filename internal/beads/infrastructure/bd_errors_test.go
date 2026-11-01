@@ -110,6 +110,7 @@ func TestBDCommandName(t *testing.T) {
 		{name: "value flag with separate value", args: []string{"--actor", "alice", "update", "X-1"}, want: "update"},
 		{name: "value flag with attached value", args: []string{"--actor=alice", "update", "X-1"}, want: "update"},
 		{name: "directory shorthand", args: []string{"-C", "/repo", "--readonly", "list"}, want: "list"},
+		{name: "hidden format flag with separate value", args: []string{"--format", "json", "list"}, want: "list"},
 		{name: "only flags", args: []string{"--version"}, want: "--version"},
 		{name: "value flag missing its value", args: []string{"--readonly", "--db"}, want: "--readonly"},
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -642,6 +643,77 @@ func TestLoadSnapshot_FailureReturnsNoDB(t *testing.T) {
 			require.Empty(t, queryStrings(t, other, `SELECT name FROM sqlite_master`))
 		})
 	}
+}
+
+// captureSnapshotDBs makes LoadSnapshot's pools observable: it wraps
+// openSnapshotDB for the test and returns the pools it opened.
+func captureSnapshotDBs(t *testing.T) *[]*sql.DB {
+	t.Helper()
+	var opened []*sql.DB
+	orig := openSnapshotDB
+	openSnapshotDB = func(driverName, dsn string) (*sql.DB, error) {
+		db, err := orig(driverName, dsn)
+		if err == nil {
+			opened = append(opened, db)
+		}
+		return db, err
+	}
+	t.Cleanup(func() { openSnapshotDB = orig })
+	return &opened
+}
+
+// TestLoadSnapshot_FailureClosesDB: on a failed load LoadSnapshot closes the
+// pool it opened, so the caller's memdb.Delete frees the database.
+func TestLoadSnapshot_FailureClosesDB(t *testing.T) {
+	opened := captureSnapshotDBs(t)
+	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	dup := ExportIssue{ID: "fx-dup", Status: "open", IssueType: "task", CreatedAt: now, UpdatedAt: now, Metadata: "{}"}
+
+	db, err := LoadSnapshot(context.Background(), snapshotName(t), SnapshotData{Issues: []ExportIssue{dup, dup}})
+	require.ErrorContains(t, err, "insert issue fx-dup")
+	require.Nil(t, db)
+
+	require.Len(t, *opened, 1)
+	require.EqualError(t, (*opened)[0].PingContext(context.Background()), "sql: database is closed")
+}
+
+// TestLoadSnapshot_SuccessKeepsDBOpen: the pool LoadSnapshot returns is the
+// one it opened, still open.
+func TestLoadSnapshot_SuccessKeepsDBOpen(t *testing.T) {
+	opened := captureSnapshotDBs(t)
+	db := loadTestSnapshot(t, fixtureData(t))
+	require.Equal(t, []*sql.DB{db}, *opened)
+	require.NoError(t, db.PingContext(context.Background()))
+}
+
+// TestRollbackSnapshotLoad: a transaction that has already ended (its Commit
+// failed or its context was cancelled) adds nothing to the load's error, and
+// a live one is rolled back.
+func TestRollbackSnapshotLoad(t *testing.T) {
+	db, err := sql.Open("sqlite3", snapshotDSN(snapshotName(t)))
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	loadErr := errors.New("insert issue fx-1: boom")
+
+	t.Run("ended transaction", func(t *testing.T) {
+		tx, err := db.BeginTx(context.Background(), nil)
+		require.NoError(t, err)
+		require.NoError(t, tx.Commit())
+
+		err = rollbackSnapshotLoad(tx, loadErr)
+		require.Same(t, loadErr, err, "sql.ErrTxDone must not be joined onto the load error")
+	})
+
+	t.Run("live transaction", func(t *testing.T) {
+		tx, err := db.BeginTx(context.Background(), nil)
+		require.NoError(t, err)
+		_, err = tx.ExecContext(context.Background(), `CREATE TABLE rolled_back (id TEXT)`)
+		require.NoError(t, err)
+
+		require.Same(t, loadErr, rollbackSnapshotLoad(tx, loadErr))
+		require.ErrorIs(t, tx.Commit(), sql.ErrTxDone, "the transaction was rolled back")
+		require.Empty(t, queryStrings(t, db, `SELECT name FROM sqlite_master`))
+	})
 }
 
 func TestLoadSnapshot_CanceledContext(t *testing.T) {

@@ -109,15 +109,21 @@ func (s *BlockedFlagSource) supportState() blockedFlagSupport {
 
 // readFlags runs `bd blocked --flags --raw` on candidates. supported is false,
 // with no error, when bd rejected --flags or --raw (now remembered) or another
-// call found that out while this one waited to probe.
+// call found that out, before this one read the support state or while it
+// waited to probe.
 func (s *BlockedFlagSource) readFlags(ctx context.Context, candidates []string) (ids map[string]bool, supported bool, err error) {
-	if s.supportState() == blockedFlagsUnknown {
+	switch s.supportState() {
+	case blockedFlagsUnsupported:
+		// Another call's probe failed since ReadBlockedIDs read the state.
+		return nil, false, nil
+	case blockedFlagsUnknown:
 		select {
 		case s.probing <- struct{}{}:
 			defer func() { <-s.probing }()
 		case <-ctx.Done():
 			return nil, false, context.Cause(ctx)
 		}
+		// The probe that held the token may have settled the question.
 		if s.supportState() == blockedFlagsUnsupported {
 			return nil, false, nil
 		}

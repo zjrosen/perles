@@ -550,6 +550,25 @@ func TestBlockedFlagSource_ProbeWaitEndsWithContext(t *testing.T) {
 	require.Equal(t, blockedFlagsSupported, source.supportState())
 }
 
+// TestBlockedFlagSource_UnsupportedSinceStateRead: when another build stores
+// "unsupported" after ReadBlockedIDs read the support state but before
+// readFlags runs, readFlags sends no second probe.
+func TestBlockedFlagSource_UnsupportedSinceStateRead(t *testing.T) {
+	var requests []BDRequest
+	run := func(_ context.Context, req BDRequest) (string, error) {
+		requests = append(requests, req)
+		return "", newBDError(req.Args, releasedFlagsRefusal, req.Timeout)
+	}
+	source := NewBlockedFlagSource(run)
+	source.support.Store(int32(blockedFlagsUnsupported))
+
+	ids, supported, err := source.readFlags(context.Background(), blockedFixtureCandidates)
+	require.NoError(t, err)
+	require.False(t, supported)
+	require.Nil(t, ids)
+	require.Empty(t, requests, "no --flags probe once support is known to be missing")
+}
+
 func TestBlockedFlagSource_PassesContext(t *testing.T) {
 	type ctxKey struct{}
 	ctx := context.WithValue(context.Background(), ctxKey{}, "caller")
