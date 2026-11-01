@@ -15,12 +15,17 @@ issue tracking, built in Go using the Bubble Tea TUI framework. It includes a
 - Go 1.27+
 - Node.js + npm (version in `.nvmrc`) for `make build` / `make install`, which rebuild the
   embedded frontend first. `make build-go` skips npm and embeds the committed `frontend/dist/`.
-- A project with a `.beads/` directory, using either:
+- A project with a `.beads/` directory, using one of:
   - beads >= v1.0.0 (`MinBeadsVersion`) on a Dolt SQL server (server mode, Dolt >= 2.6.0).
-    Embedded Dolt (the `bd init` default), proxied-server, HTTP (`bd connect`), graph-mode and
-    historical SQLite workspaces are not supported; each gets an explanatory screen.
+  - beads embedded Dolt (the `bd init` default) with bd >= v1.0.5 (`MinEmbeddedBeadsVersion`), read
+    through bd snapshots (`SnapshotBackend`). Server mode is still recommended above about 5,000
+    issues or for write-heavy multi-agent workspaces.
   - beads_rust (`backend: beads_rust` in the perles config)
-- The `bd` CLI (or `br` for beads_rust) on `PATH`. Perles uses it for writes.
+
+  Proxied-server, HTTP (`bd connect`), graph-mode and historical SQLite workspaces are not
+  supported; each gets an explanatory screen.
+- The `bd` CLI (or `br` for beads_rust) on `PATH`. Perles uses it for writes, and for every read of
+  an embedded Dolt workspace.
 - golangci-lint v2 (for linting; `.golangci.yml` uses the v2 format)
 - mockery v2 (for mock generation; `.mockery.yaml` uses the v2 format)
 
@@ -116,6 +121,8 @@ perles/
 │   ├── app/              # Root application model & orchestration
 │   ├── task/             # Backend-agnostic issue DTOs & interfaces (Backend, TaskExecutor, QueryExecutor)
 │   ├── beads/            # Beads backend (adapter, application, domain, infrastructure)
+│   │   ├── adapter/      # task.Backend: BeadsBackend (server mode), SnapshotBackend (embedded, snapshot_*.go)
+│   │   ├── infrastructure/ # Workspace detection, Dolt client, bd runner/executor, embedded snapshot reads
 │   │   └── bql/          # Query language (lexer, parser, ast, validator, executor, sql)
 │   ├── beadsrust/        # beads_rust backend adapter (reads beads.db, writes via `br`)
 │   ├── registry/         # DDD-layered workflow registry
@@ -161,7 +168,7 @@ perles/
 │   │   ├── modals/       # Modal dialogs (help, issueeditor, commenteditor)
 │   │   ├── nobeads/      # Empty state when no .beads directory
 │   │   ├── outdated/     # Database version too old state
-│   │   ├── unsupported/  # Unsupported beads workspace (embedded, proxied-server, http, graph, legacy SQLite)
+│   │   ├── unsupported/  # Unsupported beads workspace (proxied-server, http, graph, legacy SQLite; embedded when the snapshot reader can't start)
 │   │   ├── serverdown/   # Shown when the Dolt server is unreachable
 │   │   ├── shared/       # Reusable UI components
 │   │   │   ├── chatpanel/   # AI chat panel (kanban/search, ctrl+w)
@@ -423,7 +430,7 @@ imports these layers directly (e.g. `mode.Services` holds an `appgit.GitExecutor
 | Package | Layers |
 |---------|--------|
 | `internal/registry/` | `domain/` (Registration, Chain, Node, DAG algorithms), `application/` (RegistryService) |
-| `internal/beads/` | `domain/` (issue types, version checks), `application/` (ports such as `DBClient`), `infrastructure/` (workspace detection, Dolt connection resolution incl. `bd context --json`, Dolt client, `bd` executor), `adapter/` (implements the `internal/task` interfaces); `bql/` sits alongside |
+| `internal/beads/` | `domain/` (issue types, version checks), `application/` (ports such as `DBClient`), `infrastructure/` (workspace detection, Dolt connection resolution incl. `bd context --json`, Dolt client, `bd` runner and executor, embedded snapshot reader: `embedded.go`, `snapshot_source.go`, `snapshot_blocked.go`, `snapshot_schema.go`), `adapter/` (implements the `internal/task` interfaces: `BeadsBackend` for server mode, `SnapshotBackend` for embedded Dolt in `snapshot_backend.go`, `snapshot_scheduler.go`, `snapshot_writes.go`); `bql/` sits alongside |
 | `internal/git/` | `domain/` (types, errors), `application/` (`GitExecutor` port), `infrastructure/` (git CLI executor) |
 | `internal/sessions/domain/` | Persisted session entity and `SessionRepository` interface; SQLite implementation in `internal/infrastructure/sqlite/` |
 | `internal/orchestration/fabric/` | `domain/` (core messaging types), with `repository/` (storage) and `persistence/` (JSONL event log) |
@@ -670,7 +677,12 @@ on an old database) fails with `field "started" is not available in this beads d
 inlined `blocks` check (Dolt) or `blocked_issues_cache` (SQLite); `ready` also requires status `open`
 or a custom `active` status, not pinned/ephemeral/future-deferred, no future-deferred parent, and
 not one of bd's internal types (`bql.ReadyExcludedTypes`). Dependency targets include
-`dependencies.depends_on_external` (cross-prefix edges) when that column exists.
+`dependencies.depends_on_external` (cross-prefix edges) when that column exists. In an embedded
+workspace the snapshot's `is_blocked` comes from bd (the `bd blocked --json` listing, or the exact
+`bd blocked --flags --raw` on bd builds that have it), so it matches server mode except for stale
+flags with no nameable blocker on the listing path. In both modes an issue blocked only by
+`external:` dependencies is not blocked and can be ready, which differs from `bd ready` on bd
+builds with bd's external-dependency policy (follow-up perles-v18).
 
 The `beads_rust` backend accepts `owner` but not `mol_type`, `acceptance_criteria`, `close_reason`,
 `started`, `closed` or `due`; `metadata.*` queries fail there because its issues table has no
@@ -730,8 +742,9 @@ Lookup order (first found wins):
 `perles init` writes the default template (`config.DefaultConfigTemplate()`) to `./.perles/config.yaml`.
 It refuses with `config file already exists: .perles/config.yaml` only when that file exists; a home
 config does not block it. A bare `perles` run writes the same file when no config exists anywhere, but
-only after the beads backend has opened and passed its version check, so the no-beads, embedded-mode,
-server-down and outdated screens never leave a file behind. Other subcommands never create a config.
+only after the beads backend has opened and passed its version check, so the no-beads,
+unsupported-workspace, server-down and outdated screens never leave a file behind. Other subcommands
+never create a config.
 A `-c` path that does not exist is not created at startup (perles runs on built-in defaults), but
 saving a view or column later writes to that path.
 
@@ -929,13 +942,39 @@ Orchestration runs from the dashboard; there is no separate orchestration mode.
 
 - Requires a `.beads/` directory: beads (>= v1.0.0) on a Dolt SQL server (server mode, declared by
   `dolt_mode` in `.beads/metadata.json`, `dolt.mode` in `.beads/config.yaml`, a non-local host,
-  shared-server mode or `BEADS_DOLT_SERVER_MODE=1`), or a beads_rust project with
+  shared-server mode or `BEADS_DOLT_SERVER_MODE=1`), beads embedded Dolt (the fallback when nothing
+  declares server or proxied-server mode; needs bd >= v1.0.5), or a beads_rust project with
   `backend: beads_rust` in the perles config. A `.beads/` without `metadata.json` is treated as
   Dolt, as bd does; beads' SQLite backend was removed in bd v0.58
-- Unsupported workspaces (embedded Dolt, proxied-server, HTTP, graph mode, historical SQLite) show the
-  `internal/ui/unsupported` screen; an unreachable server and an older beads version each have their own
-  screen
-- Auto-refresh watches `beads.db`/`beads.db-wal` (beads_rust) or `.beads/last-touched` (beads)
+- Embedded Dolt workspaces are read by `SnapshotBackend` (`internal/beads/adapter/`): bounded
+  `bd --readonly` reads (`export --all`, `blocked --json`, `statuses --json` only for custom statuses;
+  30s each) load a fresh in-memory SQLite snapshot (`vfs/memdb`) that the unchanged BQL executor
+  queries in its SQLite dialect, swapped in atomically. Only perles' bd commands take the Dolt
+  `noms/LOCK`, so an idle perles holds no lock. Writes go through `bd`; a comment overlay gives
+  `AddComment` read-after-write, and `ShowIssue` always runs `bd --readonly show`. Board queries lag
+  a write by about one rebuild (1–2s, longer under sustained writes). The TUI builds the first
+  snapshot in `CheckCompatibility`; `perles daemon` builds nothing until a query. On released bd the
+  flags come from the `bd blocked --json` listing, whose one divergence from server mode is a stale
+  flag with no nameable blocker; repair with `bd recompute-blocked` / `bd doctor --fix` where
+  available. `export.exclude_owners` is neutralized for perles' export only (`BD_EXPORT_*` env);
+  DB-stored values are not. The opt-in real-bd tests are in `CONTRIBUTING.md`
+- Rebuilds start no sooner than `lastEnd + max(2s, 2 × lastDuration, failure backoff)`
+  (`nextBuildAt`); a failed build records its duration too. The backoff is 5s after the first
+  failure, doubling to 2min. A failure clears the installed hash but doesn't mark the snapshot
+  dirty, so the retry waits for the next trigger (any manifest rewrite, i.e. any `bd` command, a
+  perles write, or `r`). `r` (`FlushCaches`) resets only the backoff, not the pacing: after a 30s
+  lock timeout it retries about 60s later
+- Unsupported workspaces (proxied-server, HTTP, graph mode, historical SQLite) show the
+  `internal/ui/unsupported` screen. An embedded workspace gets it only when the snapshot reader can't
+  start, with a per-cause remedy (`task.EmbeddedCause`: `bd-not-found`, `bd-version`, `bd-error` with
+  the `bd_errors.go` hint, `workspace`) before the server-mode steps. An unreachable server and an
+  older beads version each have their own screen
+- Auto-refresh watches `beads.db`/`beads.db-wal` (beads_rust) or `.beads/last-touched` (beads
+  server mode; `bd dep add`/`bd label add` don't touch it, follow-up perles-chl). Embedded workspaces
+  refresh from the backend's own hash-gated watch on `noms/manifest` (`Changes()` broker, `DBPath` is
+  empty): reads, which rewrite the manifest with the same bytes, cause no rebuild, and only installed
+  snapshots send `DBChanged`. Known bug perles-8q4: under sustained external writes the watcher's 500ms
+  debounce can starve, so the board lags until writes pause (perles' own writes and `r` are unaffected)
 - Writes go through `bd`, which may refuse them (pending `bd migrate schema`, bd older than the
   schema, migration freeze, close policy with open children or blockers, notes overwrite without
   `--force`); `internal/beads/infrastructure/bd_errors.go` turns those into one-line messages with a hint
@@ -1190,7 +1229,7 @@ broker.Close()
 | `github.com/charmbracelet/x/exp/teatest` | Golden/snapshot testing |
 | `github.com/spf13/cobra` | CLI commands |
 | `github.com/spf13/viper` | Configuration loading |
-| `github.com/ncruces/go-sqlite3` | SQLite database driver |
+| `github.com/ncruces/go-sqlite3` | SQLite database driver (and `vfs/memdb` for embedded-workspace snapshots) |
 | `github.com/go-sql-driver/mysql` | Dolt server (MySQL protocol) driver |
 | `github.com/golang-migrate/migrate/v4` | Schema migrations for `~/.perles/perles.db` |
 | `github.com/lrstanley/bubblezone` | Mouse click zones |

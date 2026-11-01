@@ -89,6 +89,8 @@ BQL follows bd's own definitions. `blocked = true` matches the issues `bd blocke
 
 `ready = true` matches `bd ready`: status `open` (or a custom status with category `active`), not blocked, not pinned, not ephemeral, not deferred into the future, no parent deferred into the future, and not one of bd's internal types (`gate`, `molecule`, `message`, `merge-request`, `rig`, `agent`, `role`). With `backend: beads_rust`, `ready` means open, unblocked and not deferred into the future, and `blocked` means having a `blocks` dependency on an open, in-progress, blocked or deferred issue.
 
+An issue whose only open blocker is an `external:` (cross-project) dependency is not blocked and can be ready, while bd builds that apply bd's external-dependency policy leave it out of `bd ready`. In an embedded Dolt workspace, perles takes the flags from `bd`, which matches server mode except for stale flags on released bd; see [Embedded Dolt workspaces](../configuration/index.md#embedded-dolt-workspaces) for the details.
+
 ### Metadata Fields
 
 Issues can have custom metadata stored as JSON key-value pairs. Use the `metadata.<key>` syntax to filter by metadata:

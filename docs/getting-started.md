@@ -4,14 +4,14 @@
 
 - A [beads](https://github.com/steveyegge/beads) project (a `.beads/` directory). beads_rust projects also work if you set `backend: beads_rust` in your [config](configuration/index.md); perles doesn't detect beads_rust on its own.
 - Beads v1.0.0 or newer. To upgrade an older database, upgrade `bd`, then run `bd migrate schema` and `bd migrate`. This minimum doesn't apply to beads_rust. For multi-agent orchestration, bd v1.3.2 or newer is recommended.
-- The `bd` CLI on your `PATH`, which perles uses to create and update issues (`br` when using `backend: beads_rust`)
-- Beads must use Dolt server mode with the server running (`bd dolt start`), on Dolt 2.6.0 or newer. Embedded Dolt, the `bd init` default, has no SQL server for perles to read:
-    - New project: `bd init --server`.
-    - Existing embedded project: run `bd backup init <dir>` and `bd backup sync`, then in a new directory `bd init --server` and `bd backup restore --force <dir>`.
-    - Proxied-server and HTTP (`bd connect`) workspaces aren't supported yet; `bd migrate from-proxied-server-to-server` switches a proxied-server workspace to server mode.
+- The `bd` CLI on your `PATH`, which perles uses to create and update issues and to read embedded Dolt workspaces (`br` when using `backend: beads_rust`)
+- Beads in one of these Dolt modes:
+    - Embedded Dolt, the `bd init` default, needs bd v1.0.5 or newer. Perles reads it through `bd`, so the board catches up about 1–2 seconds after a write. See [Embedded Dolt workspaces](configuration/index.md#embedded-dolt-workspaces) for how it works and its limits.
+    - Dolt server mode (`bd init --server`) with the server running (`bd dolt start`), on Dolt 2.6.0 or newer. Server mode is recommended for very large (over about 5,000 issues) or write-heavy multi-agent workspaces. To move an existing embedded project to it (optional), run `bd backup init <dir>` and `bd backup sync`, then in a new directory `bd init --server` and `bd backup restore --force <dir>`.
+- Proxied-server and HTTP (`bd connect`) workspaces aren't supported yet; `bd migrate from-proxied-server-to-server` switches a proxied-server workspace to server mode.
 - Go 1.27+ (only for `go install` or building from source; `make install` also needs Node.js/npm)
 
-If there's no `.beads/` directory, the database is too old, the workspace uses a mode perles can't read (embedded Dolt, proxied-server, HTTP, graph mode or historical SQLite), or the Dolt server isn't running, perles shows a screen explaining the problem and the fix instead of the board.
+If there's no `.beads/` directory, the database is too old, the workspace uses a mode perles can't read (proxied-server, HTTP, graph mode or historical SQLite), perles can't read an embedded workspace through `bd` (`bd` missing, older than v1.0.5 or failing, or the embedded database can't be found or loaded), or the Dolt server isn't running, perles shows a screen explaining the problem and the fix instead of the board.
 
 ---
 

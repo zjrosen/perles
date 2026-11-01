@@ -131,10 +131,69 @@ If tracing is enabled but the tracer can't be created (for example, the trace fi
 
 **How perles finds the Dolt server.** Perles first asks `bd context --json` for the resolved mode, host, port and database. If `bd` is missing, older than v1.0.0 or fails, it resolves them itself in the order `bd` uses:
 
-- **Mode:** `BEADS_DOLT_SERVER_MODE`, the shared-server setting, a non-local host, `dolt_mode` in `.beads/metadata.json`, then `dolt.mode` in `.beads/config.yaml`; otherwise embedded.
+- **Mode:** `BEADS_DOLT_SERVER_MODE`, the shared-server setting, a non-local host, `dolt_mode` in `.beads/metadata.json`, then `dolt.mode` in `.beads/config.yaml`; otherwise embedded, which perles reads through `bd` instead of a server (see [Embedded Dolt workspaces](#embedded-dolt-workspaces)).
 - **Port:** `BEADS_DOLT_SERVER_PORT`, then the `.beads/dolt-server.port` file `bd` writes (only for a local host), then `listener.port` in the Dolt data directory's `config.yaml`, then `dolt.port` in `.beads/config.yaml`, then `dolt_server_port` in `.beads/metadata.json` (deprecated). With no port for a local, bd-run server, perles shows the server-down screen instead of guessing.
 
 The `BEADS_DOLT_*` variables only matter for the Dolt backend. See [Debug Mode](../getting-started.md#debug-mode) for `PERLES_DEBUG` and `PERLES_LOG`.
+
+---
+
+## Embedded Dolt workspaces
+
+`bd init` creates an embedded Dolt workspace by default. The database lives under `.beads/embeddeddolt/` and runs inside `bd`, with no SQL server. Perles detects such a workspace on its own (there is nothing to configure) and reads it through `bd`, which must be v1.0.5 or newer and on your `PATH`.
+
+**How it works.** Dolt's embedded engine holds an exclusive lock on the database for as long as a process has it open, and `bd` waits for that lock with no time limit. So perles never opens the database itself:
+
+- To read, perles runs a few short `bd --readonly` commands: `export --all`, `blocked --json`, and `statuses --json` when the workspace uses custom statuses. Each is limited to 30 seconds. Perles loads their output into a fresh in-memory snapshot, swaps it in, and runs every BQL query against it.
+- Writes go through `bd`, as in server mode.
+- The lock is held only while one of those commands runs. Between rebuilds no perles process holds it, so `bd`, and agents running `bd`, never wait on an idle perles.
+
+**Freshness.** Perles watches the database's `noms/manifest` file, which `bd` rewrites on every command, reads included. It rebuilds only when the file's contents change. So plain reads such as `bd list` and `bd show` cause no rebuild, while every write does, `bd dep add` and `bd label add` included. A command that reads but also writes, such as `bd ready` waking deferred issues or a database migration, changes the file and correctly triggers a rebuild. (Server mode watches `.beads/last-touched` instead, which those two commands don't update; this is tracked as perles-chl.)
+
+- After a write, from perles or anywhere else, the board shows the change once the next snapshot lands: usually 1–2 seconds later, longer under sustained writes. Until then, queries return the previous snapshot.
+- A comment you add in perles shows up in the issue's comments right away. Board queries catch up with the next snapshot.
+- Rebuilds are paced. After each one, perles waits at least 2 seconds, or twice as long as the rebuild took if that is longer, before it starts another. Under sustained writes this keeps perles' share of the lock to about a third. A quiet workspace causes no rebuilds at all.
+- If a rebuild fails (for example, because another process held the lock past the 30-second limit), perles keeps serving the last snapshot and writes the error to the [debug log](../getting-started.md#debug-mode). It retries on the next change in the workspace (any `bd` command), a perles write, or `r`, but never sooner than pacing allows: at least 2 seconds or twice the failed rebuild's duration, plus a backoff of 5 seconds after the first failure, doubling up to 2 minutes. `r` resets the backoff but not the pacing, so after a 30-second lock timeout it retries about a minute later.
+- Known limitation: while another process writes without pause (agents writing every second or so), the watcher may not react until the writes stop, because it waits for 500ms without a change first. The board can lag until then. Perles' own writes and `r` are not affected. This is tracked as perles-8q4.
+
+**Workspace size.** Rebuilds take longer as the workspace grows. With 5,000 issues and an external `bd update` every 0.8 seconds (a main-branch bd build reporting v1.3.2, on an Apple M4 Pro), the median rebuild took about 1.5–1.9 seconds, and the 95th percentile 2.2–2.6 seconds. While perles rebuilt as often as pacing allowed, the 95th-percentile `bd update` rose from about 0.5 seconds to 1.4–2.0 seconds (2.4 seconds at most), and the median stayed at about 0.46 seconds. About 5,000 issues is the comfortable size for an embedded workspace with agents writing concurrently. Above that, use server mode.
+
+**Blocked and ready.** Perles never computes `blocked` itself. It takes its answers from `bd`'s stored `is_blocked` flags, which server mode reads directly, so `blocked = true` and `ready = true` match server mode except for the stale-flag case below (see [Blocked and Ready](../bql/index.md#blocked-and-ready)).
+
+- On released bd (every release up to v1.3.2), the flags come from the `bd blocked --json` listing. That gives one difference from server mode: an issue whose flag is set but for which bd can't name a blocker (a stale flag) isn't listed, so it isn't blocked. Repair stale flags with `bd recompute-blocked` / `bd doctor --fix` where available (`bd recompute-blocked` exists in bd v1.3.2 but not in v1.0.5).
+- bd builds with `bd blocked --flags --raw` (so far only main-branch builds newer than v1.3.2) report the stored flags exactly, stale ones included. Perles checks for it once per session and uses it when it is there. On other builds the check costs at most one rejected `bd` call.
+- An issue whose only open blocker is an `external:` (cross-project) dependency counts as not blocked, so it can be ready, in both modes. bd builds that apply bd's external-dependency policy (main-branch builds) leave such an issue out of `bd ready`. Adopting that policy in BQL is tracked as perles-v18.
+
+**`export.exclude_owners`.** bd's `export.exclude_owners` and `export.exclude_owner` settings (bd v1.2.0 and newer) leave issues out of `bd export` by `created_by`. Perles overrides both for its own export only, through bd's `BD_EXPORT_*` environment variables, so the board shows every issue. Your `.beads/config.yaml` and your own `bd export` runs are unchanged. A value stored in the database's config table rather than in `config.yaml` is not overridden (no `bd` command writes one there).
+
+**bd v1.0.5.** Embedded workspaces work on the minimum version, which differs from current bd in a few ways:
+
+- Its `bd ready` leaves out issues in a custom status of category `active`. Perles counts them as ready, as newer bd does.
+- Its `bd list --all` includes wisps (ephemeral issues). Perles never shows wisps, on any bd version.
+- It has no `export.exclude_owners` (added in v1.2.0), so there is nothing to override.
+- An epic can only be blocked by another epic.
+
+**When perles can't read the workspace.** If the snapshot reader can't start, perles shows a screen with the cause and its fix instead of the board, followed by the steps to switch to server mode:
+
+| Cause | Fix |
+|-------|-----|
+| `bd` is not on your `PATH` | Install bd v1.0.5 or newer and put it on your `PATH` |
+| `bd` is older than v1.0.5, or its version can't be read | Upgrade `bd` |
+| `bd` fails, for example because the database needs a schema migration | The screen shows bd's error and a hint, here to run `bd migrate schema` |
+| The embedded database or its `manifest` can't be found, or perles can't load bd's output | Fix the problem the screen names |
+
+Then start perles again. `perles daemon` builds no snapshot until something queries the workspace, so it starts without running `bd export`, and a read error shows up on that first query instead.
+
+**Switching to server mode.** In server mode perles queries the Dolt server directly, with no snapshot to rebuild, so it is recommended for very large or write-heavy multi-agent workspaces. `bd init --server` refuses a project that already has issues, so move an existing one with a backup:
+
+```bash
+# In the embedded project
+bd backup init <backup-dir> && bd backup sync
+
+# In a new directory
+bd init --server
+bd backup restore --force <backup-dir>
+```
 
 ---
 

@@ -19,7 +19,7 @@ Thank you for your interest in contributing to Perles! This document provides gu
 - Go 1.27+
 - Node.js and npm, used by `make build` and `make install` to build the embedded web frontend (release builds use the version in `.nvmrc`; CI uses the current LTS). `make build-go` skips this step and uses the committed `frontend/dist/`.
 - golangci-lint v2 for `make lint` (CI runs the latest version)
-- A beads or beads_rust project for testing (a directory containing `.beads/`), with the `bd` (or `br`) CLI on your `PATH`. beads projects need beads v1.0.0+ and must use Dolt server mode (`bd init --server`, then start the server with `bd dolt start`); Dolt embedded mode is not supported. Select beads_rust with `backend: beads_rust` in the config. See the [README requirements](README.md#requirements) for details.
+- A beads or beads_rust project for testing (a directory containing `.beads/`), with the `bd` (or `br`) CLI on your `PATH`. beads projects need beads v1.0.0+. Embedded Dolt (the `bd init` default) works with bd v1.0.5+, and perles reads it through `bd`; Dolt server mode (`bd init --server`, then start the server with `bd dolt start`) is the other option. Select beads_rust with `backend: beads_rust` in the config. See the [README requirements](README.md#requirements) for details.
 
 ### Building
 
@@ -42,7 +42,7 @@ perles/
 ├── cmd/                    # Cobra CLI commands (root, init, daemon, workflows, themes, ...)
 ├── internal/
 │   ├── app/                # Root application model
-│   ├── beads/              # beads backend (Dolt connection + client, bd CLI executor)
+│   ├── beads/              # beads backend (Dolt connection + client, embedded-Dolt snapshot backend, bd CLI executor)
 │   │   └── bql/            # BQL lexer, parser, validator and executor
 │   ├── beadsrust/          # beads_rust backend
 │   ├── task/               # Backend-agnostic issue types and interfaces
@@ -88,6 +88,20 @@ See [AGENTS.md](AGENTS.md) for a more detailed tour of the codebase.
 make test              # All tests
 make test-update       # Update golden files
 ```
+
+### Real-bd Tests (Opt-in)
+
+Two test suites run the `bd` on your `PATH` against throwaway embedded Dolt workspaces created under your home directory and removed afterwards. They never touch the repository's `.beads/`. `make test` and CI skip them; opt in with an environment variable:
+
+```bash
+# Snapshot backend parity with bd's own answers (blocked, ready, wisps, exclude_owners, comments)
+PERLES_BD_INTEGRATION=1 go test ./internal/beads/adapter/ -run Integration -v
+
+# Lock contention benchmark: 5,000 issues, external bd updates while perles rebuilds (a minute or two)
+PERLES_BD_CONTENTION=1 go test ./internal/beads/adapter/ -run Contention -count=1 -v
+```
+
+Both skip, with a logged reason, under `-short`, without `bd` on `PATH`, with bd older than v1.0.5, or when bd refuses the throwaway workspace's location as unsafe. Some checks skip on older bd too: the `export.exclude_owners` and `bd schema` checks need bd v1.2.0+, and the exact `bd blocked --flags --raw` path needs a main-branch bd build newer than v1.3.2 (released versions use the `bd blocked --json` listing). The contention benchmark also needs `lsof` for its lock check, and skips only that check without it.
 
 ### Golden Tests
 

@@ -98,7 +98,7 @@ perles
 
 ## Requirements
 
-- A beads (`bd`) project with a `.beads/` directory, using Dolt in server mode (`bd init --server`) with the Dolt server running (`bd dolt start`) on Dolt 2.6.0 or newer. Embedded Dolt, the `bd init` default, is not supported.
+- A beads (`bd`) project with a `.beads/` directory, using embedded Dolt (the `bd init` default; needs bd v1.0.5 or newer, see [Embedded Dolt workspaces](configuration/index.md#embedded-dolt-workspaces)) or Dolt server mode (`bd init --server`) with the Dolt server running (`bd dolt start`) on Dolt 2.6.0 or newer. Server mode is recommended for very large or write-heavy multi-agent workspaces.
 - Beads v1.0.0 or newer (upgrade `bd`, then run `bd migrate schema` and `bd migrate`)
 - Or a beads_rust (`br`) project: set `backend: beads_rust` in your perles [config](configuration/index.md) and have `br` on your `PATH`
 - Go 1.27+ and Node.js/npm (needed by `make build`/`make install` for the frontend) if building from source. `go install` and `make build-go` need only Go.
