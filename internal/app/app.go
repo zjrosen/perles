@@ -3,6 +3,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -1287,8 +1288,15 @@ func (m Model) View() string {
 	return view
 }
 
-// Close releases resources held by the application.
+// closeKanban closes the kanban mode controller. It is (*kanban.Model).Close;
+// tests replace it to make it fail.
+var closeKanban = (*kanban.Model).Close
+
+// Close releases resources held by the application. Every step runs even when
+// an earlier one fails; the returned error joins the failures.
 func (m *Model) Close() error {
+	var errs []error
+
 	m.logOverlay.StopListening()
 
 	// Clean up chat panel infrastructure
@@ -1305,8 +1313,8 @@ func (m *Model) Close() error {
 	}
 
 	// Close mode controllers
-	if err := m.kanban.Close(); err != nil {
-		return err
+	if err := closeKanban(&m.kanban); err != nil {
+		errs = append(errs, err)
 	}
 
 	// Cancel watcher subscription context (stops listener)
@@ -1317,7 +1325,7 @@ func (m *Model) Close() error {
 	// Close watcher if we own it
 	if m.watcherHandle != nil {
 		if err := m.watcherHandle.Stop(); err != nil {
-			return err
+			errs = append(errs, err)
 		}
 	}
 
@@ -1344,11 +1352,11 @@ func (m *Model) Close() error {
 	if m.db != nil {
 		if err := m.db.Close(); err != nil {
 			log.Error(log.CatDB, "Error closing database", "error", err)
-			return err
+			errs = append(errs, err)
 		}
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 // newSessionFactory creates the session factory for dashboard workflow sessions.
