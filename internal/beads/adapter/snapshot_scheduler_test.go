@@ -1156,6 +1156,80 @@ func TestSnapshotScheduler_RealWatcherRenameReplace(t *testing.T) {
 	require.Equal(t, 2, h.query())
 }
 
+// TestSnapshotScheduler_RealWatcherSustainedRewrites: the real watcher, with
+// the real 500ms debounce and 2s maximum wait, while the manifest is
+// replaced every 50ms without a pause, as bd commands that keep coming
+// rewrite it, so the debounce never fires. Each rewrite writes the
+// manifest's current bytes. When a write changes them, the watcher still
+// reports it within the maximum wait, mid-stream, and the scheduler
+// rebuilds; twice in a row, while the rewrites go on.
+func TestSnapshotScheduler_RealWatcherSustainedRewrites(t *testing.T) {
+	const rewriteEvery = 50 * time.Millisecond
+	h := newSchedHarness(t, true)
+	require.Equal(t, 1, h.query())
+	require.Equal(t, dbChanged(1), h.events())
+
+	var content atomic.Value // the bytes every rewrite writes
+	content.Store("manifest v1")
+	type streamResult struct {
+		longestPause time.Duration
+		err          error
+	}
+	stream := make(chan streamResult, 1)
+	stop, stopped := make(chan struct{}), make(chan struct{})
+	// Waits for the rewrites to end, so none outlives the test's workspace.
+	stopRewrites := sync.OnceFunc(func() {
+		close(stop)
+		<-stopped
+	})
+	t.Cleanup(stopRewrites)
+	go func() {
+		defer close(stopped)
+		var longest time.Duration
+		last := time.Now()
+		ticker := time.NewTicker(rewriteEvery)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				stream <- streamResult{longestPause: longest}
+				return
+			case <-ticker.C:
+			}
+			tmp := h.ws.manifest + ".tmp"
+			if err := os.WriteFile(tmp, []byte(content.Load().(string)), 0o600); err != nil {
+				stream <- streamResult{err: err}
+				return
+			}
+			if err := os.Rename(tmp, h.ws.manifest); err != nil {
+				stream <- streamResult{err: err}
+				return
+			}
+			now := time.Now()
+			longest = max(longest, now.Sub(last))
+			last = now
+		}
+	}()
+
+	for gen := 2; gen <= 3; gen++ {
+		next := fmt.Sprintf("manifest v%d", gen)
+		content.Store(next) // a write: the rewrites write the new bytes from now on
+		require.Eventually(t, func() bool { return h.state().dirty }, manifestMaxWait+3*time.Second, time.Millisecond,
+			"the watcher reports generation %d while the rewrites go on", gen)
+		h.rebuildAfterPacing(minRebuildGap)
+		require.Equal(t, manifestHashOf(next), h.b.current.Load().manifestHash)
+		require.Equal(t, gen, h.query())
+	}
+
+	stopRewrites()
+	result := <-stream
+	require.NoError(t, result.err)
+	require.Less(t, result.longestPause, manifestDebounce,
+		"the rewrites never paused for the debounce, so only the maximum wait can have reported them")
+	require.Equal(t, 3, h.exportCount())
+	require.Equal(t, dbChanged(2), h.events())
+}
+
 // TestSnapshotScheduler_EachInstallPublishesOneDBChanged: every install, the
 // first included, publishes exactly one DBChanged; dropped triggers publish
 // nothing.

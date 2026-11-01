@@ -35,6 +35,7 @@ type Watcher struct {
 	dbPath        string
 	relevantFiles []string // Base filenames that trigger a refresh (e.g. "beads.db", "beads.db-wal")
 	debounce      time.Duration
+	maxWait       time.Duration // Bound on a burst's wait for a debounce-long pause; 0 for none (see Config.MaxWait)
 	done          chan struct{}
 	broker        *pubsub.Broker[WatcherEvent]
 }
@@ -54,11 +55,22 @@ type Config struct {
 	// for SQLite, or ["last-touched"] for Dolt sentinel-based watching.
 	// If empty, all write/create events in the watched directory trigger a refresh.
 	RelevantFiles []string
+
+	// MaxWait, when positive, bounds how long a burst of events can hold
+	// back its notification: while relevant events keep arriving less than
+	// DebounceDur apart, DBChanged is still published MaxWait after the
+	// first event not yet reported, and the next event starts a new burst.
+	// A burst that pauses for DebounceDur sooner is published as usual. It
+	// should be longer than DebounceDur.
+	//
+	// Zero, the default, sets no bound: a burst that never pauses for
+	// DebounceDur publishes nothing until it does.
+	MaxWait time.Duration
 }
 
 // New creates a new database watcher.
 func New(cfg Config) (*Watcher, error) {
-	log.Debug(log.CatWatcher, "Creating watcher", "dbPath", cfg.DBPath, "debounce", cfg.DebounceDur)
+	log.Debug(log.CatWatcher, "Creating watcher", "dbPath", cfg.DBPath, "debounce", cfg.DebounceDur, "maxWait", cfg.MaxWait)
 	fsw, err := fsnotify.NewWatcher()
 	if err != nil {
 		log.ErrorErr(log.CatWatcher, "Failed to create fsnotify watcher", err)
@@ -70,6 +82,7 @@ func New(cfg Config) (*Watcher, error) {
 		dbPath:        cfg.DBPath,
 		relevantFiles: cfg.RelevantFiles,
 		debounce:      cfg.DebounceDur,
+		maxWait:       cfg.MaxWait,
 		done:          make(chan struct{}),
 		broker:        pubsub.NewBroker[WatcherEvent](),
 	}, nil
@@ -118,7 +131,18 @@ func (w *Watcher) loop() {
 	var (
 		timer   *time.Timer
 		pending bool
+		// maxTimer publishes a pending burst MaxWait after its first event
+		// (see Config.MaxWait). It runs only with MaxWait set, from the first
+		// event of a burst until the burst is published, and is nil
+		// otherwise, so without MaxWait the loop never selects it.
+		maxTimer *time.Timer
 	)
+	stopMaxTimer := func() {
+		if maxTimer != nil {
+			maxTimer.Stop()
+			maxTimer = nil
+		}
+	}
 
 	for {
 		select {
@@ -152,15 +176,29 @@ func (w *Watcher) loop() {
 				pending = true
 			}
 
-		case <-func() <-chan time.Time {
-			if timer != nil {
-				return timer.C
+			// The first event of a burst starts its maximum wait.
+			if w.maxWait > 0 && maxTimer == nil {
+				maxTimer = time.NewTimer(w.maxWait)
 			}
-			return nil
-		}():
+
+		case <-timerC(timer):
 			if pending {
 				log.Debug(log.CatWatcher, "Debounce complete, triggering refresh")
 				// Publish DBChanged event to broker (non-blocking by design)
+				w.broker.Publish(pubsub.UpdatedEvent, WatcherEvent{
+					Type: DBChanged,
+				})
+				pending = false
+			}
+			stopMaxTimer()
+
+		case <-timerC(maxTimer):
+			// Events kept arriving for MaxWait without a debounce-long pause.
+			// The debounce timer keeps running, and publishes again only if
+			// more events arrive.
+			maxTimer = nil
+			if pending {
+				log.Debug(log.CatWatcher, "Maximum wait reached, triggering refresh", "maxWait", w.maxWait)
 				w.broker.Publish(pubsub.UpdatedEvent, WatcherEvent{
 					Type: DBChanged,
 				})
@@ -182,9 +220,18 @@ func (w *Watcher) loop() {
 			if timer != nil {
 				timer.Stop()
 			}
+			stopMaxTimer()
 			return
 		}
 	}
+}
+
+// timerC returns t's channel, or nil, which is never ready, when t is nil.
+func timerC(t *time.Timer) <-chan time.Time {
+	if t == nil {
+		return nil
+	}
+	return t.C
 }
 
 // isRelevantEvent checks if the event should trigger a refresh.

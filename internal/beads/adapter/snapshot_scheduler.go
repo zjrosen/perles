@@ -19,6 +19,20 @@ const (
 	// replaces the manifest (temp file plus rename) at least once per
 	// command, reads included.
 	manifestDebounce = 500 * time.Millisecond
+	// manifestMaxWait bounds how long the debounce can hold back a manifest
+	// event (watcher.Config.MaxWait). bd rewrites the manifest throughout
+	// each command, so agents writing about every 0.8s never leave the
+	// debounce a 500ms pause; without a bound the watcher would stay silent,
+	// and the snapshot stale, until they stop. While events keep coming,
+	// the watcher reports at least this often, and the hash gate drops the
+	// reports that find no change.
+	//
+	// It equals minRebuildGap. A report leads to a rebuild no sooner than
+	// pacing allows (at least minRebuildGap after the last build), so
+	// reporting more often could not rebuild more often or take more of
+	// the lock; reporting less often would leave the snapshot staler than
+	// pacing makes it. A report costs one read of the manifest.
+	manifestMaxWait = minRebuildGap
 	// minRebuildGap is the least idle time between the end of a build and
 	// the start of the next one. A build that took longer than half of it
 	// is followed by twice its duration instead, which keeps perles' share
@@ -33,7 +47,8 @@ const (
 )
 
 // manifestWatcher publishes watcher.DBChanged on its broker, debounced,
-// whenever the manifest is written or replaced, until it is stopped.
+// whenever the manifest is written or replaced, and at least every
+// manifestMaxWait while it keeps being rewritten, until it is stopped.
 // *watcher.Watcher is one.
 type manifestWatcher interface {
 	Broker() *pubsub.Broker[watcher.WatcherEvent]
@@ -475,11 +490,14 @@ func (b *SnapshotBackend) stopLoops() error {
 // watchManifest creates and starts the internal watcher on the manifest.
 // It watches the noms directory for the manifest's name, so it sees bd's
 // rename-replaced manifests (a new inode each time, reported as Create).
+// Its maximum wait keeps it reporting under sustained writes (see
+// manifestMaxWait).
 func (b *SnapshotBackend) watchManifest() (manifestWatcher, error) {
 	w, err := watcher.New(watcher.Config{
 		DBPath:        b.manifestPath,
 		RelevantFiles: []string{filepath.Base(b.manifestPath)},
 		DebounceDur:   manifestDebounce,
+		MaxWait:       manifestMaxWait,
 	})
 	if err != nil {
 		return nil, err

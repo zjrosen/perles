@@ -973,8 +973,10 @@ Orchestration runs from the dashboard; there is no separate orchestration mode.
   server mode; `bd dep add`/`bd label add` don't touch it, follow-up perles-chl). Embedded workspaces
   refresh from the backend's own hash-gated watch on `noms/manifest` (`Changes()` broker, `DBPath` is
   empty): reads, which rewrite the manifest with the same bytes, cause no rebuild, and only installed
-  snapshots send `DBChanged`. Known bug perles-8q4: under sustained external writes the watcher's 500ms
-  debounce can starve, so the board lags until writes pause (perles' own writes and `r` are unaffected)
+  snapshots send `DBChanged`. That watcher debounces 500ms with a 2s maximum wait (`manifestMaxWait`, via
+  `watcher.Config.MaxWait`, which only it sets; perles-8q4), so under sustained external writes, which never
+  leave the debounce a pause, it still reports at least every 2s and the board keeps refreshing at the
+  pacing rate
 - Writes go through `bd`, which may refuse them (pending `bd migrate schema`, bd older than the
   schema, migration freeze, close policy with open children or blockers, notes overwrite without
   `--force`); `internal/beads/infrastructure/bd_errors.go` turns those into one-line messages with a hint

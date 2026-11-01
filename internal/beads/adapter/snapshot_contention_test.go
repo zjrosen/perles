@@ -14,15 +14,15 @@ package adapter
 // built the way NewBeadsBackend builds it, and pre-built by
 // CheckCompatibility, rebuilds under those writes.
 //
-// The lock budget is checked at the most rebuilds the scheduler's pacing
-// allows, as the proposal's E24 measured it: after each external write the
-// benchmark makes the automatic, hash-gated rebuild request that the
-// manifest watcher (T1) makes after its debounced event. The watcher alone
-// would rebuild less, and unevenly: its 500ms debounce restarts on every
-// manifest rewrite, bd rewrites the manifest throughout each update, and
-// updates every 0.8s that take about 0.5s leave shorter quiet gaps than
-// that, so it fires only on the occasional longer gap (measured: 4 events
-// in 29s of writes, none in the last 12s).
+// Perles rebuilds as it does for a user: the benchmark asks for no rebuild
+// itself, so the manifest watcher (T1) and the post-install re-hash are the
+// only triggers. bd rewrites the manifest throughout each update, so updates
+// every 0.8s that take about 0.5s never leave the watcher's 500ms debounce a
+// quiet gap; the watcher reports them through its maximum wait
+// (manifestMaxWait, 2s), and paced rebuilds follow. (Before the maximum
+// wait, perles-8q4, the watcher fell silent under these writes, 4 events in
+// 29s and none in the last 12s, and the benchmark asked for a rebuild after
+// each write itself.)
 //
 // It asserts:
 //
@@ -139,7 +139,7 @@ func TestSnapshotBackend_Contention_LockBudget(t *testing.T) {
 
 	// Round 1, the baseline: no perles.
 	contentionRequireOwnContext(t, w)
-	baseline := writer.updates(t, ids[:contentionUpdates], nil)
+	baseline := writer.updates(t, ids[:contentionUpdates])
 
 	// Round 2: as many writes again, to other issues, while perles rebuilds.
 	tracker := &contentionTracker{run: w.run, durations: map[string][]time.Duration{}}
@@ -152,9 +152,7 @@ func TestSnapshotBackend_Contention_LockBudget(t *testing.T) {
 
 	contentionRequireOwnContext(t, w)
 	windowStart := time.Now()
-	// After each write, the automatic trigger the manifest watcher fires
-	// (see the file comment): rebuilds then run as often as pacing allows.
-	loaded := writer.updates(t, ids[contentionUpdates:2*contentionUpdates], func() { b.requestRebuild(false) })
+	loaded := writer.updates(t, ids[contentionUpdates:2*contentionUpdates])
 	window := time.Since(windowStart)
 	m.stop()
 
@@ -349,9 +347,8 @@ type contentionWriter struct {
 }
 
 // updates runs `bd update <id> --priority=N` for each of ids, one every
-// contentionCadence, calling written, when it is not nil, after each, and
-// returns how long each update took.
-func (cw *contentionWriter) updates(t *testing.T, ids []string, written func()) []time.Duration {
+// contentionCadence, and returns how long each update took.
+func (cw *contentionWriter) updates(t *testing.T, ids []string) []time.Duration {
 	t.Helper()
 	latencies := make([]time.Duration, 0, len(ids))
 	next := time.Now()
@@ -363,9 +360,6 @@ func (cw *contentionWriter) updates(t *testing.T, ids []string, written func()) 
 		next = start.Add(contentionCadence)
 		cw.update(t, id, contentionPriorities[i%len(contentionPriorities)])
 		latencies = append(latencies, time.Since(start))
-		if written != nil {
-			written()
-		}
 	}
 	return latencies
 }
