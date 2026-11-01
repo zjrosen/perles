@@ -91,6 +91,13 @@ type scheduler struct {
 	// consecutiveFailures counts the failed builds since the last success
 	// or FlushCaches, for the failure backoff.
 	consecutiveFailures int
+	// retryIfFailed is set by a manual request (FlushCaches) made after a
+	// failed build while a retry is running whose in-flight hash covers it.
+	// The gate drops the request, since the running build covers it; but if
+	// that build fails too, finishBuild replays the request: it resets the
+	// backoff and marks the snapshot dirty, so a manual refresh after a
+	// failure always gets its retry. The end of every build clears it.
+	retryIfFailed bool
 
 	// wake, with room for one signal, tells the scheduler goroutine to look
 	// at the state again: the snapshot became dirty, or the backoff it
@@ -148,8 +155,10 @@ func (b *SnapshotBackend) FlushCaches(context.Context) error {
 // read counts as changed, so the build reports why.
 //
 // A manual request also resets the failure backoff; automatic ones wait it
-// out. Before the first snapshot nothing else happens, since the first
-// query builds one from scratch, and after Close nothing happens.
+// out. A manual request after a failed build that the running retry covers
+// is replayed if that retry fails (see retryIfFailed). Before the first
+// snapshot nothing else happens, since the first query builds one from
+// scratch, and after Close nothing happens.
 //
 // It never runs bd and never waits on a build: it reads the manifest (a
 // few hundred bytes) and takes schedMu, which no build holds across its bd
@@ -171,6 +180,10 @@ func (b *SnapshotBackend) requestRebuild(manual bool) {
 	needed := err != nil || !s.covers(hash)
 	if needed {
 		s.dirty = true
+	} else if manual && s.running && s.lastErr != nil {
+		// Covered only by the running retry (a failure cleared the
+		// installed hash): retry again if it fails too.
+		s.retryIfFailed = true
 	}
 	s.mu.Unlock()
 	if needed {
@@ -271,35 +284,24 @@ func (b *SnapshotBackend) rebuild(ctx context.Context) error {
 // it on the Changes broker.
 //
 // After a success it records h0 as the installed hash, resets the failure
-// state and publishes DBChanged. It then re-hashes the manifest: when the
-// hash is no longer h0, a write landed during the export and the snapshot
-// is marked dirty, so the scheduler follows up with no further trigger.
-// The first install re-hashes too, before it starts the scheduler
-// goroutine and the watcher (startLoops), so a write during the first
-// export is not lost either.
+// state and publishes DBChanged. The first install then starts the
+// scheduler goroutine and the manifest watcher (startLoops). Only then does
+// it re-hash the manifest: when the hash is no longer h0, a write landed
+// during the export (or before the watcher was watching) and the snapshot
+// is marked dirty, so the scheduler follows up with no further trigger. A
+// write after the re-hash reaches the watcher, so none is lost.
 //
 // After a failure the current snapshot keeps serving. It clears the
 // installed hash (every later trigger then asks for a retry), records the
-// error for the backoff and publishes WatcherError. A build that failed
-// because Close cancelled it is not counted and publishes nothing.
+// error for the backoff, logs a failed first build and publishes
+// WatcherError. A manual request that the failed build covered is replayed
+// (see retryIfFailed). A build that failed because Close cancelled it is not
+// counted and publishes nothing.
 func (b *SnapshotBackend) finishBuild(h0 string, start time.Time, err error) {
 	s := &b.sched
 	end := b.clock.Now()
 	if err != nil {
-		closing := b.closing()
-		s.mu.Lock()
-		s.running = false
-		s.inFlightH0 = ""
-		s.lastEnd, s.lastDuration = end, end.Sub(start)
-		if !closing {
-			s.installedHash = ""
-			s.lastErr = err
-			s.consecutiveFailures++
-		}
-		s.mu.Unlock()
-		if !closing {
-			b.changes.Publish(pubsub.UpdatedEvent, watcher.WatcherEvent{Type: watcher.WatcherError, Error: err})
-		}
+		b.finishFailedBuild(start, end, err)
 		return
 	}
 
@@ -309,8 +311,13 @@ func (b *SnapshotBackend) finishBuild(h0 string, start time.Time, err error) {
 	s.lastEnd, s.lastDuration = end, end.Sub(start)
 	s.lastErr = nil
 	s.consecutiveFailures = 0
+	s.retryIfFailed = false
 	s.mu.Unlock()
 	b.changes.Publish(pubsub.UpdatedEvent, watcher.WatcherEvent{Type: watcher.DBChanged})
+
+	// Watch first, then re-hash: a write that lands before the watch is
+	// registered is caught by the re-hash, one after it by the watcher.
+	b.startLoops()
 
 	h1, hashErr := hashManifest(b.manifestPath)
 	s.mu.Lock()
@@ -318,15 +325,47 @@ func (b *SnapshotBackend) finishBuild(h0 string, start time.Time, err error) {
 		s.dirty = true
 	}
 	dirty := s.dirty
+	s.running = false
 	s.mu.Unlock()
 	if dirty {
 		b.wakeScheduler()
 	}
-	b.startLoops()
+}
 
+// finishFailedBuild is finishBuild after a build that failed with err.
+func (b *SnapshotBackend) finishFailedBuild(start, end time.Time, err error) {
+	s := &b.sched
+	closing := b.closing()
 	s.mu.Lock()
 	s.running = false
+	s.inFlightH0 = ""
+	s.lastEnd, s.lastDuration = end, end.Sub(start)
+	replay := s.retryIfFailed && !closing
+	s.retryIfFailed = false
+	if !closing {
+		s.installedHash = ""
+		s.lastErr = err
+		s.consecutiveFailures++
+		if replay {
+			// The manual request, as if made right after this failure.
+			s.consecutiveFailures = 0
+			s.dirty = true
+		}
+	}
+	failures := s.consecutiveFailures
 	s.mu.Unlock()
+	if closing {
+		return
+	}
+	if b.current.Load() == nil {
+		// The lazy first build (a query or CheckCompatibility); the
+		// scheduler goroutine logs its own rebuilds' failures.
+		log.Warn(log.CatBeads, "Building the first snapshot failed", "error", err, "consecutiveFailures", failures)
+	}
+	b.changes.Publish(pubsub.UpdatedEvent, watcher.WatcherEvent{Type: watcher.WatcherError, Error: err})
+	if replay {
+		b.wakeScheduler()
+	}
 }
 
 // closing reports whether Close has been called. Close cancels the

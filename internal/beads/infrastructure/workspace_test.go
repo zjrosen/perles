@@ -198,7 +198,7 @@ func TestHasEmbeddedDoltRepository(t *testing.T) {
 
 func TestUnsupportedWorkspaceError_EmbeddedMessage(t *testing.T) {
 	err := &UnsupportedWorkspaceError{Kind: WorkspaceEmbeddedDolt, BeadsDir: "/p/.beads"}
-	require.Equal(t, "beads workspace /p/.beads uses embedded Dolt; perles needs Dolt server mode", err.Error())
+	require.Equal(t, "beads workspace /p/.beads uses embedded Dolt, and perles' snapshot reader cannot start", err.Error())
 
 	err = &UnsupportedWorkspaceError{
 		Kind:     WorkspaceEmbeddedDolt,

@@ -213,6 +213,23 @@ func newTestBackendWith(t *testing.T, ws testWorkspace, cfg SnapshotBackendConfi
 	return b
 }
 
+// checkBuild runs CheckCompatibility and returns the build error it reports
+// (nil on success). CheckCompatibility reports a failed build as an embedded
+// *task.UnsupportedWorkspaceError that wraps the build's error.
+func checkBuild(t *testing.T, b *SnapshotBackend) error {
+	t.Helper()
+	err := b.CheckCompatibility()
+	if err == nil {
+		return nil
+	}
+	uw, ok := errors.AsType[*task.UnsupportedWorkspaceError](err)
+	require.True(t, ok, "CheckCompatibility: got %v", err)
+	require.Equal(t, task.WorkspaceEmbeddedDolt, uw.Kind)
+	require.Equal(t, b.beadsDir, uw.BeadsDir)
+	require.Error(t, uw.Err)
+	return uw.Err
+}
+
 // memdbRegistered reports whether a memdb database named name exists. It
 // opens the name read-only, which creates no database: memdb refuses to open
 // an unknown name without create.
@@ -690,7 +707,7 @@ func TestSnapshotBackend_LoadFailureFreesMemdb(t *testing.T) {
 		return db, err
 	}
 
-	err := b.CheckCompatibility()
+	err := checkBuild(t, b)
 	require.ErrorContains(t, err, "loading snapshot: insert issue s-dup")
 	require.Nil(t, b.current.Load())
 	require.Equal(t, []*sql.DB{nil}, loaded, "LoadSnapshot returns no database on failure")
@@ -709,7 +726,7 @@ func TestSnapshotBackend_LoadErrorClosesReturnedDatabase(t *testing.T) {
 		return db, errors.New("checking the snapshot: boom")
 	}
 
-	require.EqualError(t, b.CheckCompatibility(), "loading snapshot: checking the snapshot: boom")
+	require.EqualError(t, checkBuild(t, b), "loading snapshot: checking the snapshot: boom")
 	require.Nil(t, b.current.Load())
 	require.NotNil(t, loaded)
 	require.EqualError(t, loaded.PingContext(context.Background()), "sql: database is closed")
@@ -729,7 +746,7 @@ func TestSnapshotBackend_InstallAbortedByCloseFreesMemdb(t *testing.T) {
 		return db, err
 	}
 
-	err := b.CheckCompatibility()
+	err := checkBuild(t, b)
 	require.ErrorIs(t, err, errSnapshotBackendClosed)
 	require.Nil(t, b.current.Load())
 	require.NotNil(t, loaded)
@@ -773,7 +790,7 @@ func TestSnapshotBackend_BDReadFailuresCreateNoMemdb(t *testing.T) {
 				return infrabeads.LoadSnapshot(ctx, name, data)
 			}
 
-			require.EqualError(t, b.CheckCompatibility(), tt.wantErr)
+			require.EqualError(t, checkBuild(t, b), tt.wantErr)
 			require.Equal(t, tt.wantCmds, runner.commands())
 			require.Zero(t, loads, "no memdb is created")
 			require.Zero(t, b.lastGen.Load(), "no generation is handed out")
@@ -801,11 +818,11 @@ func TestSnapshotBackend_FailedBuildsDoNotAccumulate(t *testing.T) {
 	b := newTestBackend(t, runner.run)
 
 	for range 3 {
-		require.ErrorContains(t, b.CheckCompatibility(), "insert issue s-dup")
+		require.ErrorContains(t, checkBuild(t, b), "insert issue s-dup")
 	}
 	mode.Store("flags")
 	for range 3 {
-		require.EqualError(t, b.CheckCompatibility(), "bd blocked failed: boom")
+		require.EqualError(t, checkBuild(t, b), "bd blocked failed: boom")
 	}
 	require.Equal(t, uint64(3), b.lastGen.Load(), "only the load attempts were handed a generation")
 	mode.Store("ok")
@@ -831,7 +848,7 @@ func TestSnapshotBackend_VersionGate(t *testing.T) {
 		b := newBackend(t, newTestWorkspace(t), "1.0.4", nil, runner.run)
 
 		for _, build := range []func() error{
-			b.CheckCompatibility,
+			func() error { return checkBuild(t, b) },
 			func() error { _, err := b.Services().QueryExecutor.Execute("type = task"); return err },
 		} {
 			err := build()
@@ -848,7 +865,7 @@ func TestSnapshotBackend_VersionGate(t *testing.T) {
 	t.Run("version info left out is refused", func(t *testing.T) {
 		runner := generationRunner(t)
 		b := newBackend(t, newTestWorkspace(t), "", nil, runner.run)
-		uw, ok := errors.AsType[*infrabeads.UnsupportedWorkspaceError](b.CheckCompatibility())
+		uw, ok := errors.AsType[*infrabeads.UnsupportedWorkspaceError](checkBuild(t, b))
 		require.True(t, ok)
 		require.Contains(t, uw.Detail, "could not read the bd version")
 		require.Zero(t, runner.count(""))
@@ -861,7 +878,7 @@ func TestSnapshotBackend_VersionGate(t *testing.T) {
 		runner := &fakeRunner{answer: real}
 		b := newBackend(t, ws, "", fmt.Errorf("bd context: %w", exec.ErrNotFound), runner.run)
 
-		err := b.CheckCompatibility()
+		err := checkBuild(t, b)
 		require.ErrorIs(t, err, exec.ErrNotFound)
 		require.EqualError(t, err, "bd export failed: bd CLI not found on PATH")
 		require.Equal(t, []string{"export"}, runner.commands())
@@ -998,7 +1015,7 @@ func TestSnapshotBackend_Close(t *testing.T) {
 	before := runner.count("")
 	_, err := b.Services().QueryExecutor.Execute("type = task")
 	require.ErrorIs(t, err, errSnapshotBackendClosed)
-	require.ErrorIs(t, b.CheckCompatibility(), errSnapshotBackendClosed)
+	require.ErrorIs(t, checkBuild(t, b), errSnapshotBackendClosed)
 	_, err = b.snapshotComments("s-a")
 	require.ErrorIs(t, err, errSnapshotBackendClosed)
 	require.Equal(t, before, runner.count(""), "no bd after Close")

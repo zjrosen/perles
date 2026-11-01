@@ -2,6 +2,7 @@ package task
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -71,4 +72,39 @@ func TestParseEmbeddedDetail(t *testing.T) {
 			require.Equal(t, tt.wantText, text)
 		})
 	}
+}
+
+func TestUnsupportedWorkspaceError_Unwrap(t *testing.T) {
+	cause := errors.New("bd export failed: bd CLI not found on PATH")
+	err := &UnsupportedWorkspaceError{
+		Kind:     WorkspaceEmbeddedDolt,
+		BeadsDir: "/p/.beads",
+		Detail:   EmbeddedDetail(EmbeddedCauseBDNotFound, cause.Error()),
+		Err:      cause,
+	}
+	require.ErrorIs(t, err, cause)
+	require.Equal(t, "unsupported beads workspace in /p/.beads: embedded (bd-not-found: bd export failed: bd CLI not found on PATH)",
+		err.Error(), "Error does not repeat Err")
+	require.NoError(t, (&UnsupportedWorkspaceError{Kind: WorkspaceGraph}).Unwrap())
+}
+
+func TestEmbeddedDetail(t *testing.T) {
+	causes := []EmbeddedCause{EmbeddedCauseBDNotFound, EmbeddedCauseBDVersion, EmbeddedCauseBDError, EmbeddedCauseWorkspace}
+	for _, cause := range causes {
+		t.Run(string(cause), func(t *testing.T) {
+			const text = "bd export failed: beads database needs a schema migration: run `bd migrate schema` — x"
+			detail := EmbeddedDetail(cause, text)
+			require.Equal(t, string(cause)+": "+text, detail)
+			gotCause, gotText := ParseEmbeddedDetail(detail)
+			require.Equal(t, cause, gotCause, "ParseEmbeddedDetail reads it back")
+			require.Equal(t, text, gotText)
+
+			for _, blank := range []string{"", " \t\n"} {
+				gotCause, gotText = ParseEmbeddedDetail(EmbeddedDetail(cause, blank))
+				require.Equal(t, cause, gotCause)
+				require.NotEmpty(t, strings.TrimSpace(gotText), "a cause never comes with an empty text")
+			}
+		})
+	}
+	require.Equal(t, "bd-not-found: bd CLI not found on PATH", EmbeddedDetail(EmbeddedCauseBDNotFound, ""))
 }

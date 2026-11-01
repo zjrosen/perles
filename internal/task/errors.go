@@ -79,10 +79,16 @@ type UnsupportedWorkspaceError struct {
 	// what declared the format for WorkspaceGraph.
 	//
 	// For WorkspaceEmbeddedDolt it is "<cause>: <text>": cause is an
-	// EmbeddedCause constant and text says what failed (ParseEmbeddedDetail
-	// splits the two). An empty Detail means the workspace is embedded and
-	// this perles build cannot read it.
+	// EmbeddedCause constant and text says what failed (EmbeddedDetail builds
+	// it, ParseEmbeddedDetail splits it). An empty Detail means the workspace
+	// is embedded and this perles build cannot read it.
 	Detail string
+	// Err is the failure behind Kind and Detail, when there is one: for
+	// WorkspaceEmbeddedDolt, why the snapshot reader cannot start (the bd
+	// version gate's refusal, bd's error, a manifest resolution failure).
+	// errors.Is and errors.As reach it; Error does not repeat it, because
+	// Detail already carries its text.
+	Err error
 }
 
 func (e *UnsupportedWorkspaceError) Error() string {
@@ -90,6 +96,10 @@ func (e *UnsupportedWorkspaceError) Error() string {
 		return fmt.Sprintf("unsupported beads workspace in %s: %s (%s)", e.BeadsDir, e.Kind, e.Detail)
 	}
 	return fmt.Sprintf("unsupported beads workspace in %s: %s", e.BeadsDir, e.Kind)
+}
+
+func (e *UnsupportedWorkspaceError) Unwrap() error {
+	return e.Err
 }
 
 // EmbeddedCause names why perles' snapshot reader cannot start on an embedded
@@ -114,6 +124,30 @@ const (
 	// its manifest, or any other error. The text describes it.
 	EmbeddedCauseWorkspace EmbeddedCause = "workspace"
 )
+
+// EmbeddedDetail builds a WorkspaceEmbeddedDolt Detail, "<cause>: <text>",
+// which ParseEmbeddedDetail splits. A blank text is replaced by a generic one
+// for the cause, so a Detail never names a cause without saying what failed.
+func EmbeddedDetail(cause EmbeddedCause, text string) string {
+	if strings.TrimSpace(text) == "" {
+		text = embeddedCauseFallbackText(cause)
+	}
+	return string(cause) + ": " + text
+}
+
+// embeddedCauseFallbackText is EmbeddedDetail's text for a cause given none.
+func embeddedCauseFallbackText(cause EmbeddedCause) string {
+	switch cause {
+	case EmbeddedCauseBDNotFound:
+		return "bd CLI not found on PATH"
+	case EmbeddedCauseBDVersion:
+		return "the bd version could not be checked"
+	case EmbeddedCauseBDError:
+		return "bd failed without an error message"
+	default:
+		return "the embedded Dolt database could not be opened"
+	}
+}
 
 // ParseEmbeddedDetail splits a WorkspaceEmbeddedDolt Detail, "<cause>: <text>",
 // into its cause and text. A Detail without a recognised cause is a bd error

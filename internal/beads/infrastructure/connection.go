@@ -209,7 +209,7 @@ func ResolveConnection(beadsDir string, opts ResolveOptions) (*Connection, error
 	case doltModeProxiedServer:
 		return nil, &UnsupportedWorkspaceError{Kind: WorkspaceProxiedServer, BeadsDir: beadsDir}
 	case doltModeEmbedded:
-		return nil, newEmbeddedWorkspaceError(beadsDir, w.meta, bdCtx, ctxErr)
+		return nil, newEmbeddedWorkspaceError(beadsDir, w.database(), bdCtx, ctxErr)
 	}
 
 	conn := &Connection{

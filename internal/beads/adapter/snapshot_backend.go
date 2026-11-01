@@ -268,12 +268,19 @@ func (b *SnapshotBackend) Services() task.BackendServices {
 }
 
 // CheckCompatibility builds and installs the first snapshot when none is
-// installed yet, so the export runs before the UI starts, and returns the
-// build's error unchanged: the embedded bd version gate's
-// *infrabeads.UnsupportedWorkspaceError or bd's translated error. Unlike a
-// query, it builds even while the failure backoff defers retries.
+// installed yet, so the export runs before the UI starts. Unlike a query, it
+// builds even while the failure backoff defers retries.
+//
+// A failed build is reported as a *task.UnsupportedWorkspaceError of kind
+// WorkspaceEmbeddedDolt, so the startup screen explains it: its Detail names
+// the cause (bd-version for the embedded bd version gate, bd-not-found,
+// bd-error for bd's translated error, workspace otherwise; see
+// embeddedStartupError), and it wraps the build's error.
 func (b *SnapshotBackend) CheckCompatibility() error {
-	return b.buildFirst(true)
+	if err := b.buildFirst(true); err != nil {
+		return embeddedStartupError(b.beadsDir, err)
+	}
+	return nil
 }
 
 // Close cancels the backend's running bd reads (a running build fails and

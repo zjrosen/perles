@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
 	"time"
 
 	appbeads "github.com/zjrosen/perles/internal/beads/application"
@@ -11,13 +12,14 @@ import (
 	beads "github.com/zjrosen/perles/internal/beads/domain"
 	infrabeads "github.com/zjrosen/perles/internal/beads/infrastructure"
 	"github.com/zjrosen/perles/internal/cachemanager"
+	"github.com/zjrosen/perles/internal/log"
 	"github.com/zjrosen/perles/internal/task"
 )
 
 // Compile-time check: BeadsBackend implements task.Backend.
 var _ task.Backend = (*BeadsBackend)(nil)
 
-// BeadsBackend is a fully-wired beads backend.
+// BeadsBackend is a fully-wired beads backend for a server-mode workspace.
 // It owns the database client, caches, and all executor adapters.
 // Created via NewBeadsBackend; callers use Services() to get the task-layer interfaces.
 type BeadsBackend struct {
@@ -27,16 +29,43 @@ type BeadsBackend struct {
 	depGraphCache cachemanager.Flushable
 }
 
-// NewBeadsBackend creates a fully-wired beads backend.
-// It opens the database, creates caches and all executor adapters.
+// NewBeadsBackend creates the beads backend for the workspace at dataDir.
 // The caller should defer Close() after checking the error.
 //
+// A server-mode workspace gets a *BeadsBackend: it opens the Dolt server
+// connection and creates the caches and executor adapters.
+//
+// An embedded Dolt workspace has no server, so it gets a *SnapshotBackend,
+// which reads it through bd. Constructing one runs no bd beyond the
+// `bd context` that classified the workspace: CheckCompatibility (the TUI,
+// before the UI starts) builds the first snapshot, and perles daemon, which
+// never calls it, builds on its first query.
+//
 // Returns *task.UnsupportedWorkspaceError for a workspace perles cannot read
-// (such as embedded Dolt) and *task.ServerDownError when the workspace's Dolt
-// server is unreachable.
-func NewBeadsBackend(dataDir, workDir string) (*BeadsBackend, error) {
-	client, err := infrabeads.NewClient(dataDir, infrabeads.ResolveOptions{WorkDir: workDir})
+// (for an embedded workspace, one whose database or manifest cannot be
+// resolved) and *task.ServerDownError when the workspace's Dolt server is
+// unreachable.
+func NewBeadsBackend(dataDir, workDir string) (task.Backend, error) {
+	return newBeadsBackend(dataDir, workDir, backendDeps{})
+}
+
+// backendDeps are the bd seams of NewBeadsBackend. Zero fields run the bd on
+// PATH; tests inject fakes so that they never run it.
+type backendDeps struct {
+	// bdContext runs `bd context --json` while the workspace is resolved
+	// (infrabeads.ResolveOptions.BDContext).
+	bdContext infrabeads.BDContextRunner
+	// newBDRunner returns the runner of every bd command of an embedded
+	// workspace's backend; nil means infrabeads.NewBDRunner.
+	newBDRunner func(workDir, beadsDir string) infrabeads.BDRunner
+}
+
+func newBeadsBackend(dataDir, workDir string, deps backendDeps) (task.Backend, error) {
+	client, err := infrabeads.NewClient(dataDir, infrabeads.ResolveOptions{WorkDir: workDir, BDContext: deps.bdContext})
 	if err != nil {
+		if ew, ok := errors.AsType[*infrabeads.EmbeddedWorkspaceError](err); ok {
+			return newEmbeddedBackend(ew, workDir, deps)
+		}
 		return nil, translateClientError(err)
 	}
 
@@ -79,6 +108,36 @@ func NewBeadsBackend(dataDir, workDir string) (*BeadsBackend, error) {
 			DBPath:            client.DBPath(),
 		},
 	}, nil
+}
+
+// newEmbeddedBackend returns the SnapshotBackend of the embedded workspace ew
+// classified. It resolves the embedded database's manifest and runs no bd. A
+// manifest that cannot be resolved is not a construction error but an
+// unsupported workspace with the workspace cause, so the startup screen
+// explains it.
+func newEmbeddedBackend(ew *infrabeads.EmbeddedWorkspaceError, workDir string, deps backendDeps) (task.Backend, error) {
+	manifest, err := infrabeads.EmbeddedManifestPath(ew.BeadsDir, ew.Database)
+	if err != nil {
+		return nil, embeddedStartupError(ew.BeadsDir, err)
+	}
+	newRunner := deps.newBDRunner
+	if newRunner == nil {
+		newRunner = infrabeads.NewBDRunner
+	}
+	log.Info(log.CatBeads, "Reading the embedded Dolt workspace through bd snapshots",
+		"beadsDir", ew.BeadsDir, "database", ew.Database, "manifest", manifest,
+		"bdVersion", ew.BDVersion, "bdContextErr", ew.BDContextErr)
+	b, err := NewSnapshotBackend(SnapshotBackendConfig{
+		BeadsDir:     ew.BeadsDir,
+		ManifestPath: manifest,
+		BDVersion:    ew.BDVersion,
+		BDContextErr: ew.BDContextErr,
+		Runner:       newRunner(workDir, ew.BeadsDir),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("beads backend: %w", err)
+	}
+	return b, nil
 }
 
 // CheckCompatibility verifies the beads database version is new enough.
@@ -151,15 +210,10 @@ func doltWatcherConfig() task.WatcherConfig {
 // translateClientError maps infrastructure connection errors to the
 // task-layer errors the startup screens dispatch on.
 func translateClientError(err error) error {
-	if ew, ok := errors.AsType[*infrabeads.EmbeddedWorkspaceError](err); ok {
-		// Embedded workspaces are not read yet: show the embedded
-		// unsupported screen, whose empty Detail renders the default body.
-		return &task.UnsupportedWorkspaceError{
-			Kind:     task.WorkspaceEmbeddedDolt,
-			BeadsDir: ew.BeadsDir,
-		}
-	}
 	if uw, ok := errors.AsType[*infrabeads.UnsupportedWorkspaceError](err); ok {
+		if uw.Kind == infrabeads.WorkspaceEmbeddedDolt {
+			return embeddedStartupError(uw.BeadsDir, err)
+		}
 		return &task.UnsupportedWorkspaceError{
 			Kind:     workspaceKind(uw.Kind),
 			BeadsDir: uw.BeadsDir,
@@ -176,6 +230,48 @@ func translateClientError(err error) error {
 		}
 	}
 	return fmt.Errorf("beads backend: %w", err)
+}
+
+// embeddedStartupError maps why perles' snapshot reader cannot start on the
+// embedded workspace at beadsDir to the unsupported-workspace error the
+// startup screen dispatches on. Its Detail is "<cause>: <text>"
+// (task.EmbeddedDetail), and err stays reachable through errors.Is and
+// errors.As:
+//
+//   - the embedded bd version gate's refusal (an
+//     *infrabeads.UnsupportedWorkspaceError of kind WorkspaceEmbeddedDolt):
+//     bd-version, with the gate's Detail, e.g. "embedded workspaces need
+//     bd >= 1.0.5 (found 1.0.4)";
+//   - a bd invocation that failed because bd is not on PATH: bd-not-found,
+//     with bd's error ("bd export failed: bd CLI not found on PATH");
+//   - any other failed bd invocation: bd-error, with bd's error, which leads
+//     with perles' hint for a known failure class (e.g. "bd export failed:
+//     beads database needs a schema migration: run `bd migrate schema` —
+//     ...");
+//   - anything else, such as a manifest that cannot be resolved: workspace,
+//     with the error's text.
+func embeddedStartupError(beadsDir string, err error) *task.UnsupportedWorkspaceError {
+	cause, text := embeddedStartupCause(err)
+	return &task.UnsupportedWorkspaceError{
+		Kind:     task.WorkspaceEmbeddedDolt,
+		BeadsDir: beadsDir,
+		Detail:   task.EmbeddedDetail(cause, text),
+		Err:      err,
+	}
+}
+
+// embeddedStartupCause classifies err for embeddedStartupError.
+func embeddedStartupCause(err error) (task.EmbeddedCause, string) {
+	if uw, ok := errors.AsType[*infrabeads.UnsupportedWorkspaceError](err); ok && uw.Kind == infrabeads.WorkspaceEmbeddedDolt {
+		return task.EmbeddedCauseBDVersion, uw.Detail
+	}
+	if infrabeads.IsBDError(err) {
+		if errors.Is(err, exec.ErrNotFound) {
+			return task.EmbeddedCauseBDNotFound, err.Error()
+		}
+		return task.EmbeddedCauseBDError, err.Error()
+	}
+	return task.EmbeddedCauseWorkspace, err.Error()
 }
 
 // workspaceKind maps an infrastructure workspace kind to its task-layer kind.

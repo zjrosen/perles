@@ -366,3 +366,19 @@ func TestBDError_Predicates(t *testing.T) {
 	require.False(t, isUnknownFlag(errors.New("unknown flag: --clear-notes"), "clear-notes"))
 	require.False(t, isUnknownCommand(errors.New(`unknown command "reopen"`), "reopen"))
 }
+
+func TestIsBDError(t *testing.T) {
+	failed := newBDError([]string{"--readonly", "export", "--all"}, bdFailed(1, "", "Error: boom"), time.Minute)
+	notFound := newBDError([]string{"--readonly", "export", "--all"}, bdOutput{ExitCode: -1, Err: exec.ErrNotFound}, time.Minute)
+
+	require.True(t, IsBDError(failed))
+	require.True(t, IsBDError(fmt.Errorf("reading snapshot: %w", failed)), "wrapped")
+	require.True(t, IsBDError(notFound))
+	require.ErrorIs(t, notFound, exec.ErrNotFound, "bd missing: errors.Is tells it apart")
+	require.NotErrorIs(t, failed, exec.ErrNotFound)
+
+	require.False(t, IsBDError(nil))
+	require.False(t, IsBDError(errors.New("bd export failed: boom")), "the text alone is not a bd error")
+	require.False(t, IsBDError(exec.ErrNotFound))
+	require.False(t, IsBDError(CheckEmbeddedBDVersion("/p/.beads", "1.0.4", nil)))
+}

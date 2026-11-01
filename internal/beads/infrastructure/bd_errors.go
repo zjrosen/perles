@@ -75,6 +75,15 @@ func (e *bdError) Error() string {
 
 func (e *bdError) Unwrap() error { return e.cause }
 
+// IsBDError reports whether err is, or wraps, the error of a failed bd
+// invocation, as a BDRunner from NewBDRunner returns it: bd's own text behind
+// perles' hint for a known failure class. errors.Is(err, exec.ErrNotFound)
+// then tells that bd is not on PATH.
+func IsBDError(err error) bool {
+	_, ok := errors.AsType[*bdError](err)
+	return ok
+}
+
 // newBDError builds the error for a failed invocation of bd with args.
 func newBDError(args []string, out bdOutput, timeout time.Duration) *bdError {
 	e := &bdError{

@@ -108,6 +108,7 @@ type schedView struct {
 	lastDuration              time.Duration
 	lastErr                   error
 	consecutiveFailures       int
+	retryIfFailed             bool
 }
 
 func schedState(b *SnapshotBackend) schedView {
@@ -119,6 +120,7 @@ func schedState(b *SnapshotBackend) schedView {
 		inFlightH0: s.inFlightH0, installedHash: s.installedHash,
 		lastEnd: s.lastEnd, lastDuration: s.lastDuration,
 		lastErr: s.lastErr, consecutiveFailures: s.consecutiveFailures,
+		retryIfFailed: s.retryIfFailed,
 	}
 }
 
@@ -160,9 +162,10 @@ type schedHarness struct {
 	stopChanges context.CancelFunc
 
 	// watcherStarts counts the backend's watcher starts (fake watcher
-	// only), and dirtyAtWatcherStart is the dirty flag at the last one.
-	watcherStarts       atomic.Int32
-	dirtyAtWatcherStart atomic.Bool
+	// only). onWatcherStart, when set before the first build, runs at each
+	// start before the watcher is returned, so before it watches.
+	watcherStarts  atomic.Int32
+	onWatcherStart func()
 
 	mu sync.Mutex
 	// exports holds the clock time at the start of each export.
@@ -183,7 +186,9 @@ func newSchedHarness(t *testing.T, realWatcher bool) *schedHarness {
 	if !realWatcher {
 		h.b.sched.newWatcher = func() (manifestWatcher, error) {
 			h.watcherStarts.Add(1)
-			h.dirtyAtWatcherStart.Store(schedState(h.b).dirty)
+			if h.onWatcherStart != nil {
+				h.onWatcherStart()
+			}
 			return h.watch, nil
 		}
 	}
@@ -521,19 +526,22 @@ func TestSnapshotScheduler_WriteDuringExportPickedUpByReHash(t *testing.T) {
 	require.Equal(t, 3, h.query())
 }
 
+// firstBuilds are the synchronous first builds: CheckCompatibility (the
+// TUI) and the first query (the daemon).
+var firstBuilds = map[string]func(*schedHarness) error{
+	"CheckCompatibility": func(h *schedHarness) error { return h.b.CheckCompatibility() },
+	"first query": func(h *schedHarness) error {
+		_, err := h.b.Services().QueryExecutor.Execute("type = task")
+		return err
+	},
+}
+
 // TestSnapshotScheduler_FirstInstallReHash: a write during the export of
 // the synchronous first build (CheckCompatibility or the first query) is
-// picked up: the first install re-hashes, marks dirty before the watcher
-// starts, and the scheduler rebuilds after pacing with no further trigger.
+// picked up: the first install re-hashes and marks dirty, and the scheduler
+// rebuilds after pacing with no further trigger.
 func TestSnapshotScheduler_FirstInstallReHash(t *testing.T) {
-	builds := map[string]func(*schedHarness) error{
-		"CheckCompatibility": func(h *schedHarness) error { return h.b.CheckCompatibility() },
-		"first query": func(h *schedHarness) error {
-			_, err := h.b.Services().QueryExecutor.Execute("type = task")
-			return err
-		},
-	}
-	for name, build := range builds {
+	for name, build := range firstBuilds {
 		t.Run(name, func(t *testing.T) {
 			h := newSchedHarness(t, false)
 			h.setExportHook(func(_ context.Context, n int) error {
@@ -546,13 +554,39 @@ func TestSnapshotScheduler_FirstInstallReHash(t *testing.T) {
 			require.NoError(t, build(h))
 			require.Equal(t, manifestHashOf("manifest v1"), h.b.current.Load().manifestHash)
 			require.True(t, h.state().dirty)
-			require.True(t, h.dirtyAtWatcherStart.Load(), "dirty is set before the watcher starts")
+			require.Equal(t, int32(1), h.watcherStarts.Load())
 
 			h.rebuildAfterPacing(minRebuildGap)
 			require.Equal(t, manifestHashOf("manifest v2"), h.b.current.Load().manifestHash)
 			require.False(t, h.state().dirty)
 			require.Equal(t, 2, h.query())
 			require.Equal(t, dbChanged(2), h.events())
+		})
+	}
+}
+
+// TestSnapshotScheduler_WriteWhileWatcherStarts: the first install starts
+// the watcher before it re-hashes the manifest. A write that lands after
+// the export but before the watcher watches (the fake watcher never reports
+// it) is therefore caught by the re-hash, and the scheduler rebuilds after
+// pacing with no further trigger.
+func TestSnapshotScheduler_WriteWhileWatcherStarts(t *testing.T) {
+	for name, build := range firstBuilds {
+		t.Run(name, func(t *testing.T) {
+			h := newSchedHarness(t, false)
+			h.onWatcherStart = func() { h.replaceManifest("manifest v2") }
+
+			require.NoError(t, build(h))
+			require.Equal(t, 1, h.exportCount())
+			require.Equal(t, manifestHashOf("manifest v1"), h.b.current.Load().manifestHash)
+			require.True(t, h.state().dirty, "the re-hash after the watcher start finds the write")
+
+			h.rebuildAfterPacing(minRebuildGap)
+			require.Equal(t, manifestHashOf("manifest v2"), h.b.current.Load().manifestHash)
+			require.False(t, h.state().dirty)
+			require.Equal(t, 2, h.query())
+			require.Equal(t, dbChanged(2), h.events())
+			require.Equal(t, int32(1), h.watcherStarts.Load())
 		})
 	}
 }
@@ -739,6 +773,101 @@ func TestSnapshotScheduler_FlushCachesRetriesFailure(t *testing.T) {
 	require.Zero(t, st.consecutiveFailures)
 	require.Equal(t, manifestHashOf("manifest v2"), st.installedHash)
 	require.Equal(t, 2, h.query())
+}
+
+// TestSnapshotScheduler_ManualRefreshDuringFailingRetry: after a failed
+// rebuild, a FlushCaches while the retry runs is dropped by the hash gate
+// (the retry's in-flight hash covers it). If the retry fails too, the
+// request is replayed: the backoff is reset and one more retry runs as soon
+// as pacing allows. If the retry succeeds, nothing follows.
+func TestSnapshotScheduler_ManualRefreshDuringFailingRetry(t *testing.T) {
+	for _, retryFails := range []bool{true, false} {
+		t.Run(fmt.Sprintf("retry fails %v", retryFails), func(t *testing.T) {
+			h := newSchedHarness(t, false)
+			require.Equal(t, 1, h.query())
+			release, closeRelease := releaseOnCleanup(t)
+			var failing atomic.Bool
+			failing.Store(true)
+			retrying := make(chan struct{})
+			h.setExportHook(func(ctx context.Context, n int) error {
+				if n == 3 {
+					close(retrying)
+					select {
+					case <-release:
+					case <-ctx.Done():
+						return context.Cause(ctx)
+					}
+				}
+				if failing.Load() {
+					return errLocked
+				}
+				return nil
+			})
+
+			h.replaceManifest("manifest v2")
+			h.b.requestRebuild(false)
+			h.rebuildAfterPacing(minRebuildGap) // export 2 fails
+			require.Equal(t, 1, h.state().consecutiveFailures)
+
+			// The watcher asks for a retry, which runs after the 5s backoff
+			// and blocks in its export.
+			h.b.requestRebuild(false)
+			due := h.state().lastEnd.Add(5 * time.Second)
+			h.waitTimer(due)
+			h.advanceTo(due)
+			<-retrying
+			require.Equal(t, manifestHashOf("manifest v2"), h.state().inFlightH0)
+
+			// The manual refresh: the running retry covers its hash.
+			require.NoError(t, h.b.FlushCaches(context.Background()))
+			st := h.state()
+			require.False(t, st.dirty, "the running retry covers the request")
+			require.True(t, st.retryIfFailed)
+
+			failing.Store(retryFails)
+			closeRelease()
+			h.waitBuilt(3)
+			st = h.state()
+			require.False(t, st.retryIfFailed, "the end of the build clears it")
+			if !retryFails {
+				require.NoError(t, st.lastErr)
+				require.False(t, st.dirty, "the successful retry served the request")
+				h.clock.Advance(time.Hour)
+				require.Equal(t, 3, h.exportCount())
+				require.Equal(t, 2, h.query())
+				return
+			}
+
+			require.ErrorIs(t, st.lastErr, errLocked)
+			require.True(t, st.dirty, "the failed retry replays the manual request")
+			require.Zero(t, st.consecutiveFailures, "and resets the backoff")
+			failing.Store(false)
+			h.rebuildAfterPacing(minRebuildGap) // pacing only, no 5s backoff
+			require.Equal(t, 4, h.exportCount())
+			st = h.state()
+			require.NoError(t, st.lastErr)
+			require.Equal(t, manifestHashOf("manifest v2"), st.installedHash)
+			require.Equal(t, 2, h.query())
+		})
+	}
+}
+
+// TestSnapshotScheduler_FailedFirstBuildIsLogged: a failed lazy first
+// build (CheckCompatibility or the first query) is logged, like the
+// scheduler goroutine's failed rebuilds.
+func TestSnapshotScheduler_FailedFirstBuildIsLogged(t *testing.T) {
+	for name, build := range firstBuilds {
+		t.Run(name, func(t *testing.T) {
+			readLog := captureLog(t)
+			h := newSchedHarness(t, false)
+			failingExports(h)
+
+			require.ErrorIs(t, build(h), errLocked)
+			logged := readLog()
+			require.Contains(t, logged, "Building the first snapshot failed")
+			require.Contains(t, logged, errLocked.Error())
+		})
+	}
 }
 
 // TestSnapshotScheduler_FirstBuildBacksOff: a failed lazy first build is

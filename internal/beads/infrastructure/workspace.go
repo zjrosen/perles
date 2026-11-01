@@ -56,7 +56,7 @@ func (e *UnsupportedWorkspaceError) Error() string {
 		if e.Detail != "" {
 			return fmt.Sprintf("beads workspace %s uses embedded Dolt, but perles' snapshot reader cannot start: %s", e.BeadsDir, e.Detail)
 		}
-		return fmt.Sprintf("beads workspace %s uses embedded Dolt; perles needs Dolt server mode", e.BeadsDir)
+		return fmt.Sprintf("beads workspace %s uses embedded Dolt, and perles' snapshot reader cannot start", e.BeadsDir)
 	case WorkspaceProxiedServer:
 		return fmt.Sprintf("beads workspace %s uses Dolt proxied-server mode, which perles does not support", e.BeadsDir)
 	case WorkspaceHTTPBackend:
@@ -197,7 +197,7 @@ func soleSQLiteDatabase(beadsDir string) (string, bool) {
 // database directory with a non-empty .dolt directory
 // (configfile.HasEmbeddedDoltRepository).
 func hasEmbeddedDoltRepository(beadsDir string) bool {
-	root := filepath.Join(beadsDir, "embeddeddolt")
+	root := filepath.Join(beadsDir, embeddedDoltDir)
 	info, err := os.Lstat(root)
 	if err != nil || !info.IsDir() {
 		return false
@@ -229,7 +229,7 @@ func hasDoltData(beadsDir string) bool {
 func hasWorkspaceState(beadsDir string, meta *BeadsMetadata) bool {
 	return meta != nil ||
 		fileExists(filepath.Join(beadsDir, "config.yaml")) ||
-		dirExists(filepath.Join(beadsDir, "embeddeddolt")) ||
+		dirExists(filepath.Join(beadsDir, embeddedDoltDir)) ||
 		dirExists(filepath.Join(beadsDir, "dolt"))
 }
 

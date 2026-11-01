@@ -109,10 +109,10 @@ func TestResolveConnection_EmbeddedClassification(t *testing.T) {
 			},
 		},
 		{
-			name:         "neither bd context nor metadata names a database",
+			name:         "neither bd context nor metadata names a database: bd's default",
 			metadata:     `{"backend":"dolt","dolt_mode":"embedded"}`,
 			runner:       noBDContext,
-			wantDatabase: "",
+			wantDatabase: "beads",
 			wantVersion:  "",
 			checkErr:     func(t *testing.T, err error) { require.ErrorIs(t, err, exec.ErrNotFound) },
 		},
@@ -144,8 +144,24 @@ func TestResolveConnection_EmbeddedWithoutMetadata(t *testing.T) {
 	require.Equal(t, &EmbeddedWorkspaceError{BeadsDir: beadsDir, Database: "ctx_db", BDVersion: "1.3.2"}, ew)
 
 	ew = resolveEmbedded(t, beadsDir, noBDContext)
-	require.Empty(t, ew.Database, "no metadata and no bd context: the database is unknown")
+	require.Equal(t, "beads", ew.Database, "no metadata and no bd context: bd's default database")
 	require.ErrorIs(t, ew.BDContextErr, exec.ErrNotFound)
+}
+
+// TestResolveConnection_EmbeddedDatabaseFromEnvironment: without bd context,
+// the database is the one bd resolves itself, BEADS_DOLT_SERVER_DATABASE
+// before metadata.json dolt_database.
+func TestResolveConnection_EmbeddedDatabaseFromEnvironment(t *testing.T) {
+	isolateBeadsEnv(t)
+	t.Setenv("BEADS_DOLT_SERVER_DATABASE", "env_db")
+	beadsDir := newBeadsDir(t)
+	writeMetadata(t, beadsDir, embeddedMetadata)
+
+	ew := resolveEmbedded(t, beadsDir, noBDContext)
+	require.Equal(t, "env_db", ew.Database)
+
+	ew = resolveEmbedded(t, beadsDir, bdContextJSON(`{"backend":"dolt","dolt_mode":"embedded","database":"ctx_db","bd_version":"1.3.2"}`))
+	require.Equal(t, "ctx_db", ew.Database, "bd context's answer wins")
 }
 
 func TestEmbeddedWorkspaceError_Error(t *testing.T) {
@@ -163,6 +179,41 @@ func TestEmbeddedManifestPath(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, want, got)
 		require.Equal(t, filepath.Join(beadsDir, "embeddeddolt", "perles", ".dolt", "noms", "manifest"), got)
+	})
+
+	t.Run("bd's sanitized directory name", func(t *testing.T) {
+		beadsDir := newBeadsDir(t)
+		want := writeFile(t, beadsDir, "embeddeddolt/my_proj_v2/.dolt/noms/manifest", "5:__DOLT__:abc")
+
+		got, err := EmbeddedManifestPath(beadsDir, "my-proj.v2")
+		require.NoError(t, err, "bd opens my-proj.v2 as my_proj_v2")
+		require.Equal(t, want, got)
+	})
+
+	t.Run("legacy unsanitized directory", func(t *testing.T) {
+		beadsDir := newBeadsDir(t)
+		writeFile(t, beadsDir, "embeddeddolt/my-proj/.dolt/noms/manifest", "5:__DOLT__:abc")
+
+		got, err := EmbeddedManifestPath(beadsDir, "my-proj")
+		require.Empty(t, got)
+		require.ErrorIs(t, err, fs.ErrNotExist)
+		require.ErrorContains(t, err, `bd opens it as "my_proj"`)
+		require.ErrorContains(t, err, `renames the legacy "my-proj" directory`)
+	})
+
+	t.Run("symlinked database directory", func(t *testing.T) {
+		beadsDir := newBeadsDir(t)
+		writeFile(t, beadsDir, "embeddeddolt/other/.dolt/noms/manifest", "other")
+		target := filepath.Join(t.TempDir(), "perles")
+		writeFile(t, target, ".dolt/noms/manifest", "5:__DOLT__:abc")
+		if err := os.Symlink(target, filepath.Join(beadsDir, "embeddeddolt", "perles")); err != nil {
+			t.Skipf("cannot create a symlink: %v", err)
+		}
+
+		got, err := EmbeddedManifestPath(beadsDir, "perles")
+		require.Empty(t, got)
+		require.ErrorContains(t, err, `embedded Dolt database "perles" at `)
+		require.ErrorContains(t, err, "is a symbolic link, not a directory")
 	})
 
 	t.Run("classification feeds the resolver", func(t *testing.T) {
@@ -195,6 +246,16 @@ func TestEmbeddedManifestPath(t *testing.T) {
 		},
 		{name: "database is dot-dot", database: "..", wantErr: "is not a directory name"},
 		{name: "database is dot", database: ".", wantErr: "is not a directory name"},
+		{name: "database is the root", database: "/", wantErr: "is not a directory name"},
+		{
+			name: "database with a slash", files: []string{"embeddeddolt/a/b/.dolt/noms/manifest"},
+			database: "a/b", wantErr: "is not a directory name",
+		},
+		{name: "database with a backslash", database: `a\b`, wantErr: "is not a directory name"},
+		{
+			name: "database is a file", files: []string{"embeddeddolt/other/.dolt/noms/manifest", "embeddeddolt/perles"},
+			database: "perles", wantErr: "is not a directory",
+		},
 		{name: "no embeddeddolt directory", database: "perles", wantErr: "holds no embedded Dolt repository", notExist: true},
 		{
 			name: "empty .dolt directory", dirs: []string{"embeddeddolt/perles/.dolt"},
