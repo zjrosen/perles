@@ -18,7 +18,7 @@ require (
 	github.com/mattn/go-runewidth v0.0.31
 	github.com/muesli/reflow v0.3.0
 	github.com/muesli/termenv v0.16.0
-	github.com/ncruces/go-sqlite3 v0.36.0
+	github.com/ncruces/go-sqlite3 v0.37.0
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/rivo/uniseg v0.4.7
 	github.com/sergi/go-diff v1.4.0
@@ -65,7 +65,7 @@ require (
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
-	github.com/ncruces/go-sqlite3-wasm/v6 v6.4.35401 // indirect
+	github.com/ncruces/go-sqlite3-wasm/v6 v6.5.35401 // indirect
 	github.com/ncruces/julianday v1.0.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/sagikazarmark/locafero v0.11.0 // indirect
